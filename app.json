@@ -1,30 +1,47 @@
 {
   "expo": {
-    "name": "whaletools-native",
+    "name": "Whaletools",
     "slug": "whaletools-native",
     "version": "1.0.0",
-    "orientation": "portrait",
+    "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
+    "scheme": "whaletools",
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.whaletools.app",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Whaletools needs camera access to scan ID barcodes for age verification and product barcodes.",
+        "NSPhotoLibraryUsageDescription": "Whaletools needs photo library access to select product images.",
+        "UIViewControllerBasedStatusBarAppearance": false
+      },
+      "requireFullScreen": true
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
+      "package": "com.whaletools.app",
+      "permissions": [
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE"
+      ],
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      "react-native-vision-camera"
+    ]
   }
 }

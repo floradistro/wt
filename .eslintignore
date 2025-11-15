@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+.expo/
+.expo-shared/
+
+# Build output
+dist/
+build/
+.next/
+
+# Config files
+*.config.js
+*.config.ts
+metro.config.js
+babel.config.js
+
+# Generated files
+*.generated.*
+coverage/
+
+# OS files
+.DS_Store
