@@ -7,7 +7,8 @@ import { View, TouchableOpacity, StyleSheet } from 'react-native'
 import { memo } from 'react'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import * as Haptics from 'expo-haptics'
-import { colors, radius, spacing, shadows, borderWidth, LiquidGlass } from '@/theme'
+import { colors, radius, spacing, shadows, borderWidth } from '@/theme'
+import { LiquidGlass } from '@/theme/LiquidGlass'
 
 interface DockProps {
   activeTab: number
