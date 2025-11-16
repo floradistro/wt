@@ -169,7 +169,7 @@ function POSSaleSuccessModal({ visible, saleData, onClose }: POSSaleSuccessModal
                 </View>
                 <View style={styles.detailTextContainer}>
                   <Text style={styles.detailLabel}>Authorization Code</Text>
-                  <Text style={styles.detailValue}>{saleData.authorizationCode}</Text>
+                  <Text style={styles.detailValue}>{saleData.authorizationCode || 'N/A'}</Text>
                 </View>
               </View>
             )}
@@ -182,7 +182,7 @@ function POSSaleSuccessModal({ visible, saleData, onClose }: POSSaleSuccessModal
                 </View>
                 <View style={styles.detailTextContainer}>
                   <Text style={styles.detailLabel}>Terminal</Text>
-                  <Text style={styles.detailValue}>{saleData.processorName}</Text>
+                  <Text style={styles.detailValue}>{saleData.processorName || 'Unknown'}</Text>
                 </View>
               </View>
             )}
@@ -195,7 +195,7 @@ function POSSaleSuccessModal({ visible, saleData, onClose }: POSSaleSuccessModal
                 </View>
                 <View style={styles.detailTextContainer}>
                   <Text style={styles.detailLabel}>Transaction #</Text>
-                  <Text style={styles.detailValue}>{saleData.transactionNumber}</Text>
+                  <Text style={styles.detailValue}>{saleData.transactionNumber || 'N/A'}</Text>
                 </View>
               </View>
             )}

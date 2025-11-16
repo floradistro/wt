@@ -1,14 +1,13 @@
 /**
  * Dock Component - Refactored with Design System
- * Apple-quality dock matching slide-up selector magic
+ * Apple-quality dock with Liquid Glass effect
  */
 
-import { View, TouchableOpacity, StyleSheet, Platform } from 'react-native'
+import { View, TouchableOpacity, StyleSheet } from 'react-native'
 import { memo } from 'react'
-import { BlurView } from 'expo-blur'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import * as Haptics from 'expo-haptics'
-import { colors, radius, spacing, blur, shadows, borderWidth } from '@/theme'
+import { colors, radius, spacing, shadows, borderWidth, LiquidGlass } from '@/theme'
 
 interface DockProps {
   activeTab: number
@@ -73,16 +72,12 @@ function Dock({ activeTab, onTabChange }: DockProps) {
 
   return (
     <View style={[styles.container, { bottom: insets.bottom + spacing.xs }]}>
-      <View style={styles.dockWrapper}>
-        {/* JOBS: Liquid glass effect matching slide-up selectors */}
-        {Platform.OS === 'ios' ? (
-          <View style={styles.blurContainer}>
-            <BlurView intensity={blur.thick} tint="dark" style={StyleSheet.absoluteFill} />
-          </View>
-        ) : (
-          <View style={styles.androidBg} />
-        )}
-
+      {/* JOBS: Real liquid glass effect - depth, fluidity, elegance */}
+      <LiquidGlass
+        intensity="ultraThick"
+        animate={false}
+        style={styles.dockWrapper}
+      >
         <View style={styles.iconsContainer}>
           {tabs.map((tab, index) => {
             const isActive = activeTab === index
@@ -112,7 +107,7 @@ function Dock({ activeTab, onTabChange }: DockProps) {
             )
           })}
         </View>
-      </View>
+      </LiquidGlass>
     </View>
   )
 }
@@ -130,18 +125,9 @@ const styles = StyleSheet.create({
   },
   dockWrapper: {
     borderRadius: radius.pill, // Pill shaped - Jobs: Like iOS dock
-    overflow: 'hidden',
-    backgroundColor: colors.glass.thin, // Subtle base
     borderWidth: borderWidth.regular,
     borderColor: colors.border.regular,
     ...shadows.lg, // Proper elevation
-  },
-  blurContainer: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  androidBg: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: colors.background.secondary,
   },
   iconsContainer: {
     flexDirection: 'row',
