@@ -1,7 +1,7 @@
 import { View, Text, StyleSheet, TextInput, TouchableOpacity } from 'react-native'
+import { memo, type ReactNode } from 'react'
 import { BlurView } from 'expo-blur'
 import * as Haptics from 'expo-haptics'
-import type { ReactNode } from 'react'
 
 interface POSSearchBarProps {
   searchQuery: string
@@ -12,7 +12,7 @@ interface POSSearchBarProps {
   children?: ReactNode
 }
 
-export function POSSearchBar({
+function POSSearchBar({
   searchQuery,
   onSearchChange,
   activeFilterCount,
@@ -27,43 +27,41 @@ export function POSSearchBar({
           {/* BlurView for glass effect */}
           <BlurView intensity={50} tint="dark" style={StyleSheet.absoluteFill} />
 
-          {/* Filter Button - Left Side */}
-          {activeFilterCount > 0 ? (
-            <View style={styles.filterButtonIntegrated}>
-              <TouchableOpacity
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                  onFilterPress()
-                }}
-                style={styles.filterButtonActiveSection}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.filterCount}>{activeFilterCount}</Text>
-              </TouchableOpacity>
+          {/* Filter Button - Left Side - iOS 26 Style */}
+          <TouchableOpacity
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+              onFilterPress()
+            }}
+            style={[
+              styles.filterButton,
+              activeFilterCount > 0 && styles.filterButtonActive
+            ]}
+            activeOpacity={0.7}
+          >
+            {activeFilterCount > 0 ? (
+              <View style={styles.filterBadge}>
+                <Text style={styles.filterBadgeText}>{activeFilterCount}</Text>
+              </View>
+            ) : (
+              <View style={styles.filterIconContainer}>
+                <View style={styles.filterIconLine} />
+                <View style={styles.filterIconLine} />
+                <View style={styles.filterIconLine} />
+              </View>
+            )}
+          </TouchableOpacity>
 
-              <View style={styles.filterDivider} />
-
-              <TouchableOpacity
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                  onClearFilters()
-                }}
-                style={styles.filterClearSection}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.filterClearX}>×</Text>
-              </TouchableOpacity>
-            </View>
-          ) : (
+          {activeFilterCount > 0 && (
             <TouchableOpacity
               onPress={() => {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                onFilterPress()
+                onClearFilters()
               }}
-              style={styles.filterButtonIntegrated}
+              style={styles.filterClearButton}
               activeOpacity={0.7}
             >
-              <Text style={styles.filterIcon}>|||</Text>
+              <Text style={styles.filterClearText}>×</Text>
             </TouchableOpacity>
           )}
 
@@ -82,12 +80,15 @@ export function POSSearchBar({
   )
 }
 
+const POSSearchBarMemo = memo(POSSearchBar)
+export { POSSearchBarMemo as POSSearchBar }
+
 const styles = StyleSheet.create({
   searchHeaderFloating: {
     position: 'absolute',
-    top: 20,
-    left: 20,
-    right: 20,
+    top: 16,
+    left: 16,
+    right: 16,
     zIndex: 10,
   },
   unifiedSearchBar: {
@@ -103,44 +104,57 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     backgroundColor: 'rgba(0,0,0,0.3)',
   },
-  filterButtonIntegrated: {
-    flexDirection: 'row',
+  // iOS 26 Filter Button
+  filterButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    marginLeft: 6,
     alignItems: 'center',
-    paddingLeft: 16,
-    paddingRight: 12,
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.08)',
   },
-  filterButtonActiveSection: {
-    paddingRight: 8,
-  },
-  filterCount: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: 'rgba(59,130,246,0.95)',
-    letterSpacing: 0.5,
-  },
-  filterDivider: {
-    width: 1,
-    height: 20,
+  filterButtonActive: {
     backgroundColor: 'rgba(255,255,255,0.15)',
-    marginRight: 8,
   },
-  filterClearSection: {
-    width: 24,
-    height: 24,
+  filterBadge: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.95)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  filterClearX: {
-    fontSize: 20,
-    fontWeight: '300',
-    color: 'rgba(255,255,255,0.6)',
-  },
-  filterIcon: {
+  filterBadgeText: {
     fontSize: 11,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.5)',
-    letterSpacing: -1,
-    transform: [{ rotate: '90deg' }],
+    fontWeight: '700',
+    color: '#000',
+    letterSpacing: 0,
+  },
+  filterIconContainer: {
+    gap: 2,
+  },
+  filterIconLine: {
+    width: 12,
+    height: 1.5,
+    backgroundColor: 'rgba(255,255,255,0.7)',
+    borderRadius: 1,
+  },
+  filterClearButton: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    marginLeft: 4,
+    marginRight: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,60,60,0.15)',
+  },
+  filterClearText: {
+    fontSize: 18,
+    fontWeight: '300',
+    color: 'rgba(255,60,60,0.95)',
+    marginTop: -2,
   },
   unifiedSearchInput: {
     flex: 1,
@@ -148,6 +162,7 @@ const styles = StyleSheet.create({
     fontWeight: '300',
     color: '#fff',
     letterSpacing: 0.3,
+    paddingLeft: 12,
     paddingRight: 20,
     zIndex: 1,
   },

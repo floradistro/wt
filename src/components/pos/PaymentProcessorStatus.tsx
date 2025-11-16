@@ -1,15 +1,14 @@
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Animated, ScrollView } from 'react-native'
-import { BlurView } from 'expo-blur'
+import {  View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Animated } from 'react-native'
 import * as Haptics from 'expo-haptics'
-import { usePaymentProcessor, type ActivityLog } from '@/stores/payment-processor.store'
-import { useEffect, useRef, useState } from 'react'
+import {  usePaymentProcessor, type ActivityLog } from '@/stores/payment-processor.store'
+import { memo,  useEffect, useRef, useState } from 'react'
 
 interface PaymentProcessorStatusProps {
   compact?: boolean
 }
 
 // JOBS PRINCIPLE: Mission-critical status indicator - always visible, crystal clear
-export function PaymentProcessorStatus({ compact = false }: PaymentProcessorStatusProps) {
+function PaymentProcessorStatus({ compact = false }: PaymentProcessorStatusProps) {
   const {
     status,
     lastCheck,
@@ -329,6 +328,9 @@ export function PaymentProcessorStatus({ compact = false }: PaymentProcessorStat
     </TouchableOpacity>
   )
 }
+
+const PaymentProcessorStatusMemo = memo(PaymentProcessorStatus)
+export { PaymentProcessorStatusMemo as PaymentProcessorStatus }
 
 const styles = StyleSheet.create({
   // Full Status

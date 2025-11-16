@@ -1,14 +1,8 @@
-/**
- * Dock Component - Refactored with Design System
- * Apple-quality dock matching slide-up selector magic
- */
-
 import { View, TouchableOpacity, StyleSheet, Platform } from 'react-native'
 import { memo } from 'react'
 import { BlurView } from 'expo-blur'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import * as Haptics from 'expo-haptics'
-import { colors, radius, spacing, blur, shadows, borderWidth } from '@/theme'
 
 interface DockProps {
   activeTab: number
@@ -69,16 +63,14 @@ const tabs = [
 ]
 
 function Dock({ activeTab, onTabChange }: DockProps) {
-  const insets = useSafeAreaInsets()
+  const _insets = useSafeAreaInsets()
 
   return (
-    <View style={[styles.container, { bottom: insets.bottom + spacing.xs }]}>
+    <View style={[styles.container, { bottom: 8 }]}>
+      {/* JOBS: Fixed bottom position for consistent dock placement */}
       <View style={styles.dockWrapper}>
-        {/* JOBS: Liquid glass effect matching slide-up selectors */}
         {Platform.OS === 'ios' ? (
-          <View style={styles.blurContainer}>
-            <BlurView intensity={blur.thick} tint="dark" style={StyleSheet.absoluteFill} />
-          </View>
+          <BlurView intensity={25} tint="dark" style={styles.blur} />
         ) : (
           <View style={styles.androidBg} />
         )}
@@ -86,8 +78,8 @@ function Dock({ activeTab, onTabChange }: DockProps) {
         <View style={styles.iconsContainer}>
           {tabs.map((tab, index) => {
             const isActive = activeTab === index
-            const isCenter = index === 2 // Scan is center
-            const color = isActive ? colors.text.primary : colors.text.quaternary
+            const isCenter = index === 2
+            const color = isActive ? '#fff' : 'rgba(255,255,255,0.6)'
 
             return (
               <TouchableOpacity
@@ -123,61 +115,66 @@ export { DockMemo as Dock }
 const styles = StyleSheet.create({
   container: {
     position: 'absolute',
+    // bottom position set dynamically with insets
     left: 0,
     right: 0,
     alignItems: 'center',
     pointerEvents: 'box-none',
   },
   dockWrapper: {
-    borderRadius: radius.xxl + 4, // 28px - matches modal corners
+    borderRadius: 28,
     overflow: 'hidden',
-    backgroundColor: colors.glass.thin, // Subtle base
-    borderWidth: borderWidth.regular,
-    borderColor: colors.border.regular,
-    ...shadows.lg, // Proper elevation
+    backgroundColor: 'rgba(0,0,0,0.05)',
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.1)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+    elevation: 10,
   },
-  blurContainer: {
+  blur: {
     ...StyleSheet.absoluteFillObject,
   },
   androidBg: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: colors.background.secondary,
+    backgroundColor: 'rgba(0,0,0,0.2)',
   },
   iconsContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: spacing.xxs + 2, // 6px
-    paddingVertical: spacing.xxs + 2,
-    gap: spacing.xxs,
+    paddingHorizontal: 6, // JOBS: Reduced to match tighter spacing
+    paddingVertical: 6, // JOBS: Reduced to match tighter spacing
+    gap: 4,
   },
   iconButton: {
     width: 56,
     height: 56,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: radius.lg, // Consistent with list items
+    borderRadius: 16,
   },
   centerIcon: {
     width: 60,
     height: 60,
-    borderRadius: radius.lg + 2,
+    borderRadius: 18,
   },
   activeIcon: {
-    backgroundColor: colors.glass.thick, // Match active state in selectors
+    backgroundColor: 'rgba(255,255,255,0.18)',
   },
 
   // Icon styles
   icon: {
     width: 28,
     height: 28,
-    borderRadius: radius.xs + 2,
+    borderRadius: 8,
   },
   gridIcon: {
     width: 28,
     height: 28,
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: spacing.xxs,
+    gap: 4,
   },
   dot: {
     width: 11,
@@ -205,7 +202,7 @@ const styles = StyleSheet.create({
     right: 2,
   },
   receiptIcon: {
-    gap: spacing.xxs,
+    gap: 4,
   },
   line: {
     width: 24,

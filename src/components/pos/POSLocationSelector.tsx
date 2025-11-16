@@ -1,11 +1,14 @@
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions, Animated, Image } from 'react-native'
+/**
+ * POSLocationSelector - Refactored with Design System
+ * Apple-quality location selection matching login design
+ */
+
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated, Image } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { BlurView } from 'expo-blur'
 import * as Haptics from 'expo-haptics'
-import { useRef, useEffect } from 'react'
-
-const { width } = Dimensions.get('window')
-const isTablet = width > 600
+import { memo, useRef, useEffect } from 'react'
+import { colors, typography, spacing, radius, blur, shadows, borderWidth, animation } from '@/theme/tokens'
 
 interface Location {
   id: string
@@ -38,10 +41,8 @@ function LocationCard({ location, index, onPress }: { location: Location; index:
       }),
       Animated.spring(slideAnim, {
         toValue: 0,
-        tension: 50,
-        friction: 10,
         delay: index * 80,
-        useNativeDriver: true,
+        ...animation.spring.gentle,
       }),
     ]).start()
   }, [])
@@ -50,18 +51,14 @@ function LocationCard({ location, index, onPress }: { location: Location; index:
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
     Animated.spring(scaleAnim, {
       toValue: 0.96,
-      useNativeDriver: true,
-      speed: 50,
-      bounciness: 4,
+      ...animation.spring.snappy,
     }).start()
   }
 
   const handlePressOut = () => {
     Animated.spring(scaleAnim, {
       toValue: 1,
-      useNativeDriver: true,
-      speed: 50,
-      bounciness: 4,
+      ...animation.spring.snappy,
     }).start()
   }
 
@@ -82,8 +79,9 @@ function LocationCard({ location, index, onPress }: { location: Location; index:
           },
         ]}
       >
+        {/* Glass background - matches POS design */}
         <View style={styles.locationCardBg}>
-          <BlurView intensity={15} tint="dark" style={StyleSheet.absoluteFill} />
+          <BlurView intensity={blur.thin} tint="dark" style={StyleSheet.absoluteFill} />
         </View>
 
         <View style={styles.locationCardContent}>
@@ -98,232 +96,215 @@ function LocationCard({ location, index, onPress }: { location: Location; index:
 
           {(location.address_line1 || location.city) && (
             <Text style={styles.locationAddress} numberOfLines={2}>
-              {[location.address_line1, location.city, location.state].filter(Boolean).join(', ')}
+              {location.address_line1}
+              {location.city && `, ${location.city}`}
+              {location.state && `, ${location.state}`}
             </Text>
           )}
-
-          <View style={styles.selectButton}>
-            <Text style={styles.selectButtonText}>SELECT</Text>
-          </View>
         </View>
       </Animated.View>
     </TouchableOpacity>
   )
 }
 
-export function POSLocationSelector({
-  locations,
-  vendorLogo,
-  vendorName,
-  onLocationSelected,
-}: POSLocationSelectorProps) {
-  const headerFade = useRef(new Animated.Value(0)).current
+function POSLocationSelector({ locations, vendorLogo, vendorName, onLocationSelected }: POSLocationSelectorProps) {
+  const fadeAnim = useRef(new Animated.Value(0)).current
 
   useEffect(() => {
-    Animated.timing(headerFade, {
+    Animated.timing(fadeAnim, {
       toValue: 1,
-      duration: 600,
-      useNativeDriver: true,
+      ...animation.timing.easeOut,
     }).start()
   }, [])
 
-  const handleLocationPress = (location: Location) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
-    onLocationSelected(location.id, location.name)
-  }
-
-  if (locations.length === 0) {
-    return (
-      <SafeAreaView style={styles.container} edges={['top']}>
-        <View style={styles.emptyContainer}>
-          <Text style={styles.emptyText}>No locations available</Text>
-          <Text style={styles.emptySubtext}>Contact your administrator</Text>
-        </View>
-      </SafeAreaView>
-    )
-  }
-
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      <ScrollView
-        style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        <Animated.View style={[styles.header, { opacity: headerFade }]}>
-          {vendorLogo && (
-            <View style={styles.logoContainer}>
-              <View style={styles.logoCircle}>
-                <Image source={{ uri: vendorLogo }} style={styles.logo} resizeMode="contain" />
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right', 'bottom']}>
+      <Animated.View style={[styles.content, { opacity: fadeAnim }]}>
+        {/* Header - matches login design */}
+        <View style={styles.header}>
+          {vendorLogo ? (
+            <View style={styles.logoCircle}>
+              <View style={styles.logoCircleBg}>
+                <BlurView intensity={blur.thin} tint="dark" style={StyleSheet.absoluteFill} />
               </View>
+              <Image source={{ uri: vendorLogo }} style={styles.logo} resizeMode="contain" />
+            </View>
+          ) : (
+            <View style={styles.logoCircle}>
+              <View style={styles.logoCircleBg}>
+                <BlurView intensity={blur.thin} tint="dark" style={StyleSheet.absoluteFill} />
+              </View>
+              <Text style={styles.logoText}>
+                {vendorName?.charAt(0).toUpperCase() || 'W'}
+              </Text>
             </View>
           )}
-          <Text style={styles.title}>SELECT LOCATION</Text>
-          <Text style={styles.subtitle}>Choose which location to access</Text>
-        </Animated.View>
 
-        <View style={styles.locationsGrid}>
+          <Text style={styles.title}>{vendorName || 'WHALETOOLS'}</Text>
+          <View style={styles.divider} />
+          <Text style={styles.subtitle}>SELECT LOCATION</Text>
+        </View>
+
+        {/* Locations List */}
+        <ScrollView
+          style={styles.locationsList}
+          contentContainerStyle={styles.locationsListContent}
+          showsVerticalScrollIndicator={false}
+        >
           {locations.map((location, index) => (
             <LocationCard
               key={location.id}
               location={location}
               index={index}
-              onPress={() => handleLocationPress(location)}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+                onLocationSelected(location.id, location.name)
+              }}
             />
           ))}
-        </View>
 
-        <View style={styles.footer}>
-          <Text style={styles.footerText}>Select a location to view registers</Text>
-        </View>
-      </ScrollView>
+          {locations.length === 0 && (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyStateText}>No locations available</Text>
+              <Text style={styles.emptyStateSubtext}>
+                Contact support to configure your locations
+              </Text>
+            </View>
+          )}
+        </ScrollView>
+      </Animated.View>
     </SafeAreaView>
   )
 }
 
+const POSLocationSelectorMemo = memo(POSLocationSelector)
+export { POSLocationSelectorMemo as POSLocationSelector }
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000',
+    backgroundColor: colors.background.primary,
   },
-  scrollView: {
+  content: {
     flex: 1,
+    paddingHorizontal: spacing.xl,
   },
-  scrollContent: {
-    paddingHorizontal: isTablet ? 60 : 24,
-    paddingVertical: 40,
-  },
-  emptyContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 12,
-  },
-  emptyText: {
-    fontSize: 14,
-    fontWeight: '300',
-    color: 'rgba(255,255,255,0.4)',
-    letterSpacing: 2,
-  },
-  emptySubtext: {
-    fontSize: 11,
-    fontWeight: '300',
-    color: 'rgba(255,255,255,0.25)',
-    letterSpacing: 1,
-  },
+  // Header - matches login design
   header: {
     alignItems: 'center',
-    marginBottom: 48,
-  },
-  logoContainer: {
-    marginBottom: 24,
+    paddingTop: spacing.huge,
+    paddingBottom: spacing.xxxl,
   },
   logoCircle: {
     width: 80,
     height: 80,
-    borderRadius: 24,
-    backgroundColor: 'rgba(255,255,255,0.04)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+    borderRadius: radius.round,
+    overflow: 'hidden',
+    borderWidth: borderWidth.regular,
+    borderColor: colors.border.regular,
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 12,
+    marginBottom: spacing.lg,
+    ...shadows.md,
+  },
+  logoCircleBg: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: colors.glass.thin,
   },
   logo: {
-    width: '100%',
-    height: '100%',
+    width: 50,
+    height: 50,
+  },
+  logoText: {
+    ...typography.display,
+    color: colors.text.secondary,
   },
   title: {
-    fontSize: 28,
+    ...typography.title.large,
     fontWeight: '200',
-    color: '#fff',
     letterSpacing: 4,
-    marginBottom: 12,
+    marginBottom: spacing.sm,
+  },
+  divider: {
+    width: 60,
+    height: 1,
+    backgroundColor: colors.border.hairline,
+    marginBottom: spacing.sm,
   },
   subtitle: {
-    fontSize: 11,
-    fontWeight: '300',
-    color: 'rgba(255,255,255,0.5)',
-    letterSpacing: 2,
-    textTransform: 'uppercase',
+    ...typography.uppercase,
+    color: colors.text.disabled,
+    letterSpacing: 3,
   },
-  locationsGrid: {
-    gap: 16,
+  // Locations list
+  locationsList: {
+    flex: 1,
   },
+  locationsListContent: {
+    paddingBottom: spacing.xxxl,
+    gap: spacing.md,
+  },
+  // Location card - matches POS card design
   locationCard: {
-    marginBottom: 16,
+    marginBottom: 0,
   },
   locationCardInner: {
-    borderRadius: 24,
+    borderRadius: radius.lg,
     overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
+    borderWidth: borderWidth.regular,
+    borderColor: colors.border.regular,
+    ...shadows.md,
   },
   locationCardBg: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.3)',
+    backgroundColor: colors.glass.thin,
   },
   locationCardContent: {
-    padding: 24,
+    padding: spacing.lg,
   },
   locationHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    marginBottom: 8,
-    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    marginBottom: spacing.xs,
   },
   locationName: {
-    fontSize: 18,
-    fontWeight: '400',
-    color: '#fff',
-    letterSpacing: 0.5,
+    ...typography.body.large,
+    color: colors.text.primary,
+    flex: 1,
   },
   primaryBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    backgroundColor: 'rgba(59,130,246,0.2)',
-    borderRadius: 8,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xxs,
+    backgroundColor: colors.semantic.successBg,
+    borderRadius: radius.xs,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.semantic.successBorder,
+    marginLeft: spacing.sm,
   },
   primaryBadgeText: {
-    fontSize: 9,
-    fontWeight: '600',
-    color: 'rgba(96,165,250,0.9)',
-    letterSpacing: 1.5,
+    ...typography.label.tiny,
+    color: colors.semantic.success,
+    letterSpacing: 1,
   },
   locationAddress: {
-    fontSize: 12,
-    fontWeight: '300',
-    color: 'rgba(255,255,255,0.5)',
+    ...typography.caption.regular,
+    color: colors.text.tertiary,
     lineHeight: 18,
-    marginBottom: 20,
   },
-  selectButton: {
-    paddingVertical: 14,
-    borderRadius: 16,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
+  // Empty state
+  emptyState: {
+    paddingVertical: spacing.massive,
     alignItems: 'center',
+    gap: spacing.sm,
   },
-  selectButtonText: {
-    fontSize: 11,
-    fontWeight: '500',
-    color: '#fff',
-    letterSpacing: 3,
+  emptyStateText: {
+    ...typography.body.regular,
+    color: colors.text.subtle,
   },
-  footer: {
-    alignItems: 'center',
-    marginTop: 32,
-    paddingTop: 24,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.05)',
-  },
-  footerText: {
-    fontSize: 10,
-    fontWeight: '300',
-    color: 'rgba(255,255,255,0.3)',
-    letterSpacing: 2,
-    textTransform: 'uppercase',
+  emptyStateSubtext: {
+    ...typography.caption.regular,
+    color: colors.text.ghost,
+    textAlign: 'center',
   },
 })

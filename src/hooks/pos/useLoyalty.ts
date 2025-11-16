@@ -10,10 +10,13 @@ export function useLoyalty(vendorId: string | null, selectedCustomer: Customer |
    */
   useEffect(() => {
     const loadLoyaltyProgram = async () => {
-      if (!vendorId) return
+      if (!vendorId) {
+        return
+      }
 
       try {
         const BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000'
+
         const response = await fetch(`${BASE_URL}/api/vendor/loyalty/program`, {
           headers: {
             'x-vendor-id': vendorId,
@@ -24,8 +27,8 @@ export function useLoyalty(vendorId: string | null, selectedCustomer: Customer |
           const data = await response.json()
           setLoyaltyProgram(data.program)
         }
-      } catch (error) {
-        console.error('❌ Failed to load loyalty program:', error)
+      } catch (_error) {
+        // Silently fail - loyalty is optional
       }
     }
 
@@ -41,19 +44,22 @@ export function useLoyalty(vendorId: string | null, selectedCustomer: Customer |
 
   /**
    * Calculate loyalty discount amount
+   * Use default point value of $0.01 if loyalty program not loaded
    */
-  const loyaltyDiscountAmount = loyaltyProgram
-    ? loyaltyPointsToRedeem * (loyaltyProgram.point_value || 0.01)
-    : 0
+  const loyaltyDiscountAmount = loyaltyPointsToRedeem * (loyaltyProgram?.point_value || 0.01)
 
   /**
    * Calculate maximum redeemable points based on subtotal
    */
   const getMaxRedeemablePoints = (subtotal: number): number => {
-    if (!selectedCustomer || !loyaltyProgram) return 0
+    if (!selectedCustomer) return 0
 
-    const maxPointsFromSubtotal = Math.floor(subtotal / (loyaltyProgram.point_value || 0.01))
-    return Math.min(selectedCustomer.loyalty_points, maxPointsFromSubtotal)
+    // Use loyalty program point value if available, otherwise default to $0.01 per point
+    const pointValue = loyaltyProgram?.point_value || 0.01
+    const maxPointsFromSubtotal = Math.floor(subtotal / pointValue)
+    const maxRedeemable = Math.min(selectedCustomer.loyalty_points, maxPointsFromSubtotal)
+
+    return maxRedeemable
   }
 
   /**

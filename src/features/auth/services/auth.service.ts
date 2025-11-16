@@ -64,7 +64,7 @@ export class AuthService {
       }
 
       return session
-    } catch (error) {
+    } catch (_error) {
       // Silent fail - session will be null and user will need to login
       return null
     }

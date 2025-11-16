@@ -36,6 +36,8 @@ export interface PricingTier {
   price: string | number
   weight?: string
   label?: string
+  break_id?: string
+  sort_order?: number
 }
 
 export interface ProductField {
@@ -94,6 +96,7 @@ export interface SessionInfo {
   registerName: string
   sessionId?: string
   taxRate?: number
+  taxName?: string
 }
 
 export interface LoyaltyProgram {
@@ -101,6 +104,7 @@ export interface LoyaltyProgram {
   vendor_id: string
   point_value: number
   enabled: boolean
+  min_redemption_points?: number
 }
 
 export interface PaymentData {

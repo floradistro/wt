@@ -1,7 +1,7 @@
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, Modal, Animated, Dimensions, ScrollView, KeyboardAvoidingView, Platform } from 'react-native'
-import { BlurView } from 'expo-blur'
+import {  View, Text, StyleSheet, TextInput, TouchableOpacity, Modal, Animated, Dimensions, ScrollView, KeyboardAvoidingView, Platform } from 'react-native'
+import {  BlurView } from 'expo-blur'
 import * as Haptics from 'expo-haptics'
-import { useRef, useEffect, useState } from 'react'
+import { memo,  useRef, useEffect, useState } from 'react'
 
 const { width } = Dimensions.get('window')
 const isTablet = width > 600
@@ -12,7 +12,7 @@ interface OpenCashDrawerModalProps {
   onCancel: () => void
 }
 
-export function OpenCashDrawerModal({ visible, onSubmit, onCancel }: OpenCashDrawerModalProps) {
+function OpenCashDrawerModal({ visible, onSubmit, onCancel }: OpenCashDrawerModalProps) {
   const [openingCash, setOpeningCash] = useState('')
   const [notes, setNotes] = useState('')
   const fadeAnim = useRef(new Animated.Value(0)).current
@@ -192,6 +192,9 @@ export function OpenCashDrawerModal({ visible, onSubmit, onCancel }: OpenCashDra
     </Modal>
   )
 }
+
+const OpenCashDrawerModalMemo = memo(OpenCashDrawerModal)
+export { OpenCashDrawerModalMemo as OpenCashDrawerModal }
 
 const styles = StyleSheet.create({
   overlay: {

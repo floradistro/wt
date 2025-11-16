@@ -1,59 +1,89 @@
-import React from 'react'
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native'
+/**
+ * Error Boundary Component
+ * Apple-quality error handling with design system
+ */
 
-interface ErrorBoundaryProps {
-  children: React.ReactNode
+import React, { Component, ReactNode } from 'react'
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native'
+import { SafeAreaView } from 'react-native-safe-area-context'
+import { BlurView } from 'expo-blur'
+import * as Haptics from 'expo-haptics'
+import { colors, typography, spacing, radius } from '@/theme'
+
+interface Props {
+  children: ReactNode
+  fallback?: (error: Error, resetError: () => void) => ReactNode
 }
 
-interface ErrorBoundaryState {
+interface State {
   hasError: boolean
   error: Error | null
 }
 
-export class ErrorBoundary extends React.Component<
-  ErrorBoundaryProps,
-  ErrorBoundaryState
-> {
-  constructor(props: ErrorBoundaryProps) {
+export class ErrorBoundary extends Component<Props, State> {
+  constructor(props: Props) {
     super(props)
-    this.state = { hasError: false, error: null }
-  }
-
-  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
-    return { hasError: true, error }
-  }
-
-  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-    // In production, you would log this to an error tracking service
-    // For now, we'll just log it to help with debugging
-    if (__DEV__) {
-      console.error('Error caught by boundary:', error, errorInfo)
+    this.state = {
+      hasError: false,
+      error: null,
     }
   }
 
-  handleReset = () => {
-    this.setState({ hasError: false, error: null })
+  static getDerivedStateFromError(error: Error): State {
+    return {
+      hasError: true,
+      error,
+    }
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error('Error Boundary caught error:', error, errorInfo)
+  }
+
+  resetError = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    this.setState({
+      hasError: false,
+      error: null,
+    })
   }
 
   render() {
-    if (this.state.hasError) {
-      return (
-        <View style={styles.container}>
-          <View style={styles.content}>
-            <Text style={styles.title}>Something went wrong</Text>
-            <Text style={styles.message}>
-              {this.state.error?.message || 'An unexpected error occurred'}
-            </Text>
+    if (this.state.hasError && this.state.error) {
+      if (this.props.fallback) {
+        return this.props.fallback(this.state.error, this.resetError)
+      }
 
-            <TouchableOpacity
-              style={styles.button}
-              onPress={this.handleReset}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.buttonText}>TRY AGAIN</Text>
-            </TouchableOpacity>
+      // Default error UI with Apple design language
+      return (
+        <SafeAreaView style={styles.container} edges={['top', 'left', 'right', 'bottom']}>
+          <View style={styles.errorCard}>
+            <View style={styles.errorBg}>
+              <BlurView intensity={30} tint="dark" style={StyleSheet.absoluteFill} />
+            </View>
+
+            <View style={styles.errorContent}>
+              <Text style={styles.errorIcon}>⚠️</Text>
+              <Text style={styles.errorTitle}>Something went wrong</Text>
+              <Text style={styles.errorMessage}>
+                {this.state.error.message || 'An unexpected error occurred'}
+              </Text>
+
+              {__DEV__ && (
+                <View style={styles.errorStack}>
+                  <Text style={styles.errorStackLabel}>STACK TRACE (DEV ONLY)</Text>
+                  <Text style={styles.errorStackText} numberOfLines={10}>
+                    {this.state.error.stack}
+                  </Text>
+                </View>
+              )}
+
+              <TouchableOpacity onPress={this.resetError} style={styles.resetButton} activeOpacity={0.7}>
+                <Text style={styles.resetButtonText}>Try Again</Text>
+              </TouchableOpacity>
+            </View>
           </View>
-        </View>
+        </SafeAreaView>
       )
     }
 
@@ -64,44 +94,72 @@ export class ErrorBoundary extends React.Component<
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000',
-    alignItems: 'center',
+    backgroundColor: colors.background.primary,
     justifyContent: 'center',
-    padding: 32,
-  },
-  content: {
     alignItems: 'center',
-    maxWidth: 400,
+    padding: spacing.xl,
   },
-  title: {
-    fontSize: 24,
-    fontWeight: '200',
-    color: '#fff',
-    letterSpacing: 2,
-    marginBottom: 16,
-    textAlign: 'center',
-  },
-  message: {
-    fontSize: 14,
-    fontWeight: '300',
-    color: 'rgba(255,255,255,0.6)',
-    letterSpacing: 0.5,
-    textAlign: 'center',
-    marginBottom: 32,
-    lineHeight: 20,
-  },
-  button: {
-    backgroundColor: 'rgba(255,255,255,0.1)',
+  errorCard: {
+    width: '100%',
+    maxWidth: 500,
+    borderRadius: radius.xxl,
+    overflow: 'hidden',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
-    borderRadius: 16,
-    paddingHorizontal: 32,
-    paddingVertical: 16,
+    borderColor: colors.semantic.errorBorder,
   },
-  buttonText: {
-    color: '#fff',
-    fontSize: 11,
-    fontWeight: '400',
-    letterSpacing: 3,
+  errorBg: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: colors.semantic.errorBg,
+  },
+  errorContent: {
+    padding: spacing.xxxl,
+    alignItems: 'center',
+    gap: spacing.md,
+  },
+  errorIcon: {
+    fontSize: 48,
+    marginBottom: spacing.sm,
+  },
+  errorTitle: {
+    ...typography.title.large,
+    color: colors.text.primary,
+    textAlign: 'center',
+  },
+  errorMessage: {
+    ...typography.body.regular,
+    color: colors.text.tertiary,
+    textAlign: 'center',
+  },
+  errorStack: {
+    width: '100%',
+    marginTop: spacing.lg,
+    padding: spacing.md,
+    backgroundColor: colors.glass.regular,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border.subtle,
+  },
+  errorStackLabel: {
+    ...typography.uppercase,
+    color: colors.text.disabled,
+    marginBottom: spacing.xs,
+  },
+  errorStackText: {
+    ...typography.caption.small,
+    color: colors.text.subtle,
+    fontFamily: 'monospace',
+  },
+  resetButton: {
+    marginTop: spacing.lg,
+    paddingHorizontal: spacing.xxxl,
+    paddingVertical: spacing.md,
+    backgroundColor: colors.glass.thick,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.border.emphasis,
+  },
+  resetButtonText: {
+    ...typography.label.regular,
+    color: colors.text.primary,
   },
 })

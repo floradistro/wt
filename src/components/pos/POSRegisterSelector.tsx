@@ -1,9 +1,9 @@
-import { View, Text, StyleSheet, TouchableOpacity, Dimensions, Animated, Image, Alert, ScrollView } from 'react-native'
-import { SafeAreaView } from 'react-native-safe-area-context'
-import { BlurView } from 'expo-blur'
+import {  View, Text, StyleSheet, TouchableOpacity, Dimensions, Animated, Image, ScrollView } from 'react-native'
+import {  SafeAreaView } from 'react-native-safe-area-context'
+import {  BlurView } from 'expo-blur'
 import * as Haptics from 'expo-haptics'
-import { useRef, useEffect, useState } from 'react'
-import { supabase } from '@/lib/supabase/client'
+import { memo,  useRef, useEffect, useState } from 'react'
+import {  supabase } from '@/lib/supabase/client'
 
 const { width } = Dimensions.get('window')
 const isTablet = width > 600
@@ -156,7 +156,7 @@ function RegisterCard({ register, index, onPress }: { register: Register; index:
   )
 }
 
-export function POSRegisterSelector({
+function POSRegisterSelector({
   locationId,
   locationName,
   vendorLogo,
@@ -321,6 +321,9 @@ export function POSRegisterSelector({
     </SafeAreaView>
   )
 }
+
+const POSRegisterSelectorMemo = memo(POSRegisterSelector)
+export { POSRegisterSelectorMemo as POSRegisterSelector }
 
 const styles = StyleSheet.create({
   container: {

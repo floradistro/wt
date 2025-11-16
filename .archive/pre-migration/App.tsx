@@ -1,28 +1,24 @@
-/**
- * App Component - Refactored with Design System
- * Apple-quality login experience matching POS design language
- */
-
 import { useState, useRef, useEffect } from 'react'
 import {
   View,
   Text,
+  TextInput,
+  TouchableOpacity,
   StyleSheet,
   SafeAreaView,
   StatusBar,
   KeyboardAvoidingView,
   Platform,
   Animated,
+  Dimensions,
   Image,
   Alert,
 } from 'react-native'
-import { BlurView } from 'expo-blur'
-import * as Haptics from 'expo-haptics'
 import { useAuth, useAuthActions } from './src/stores/auth.store'
 import { DashboardNavigator } from './src/navigation/DashboardNavigator'
 import { ErrorBoundary } from './src/components/ErrorBoundary'
-import { Button, TextInput as DSTextInput } from './src/theme'
-import { colors, typography, spacing, radius, blur, animation } from './src/theme/tokens'
+
+const { width: _width } = Dimensions.get('window')
 
 export default function App() {
   const [email, setEmail] = useState('')
@@ -32,28 +28,31 @@ export default function App() {
   const { user, session, isLoading, error } = useAuth()
   const { login, restoreSession, clearError } = useAuthActions()
 
-  // Animations - Apple spring physics
+  // Animations
   const fadeAnim = useRef(new Animated.Value(0)).current
   const slideAnim = useRef(new Animated.Value(30)).current
   const orb1 = useRef(new Animated.Value(0)).current
   const orb2 = useRef(new Animated.Value(0)).current
 
   useEffect(() => {
+    // Restore session on app start
     restoreSession()
 
-    // Entrance animation with spring
+    // Entrance animation
     Animated.parallel([
       Animated.timing(fadeAnim, {
         toValue: 1,
-        ...animation.timing.easeOut,
+        duration: 800,
+        useNativeDriver: true,
       }),
-      Animated.spring(slideAnim, {
+      Animated.timing(slideAnim, {
         toValue: 0,
-        ...animation.spring.gentle,
+        duration: 600,
+        useNativeDriver: true,
       }),
     ]).start()
 
-    // Breathing orbs - subtle background motion
+    // Breathing orb animations
     Animated.loop(
       Animated.sequence([
         Animated.timing(orb1, {
@@ -85,6 +84,7 @@ export default function App() {
     ).start()
   }, [])
 
+  // Show error alerts
   useEffect(() => {
     if (error) {
       Alert.alert('Authentication Error', error, [
@@ -94,6 +94,7 @@ export default function App() {
   }, [error])
 
   const handleLogin = async () => {
+    // Basic validation
     if (!email || !password) {
       Alert.alert('Validation Error', 'Please enter email and password')
       return
@@ -104,12 +105,11 @@ export default function App() {
       return
     }
 
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
-
     try {
       await login(email, password)
+      // Login successful - user state will be updated automatically
     } catch (_err) {
-      // Error handled by store
+      // Error is handled by the store and shown via Alert
     }
   }
 
@@ -123,7 +123,7 @@ export default function App() {
     outputRange: [1, 1.3],
   })
 
-  // If logged in, show dashboard
+  // If logged in, show dashboard with custom dock
   if (user && session) {
     return (
       <ErrorBoundary>
@@ -141,9 +141,23 @@ export default function App() {
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={styles.keyboardView}
         >
-          {/* Animated background orbs - Jobs: Subtle depth */}
-          <Animated.View style={[styles.orb1, { transform: [{ scale: orb1Scale }] }]} />
-          <Animated.View style={[styles.orb2, { transform: [{ scale: orb2Scale }] }]} />
+          {/* Animated background orbs */}
+          <Animated.View
+            style={[
+              styles.orb1,
+              {
+                transform: [{ scale: orb1Scale }],
+              },
+            ]}
+          />
+          <Animated.View
+            style={[
+              styles.orb2,
+              {
+                transform: [{ scale: orb2Scale }],
+              },
+            ]}
+          />
 
           <Animated.View
             style={[
@@ -154,12 +168,9 @@ export default function App() {
               },
             ]}
           >
-            {/* Logo - Matches POS location selector design */}
+            {/* Logo */}
             <View style={styles.logoContainer}>
               <View style={styles.logoCircle}>
-                <View style={styles.logoCircleBg}>
-                  <BlurView intensity={blur.thin} tint="dark" style={StyleSheet.absoluteFill} />
-                </View>
                 <Image
                   source={require('./assets/logo.png')}
                   style={styles.logo}
@@ -168,48 +179,68 @@ export default function App() {
               </View>
             </View>
 
-            {/* Header - Using design system typography */}
+            {/* Header */}
             <View style={styles.header}>
               <Text style={styles.title}>WHALETOOLS</Text>
               <View style={styles.divider} />
               <Text style={styles.subtitle}>VENDOR PORTAL</Text>
             </View>
 
-            {/* Form - Using design system components */}
+            {/* Form */}
             <View style={styles.form}>
-              <DSTextInput
-                value={email}
-                onChangeText={setEmail}
-                placeholder="your@email.com"
-                label="EMAIL ADDRESS"
-                keyboardType="email-address"
-                style={{ marginBottom: spacing.lg }}
-              />
+              {/* Email */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>EMAIL ADDRESS</Text>
+                <View style={styles.inputWrapper}>
+                  <Text style={styles.inputIcon}>✉</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={email}
+                    onChangeText={setEmail}
+                    placeholder="your@email.com"
+                    placeholderTextColor="rgba(255,255,255,0.2)"
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                  />
+                </View>
+              </View>
 
-              <DSTextInput
-                value={password}
-                onChangeText={setPassword}
-                placeholder="••••••••"
-                label="PASSWORD"
-                secureTextEntry
-                style={{ marginBottom: spacing.xxxl }}
-              />
+              {/* Password */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>PASSWORD</Text>
+                <View style={styles.inputWrapper}>
+                  <Text style={styles.inputIcon}>🔒</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={password}
+                    onChangeText={setPassword}
+                    placeholder="••••••••"
+                    placeholderTextColor="rgba(255,255,255,0.2)"
+                    secureTextEntry
+                  />
+                </View>
+              </View>
 
-              {/* Login Button - Using design system Button */}
-              <Button
-                variant="primary"
-                size="large"
-                fullWidth
+              {/* Login Button */}
+              <TouchableOpacity
+                style={[styles.button, isLoading && styles.buttonDisabled]}
                 onPress={handleLogin}
-                loading={isLoading}
                 disabled={isLoading}
+                activeOpacity={0.8}
               >
-                {isLoading ? 'AUTHENTICATING...' : 'ACCESS PORTAL'}
-              </Button>
+                {isLoading ? (
+                  <Text style={styles.buttonText}>AUTHENTICATING...</Text>
+                ) : (
+                  <Text style={styles.buttonText}>ACCESS PORTAL</Text>
+                )}
+              </TouchableOpacity>
 
               {/* Help Links */}
               <View style={styles.helpLinks}>
-                <Text style={styles.helpText}>Need help signing in?</Text>
+                <TouchableOpacity>
+                  <Text style={styles.helpText}>Forgot Password?</Text>
+                </TouchableOpacity>
               </View>
             </View>
 
@@ -229,12 +260,12 @@ export default function App() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.background.primary,
+    backgroundColor: '#000',
   },
   keyboardView: {
     flex: 1,
   },
-  // Animated orbs - subtle background depth
+  // Animated orbs
   orb1: {
     position: 'absolute',
     top: 80,
@@ -242,7 +273,7 @@ const styles = StyleSheet.create({
     width: 300,
     height: 300,
     borderRadius: 150,
-    backgroundColor: colors.glass.ultraThin,
+    backgroundColor: 'rgba(255,255,255,0.02)',
     opacity: 0.5,
   },
   orb2: {
@@ -258,75 +289,135 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
     justifyContent: 'center',
-    paddingHorizontal: spacing.xxxl,
-    paddingVertical: spacing.massive,
+    paddingHorizontal: 32,
+    paddingVertical: 40,
   },
-  // Logo - matches slide-up selector style
+  // Logo
   logoContainer: {
     alignItems: 'center',
-    marginBottom: spacing.massive,
+    marginBottom: 40,
   },
   logoCircle: {
     width: 80,
     height: 80,
-    borderRadius: radius.round,
-    overflow: 'hidden',
+    borderRadius: 40,
+    backgroundColor: 'rgba(255,255,255,0.02)',
     borderWidth: 1,
-    borderColor: colors.border.regular,
+    borderColor: 'rgba(255,255,255,0.1)',
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  logoCircleBg: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: colors.glass.thin,
+    shadowColor: '#fff',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.05,
+    shadowRadius: 20,
   },
   logo: {
     width: 50,
     height: 50,
   },
-  // Header - design system typography
+  // Header
   header: {
     alignItems: 'center',
-    marginBottom: spacing.huge,
+    marginBottom: 50,
   },
   title: {
-    ...typography.title.large,
+    fontSize: 24,
     fontWeight: '200',
+    color: '#fff',
     letterSpacing: 8,
-    marginBottom: spacing.sm,
+    marginBottom: 12,
   },
   divider: {
     width: 60,
     height: 1,
-    backgroundColor: colors.border.hairline,
-    marginBottom: spacing.sm,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    marginBottom: 12,
   },
   subtitle: {
-    ...typography.uppercase,
-    color: colors.text.subtle,
+    fontSize: 10,
+    fontWeight: '300',
+    color: 'rgba(255,255,255,0.4)',
     letterSpacing: 4,
   },
   // Form
   form: {
     width: '100%',
   },
+  inputGroup: {
+    marginBottom: 24,
+  },
+  label: {
+    fontSize: 9,
+    fontWeight: '400',
+    color: 'rgba(255,255,255,0.4)',
+    letterSpacing: 3,
+    marginBottom: 12,
+  },
+  inputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.2)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 16,
+    paddingHorizontal: 20,
+    height: 56,
+  },
+  inputIcon: {
+    fontSize: 16,
+    marginRight: 12,
+    opacity: 0.3,
+  },
+  input: {
+    flex: 1,
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '300',
+  },
+  button: {
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+    borderRadius: 16,
+    height: 56,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 32,
+    shadowColor: '#fff',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+  },
+  buttonDisabled: {
+    opacity: 0.5,
+  },
+  buttonText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '400',
+    letterSpacing: 3,
+  },
   helpLinks: {
     alignItems: 'center',
-    marginTop: spacing.xl,
-    paddingTop: spacing.xl,
+    marginTop: 24,
+    paddingTop: 24,
     borderTopWidth: 1,
-    borderTopColor: colors.border.subtle,
+    borderTopColor: 'rgba(255,255,255,0.05)',
   },
   helpText: {
-    ...typography.caption.regular,
-    color: colors.text.subtle,
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 11,
+    fontWeight: '300',
+    letterSpacing: 1,
   },
   footer: {
     alignItems: 'center',
-    marginTop: spacing.massive,
+    marginTop: 40,
   },
   footerText: {
-    ...typography.caption.regular,
-    color: colors.text.ghost,
+    color: 'rgba(255,255,255,0.3)',
+    fontSize: 11,
+    fontWeight: '300',
+    letterSpacing: 1,
   },
 })

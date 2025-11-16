@@ -1,7 +1,7 @@
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, Modal, Animated, Dimensions, ScrollView, KeyboardAvoidingView, Platform } from 'react-native'
-import { BlurView } from 'expo-blur'
+import {  View, Text, StyleSheet, TextInput, TouchableOpacity, Modal, Animated, Dimensions, ScrollView, KeyboardAvoidingView, Platform } from 'react-native'
+import {  BlurView } from 'expo-blur'
 import * as Haptics from 'expo-haptics'
-import { useRef, useEffect, useState } from 'react'
+import { memo,  useRef, useEffect, useState } from 'react'
 
 const { width } = Dimensions.get('window')
 const isTablet = width > 600
@@ -16,7 +16,7 @@ interface CloseCashDrawerModalProps {
   onCancel: () => void
 }
 
-export function CloseCashDrawerModal({
+function CloseCashDrawerModal({
   visible,
   sessionNumber: _sessionNumber,
   totalSales,
@@ -239,6 +239,9 @@ export function CloseCashDrawerModal({
     </Modal>
   )
 }
+
+const CloseCashDrawerModalMemo = memo(CloseCashDrawerModal)
+export { CloseCashDrawerModalMemo as CloseCashDrawerModal }
 
 const styles = StyleSheet.create({
   overlay: {

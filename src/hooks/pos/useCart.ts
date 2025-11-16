@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useCallback, useMemo } from 'react'
 import * as Haptics from 'expo-haptics'
 import type { CartItem, Product, PricingTier } from '@/types/pos'
 
@@ -9,7 +9,7 @@ export function useCart() {
   /**
    * Add product to cart (with optional pricing tier)
    */
-  const addToCart = (product: Product, tier?: PricingTier) => {
+  const addToCart = useCallback((product: Product, tier?: PricingTier) => {
     const price = tier ? (typeof tier.price === 'number' ? tier.price : parseFloat(tier.price)) : (product.regular_price || 0)
     const tierLabel = tier ? (tier.weight || tier.label) : null
     const itemId = tier ? `${product.id}_${tier.weight || tier.label}` : product.id
@@ -33,27 +33,66 @@ export function useCart() {
           tierLabel: tierLabel || undefined,
           productName: product.name,
           productId: product.id,
-          inventoryId: product.id, // TODO: Use actual inventory_id once Product type is updated
+          inventoryId: product.inventory_id || product.id, // Use actual inventory record ID
         },
       ]
     })
-  }
+  }, [])
 
   /**
    * Update item quantity (delta can be +1 or -1)
    */
-  const updateQuantity = (productId: string, delta: number) => {
+  const updateQuantity = useCallback((productId: string, delta: number) => {
     setCart((prevCart) =>
       prevCart
         .map((item) => (item.id === productId ? { ...item, quantity: item.quantity + delta } : item))
         .filter((item) => item.quantity > 0)
     )
-  }
+  }, [])
+
+  /**
+   * Change tier for a cart item (remove old, add new)
+   */
+  const changeTier = useCallback((oldItemId: string, product: Product, newTier: PricingTier) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+
+    setCart((prevCart) => {
+      // Remove the old tier item
+      const filtered = prevCart.filter((item) => item.id !== oldItemId)
+
+      // Add the new tier
+      const price = typeof newTier.price === 'number' ? newTier.price : parseFloat(newTier.price)
+      const tierLabel = newTier.weight || newTier.label
+      const itemId = `${product.id}_${newTier.weight || newTier.label}`
+
+      // Check if this tier already exists
+      const existing = filtered.find((item) => item.id === itemId)
+      if (existing) {
+        return filtered.map((item) =>
+          item.id === itemId ? { ...item, quantity: item.quantity + 1 } : item
+        )
+      }
+
+      return [
+        ...filtered,
+        {
+          id: itemId,
+          name: tierLabel ? `${product.name} (${tierLabel})` : product.name,
+          price,
+          quantity: 1,
+          tierLabel: tierLabel || undefined,
+          productName: product.name,
+          productId: product.id,
+          inventoryId: product.inventory_id || product.id, // Use actual inventory record ID
+        },
+      ]
+    })
+  }, [])
 
   /**
    * Apply staff discount to cart item
    */
-  const applyManualDiscount = (productId: string, type: 'percentage' | 'amount', value: number) => {
+  const applyManualDiscount = useCallback((productId: string, type: 'percentage' | 'amount', value: number) => {
     setCart((prevCart) =>
       prevCart.map((item) => {
         if (item.id === productId) {
@@ -79,45 +118,49 @@ export function useCart() {
     )
     setDiscountingItemId(null)
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
-  }
+  }, [])
 
   /**
    * Remove staff discount from cart item
    */
-  const removeManualDiscount = (productId: string) => {
+  const removeManualDiscount = useCallback((productId: string) => {
     setCart((prevCart) =>
       prevCart.map((item) => {
         if (item.id === productId) {
-          const { manualDiscountType, manualDiscountValue, adjustedPrice, originalPrice, ...rest } = item
+          const { manualDiscountType: _manualDiscountType, manualDiscountValue: _manualDiscountValue, adjustedPrice: _adjustedPrice, originalPrice: _originalPrice, ...rest } = item
           return rest
         }
         return item
       })
     )
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-  }
+  }, [])
 
   /**
    * Clear entire cart
    */
-  const clearCart = () => {
+  const clearCart = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
     setCart([])
     setDiscountingItemId(null)
-  }
+  }, [])
 
   /**
    * Calculate cart subtotal (with staff discounts applied)
    */
-  const subtotal = cart.reduce((sum, item) => {
-    const price = item.adjustedPrice !== undefined ? item.adjustedPrice : item.price
-    return sum + price * item.quantity
-  }, 0)
+  const subtotal = useMemo(() => {
+    return cart.reduce((sum, item) => {
+      const price = item.adjustedPrice !== undefined ? item.adjustedPrice : item.price
+      return sum + price * item.quantity
+    }, 0)
+  }, [cart])
 
   /**
    * Calculate total item count
    */
-  const itemCount = cart.reduce((sum, item) => sum + item.quantity, 0)
+  const itemCount = useMemo(() => {
+    return cart.reduce((sum, item) => sum + item.quantity, 0)
+  }, [cart])
 
   return {
     // State
@@ -127,6 +170,7 @@ export function useCart() {
     // Actions
     addToCart,
     updateQuantity,
+    changeTier,
     applyManualDiscount,
     removeManualDiscount,
     clearCart,

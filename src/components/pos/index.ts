@@ -7,14 +7,14 @@ export { POSLocationSelector } from './POSLocationSelector'
 export { POSRegisterSelector } from './POSRegisterSelector'
 
 // Customer & ID Scanning
-export { POSCustomerSelector } from './POSCustomerSelector'
-export { POSIDScannerModal } from './POSIDScannerModal'
+export { POSUnifiedCustomerSelector } from './POSUnifiedCustomerSelector'
 
 // Payment
 export { POSPaymentModal } from './POSPaymentModal'
 export { PaymentProcessorStatus } from './PaymentProcessorStatus'
+export { default as POSSaleSuccessModal } from './POSSaleSuccessModal'
 
-// Products (Legacy - use products/index.ts for new code)
+// Products (Legacy - maintained for grid compatibility)
 export { POSProductCard } from './POSProductCard'
 
 // Cart Components

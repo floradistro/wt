@@ -1,4 +1,5 @@
 import { View, Text, StyleSheet, ScrollView, ActivityIndicator } from 'react-native'
+import { memo } from 'react'
 import type { Product, PricingTier } from '@/types/pos'
 import { POSProductCard } from '../POSProductCard'
 
@@ -15,7 +16,7 @@ interface POSProductGridProps {
   matchingFiltersMap?: Map<string, string[]>
 }
 
-export function POSProductGrid({
+function POSProductGrid({
   products,
   loading,
   onAddToCart,
@@ -83,6 +84,9 @@ export function POSProductGrid({
   )
 }
 
+const POSProductGridMemo = memo(POSProductGrid)
+export { POSProductGridMemo as POSProductGrid }
+
 const styles = StyleSheet.create({
   loadingContainer: {
     flex: 1,
@@ -118,7 +122,7 @@ const styles = StyleSheet.create({
   productsGridWithHeader: {
     paddingTop: 80, // Space for floating search bar
     paddingBottom: 24,
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 16,

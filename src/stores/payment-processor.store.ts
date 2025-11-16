@@ -242,7 +242,7 @@ export const usePaymentProcessor = create<ProcessorStore>((set, get) => ({
   // JOBS PRINCIPLE: Test terminal with small transaction to verify it works
   sendTestTransaction: async () => {
     const startTime = Date.now()
-    const { currentProcessor, locationId, addActivityLog } = get()
+    const { currentProcessor, addActivityLog } = get()
 
     if (!currentProcessor) {
       addActivityLog('error', 'No processor available for testing')

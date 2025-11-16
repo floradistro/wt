@@ -1,9 +1,9 @@
-import { View, Text, StyleSheet, Modal, TextInput, TouchableOpacity, ScrollView, Pressable, Animated, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native'
-import { BlurView } from 'expo-blur'
-import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import {  View, Text, StyleSheet, Modal, TextInput, TouchableOpacity, ScrollView, Pressable, Animated, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native'
+import {  BlurView } from 'expo-blur'
+import {  useSafeAreaInsets } from 'react-native-safe-area-context'
 import * as Haptics from 'expo-haptics'
-import { useState, useRef, useEffect } from 'react'
-import { PaymentProcessorStatus } from './PaymentProcessorStatus'
+import { memo,  useState, useRef, useEffect } from 'react'
+import { usePaymentProcessor } from '@/stores/payment-processor.store'
 
 interface SplitPayment {
   method: 'cash' | 'card'
@@ -25,6 +25,18 @@ export interface PaymentData {
 interface POSPaymentModalProps {
   visible: boolean
   total: number
+  subtotal: number
+  taxAmount: number
+  taxRate: number
+  taxName?: string
+  loyaltyDiscountAmount?: number
+  loyaltyPointsEarned?: number
+  currentLoyaltyPoints?: number
+  pointValue?: number
+  maxRedeemablePoints?: number
+  itemCount: number
+  customerName?: string
+  onApplyLoyaltyPoints?: (points: number) => void
   onPaymentComplete: (paymentData: PaymentData) => void
   onCancel: () => void
   hasPaymentProcessor?: boolean
@@ -32,9 +44,21 @@ interface POSPaymentModalProps {
   registerId?: string
 }
 
-export function POSPaymentModal({
+function POSPaymentModal({
   visible,
   total,
+  subtotal,
+  taxAmount,
+  taxRate,
+  taxName,
+  loyaltyDiscountAmount = 0,
+  loyaltyPointsEarned = 0,
+  currentLoyaltyPoints = 0,
+  pointValue = 0.01,
+  maxRedeemablePoints = 0,
+  itemCount,
+  customerName,
+  onApplyLoyaltyPoints,
   onPaymentComplete,
   onCancel,
   hasPaymentProcessor = false,
@@ -43,6 +67,13 @@ export function POSPaymentModal({
 }: POSPaymentModalProps) {
   const insets = useSafeAreaInsets()
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card' | 'split'>('cash')
+
+  // Payment processor status
+  const processorStatus = usePaymentProcessor((state) => state.status)
+  const currentProcessor = usePaymentProcessor((state) => state.currentProcessor)
+  const onlineCount = usePaymentProcessor((state) => state.onlineCount)
+  const totalCount = usePaymentProcessor((state) => state.totalCount)
+
   const [cashTendered, setCashTendered] = useState('')
   const [processing, setProcessing] = useState(false)
   const [splitPayments, setSplitPayments] = useState<SplitPayment[]>([])
@@ -121,6 +152,12 @@ export function POSPaymentModal({
       throw new Error('Location ID required for card payments')
     }
 
+    // Validate minimum amount for card payments
+    // Dejavoo requires amount > 0, practically should be at least $0.50
+    if (total < 0.50) {
+      throw new Error(`Card payments require a minimum of $0.50. Current total: $${total.toFixed(2)}. Please use cash for small amounts.`)
+    }
+
     // Get auth session
     const { supabase } = await import('@/lib/supabase/client')
     const { data: { session } } = await supabase.auth.getSession()
@@ -133,26 +170,32 @@ export function POSPaymentModal({
 
     setPaymentError('Waiting for terminal...')
 
+    // Round amount to 2 decimal places to avoid floating point issues
+    const roundedAmount = Math.round(total * 100) / 100
+
+    const requestBody = {
+      locationId,
+      registerId,
+      amount: roundedAmount,
+      paymentMethod: 'credit',
+      referenceId: `POS-${Date.now()}`,
+    }
+
     const response = await fetch(`${BASE_URL}/api/pos/payment/process`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${session.access_token}`,
       },
-      body: JSON.stringify({
-        locationId,
-        registerId,
-        amount: total,
-        paymentMethod: 'card',
-      }),
+      body: JSON.stringify(requestBody),
     })
 
     const result = await response.json()
 
     if (!response.ok || !result.success) {
-      throw new Error(result.error || 'Card payment failed')
+      const errorMsg = result.error || result.details || 'Card payment failed'
+      throw new Error(errorMsg)
     }
-
 
     return {
       authorizationCode: result.authorizationCode,
@@ -255,13 +298,111 @@ export function POSPaymentModal({
 
               <View style={styles.pullHandle} />
 
-            <Text style={styles.modalTitle}>Payment</Text>
-            <Text style={styles.modalTotal}>${total.toFixed(2)}</Text>
+            {/* JOBS: Transaction Summary - Everything at a glance */}
+            <View style={styles.summarySection}>
+              {/* Customer (if present) */}
+              {customerName && (
+                <View style={styles.summaryRow}>
+                  <Text style={styles.summaryLabel}>Customer</Text>
+                  <Text style={styles.summaryValue}>{customerName}</Text>
+                </View>
+              )}
 
-            {/* JOBS PRINCIPLE: Mission-critical payment processor status - always visible */}
-            <View style={styles.statusContainer}>
-              <PaymentProcessorStatus />
+              {/* Items */}
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Items</Text>
+                <Text style={styles.summaryValue}>
+                  {itemCount} {itemCount === 1 ? 'item' : 'items'}
+                </Text>
+              </View>
+
+              {/* Subtotal */}
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Subtotal</Text>
+                <Text style={styles.summaryValue}>${subtotal.toFixed(2)}</Text>
+              </View>
+
+              {/* Loyalty Discount (if any) */}
+              {loyaltyDiscountAmount > 0 && (
+                <View style={styles.summaryRow}>
+                  <Text style={styles.summaryLabel}>Loyalty Discount</Text>
+                  <Text style={styles.summaryValueDiscount}>-${loyaltyDiscountAmount.toFixed(2)}</Text>
+                </View>
+              )}
+
+              {/* Tax */}
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>
+                  {taxName || 'Tax'} ({(taxRate * 100).toFixed(2)}%)
+                </Text>
+                <Text style={styles.summaryValue}>${taxAmount.toFixed(2)}</Text>
+              </View>
+
+              {/* Total - HUGE */}
+              <View style={styles.totalRow}>
+                <Text style={styles.totalLabel}>Total</Text>
+                <Text style={styles.totalValue}>${total.toFixed(2)}</Text>
+              </View>
             </View>
+
+            {/* Loyalty Points Section - Show if customer present and points will be earned */}
+            {customerName && loyaltyPointsEarned >= 0 && (
+              <>
+                <View style={styles.divider} />
+                <View style={styles.loyaltySection}>
+                  <View style={styles.loyaltyRow}>
+                    <View style={styles.loyaltyInfo}>
+                      <Text style={styles.loyaltyLabel}>Points Earned</Text>
+                      <Text style={styles.loyaltyEarned}>+{loyaltyPointsEarned.toLocaleString()}</Text>
+                    </View>
+                    <View style={styles.loyaltyInfo}>
+                      <Text style={styles.loyaltyLabel}>New Balance</Text>
+                      <Text style={styles.loyaltyBalance}>
+                        {(currentLoyaltyPoints + loyaltyPointsEarned).toLocaleString()}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {/* Redemption UI - Only show if customer has points and not already fully redeemed */}
+                  {currentLoyaltyPoints > 0 && maxRedeemablePoints > 0 && onApplyLoyaltyPoints && (
+                    <View style={styles.redemptionContainer}>
+                      {loyaltyDiscountAmount > 0 ? (
+                        /* Show applied discount indicator */
+                        <TouchableOpacity
+                          onPress={() => {
+                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                            onApplyLoyaltyPoints(0) // Clear redemption
+                          }}
+                          style={styles.redeemedIndicator}
+                        >
+                          <Text style={styles.redeemedText}>
+                            ✓ Redeemed ${loyaltyDiscountAmount.toFixed(2)}
+                          </Text>
+                          <Text style={styles.redeemedRemove}>×</Text>
+                        </TouchableOpacity>
+                      ) : (
+                        /* Show "Redeem Points" button */
+                        <TouchableOpacity
+                          onPress={() => {
+                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                            onApplyLoyaltyPoints(maxRedeemablePoints)
+                          }}
+                          style={styles.redeemPointsLink}
+                        >
+                          <Text style={styles.redeemPointsLinkText}>
+                            Redeem Points ({maxRedeemablePoints.toLocaleString()} pts = -$
+                            {(maxRedeemablePoints * pointValue).toFixed(2)})
+                          </Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  )}
+                </View>
+              </>
+            )}
+
+            {/* Divider */}
+            <View style={styles.divider} />
 
             {/* Payment Error Display */}
             {paymentError && (
@@ -270,44 +411,47 @@ export function POSPaymentModal({
               </View>
             )}
 
-            {/* Payment Method Tabs */}
-            <View style={styles.paymentTabs}>
-              <TouchableOpacity
-                onPress={() => {
-                  setPaymentMethod('cash')
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                }}
-                style={[styles.paymentTab, paymentMethod === 'cash' && styles.paymentTabActive]}
-              >
-                <Text style={[styles.paymentTabText, paymentMethod === 'cash' && styles.paymentTabTextActive]}>
-                  CASH
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => {
-                  setPaymentMethod('card')
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                }}
-                style={[styles.paymentTab, paymentMethod === 'card' && styles.paymentTabActive]}
-              >
-                <Text style={[styles.paymentTabText, paymentMethod === 'card' && styles.paymentTabTextActive]}>
-                  CARD
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => {
-                  setPaymentMethod('split')
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                }}
-                style={[styles.paymentTab, paymentMethod === 'split' && styles.paymentTabActive]}
-              >
-                <Text style={[styles.paymentTabText, paymentMethod === 'split' && styles.paymentTabTextActive]}>
-                  SPLIT
-                </Text>
-              </TouchableOpacity>
+            {/* Payment Method Selector - Subtle, below the important info */}
+            <View style={styles.paymentMethodSection}>
+              <Text style={styles.paymentMethodLabel}>PAYMENT METHOD</Text>
+              <View style={styles.paymentTabs}>
+                <TouchableOpacity
+                  onPress={() => {
+                    setPaymentMethod('cash')
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                  }}
+                  style={[styles.paymentTab, paymentMethod === 'cash' && styles.paymentTabActive]}
+                >
+                  <Text style={[styles.paymentTabText, paymentMethod === 'cash' && styles.paymentTabTextActive]}>
+                    Cash
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => {
+                    setPaymentMethod('card')
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                  }}
+                  style={[styles.paymentTab, paymentMethod === 'card' && styles.paymentTabActive]}
+                >
+                  <Text style={[styles.paymentTabText, paymentMethod === 'card' && styles.paymentTabTextActive]}>
+                    Card
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => {
+                    setPaymentMethod('split')
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                  }}
+                  style={[styles.paymentTab, paymentMethod === 'split' && styles.paymentTabActive]}
+                >
+                  <Text style={[styles.paymentTabText, paymentMethod === 'split' && styles.paymentTabTextActive]}>
+                    Split
+                  </Text>
+                </TouchableOpacity>
+              </View>
             </View>
 
-            <ScrollView style={styles.paymentContent} showsVerticalScrollIndicator={false}>
+            <ScrollView style={styles.paymentContent} showsVerticalScrollIndicator={false} contentContainerStyle={styles.paymentContentInner}>
               {/* CASH PAYMENT */}
               {paymentMethod === 'cash' && (
                 <View style={styles.cashPayment}>
@@ -348,11 +492,89 @@ export function POSPaymentModal({
               {/* CARD PAYMENT */}
               {paymentMethod === 'card' && (
                 <View style={styles.cardPayment}>
-                  <Text style={styles.cardMessage}>
-                    {hasPaymentProcessor
-                      ? 'Payment terminal integration will be activated here'
-                      : 'Manual card entry'}
-                  </Text>
+                  {hasPaymentProcessor && currentProcessor ? (
+                    <View style={styles.processorInfo}>
+                      {/* Processor Status Indicator */}
+                      <View style={styles.processorHeader}>
+                        <View style={styles.processorStatusRow}>
+                          <View
+                            style={[
+                              styles.processorStatusDot,
+                              processorStatus === 'connected' && styles.processorStatusDotConnected,
+                              processorStatus === 'disconnected' && styles.processorStatusDotDisconnected,
+                              processorStatus === 'error' && styles.processorStatusDotError,
+                              processorStatus === 'checking' && styles.processorStatusDotChecking,
+                            ]}
+                          />
+                          <Text style={styles.processorStatusText}>
+                            {processorStatus === 'connected' && 'Connected'}
+                            {processorStatus === 'disconnected' && 'Offline'}
+                            {processorStatus === 'error' && 'Error'}
+                            {processorStatus === 'checking' && 'Checking...'}
+                          </Text>
+                        </View>
+                        {totalCount > 1 && (
+                          <Text style={styles.processorCount}>
+                            {onlineCount}/{totalCount} terminals
+                          </Text>
+                        )}
+                      </View>
+
+                      {/* Processor Details */}
+                      <View style={styles.processorDetails}>
+                        <Text style={styles.processorName}>
+                          {currentProcessor.processor_name || 'Payment Terminal'}
+                        </Text>
+                        <Text style={styles.processorType}>
+                          {currentProcessor.processor_type?.toUpperCase() || 'TERMINAL'}
+                        </Text>
+                      </View>
+
+                      {/* Ready/Error Message */}
+                      {processorStatus === 'connected' && !processing && (
+                        <View style={styles.processorReadyBanner}>
+                          <Text style={styles.processorReadyText}>
+                            ✓ Ready to process ${total.toFixed(2)}
+                          </Text>
+                          <Text style={styles.processorReadySubtext}>
+                            Tap Complete to send to terminal
+                          </Text>
+                        </View>
+                      )}
+
+                      {processorStatus === 'disconnected' && (
+                        <View style={styles.processorErrorBanner}>
+                          <Text style={styles.processorErrorText}>⚠ Terminal Offline</Text>
+                          <Text style={styles.processorErrorSubtext}>
+                            Check terminal is powered on and connected
+                          </Text>
+                        </View>
+                      )}
+
+                      {processorStatus === 'error' && currentProcessor.error && (
+                        <View style={styles.processorErrorBanner}>
+                          <Text style={styles.processorErrorText}>⚠ Terminal Error</Text>
+                          <Text style={styles.processorErrorSubtext}>{currentProcessor.error}</Text>
+                        </View>
+                      )}
+
+                      {processing && (
+                        <View style={styles.processorProcessingBanner}>
+                          <ActivityIndicator color="#10b981" size="small" />
+                          <Text style={styles.processorProcessingText}>Processing on terminal...</Text>
+                          <Text style={styles.processorProcessingSubtext}>
+                            Please follow prompts on payment terminal
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+                  ) : (
+                    <Text style={styles.cardMessage}>
+                      {hasPaymentProcessor
+                        ? 'Loading payment terminal...'
+                        : 'Manual card entry - No terminal configured'}
+                    </Text>
+                  )}
                 </View>
               )}
 
@@ -434,6 +656,9 @@ export function POSPaymentModal({
   )
 }
 
+const POSPaymentModalMemo = memo(POSPaymentModal)
+export { POSPaymentModalMemo as POSPaymentModal }
+
 const styles = StyleSheet.create({
   modalOverlay: {
     flex: 1,
@@ -461,26 +686,139 @@ const styles = StyleSheet.create({
     borderRadius: 2,
     alignSelf: 'center',
     marginTop: 12,
-    marginBottom: 20,
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: '200',
-    color: '#fff',
-    letterSpacing: -0.4,
-    paddingHorizontal: 24,
-    marginBottom: 8,
-  },
-  modalTotal: {
-    fontSize: 48,
-    fontWeight: '200',
-    color: '#fff',
-    paddingHorizontal: 24,
-    marginBottom: 20,
-  },
-  statusContainer: {
-    paddingHorizontal: 24,
     marginBottom: 24,
+  },
+  // JOBS: Transaction Summary - Clean, readable hierarchy
+  summarySection: {
+    paddingHorizontal: 24,
+    gap: 12,
+  },
+  summaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  summaryLabel: {
+    fontSize: 13,
+    fontWeight: '400',
+    color: 'rgba(255,255,255,0.6)',
+    letterSpacing: -0.2,
+  },
+  summaryValue: {
+    fontSize: 15,
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.95)',
+    letterSpacing: -0.3,
+  },
+  summaryValueDiscount: {
+    fontSize: 15,
+    fontWeight: '500',
+    color: '#10b981',
+    letterSpacing: -0.3,
+  },
+  totalRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingTop: 8,
+  },
+  totalLabel: {
+    fontSize: 17,
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.8)',
+    letterSpacing: -0.3,
+  },
+  totalValue: {
+    fontSize: 34,
+    fontWeight: '300',
+    color: '#fff',
+    letterSpacing: -0.5,
+  },
+  divider: {
+    height: 0.33,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    marginHorizontal: 24,
+    marginVertical: 24,
+  },
+  paymentMethodSection: {
+    paddingHorizontal: 24,
+    gap: 12,
+  },
+  paymentMethodLabel: {
+    fontSize: 10,
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.5)',
+    letterSpacing: 1.2,
+  },
+  // Loyalty Points Section
+  loyaltySection: {
+    paddingHorizontal: 24,
+    paddingVertical: 16,
+    backgroundColor: 'rgba(16,185,129,0.05)',
+  },
+  loyaltyRow: {
+    flexDirection: 'row',
+    gap: 24,
+  },
+  loyaltyInfo: {
+    flex: 1,
+    gap: 6,
+  },
+  loyaltyLabel: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: 'rgba(16,185,129,0.7)',
+    letterSpacing: 0.3,
+  },
+  loyaltyEarned: {
+    fontSize: 24,
+    fontWeight: '600',
+    color: '#10b981',
+    letterSpacing: -0.5,
+  },
+  loyaltyBalance: {
+    fontSize: 24,
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.95)',
+    letterSpacing: -0.5,
+  },
+  redemptionContainer: {
+    marginTop: 16,
+  },
+  redeemPointsLink: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    backgroundColor: 'rgba(16,185,129,0.15)',
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  redeemPointsLinkText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#10b981',
+    letterSpacing: -0.2,
+  },
+  redeemedIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    backgroundColor: 'rgba(16,185,129,0.1)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(16,185,129,0.3)',
+  },
+  redeemedText: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: '#10b981',
+    letterSpacing: -0.2,
+  },
+  redeemedRemove: {
+    fontSize: 18,
+    fontWeight: '300',
+    color: '#10b981',
   },
   errorContainer: {
     marginHorizontal: 24,
@@ -500,36 +838,36 @@ const styles = StyleSheet.create({
   },
   paymentTabs: {
     flexDirection: 'row',
-    paddingHorizontal: 24,
     gap: 8,
-    marginBottom: 24,
   },
   paymentTab: {
     flex: 1,
-    height: 44,
-    borderRadius: 22, // JOBS: Perfect pill (height/2)
-    backgroundColor: 'rgba(255,255,255,0.08)', // iOS: Liquid glass
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.12)',
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 0,
     alignItems: 'center',
     justifyContent: 'center',
   },
   paymentTabActive: {
-    backgroundColor: 'rgba(10,132,255,0.2)', // iOS: Blue glass when active
-    borderColor: 'rgba(10,132,255,0.4)',
+    backgroundColor: 'rgba(255,255,255,0.12)',
   },
   paymentTabText: {
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '500',
-    color: 'rgba(255,255,255,0.6)',
-    letterSpacing: 1.5,
+    color: 'rgba(255,255,255,0.5)',
+    letterSpacing: -0.2,
   },
   paymentTabTextActive: {
-    color: '#fff',
+    color: 'rgba(255,255,255,0.95)',
+    fontWeight: '600',
   },
   paymentContent: {
     flex: 1,
+  },
+  paymentContentInner: {
     paddingHorizontal: 24,
+    paddingTop: 20,
   },
   cashPayment: {
     gap: 16,
@@ -572,9 +910,8 @@ const styles = StyleSheet.create({
     color: '#fff',
   },
   changeDisplay: {
-    backgroundColor: 'rgba(100,200,100,0.15)',
-    borderWidth: 1,
-    borderColor: 'rgba(100,200,100,0.3)',
+    backgroundColor: 'rgba(16,185,129,0.08)',
+    borderWidth: 0,
     borderRadius: 16,
     padding: 20,
     alignItems: 'center',
@@ -582,23 +919,159 @@ const styles = StyleSheet.create({
   },
   changeLabel: {
     fontSize: 11,
-    fontWeight: '400',
-    color: 'rgba(100,200,100,0.8)',
-    letterSpacing: 1.5,
+    fontWeight: '500',
+    color: 'rgba(16,185,129,0.7)',
+    letterSpacing: 0.5,
   },
   changeAmount: {
     fontSize: 36,
-    fontWeight: '200',
-    color: 'rgba(100,200,100,0.95)',
+    fontWeight: '300',
+    color: '#10b981',
+    letterSpacing: -0.5,
   },
   cardPayment: {
-    padding: 40,
+    padding: 24,
     alignItems: 'center',
   },
   cardMessage: {
     fontSize: 14,
     fontWeight: '300',
     color: 'rgba(255,255,255,0.6)',
+    textAlign: 'center',
+  },
+  // Processor Info Styles
+  processorInfo: {
+    width: '100%',
+    gap: 16,
+  },
+  processorHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  processorStatusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  processorStatusDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: 'rgba(255,255,255,0.3)',
+  },
+  processorStatusDotConnected: {
+    backgroundColor: '#10b981',
+    shadowColor: '#10b981',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.6,
+    shadowRadius: 4,
+  },
+  processorStatusDotDisconnected: {
+    backgroundColor: 'rgba(255,255,255,0.3)',
+  },
+  processorStatusDotError: {
+    backgroundColor: '#ef4444',
+  },
+  processorStatusDotChecking: {
+    backgroundColor: '#f59e0b',
+  },
+  processorStatusText: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.8)',
+    letterSpacing: -0.2,
+  },
+  processorCount: {
+    fontSize: 11,
+    fontWeight: '400',
+    color: 'rgba(255,255,255,0.5)',
+    letterSpacing: -0.1,
+  },
+  processorDetails: {
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  processorName: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#fff',
+    letterSpacing: -0.3,
+    marginBottom: 4,
+  },
+  processorType: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.5)',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+  },
+  processorReadyBanner: {
+    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.3)',
+    alignItems: 'center',
+  },
+  processorReadyText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#10b981',
+    letterSpacing: -0.2,
+    marginBottom: 4,
+  },
+  processorReadySubtext: {
+    fontSize: 12,
+    fontWeight: '400',
+    color: 'rgba(16, 185, 129, 0.8)',
+    letterSpacing: -0.1,
+  },
+  processorErrorBanner: {
+    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.3)',
+    alignItems: 'center',
+  },
+  processorErrorText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#ef4444',
+    letterSpacing: -0.2,
+    marginBottom: 4,
+  },
+  processorErrorSubtext: {
+    fontSize: 12,
+    fontWeight: '400',
+    color: 'rgba(239, 68, 68, 0.8)',
+    letterSpacing: -0.1,
+    textAlign: 'center',
+  },
+  processorProcessingBanner: {
+    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+    borderRadius: 12,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.3)',
+    alignItems: 'center',
+    gap: 12,
+  },
+  processorProcessingText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#10b981',
+    letterSpacing: -0.2,
+  },
+  processorProcessingSubtext: {
+    fontSize: 12,
+    fontWeight: '400',
+    color: 'rgba(16, 185, 129, 0.8)',
+    letterSpacing: -0.1,
     textAlign: 'center',
   },
   splitPayment: {
@@ -742,20 +1215,19 @@ const styles = StyleSheet.create({
   completeButton: {
     flex: 2,
     height: 56,
-    borderRadius: 28, // JOBS: Perfect pill (height/2)
-    backgroundColor: 'rgba(52,199,89,0.15)', // iOS: System green glass
-    borderWidth: 0.5,
-    borderColor: 'rgba(52,199,89,0.3)',
+    borderRadius: 28,
+    backgroundColor: 'rgba(16,185,129,0.15)',
+    borderWidth: 0,
     alignItems: 'center',
     justifyContent: 'center',
   },
   completeButtonDisabled: {
-    opacity: 0.4,
+    opacity: 0.3,
   },
   completeButtonText: {
-    fontSize: 13,
+    fontSize: 15,
     fontWeight: '600',
-    color: 'rgba(100,200,100,0.95)',
-    letterSpacing: 2,
+    color: '#10b981',
+    letterSpacing: -0.2,
   },
 })

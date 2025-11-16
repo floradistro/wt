@@ -1,12 +1,13 @@
 import { View, Text, StyleSheet, TextInput, TouchableOpacity } from 'react-native'
 import * as Haptics from 'expo-haptics'
-import { useState } from 'react'
+import { useState, memo } from 'react'
 import type { CartItem } from '@/types/pos'
 
 interface POSCartItemProps {
   item: CartItem
   onAdd: () => void
   onRemove: () => void
+  onOpenTierSelector?: () => void
   onApplyDiscount?: (type: 'percentage' | 'amount', value: number) => void
   onRemoveDiscount?: () => void
   isDiscounting?: boolean
@@ -14,10 +15,11 @@ interface POSCartItemProps {
   onCancelDiscounting?: () => void
 }
 
-export function POSCartItem({
+function POSCartItem({
   item,
   onAdd,
   onRemove,
+  onOpenTierSelector,
   onApplyDiscount,
   onRemoveDiscount,
   isDiscounting,
@@ -41,19 +43,33 @@ export function POSCartItem({
 
   return (
     <View>
-      {/* JOBS PRINCIPLE: Clean cart item row */}
+      {/* iOS 26 Cart Item - Beautiful, spacious layout */}
       <View style={styles.cartItem}>
+        {/* Left: Product Info (70% width) */}
         <View style={styles.cartItemInfo}>
+          {/* Product Name - NEVER truncated */}
           <View style={styles.cartItemNameRow}>
-            <Text style={styles.cartItemName} numberOfLines={1}>
+            <Text style={styles.cartItemName} numberOfLines={2}>
               {item.productName || item.name}
             </Text>
             {item.tierLabel && (
-              <View style={styles.tierBadge}>
+              <TouchableOpacity
+                onPress={() => {
+                  if (onOpenTierSelector) {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                    onOpenTierSelector()
+                  }
+                }}
+                style={styles.tierBadge}
+                disabled={!onOpenTierSelector}
+              >
                 <Text style={styles.tierBadgeText}>{item.tierLabel}</Text>
-              </View>
+                {onOpenTierSelector && <Text style={styles.tierBadgeChevron}>›</Text>}
+              </TouchableOpacity>
             )}
           </View>
+
+          {/* Price Info Row */}
           <View style={styles.cartItemPriceRow}>
             {hasDiscount && item.originalPrice && (
               <Text style={styles.cartItemOriginalPrice}>${item.originalPrice.toFixed(2)}</Text>
@@ -61,11 +77,11 @@ export function POSCartItem({
             <Text style={[styles.cartItemPrice, hasDiscount ? styles.cartItemDiscountedPrice : undefined]}>
               ${displayPrice.toFixed(2)}
             </Text>
-            <Text style={styles.cartItemPriceLabel}> each</Text>
+            <Text style={styles.cartItemPriceLabel}>each</Text>
           </View>
 
-          {/* JOBS PRINCIPLE: Staff discount - inline, minimal */}
-          {hasDiscount ? (
+          {/* Staff Discount Badge */}
+          {hasDiscount && (
             <TouchableOpacity
               onPress={() => {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
@@ -80,45 +96,65 @@ export function POSCartItem({
               </Text>
               <Text style={styles.discountRemoveIcon}>×</Text>
             </TouchableOpacity>
-          ) : !isDiscounting ? (
+          )}
+        </View>
+
+        {/* Right: Quantity Controls OR Tier Info + Total (30% width) */}
+        <View style={styles.cartItemRight}>
+          {!item.tierLabel ? (
+            // Single-price product: Show -/+ controls
+            <View style={styles.cartItemControls}>
+              <TouchableOpacity
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                  onRemove()
+                }}
+                style={styles.cartButton}
+              >
+                <Text style={styles.cartButtonText}>−</Text>
+              </TouchableOpacity>
+
+              <Text style={styles.cartItemQuantity}>{item.quantity}</Text>
+
+              <TouchableOpacity
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                  onAdd()
+                }}
+                style={styles.cartButton}
+              >
+                <Text style={styles.cartButtonText}>+</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            // Tiered product: Show remove button only
             <TouchableOpacity
               onPress={() => {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                onStartDiscounting?.()
+                onRemove()
               }}
-              style={styles.addDiscountLink}
+              style={styles.cartRemoveButton}
             >
-              <Text style={styles.addDiscountLinkText}>+ Staff Discount</Text>
+              <Text style={styles.cartRemoveButtonText}>×</Text>
             </TouchableOpacity>
-          ) : null}
+          )}
+
+          <Text style={styles.cartItemTotal}>${(displayPrice * item.quantity).toFixed(2)}</Text>
         </View>
-
-        <View style={styles.cartItemControls}>
-          <TouchableOpacity
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-              onRemove()
-            }}
-            style={styles.cartButton}
-          >
-            <Text style={styles.cartButtonText}>−</Text>
-          </TouchableOpacity>
-
-          <Text style={styles.cartItemQuantity}>{item.quantity}</Text>
-
-          <TouchableOpacity
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-              onAdd()
-            }}
-            style={styles.cartButton}
-          >
-            <Text style={styles.cartButtonText}>+</Text>
-          </TouchableOpacity>
-        </View>
-
-        <Text style={styles.cartItemTotal}>${(displayPrice * item.quantity).toFixed(2)}</Text>
       </View>
+
+      {/* Staff Discount Link - Only show when NOT discounting and NO discount */}
+      {!hasDiscount && !isDiscounting && (
+        <TouchableOpacity
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+            onStartDiscounting?.()
+          }}
+          style={styles.addDiscountLink}
+        >
+          <Text style={styles.addDiscountLinkText}>+ Add Staff Discount</Text>
+        </TouchableOpacity>
+      )}
 
       {/* JOBS PRINCIPLE: Discount input - minimal inline form */}
       {isDiscounting && (
@@ -190,19 +226,30 @@ export function POSCartItem({
   )
 }
 
+const POSCartItemMemo = memo(POSCartItem)
+export { POSCartItemMemo as POSCartItem }
+
 const styles = StyleSheet.create({
+  // iOS 26 Cart Item - Clean, spacious
   cartItem: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    paddingVertical: 12,
+    alignItems: 'center',
+    paddingVertical: 16,
     paddingHorizontal: 16,
     gap: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.05)',
+    borderBottomWidth: 0.33,
+    borderBottomColor: 'rgba(255,255,255,0.06)',
+    minHeight: 60,
   },
   cartItemInfo: {
     flex: 1,
-    gap: 6,
+    gap: 4,
+    maxWidth: '70%',
+  },
+  cartItemRight: {
+    alignItems: 'flex-end',
+    gap: 8,
+    justifyContent: 'space-between',
   },
   cartItemNameRow: {
     flexDirection: 'row',
@@ -211,48 +258,57 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
   },
   cartItemName: {
-    fontSize: 13,
-    fontWeight: '300',
+    fontSize: 15,
+    fontWeight: '500',
     color: '#fff',
-    letterSpacing: 0.2,
+    letterSpacing: -0.3,
     flex: 1,
   },
   tierBadge: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    borderRadius: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 8,
   },
   tierBadgeText: {
-    fontSize: 9,
-    fontWeight: '500',
-    color: 'rgba(255,255,255,0.7)',
-    letterSpacing: 0.5,
+    fontSize: 10,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.8)',
+    letterSpacing: 0.3,
+  },
+  tierBadgeChevron: {
+    fontSize: 14,
+    fontWeight: '400',
+    color: 'rgba(255,255,255,0.6)',
+    marginTop: -1,
   },
   cartItemPriceRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    gap: 6,
   },
   cartItemOriginalPrice: {
-    fontSize: 11,
-    fontWeight: '300',
+    fontSize: 13,
+    fontWeight: '400',
     color: 'rgba(255,255,255,0.4)',
     textDecorationLine: 'line-through',
   },
   cartItemPrice: {
-    fontSize: 11,
-    fontWeight: '400',
-    color: 'rgba(255,255,255,0.7)',
+    fontSize: 13,
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.8)',
   },
   cartItemDiscountedPrice: {
     color: '#10b981',
-    fontWeight: '500',
+    fontWeight: '600',
   },
   cartItemPriceLabel: {
-    fontSize: 10,
-    fontWeight: '300',
-    color: 'rgba(255,255,255,0.4)',
+    fontSize: 11,
+    fontWeight: '400',
+    color: 'rgba(255,255,255,0.5)',
   },
   // Staff Discount UI
   discountAppliedBadge: {
@@ -280,78 +336,94 @@ const styles = StyleSheet.create({
   },
   addDiscountLink: {
     alignSelf: 'flex-start',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
   },
   addDiscountLinkText: {
-    fontSize: 10,
-    fontWeight: '400',
-    color: 'rgba(255,255,255,0.4)',
-    letterSpacing: 0.3,
+    fontSize: 11,
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.5)',
+    letterSpacing: 0.2,
   },
+  // iOS 26 Quantity Controls - Circular buttons
   cartItemControls: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 10,
   },
   cartButton: {
-    width: 28,
-    height: 28,
-    borderRadius: 8,
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.10)',
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
+    borderWidth: 0,
   },
   cartButtonText: {
-    fontSize: 16,
-    fontWeight: '300',
-    color: 'rgba(255,255,255,0.9)',
+    fontSize: 18,
+    fontWeight: '400',
+    color: 'rgba(255,255,255,0.95)',
+    marginTop: -1,
   },
   cartItemQuantity: {
-    fontSize: 13,
-    fontWeight: '400',
+    fontSize: 15,
+    fontWeight: '600',
     color: '#fff',
-    minWidth: 20,
+    minWidth: 24,
     textAlign: 'center',
   },
+  cartRemoveButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,60,60,0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 0,
+  },
+  cartRemoveButtonText: {
+    fontSize: 18,
+    fontWeight: '300',
+    color: 'rgba(255,60,60,0.95)',
+    marginTop: -1,
+  },
   cartItemTotal: {
-    fontSize: 13,
-    fontWeight: '500',
+    fontSize: 15,
+    fontWeight: '600',
     color: '#fff',
-    minWidth: 60,
+    minWidth: 70,
     textAlign: 'right',
   },
-  // Discount Input Form
+  // iOS 26 Discount Input Form
   discountInputContainer: {
     paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 12,
-    backgroundColor: 'rgba(255,255,255,0.03)',
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.05)',
+    paddingTop: 12,
+    paddingBottom: 16,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderBottomWidth: 0.33,
+    borderBottomColor: 'rgba(255,255,255,0.06)',
   },
   discountTypeRow: {
     flexDirection: 'row',
-    gap: 6,
+    gap: 8,
     alignItems: 'center',
   },
   discountTypeBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 8,
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 0,
     alignItems: 'center',
     justifyContent: 'center',
   },
   discountTypeBtnActive: {
     backgroundColor: 'rgba(255,255,255,0.15)',
-    borderColor: 'rgba(255,255,255,0.3)',
   },
   discountTypeBtnText: {
-    fontSize: 14,
-    fontWeight: '500',
+    fontSize: 15,
+    fontWeight: '600',
     color: 'rgba(255,255,255,0.5)',
   },
   discountTypeBtnTextActive: {
@@ -359,49 +431,46 @@ const styles = StyleSheet.create({
   },
   discountInput: {
     flex: 1,
-    height: 32,
-    paddingHorizontal: 12,
-    fontSize: 13,
-    fontWeight: '400',
+    height: 36,
+    paddingHorizontal: 14,
+    fontSize: 15,
+    fontWeight: '500',
     color: '#fff',
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
-    borderRadius: 8,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 0,
+    borderRadius: 18,
   },
   discountApplyBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 8,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     backgroundColor: 'rgba(16,185,129,0.2)',
-    borderWidth: 1,
-    borderColor: 'rgba(16,185,129,0.4)',
+    borderWidth: 0,
     alignItems: 'center',
     justifyContent: 'center',
   },
   discountApplyBtnDisabled: {
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: 'rgba(255,255,255,0.08)',
     opacity: 0.4,
   },
   discountApplyBtnText: {
-    fontSize: 14,
-    fontWeight: '500',
+    fontSize: 16,
+    fontWeight: '600',
     color: '#10b981',
   },
   discountCancelBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 8,
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,60,60,0.15)',
+    borderWidth: 0,
     alignItems: 'center',
     justifyContent: 'center',
   },
   discountCancelBtnText: {
-    fontSize: 18,
-    fontWeight: '300',
-    color: 'rgba(255,255,255,0.6)',
+    fontSize: 20,
+    fontWeight: '400',
+    color: 'rgba(255,60,60,0.95)',
+    marginTop: -2,
   },
 })

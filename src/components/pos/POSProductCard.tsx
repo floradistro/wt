@@ -2,7 +2,7 @@ import { View, Text, StyleSheet, Image, TouchableOpacity, Dimensions, Animated, 
 import { BlurView } from 'expo-blur'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import * as Haptics from 'expo-haptics'
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, memo, forwardRef, useImperativeHandle } from 'react'
 
 const { width } = Dimensions.get('window')
 const isTablet = width > 600
@@ -14,8 +14,9 @@ const cardWidth = availableWidth / 3 - 12
 
 interface PricingTier {
   qty: number
-  price: string
-  weight: string
+  price: string | number
+  weight?: string
+  label?: string
 }
 
 interface Product {
@@ -44,7 +45,7 @@ interface POSProductCardProps {
   matchingFilters?: string[]
 }
 
-export function POSProductCard({ product, onAddToCart, matchingFilters }: POSProductCardProps) {
+const POSProductCard = forwardRef<any, POSProductCardProps>(({ product, onAddToCart, matchingFilters }, ref) => {
   const insets = useSafeAreaInsets()
   const [showPricingModal, setShowPricingModal] = useState(false)
   const [selectedTier, setSelectedTier] = useState<number | null>(null)
@@ -52,20 +53,22 @@ export function POSProductCard({ product, onAddToCart, matchingFilters }: POSPro
   const modalSlideAnim = useRef(new Animated.Value(600)).current
   const modalOpacity = useRef(new Animated.Value(0)).current
 
-  const pricingMode = product.meta_data?.pricing_mode || 'single'
+  const _pricingMode = product.meta_data?.pricing_mode || 'single'
   const customTiers = product.meta_data?.pricing_tiers || []
   const inStock = (product.inventory_quantity || 0) > 0
 
   // Jobs Principle: Show "From $X.XX"
   const lowestPrice = customTiers.length > 0
-    ? Math.min(...customTiers.map(t => parseFloat(t.price)))
+    ? Math.min(...customTiers.map((t: PricingTier) => parseFloat(String(t.price))))
     : product.regular_price || 0
 
   // Jobs Principle: Smart Default (pre-highlight most common option)
   // For cannabis: 3.5g (eighth) is most common
-  const suggestedTierIndex = customTiers.findIndex(t =>
-    t.weight.toLowerCase().includes('3.5') || t.weight.toLowerCase().includes('eighth')
-  )
+  const suggestedTierIndex = customTiers.findIndex((t: PricingTier) => {
+    const weight = t.weight || t.label || ''
+    const weightLower = weight.toLowerCase()
+    return weightLower.includes('3.5') || weightLower.includes('eighth')
+  })
 
   const openPricingModal = () => {
     if (!inStock) return
@@ -88,6 +91,11 @@ export function POSProductCard({ product, onAddToCart, matchingFilters }: POSPro
       }),
     ]).start()
   }
+
+  // Expose openPricingModal via ref
+  useImperativeHandle(ref, () => ({
+    openPricingModal,
+  }))
 
   const closePricingModal = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
@@ -246,8 +254,8 @@ export function POSProductCard({ product, onAddToCart, matchingFilters }: POSPro
             style={[
               styles.modalBorder,
               {
-                marginLeft: insets.left + 8,
-                marginRight: insets.right + 8,
+                marginLeft: insets.left,
+                marginRight: insets.right,
                 marginBottom: 0,
                 transform: [{ translateY: modalSlideAnim }],
               },
@@ -271,46 +279,51 @@ export function POSProductCard({ product, onAddToCart, matchingFilters }: POSPro
               contentContainerStyle={styles.tiersContainer}
               showsVerticalScrollIndicator={false}
             >
-              {pricingMode === 'tiered' && customTiers.length > 0 ? (
-                customTiers.map((tier, index) => {
-                    const price = parseFloat(tier.price)
-                    const isSelected = selectedTier === index
-                    const isSuggested = index === suggestedTierIndex
+              {/* iOS 26 Grouped List Container */}
+              <View style={styles.tierGroupContainer}>
+                {customTiers.length > 0 ? (
+                  customTiers.map((tier: PricingTier, index: number) => {
+                      const price = parseFloat(String(tier.price))
+                      const isSelected = selectedTier === index
+                      const isSuggested = index === suggestedTierIndex
 
-                    return (
-                      <TouchableOpacity
-                        key={index}
-                        activeOpacity={0.7}
-                        onPress={() => handleTierPress(tier, index)}
-                        style={[
-                          styles.tierButton,
-                          isSuggested && styles.tierButtonSuggested,
-                          isSelected && styles.tierButtonSelected,
-                        ]}
-                      >
-                        <View style={styles.tierButtonContent}>
-                          <Text style={styles.tierLabel}>{tier.weight}</Text>
-                          {/* JOBS PRINCIPLE: Price is HUGE and prominent */}
-                          <Text style={styles.tierPrice}>${price.toFixed(2)}</Text>
-                        </View>
-                      </TouchableOpacity>
-                    )
-                })
-              ) : (
-                /* Single Price Product */
-                <TouchableOpacity
-                  activeOpacity={0.7}
-                  onPress={() => handleTierPress()}
-                  style={styles.tierButton}
-                >
-                  <View style={styles.tierButtonContent}>
-                    <Text style={styles.tierLabel}>Add to cart</Text>
-                    <Text style={styles.tierPrice}>
-                      ${(product.regular_price || 0).toFixed(2)}
-                    </Text>
-                  </View>
-                </TouchableOpacity>
-              )}
+                      return (
+                        <TouchableOpacity
+                          key={index}
+                          activeOpacity={0.7}
+                          onPress={() => handleTierPress(tier, index)}
+                          style={[
+                            styles.tierButton,
+                            index === 0 && styles.tierButtonFirst,
+                            index === customTiers.length - 1 && styles.tierButtonLast,
+                            isSuggested && styles.tierButtonSuggested,
+                            isSelected && styles.tierButtonSelected,
+                          ]}
+                        >
+                          <View style={styles.tierButtonContent}>
+                            <Text style={styles.tierLabel}>{tier.weight || tier.label || 'N/A'}</Text>
+                            {/* JOBS PRINCIPLE: Price is HUGE and prominent */}
+                            <Text style={styles.tierPrice}>${price.toFixed(2)}</Text>
+                          </View>
+                        </TouchableOpacity>
+                      )
+                  })
+                ) : (
+                  /* Single Price Product */
+                  <TouchableOpacity
+                    activeOpacity={0.7}
+                    onPress={() => handleTierPress()}
+                    style={[styles.tierButton, styles.tierButtonFirst, styles.tierButtonLast]}
+                  >
+                    <View style={styles.tierButtonContent}>
+                      <Text style={styles.tierLabel}>Add to cart</Text>
+                      <Text style={styles.tierPrice}>
+                        ${(product.regular_price || 0).toFixed(2)}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                )}
+              </View>
             </ScrollView>
           </View>
           </Animated.View>
@@ -318,7 +331,13 @@ export function POSProductCard({ product, onAddToCart, matchingFilters }: POSPro
       </Modal>
     </>
   )
-}
+})
+
+POSProductCard.displayName = 'POSProductCard'
+
+const POSProductCardMemo = memo(POSProductCard)
+POSProductCardMemo.displayName = 'POSProductCard'
+export { POSProductCardMemo as POSProductCard }
 
 const styles = StyleSheet.create({
   // Clean Product Card - iOS liquid glass
@@ -482,46 +501,53 @@ const styles = StyleSheet.create({
   tiersContainer: {
     paddingHorizontal: 24,
     paddingBottom: 20,
-    gap: 12,
   },
-  // JOBS: 60px height minimum for large touch targets - iOS pill shape
-  tierButton: {
-    minHeight: 60,
-    borderRadius: 30, // JOBS: Perfect pill (60/2)
+  // iOS 26 Grouped List Container
+  tierGroupContainer: {
+    borderRadius: 16,
     overflow: 'hidden',
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.12)', // iOS: Hairline border
-    backgroundColor: 'rgba(255,255,255,0.08)', // iOS: Liquid glass
   },
-  // JOBS: Smart default (subtle highlight)
+  // iOS 26 List Items - Match customer/filter selector
+  tierButton: {
+    height: 60,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderBottomWidth: 0.33,
+    borderBottomColor: 'rgba(255,255,255,0.06)',
+  },
+  tierButtonFirst: {
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+  },
+  tierButtonLast: {
+    borderBottomLeftRadius: 16,
+    borderBottomRightRadius: 16,
+    borderBottomWidth: 0,
+  },
+  // White glass effect for suggested/selected
   tierButtonSuggested: {
-    backgroundColor: 'rgba(10,132,255,0.1)', // iOS: Blue tint for suggested
-    borderColor: 'rgba(10,132,255,0.3)',
+    backgroundColor: 'rgba(255,255,255,0.12)',
   },
   tierButtonSelected: {
-    borderColor: 'rgba(10,132,255,0.6)', // iOS: Stronger blue when selected
-    borderWidth: 1,
-    backgroundColor: 'rgba(10,132,255,0.2)',
+    backgroundColor: 'rgba(255,255,255,0.15)',
   },
   tierButtonContent: {
     flex: 1,
-    paddingVertical: 16,
     paddingHorizontal: 20,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
   tierLabel: {
-    fontSize: 17, // iOS body text
-    fontWeight: '200',
-    color: 'rgba(255,255,255,0.95)',
-    letterSpacing: -0.4, // Apple tight tracking
+    fontSize: 17,
+    fontWeight: '500',
+    color: '#fff',
+    letterSpacing: -0.4,
   },
   // JOBS: Price is HUGE (28pt, not 24pt)
   tierPrice: {
     fontSize: 28,
-    fontWeight: '600', // Only semibold for numbers
+    fontWeight: '600',
     color: '#fff',
-    letterSpacing: 0, // No tracking on numbers
+    letterSpacing: 0,
   },
 })
