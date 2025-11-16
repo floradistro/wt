@@ -129,7 +129,7 @@ const styles = StyleSheet.create({
     pointerEvents: 'box-none',
   },
   dockWrapper: {
-    borderRadius: radius.xxl + 4, // 28px - matches modal corners
+    borderRadius: radius.pill, // Pill shaped - Jobs: Like iOS dock
     overflow: 'hidden',
     backgroundColor: colors.glass.thin, // Subtle base
     borderWidth: borderWidth.regular,
@@ -155,12 +155,12 @@ const styles = StyleSheet.create({
     height: 56,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: radius.lg, // Consistent with list items
+    borderRadius: radius.round, // Round icons - Jobs: Perfect circles
   },
   centerIcon: {
     width: 60,
     height: 60,
-    borderRadius: radius.lg + 2,
+    borderRadius: radius.round, // Round center icon
   },
   activeIcon: {
     backgroundColor: colors.glass.thick, // Match active state in selectors
