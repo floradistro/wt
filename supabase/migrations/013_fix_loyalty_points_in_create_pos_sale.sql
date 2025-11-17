@@ -48,7 +48,7 @@ BEGIN
   v_order_number := 'POS-' || TO_CHAR(NOW(), 'YYYYMMDD') || '-' || LPAD(FLOOR(RANDOM() * 10000)::TEXT, 4, '0');
   v_reference_id := 'POS-' || EXTRACT(EPOCH FROM NOW())::BIGINT::TEXT;
 
-  -- Get loyalty program for this vendor
+  -- Get loyalty program for this vendor (calculate points but don't create transactions yet)
   IF p_customer_id IS NOT NULL THEN
     SELECT * INTO v_loyalty_program
     FROM loyalty_programs
@@ -60,71 +60,10 @@ BEGIN
     IF v_loyalty_program.id IS NOT NULL THEN
       v_points_earned := FLOOR(p_subtotal * COALESCE(v_loyalty_program.points_per_dollar, 0));
       v_points_redeemed := COALESCE(p_loyalty_points_redeemed, 0);
-
-      -- NOTE: Do NOT manually update customer loyalty_points here!
-      -- The loyalty_transactions table has a trigger (update_customer_loyalty_balance)
-      -- that automatically updates the customer's balance when we INSERT below.
-      -- Doing both would DOUBLE-COUNT the points!
-
-      -- Create loyalty transaction record for points redeemed FIRST (if any)
-      -- This must happen BEFORE earning, so the balance is correct
-      IF v_points_redeemed > 0 THEN
-        DECLARE
-          v_balance_before_redeemed INT;
-        BEGIN
-          -- Get current balance
-          SELECT COALESCE(loyalty_points, 0) INTO v_balance_before_redeemed
-          FROM customers WHERE id = p_customer_id;
-
-          INSERT INTO loyalty_transactions (
-            customer_id, transaction_type, points,
-            reference_type, reference_id, description,
-            balance_before, created_at
-          )
-          VALUES (
-            p_customer_id, 'spent', -v_points_redeemed,  -- Negative for spent
-            'order', v_order_id::TEXT, 'Points redeemed for order ' || v_order_number,
-            v_balance_before_redeemed,
-            NOW()
-          );
-          -- Note: balance_after is set automatically by the trigger
-        EXCEPTION
-          WHEN OTHERS THEN
-            -- Log error but don't fail transaction
-            RAISE WARNING 'Failed to create redeemed loyalty transaction: %', SQLERRM;
-        END;
-      END IF;
-
-      -- Create loyalty transaction record for points earned
-      IF v_points_earned > 0 THEN
-        DECLARE
-          v_balance_before_earned INT;
-        BEGIN
-          -- Get current balance (after redemption if any)
-          SELECT COALESCE(loyalty_points, 0) INTO v_balance_before_earned
-          FROM customers WHERE id = p_customer_id;
-
-          INSERT INTO loyalty_transactions (
-            customer_id, transaction_type, points,
-            reference_type, reference_id, description,
-            balance_before, created_at
-          )
-          VALUES (
-            p_customer_id, 'earned', v_points_earned,
-            'order', v_order_id::TEXT, 'Points earned from order ' || v_order_number,
-            v_balance_before_earned,
-            NOW()
-          );
-          -- Note: balance_after is set automatically by the trigger
-        EXCEPTION
-          WHEN OTHERS THEN
-            -- Log error but don't fail transaction
-            RAISE WARNING 'Failed to create earned loyalty transaction: %', SQLERRM;
-        END;
-      END IF;
     END IF;
   END IF;
 
+  -- Create order FIRST so we have v_order_id for loyalty transactions
   INSERT INTO orders (
     order_number, vendor_id, customer_id, employee_id, pickup_location_id,
     subtotal, tax_amount, discount_amount, total_amount, payment_method, payment_status,
@@ -157,6 +96,71 @@ BEGIN
     WHERE id = (v_item->>'productId')::UUID
     AND manage_stock = true;
   END LOOP;
+
+  -- Create loyalty transactions AFTER order is created (so we have v_order_id)
+  IF p_customer_id IS NOT NULL AND v_loyalty_program.id IS NOT NULL THEN
+    -- NOTE: Do NOT manually update customer loyalty_points here!
+    -- The loyalty_transactions table has a TRIGGER (update_customer_loyalty_balance)
+    -- that automatically updates the customer's balance when we INSERT below.
+    -- Doing both would DOUBLE-COUNT the points!
+
+    -- Create loyalty transaction record for points redeemed FIRST (if any)
+    -- This must happen BEFORE earning, so the balance is correct
+    IF v_points_redeemed > 0 THEN
+      DECLARE
+        v_balance_before_redeemed INT;
+      BEGIN
+        -- Get current balance
+        SELECT COALESCE(loyalty_points, 0) INTO v_balance_before_redeemed
+        FROM customers WHERE id = p_customer_id;
+
+        INSERT INTO loyalty_transactions (
+          customer_id, transaction_type, points,
+          reference_type, reference_id, description,
+          balance_before, created_at
+        )
+        VALUES (
+          p_customer_id, 'spent', -v_points_redeemed,  -- Negative for spent
+          'order', v_order_id::TEXT, 'Points redeemed for order ' || v_order_number,
+          v_balance_before_redeemed,
+          NOW()
+        );
+        -- Note: balance_after is set automatically by the trigger
+      EXCEPTION
+        WHEN OTHERS THEN
+          -- Log error but don't fail transaction
+          RAISE WARNING 'Failed to create redeemed loyalty transaction: %', SQLERRM;
+      END;
+    END IF;
+
+    -- Create loyalty transaction record for points earned
+    IF v_points_earned > 0 THEN
+      DECLARE
+        v_balance_before_earned INT;
+      BEGIN
+        -- Get current balance (after redemption if any)
+        SELECT COALESCE(loyalty_points, 0) INTO v_balance_before_earned
+        FROM customers WHERE id = p_customer_id;
+
+        INSERT INTO loyalty_transactions (
+          customer_id, transaction_type, points,
+          reference_type, reference_id, description,
+          balance_before, created_at
+        )
+        VALUES (
+          p_customer_id, 'earned', v_points_earned,
+          'order', v_order_id::TEXT, 'Points earned from order ' || v_order_number,
+          v_balance_before_earned,
+          NOW()
+        );
+        -- Note: balance_after is set automatically by the trigger
+      EXCEPTION
+        WHEN OTHERS THEN
+          -- Log error but don't fail transaction
+          RAISE WARNING 'Failed to create earned loyalty transaction: %', SQLERRM;
+      END;
+    END IF;
+  END IF;
 
   INSERT INTO payment_transactions (
     vendor_id, location_id, payment_processor_id, pos_register_id, order_id, user_id,
