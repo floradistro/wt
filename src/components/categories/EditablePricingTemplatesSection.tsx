@@ -291,22 +291,26 @@ export function EditablePricingTemplatesSection({
 
                   return (
                     <View key={templateIndex} style={[styles.templateEditRow, isLast && styles.templateEditRowLast]}>
-                      {/* Template Header - Entire row is clickable to expand */}
-                      <Pressable
-                        style={styles.templateEditHeader}
-                        onPress={() => {
-                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                          setExpandedTemplateId(isExpanded ? null : `${templateIndex}`)
-                        }}
-                      >
-                        <View style={styles.templateExpandButton}>
+                      {/* Template Header */}
+                      <View style={styles.templateEditHeader}>
+                        <Pressable
+                          style={styles.templateExpandButton}
+                          onPress={() => {
+                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                            setExpandedTemplateId(isExpanded ? null : `${templateIndex}`)
+                          }}
+                        >
                           <Text style={styles.templateChevron}>
                             {isExpanded ? '▼' : '▶'}
                           </Text>
-                        </View>
-                        <View style={{ flex: 1 }}>
-                          <Text style={styles.templateNameText}>{template.name}</Text>
-                        </View>
+                        </Pressable>
+                        <TextInput
+                          style={styles.templateNameInput}
+                          value={template.name}
+                          onChangeText={(text) => handleUpdateTemplate(templateIndex, { name: text })}
+                          placeholder="Template name"
+                          placeholderTextColor="rgba(235,235,245,0.3)"
+                        />
                         <Pressable
                           onPress={(e) => {
                             e.stopPropagation()
@@ -317,7 +321,7 @@ export function EditablePricingTemplatesSection({
                         >
                           <Text style={styles.removeButtonText}>✕</Text>
                         </Pressable>
-                      </Pressable>
+                      </View>
 
                       {/* Template Description */}
                       <TextInput
