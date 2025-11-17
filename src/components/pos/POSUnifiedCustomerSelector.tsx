@@ -24,7 +24,7 @@ interface POSUnifiedCustomerSelectorProps {
 
 function POSUnifiedCustomerSelector({
   visible,
-  vendorId,
+  vendorId: _vendorId,
   onCustomerSelected,
   onNoMatchFoundWithData,
   onAddCustomer,
@@ -417,41 +417,34 @@ function POSUnifiedCustomerSelector({
           </TouchableWithoutFeedback>
         )}
 
-        {/* Scan ID Label + Manual Add Button - Only show when camera is active */}
-        {!isTypingMode && isScanning && !isProcessing && !scanMessage && !parsedData && !matchedCustomer && (
+        {/* Manual Add Customer Button - Only show when camera is active */}
+        {!isTypingMode && isScanning && !isProcessing && !scanMessage && !parsedData && !matchedCustomer && onAddCustomer && (
           <View style={styles.scanLabelContainer}>
-            <View style={styles.scanLabel}>
-              <Text style={styles.scanLabelText}>Scan ID</Text>
-            </View>
-
-            {/* Manual Add Customer Button - Always visible on scanner screen */}
-            {onAddCustomer && (
-              <LiquidGlassView
-                effect="regular"
-                colorScheme="dark"
-                interactive
-                style={[
-                  styles.manualAddButton,
-                  !isLiquidGlassSupported && styles.manualAddButtonFallback,
-                ]}
-                accessible={false}
+            <LiquidGlassView
+              effect="regular"
+              colorScheme="dark"
+              interactive
+              style={[
+                styles.manualAddButton,
+                !isLiquidGlassSupported && styles.manualAddButtonFallback,
+              ]}
+              accessible={false}
+            >
+              <TouchableOpacity
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                  onAddCustomer()
+                }}
+                style={styles.manualAddButtonInner}
+                activeOpacity={0.7}
+                accessible={true}
+                accessibilityRole="button"
+                accessibilityLabel="Add customer manually"
+                accessibilityHint="Double tap to create a new customer without scanning ID"
               >
-                <TouchableOpacity
-                  onPress={() => {
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                    onAddCustomer()
-                  }}
-                  style={styles.manualAddButtonInner}
-                  activeOpacity={0.7}
-                  accessible={true}
-                  accessibilityRole="button"
-                  accessibilityLabel="Add customer manually"
-                  accessibilityHint="Double tap to create a new customer without scanning ID"
-                >
-                  <Text style={styles.manualAddText}>+ ADD CUSTOMER</Text>
-                </TouchableOpacity>
-              </LiquidGlassView>
-            )}
+                <Text style={styles.manualAddText}>+ ADD CUSTOMER</Text>
+              </TouchableOpacity>
+            </LiquidGlassView>
           </View>
         )}
 
@@ -594,24 +587,6 @@ function POSUnifiedCustomerSelector({
 
           {/* Customer List - Grouped section with rounded container */}
           <View style={styles.listContent}>
-            {/* Add New Customer Button */}
-            {onAddCustomer && (
-              <TouchableOpacity
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                  onAddCustomer()
-                }}
-                style={styles.addCustomerButton}
-                activeOpacity={0.7}
-                accessible={true}
-                accessibilityRole="button"
-                accessibilityLabel="Add new customer"
-                accessibilityHint="Double tap to create a new customer profile"
-              >
-                <Text style={styles.addCustomerText}>+ ADD NEW CUSTOMER</Text>
-              </TouchableOpacity>
-            )}
-
             {searching ? (
               <View
                 style={styles.centered}
@@ -760,40 +735,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
 
-  // Add New Customer Button
-  addCustomerButton: {
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    marginBottom: 16,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  addCustomerIconContainer: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  addCustomerIcon: {
-    fontSize: 18,
-    fontWeight: '400',
-    color: '#fff',
-    lineHeight: 18,
-  },
-  addCustomerText: {
-    fontSize: 10,
-    fontWeight: '900',
-    textTransform: 'uppercase',
-    letterSpacing: 1.5,
-    color: '#fff',
-  },
-
   // Customer List Section - Rounded container that clips scrolling content
   customerListSection: {
     flex: 1,
@@ -809,28 +750,12 @@ const styles = StyleSheet.create({
     right: 0,
     alignItems: 'center',
     zIndex: 10,
-    gap: 16,
-  },
-  scanLabel: {
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 100,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.2)',
-  },
-  scanLabelText: {
-    fontSize: 15,
-    fontWeight: '500',
-    color: '#fff',
-    letterSpacing: -0.3,
   },
 
   // Manual Add Customer Button (on scanner screen)
   manualAddButton: {
     borderRadius: 100,
     overflow: 'hidden',
-    marginTop: 12,
   },
   manualAddButtonFallback: {
     backgroundColor: 'rgba(255,255,255,0.08)',

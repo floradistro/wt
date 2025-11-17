@@ -98,13 +98,13 @@ export function Button({
   const getFontSize = () => {
     switch (size) {
       case 'small':
-        return typography.label.small.fontSize
+        return typography.tinyLabel.fontSize
       case 'medium':
-        return typography.label.regular.fontSize
+        return typography.subhead.fontSize
       case 'large':
-        return typography.body.regular.fontSize
+        return typography.body.fontSize
       default:
-        return typography.label.regular.fontSize
+        return typography.subhead.fontSize
     }
   }
 
@@ -137,7 +137,7 @@ export function Button({
             fontSize: getFontSize(),
             fontWeight: variant === 'primary' ? '600' : '500',
             color: getTextColor(),
-            letterSpacing: typography.label.regular.letterSpacing,
+            letterSpacing: typography.subhead.letterSpacing,
           }}
         >
           {children}
@@ -160,7 +160,7 @@ interface CardProps {
   blurIntensity?: keyof typeof blur
 }
 
-export function Card({ children, style, blur: useBlur = true, blurIntensity = 'thick' }: CardProps) {
+export function Card({ children, style, blur: useBlur = true, blurIntensity: _blurIntensity = 'thick' }: CardProps) {
   return (
     <View
       style={[
@@ -299,7 +299,7 @@ export function Modal({ visible, onClose, children, title, showHandle = true }: 
             {title && (
               <Text
                 style={{
-                  ...typography.title.medium,
+                  ...typography.title2,
                   color: colors.text.primary,
                   paddingHorizontal: spacing.xl,
                   marginBottom: spacing.xl,
@@ -342,7 +342,7 @@ export const TextInput = forwardRef<RNTextInput, TextInputProps>(
         {label && (
           <Text
             style={{
-              ...typography.uppercase,
+              ...typography.uppercaseLabel,
               color: colors.text.disabled,
               marginBottom: spacing.xs,
             }}
@@ -360,15 +360,13 @@ export const TextInput = forwardRef<RNTextInput, TextInputProps>(
           secureTextEntry={secureTextEntry}
           style={{
             height: large ? layout.height.inputLarge : layout.height.input,
-            fontSize: large ? typography.input.large.fontSize : typography.input.regular.fontSize,
-            fontWeight: large ? typography.input.large.fontWeight : typography.input.regular.fontWeight,
+            ...typography.input,
             color: colors.text.primary,
             backgroundColor: colors.glass.regular,
             borderWidth: borderWidth.thin,
             borderColor: colors.border.emphasis,
             borderRadius: radius.xl,
             paddingHorizontal: spacing.lg,
-            letterSpacing: large ? typography.input.large.letterSpacing : typography.input.regular.letterSpacing,
           }}
         />
       </View>
@@ -590,7 +588,7 @@ export function SectionHeader({ title, action, style }: SectionHeaderProps) {
     >
       <Text
         style={{
-          ...typography.uppercase,
+          ...typography.uppercaseLabel,
           color: colors.text.disabled,
         }}
       >
@@ -605,7 +603,7 @@ export function SectionHeader({ title, action, style }: SectionHeaderProps) {
         >
           <Text
             style={{
-              ...typography.label.small,
+              ...typography.tinyLabel,
               color: colors.semantic.info,
             }}
           >
@@ -647,7 +645,7 @@ export function EmptyState({ title, subtitle, action, style }: EmptyStateProps) 
     >
       <Text
         style={{
-          ...typography.body.small,
+          ...typography.footnote,
           color: colors.text.subtle,
         }}
       >
@@ -656,7 +654,7 @@ export function EmptyState({ title, subtitle, action, style }: EmptyStateProps) 
       {subtitle && (
         <Text
           style={{
-            ...typography.caption.regular,
+            ...typography.caption1,
             color: colors.text.ghost,
           }}
         >

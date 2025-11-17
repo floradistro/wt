@@ -291,7 +291,7 @@ const styles = StyleSheet.create({
     padding: isTablet ? 40 : 20,
   },
   modalContent: {
-    maxWidth: isTablet ? 700 : '100%', // JOBS: Wider for landscape layout
+    maxWidth: isTablet ? 600 : '100%', // Optimized for iPad Pro
     alignSelf: 'center',
     width: '100%',
     borderRadius: 28,
@@ -309,16 +309,16 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 20,
-    fontWeight: '200',
+    fontWeight: '600',
     color: '#fff',
-    letterSpacing: 3,
+    letterSpacing: -0.4,
     marginBottom: 8,
   },
   subtitle: {
-    fontSize: 12,
-    fontWeight: '300',
+    fontSize: 13,
+    fontWeight: '400',
     color: 'rgba(255,255,255,0.5)',
-    letterSpacing: 0.5,
+    letterSpacing: -0.1,
   },
   // JOBS PRINCIPLE: Two-column layout for landscape
   twoColumnContainer: {
@@ -342,10 +342,11 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.05)',
   },
   summaryTitle: {
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: '600',
     color: 'rgba(255,255,255,0.6)',
-    letterSpacing: 2,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
     marginBottom: 12,
   },
   summaryRow: {
@@ -355,10 +356,10 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   summaryLabel: {
-    fontSize: 12,
-    fontWeight: '300',
+    fontSize: 13,
+    fontWeight: '400',
     color: 'rgba(255,255,255,0.6)',
-    letterSpacing: 0.5,
+    letterSpacing: -0.1,
   },
   summaryValue: {
     fontSize: 13,
@@ -373,14 +374,16 @@ const styles = StyleSheet.create({
   },
   summaryLabelFinal: {
     fontSize: 11,
-    fontWeight: '500',
+    fontWeight: '600',
     color: 'rgba(255,255,255,0.7)',
-    letterSpacing: 2,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
   },
   summaryValueFinal: {
-    fontSize: 18,
-    fontWeight: '300',
+    fontSize: 20,
+    fontWeight: '700',
     color: '#fff',
+    letterSpacing: -0.3,
   },
   instructions: {
     flex: isTablet ? 1 : undefined,
@@ -397,30 +400,32 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(59,130,246,0.08)',
   },
   instructionsTitle: {
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: '600',
     color: 'rgba(96,165,250,0.9)',
-    letterSpacing: 2,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
     marginBottom: 12,
   },
   instructionsList: {
     gap: 6,
   },
   instructionItem: {
-    fontSize: 11,
-    fontWeight: '300',
+    fontSize: 13,
+    fontWeight: '400',
     color: 'rgba(255,255,255,0.7)',
-    letterSpacing: 0.3,
+    letterSpacing: -0.1,
   },
   inputSection: {
     paddingHorizontal: 24,
     marginBottom: 16,
   },
   inputLabel: {
-    fontSize: 10,
-    fontWeight: '500',
+    fontSize: 11,
+    fontWeight: '600',
     color: 'rgba(255,255,255,0.6)',
-    letterSpacing: 2,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
     marginBottom: 12,
   },
   inputContainer: {
@@ -434,17 +439,18 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
   },
   dollarSign: {
-    fontSize: 32,
-    fontWeight: '200',
+    fontSize: 36,
+    fontWeight: '700',
     color: 'rgba(255,255,255,0.4)',
+    letterSpacing: -1,
     marginRight: 8,
   },
   input: {
     flex: 1,
-    fontSize: 32,
-    fontWeight: '200',
+    fontSize: 36,
+    fontWeight: '700',
     color: '#fff',
-    letterSpacing: 1,
+    letterSpacing: -1,
   },
   alert: {
     marginHorizontal: 24,
@@ -472,7 +478,8 @@ const styles = StyleSheet.create({
   alertTitle: {
     fontSize: 11,
     fontWeight: '600',
-    letterSpacing: 2,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
     marginBottom: 6,
   },
   alertTitleOver: {
@@ -482,10 +489,10 @@ const styles = StyleSheet.create({
     color: 'rgba(239,68,68,0.9)',
   },
   alertText: {
-    fontSize: 11,
-    fontWeight: '300',
+    fontSize: 13,
+    fontWeight: '400',
     color: 'rgba(255,255,255,0.6)',
-    letterSpacing: 0.3,
+    letterSpacing: -0.1,
   },
   notesSection: {
     paddingHorizontal: 24,
@@ -498,10 +505,10 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     paddingHorizontal: 16,
     paddingVertical: 12,
-    fontSize: 13,
-    fontWeight: '300',
+    fontSize: 15,
+    fontWeight: '400',
     color: '#fff',
-    letterSpacing: 0.3,
+    letterSpacing: -0.2,
     minHeight: 60,
     textAlignVertical: 'top',
   },
@@ -522,10 +529,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   cancelButtonText: {
-    fontSize: 12,
-    fontWeight: '500',
+    fontSize: 15,
+    fontWeight: '600',
     color: 'rgba(255,255,255,0.6)',
-    letterSpacing: 2,
+    letterSpacing: -0.2,
   },
   submitButton: {
     flex: 1,
@@ -535,9 +542,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   submitButtonText: {
-    fontSize: 12,
-    fontWeight: '500',
+    fontSize: 15,
+    fontWeight: '600',
     color: '#fff',
-    letterSpacing: 2,
+    letterSpacing: -0.2,
   },
 })

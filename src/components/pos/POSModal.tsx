@@ -35,7 +35,7 @@ import {
 import { LiquidGlassView, isLiquidGlassSupported } from '@callstack/liquid-glass'
 import * as Haptics from 'expo-haptics'
 import { memo, useRef, useEffect, ReactNode } from 'react'
-import { colors, typography, spacing, radius, blur, shadows, borderWidth } from '@/theme/tokens'
+import { colors, spacing, radius } from '@/theme/tokens'
 
 const { width } = Dimensions.get('window')
 const isTablet = width > 600
@@ -54,7 +54,7 @@ function POSModal({
   visible,
   title,
   subtitle,
-  maxWidth = isTablet ? 900 : undefined,
+  maxWidth = isTablet ? 700 : undefined,
   onClose,
   children,
   showCloseButton = false,
@@ -218,9 +218,9 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(18,18,18,0.96)',
   },
   header: {
-    paddingHorizontal: spacing.xxxl,
-    paddingTop: spacing.xxxl,
-    paddingBottom: spacing.xl,
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing.xl,
+    paddingBottom: spacing.md,
     flexDirection: 'row',
     alignItems: 'flex-start',
     justifyContent: 'space-between',
@@ -231,14 +231,16 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 20,
-    fontWeight: '200',
+    fontWeight: '600',
     color: colors.text.primary,
-    letterSpacing: 3,
+    letterSpacing: -0.4,
     marginBottom: spacing.xs,
     textAlign: 'center',
   },
   subtitle: {
-    ...typography.caption.regular,
+    fontSize: 13,
+    fontWeight: '400',
+    letterSpacing: -0.1,
     color: colors.text.subtle,
     textAlign: 'center',
   },
@@ -249,8 +251,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   closeButtonText: {
-    fontSize: 24,
-    fontWeight: '200',
+    fontSize: 22,
+    fontWeight: '700',
     color: colors.text.tertiary,
+    letterSpacing: -0.4,
   },
 })

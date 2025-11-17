@@ -16,14 +16,13 @@ import {
   TextInput,
   TouchableOpacity,
   Dimensions,
-  Platform,
   Modal,
 } from 'react-native'
 import { LiquidGlassView, isLiquidGlassSupported } from '@callstack/liquid-glass'
 import * as Haptics from 'expo-haptics'
 import { memo, useState, useEffect } from 'react'
 import DateTimePicker from '@react-native-community/datetimepicker'
-import { colors, typography, spacing, radius, blur, borderWidth } from '@/theme/tokens'
+import { colors, spacing, radius, borderWidth } from '@/theme/tokens'
 import { supabase } from '@/lib/supabase/client'
 import type { Customer } from '@/types/pos'
 import type { AAMVAData } from '@/lib/id-scanner/aamva-parser'
@@ -43,7 +42,7 @@ interface POSAddCustomerModalProps {
 
 function POSAddCustomerModal({
   visible,
-  vendorId,
+  vendorId: _vendorId,
   prefilledData,
   onCustomerCreated,
   onClose,
@@ -609,9 +608,9 @@ export { POSAddCustomerModalMemo as POSAddCustomerModal }
 const styles = StyleSheet.create({
   twoColumnContainer: {
     flexDirection: isTablet ? 'row' : 'column',
-    gap: spacing.lg,
-    paddingHorizontal: spacing.xxxl,
-    marginBottom: spacing.xl,
+    gap: spacing.md,
+    paddingHorizontal: spacing.xl,
+    marginBottom: spacing.sm,
   },
   column: {
     flex: 1,
@@ -619,35 +618,37 @@ const styles = StyleSheet.create({
   section: {
     borderRadius: radius.lg,
     borderCurve: 'continuous' as any,
-    padding: spacing.lg,
+    padding: spacing.md,
     overflow: 'hidden',
   },
   sectionFallback: {
     backgroundColor: 'rgba(255,255,255,0.05)',
   },
   sectionTitle: {
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: '600',
     color: 'rgba(96,165,250,0.9)',
-    letterSpacing: 2,
-    marginBottom: spacing.md,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+    marginBottom: spacing.sm,
   },
   field: {
-    marginBottom: spacing.md,
+    marginBottom: spacing.sm,
   },
   fieldRow: {
     flexDirection: 'row',
-    gap: spacing.md,
-    marginBottom: spacing.md,
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
   },
   fieldHalf: {
     flex: 1,
   },
   fieldLabel: {
-    fontSize: 10,
-    fontWeight: '500',
+    fontSize: 11,
+    fontWeight: '600',
     color: colors.text.tertiary,
-    letterSpacing: 2,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
     marginBottom: spacing.xs,
   },
   input: {
@@ -655,22 +656,22 @@ const styles = StyleSheet.create({
     borderWidth: borderWidth.thick,
     borderColor: 'rgba(255,255,255,0.15)',
     borderRadius: radius.xl,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
-    fontSize: 13,
-    fontWeight: '300',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    fontSize: 15,
+    fontWeight: '400',
     color: colors.text.primary,
-    letterSpacing: 0.3,
+    letterSpacing: -0.4,
   },
   dateInputContainer: {
     justifyContent: 'center',
     minHeight: 44, // Ensure adequate touch target
   },
   dateText: {
-    fontSize: 13,
-    fontWeight: '300',
+    fontSize: 15,
+    fontWeight: '400',
     color: colors.text.primary,
-    letterSpacing: 0.3,
+    letterSpacing: -0.4,
   },
   datePlaceholder: {
     fontSize: 13,
@@ -753,17 +754,18 @@ const styles = StyleSheet.create({
     letterSpacing: 2,
   },
   helperText: {
-    fontSize: 9,
-    fontWeight: '300',
+    fontSize: 11,
+    fontWeight: '400',
     color: colors.text.disabled,
+    letterSpacing: 0,
     marginTop: spacing.xs,
   },
   errorAlert: {
-    marginHorizontal: spacing.xxxl,
-    marginBottom: spacing.xl,
+    marginHorizontal: spacing.xl,
+    marginBottom: spacing.sm,
     borderRadius: radius.lg,
     borderCurve: 'continuous' as any,
-    padding: spacing.lg,
+    padding: spacing.md,
     overflow: 'hidden',
     borderWidth: borderWidth.regular,
     borderColor: colors.semantic.errorBorder,
@@ -787,9 +789,9 @@ const styles = StyleSheet.create({
   actions: {
     flexDirection: 'row',
     gap: spacing.md,
-    paddingHorizontal: spacing.xxxl,
-    paddingTop: spacing.xxl,
-    paddingBottom: spacing.xxxl,
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.lg,
   },
   cancelButton: {
     flex: 1,
@@ -801,14 +803,14 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.05)',
   },
   cancelButtonInner: {
-    paddingVertical: spacing.lg,
+    paddingVertical: spacing.md,
     alignItems: 'center',
   },
   cancelButtonText: {
-    fontSize: 12,
-    fontWeight: '500',
+    fontSize: 15,
+    fontWeight: '600',
     color: colors.text.secondary,
-    letterSpacing: 2,
+    letterSpacing: -0.2,
   },
   submitButton: {
     flex: 1,
@@ -824,13 +826,13 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
   submitButtonInner: {
-    paddingVertical: spacing.lg,
+    paddingVertical: spacing.md,
     alignItems: 'center',
   },
   submitButtonText: {
-    fontSize: 12,
-    fontWeight: '500',
+    fontSize: 15,
+    fontWeight: '600',
     color: colors.text.primary,
-    letterSpacing: 2,
+    letterSpacing: -0.2,
   },
 })

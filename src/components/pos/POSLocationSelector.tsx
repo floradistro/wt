@@ -1,14 +1,16 @@
 /**
- * POSLocationSelector - Refactored with Design System
- * Apple-quality location selection matching login design
+ * POSLocationSelector - Grid Layout
+ * Beautiful centered grid with vendor logos
  */
 
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated, Image } from 'react-native'
+import { View, Text, StyleSheet, TouchableOpacity, Animated, Dimensions, Image } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { BlurView } from 'expo-blur'
 import * as Haptics from 'expo-haptics'
 import { memo, useRef, useEffect } from 'react'
-import { colors, typography, spacing, radius, blur, shadows, borderWidth, animation } from '@/theme/tokens'
+
+const { width } = Dimensions.get('window')
+const isTablet = width > 600
 
 interface Location {
   id: string
@@ -26,88 +28,116 @@ interface POSLocationSelectorProps {
   onLocationSelected: (locationId: string, locationName: string) => void
 }
 
-function LocationCard({ location, index, onPress }: { location: Location; index: number; onPress: () => void }) {
-  const fadeAnim = useRef(new Animated.Value(0)).current
-  const slideAnim = useRef(new Animated.Value(20)).current
+function LocationCard({
+  location,
+  index,
+  vendorLogo,
+  onPress,
+}: {
+  location: Location
+  index: number
+  vendorLogo?: string | null
+  onPress: () => void
+}) {
   const scaleAnim = useRef(new Animated.Value(1)).current
+  const fadeAnim = useRef(new Animated.Value(0)).current
 
   useEffect(() => {
-    Animated.parallel([
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 400,
-        delay: index * 80,
-        useNativeDriver: true,
-      }),
-      Animated.spring(slideAnim, {
-        toValue: 0,
-        delay: index * 80,
-        ...animation.spring.gentle,
-      }),
-    ]).start()
+    Animated.timing(fadeAnim, {
+      toValue: 1,
+      duration: 400,
+      delay: index * 60,
+      useNativeDriver: true,
+    }).start()
   }, [])
 
   const handlePressIn = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
     Animated.spring(scaleAnim, {
       toValue: 0.96,
-      ...animation.spring.snappy,
+      useNativeDriver: true,
+      speed: 50,
+      bounciness: 4,
     }).start()
   }
 
   const handlePressOut = () => {
     Animated.spring(scaleAnim, {
       toValue: 1,
-      ...animation.spring.snappy,
+      useNativeDriver: true,
+      speed: 50,
+      bounciness: 4,
     }).start()
   }
 
-  const addressText = [location.address_line1, location.city, location.state].filter(Boolean).join(', ')
-  const accessibilityLabel = `${location.name}${location.is_primary ? ', primary location' : ''}${addressText ? `. ${addressText}` : ''}`
+  const handlePress = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+    onPress()
+  }
+
+  const addressText = [location.city, location.state].filter(Boolean).join(', ')
 
   return (
     <TouchableOpacity
-      onPress={onPress}
+      onPress={handlePress}
       onPressIn={handlePressIn}
       onPressOut={handlePressOut}
       activeOpacity={1}
-      style={styles.locationCard}
+      style={styles.cardContainer}
       accessible={true}
       accessibilityRole="button"
-      accessibilityLabel={accessibilityLabel}
+      accessibilityLabel={`${location.name}, ${addressText || 'Location'}`}
       accessibilityHint="Double tap to select this location"
-      accessibilityState={{ selected: location.is_primary }}
     >
       <Animated.View
         style={[
-          styles.locationCardInner,
+          styles.card,
           {
             opacity: fadeAnim,
-            transform: [{ translateY: slideAnim }, { scale: scaleAnim }],
+            transform: [{ scale: scaleAnim }],
           },
         ]}
       >
-        {/* Glass background - matches POS design */}
-        <View style={styles.locationCardBg} accessibilityElementsHidden={true} importantForAccessibility="no">
-          <BlurView intensity={blur.thin} tint="dark" style={StyleSheet.absoluteFill} />
-        </View>
+        <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} />
 
-        <View style={styles.locationCardContent} accessible={false}>
-          <View style={styles.locationHeader}>
-            <Text style={styles.locationName}>{location.name}</Text>
-            {location.is_primary && (
-              <View style={styles.primaryBadge} accessible={false}>
-                <Text style={styles.primaryBadgeText}>PRIMARY</Text>
-              </View>
-            )}
-          </View>
+        <View style={styles.cardContent}>
+          {/* Vendor Logo */}
+          {vendorLogo ? (
+            <View style={styles.logoContainer}>
+              <BlurView intensity={20} tint="dark" style={StyleSheet.absoluteFill} />
+              <Image
+                source={{ uri: vendorLogo }}
+                style={styles.logo}
+                resizeMode="contain"
+              />
+            </View>
+          ) : (
+            <View style={[styles.logoContainer, styles.logoPlaceholder]}>
+              <BlurView intensity={20} tint="dark" style={StyleSheet.absoluteFill} />
+              <Text style={styles.logoPlaceholderText}>
+                {location.name.charAt(0).toUpperCase()}
+              </Text>
+            </View>
+          )}
 
-          {(location.address_line1 || location.city) && (
-            <Text style={styles.locationAddress} numberOfLines={2}>
-              {location.address_line1}
-              {location.city && `, ${location.city}`}
-              {location.state && `, ${location.state}`}
+          {/* Location Name */}
+          <Text style={styles.locationName} numberOfLines={2}>
+            {location.name}
+          </Text>
+
+          {/* Address */}
+          {addressText && (
+            <Text style={styles.address} numberOfLines={1}>
+              {addressText}
             </Text>
+          )}
+
+          {/* Primary Badge */}
+          {location.is_primary && (
+            <View style={styles.primaryBadge}>
+              <BlurView intensity={60} tint="dark" style={StyleSheet.absoluteFill} />
+              <Text style={styles.primaryBadgeText}>PRIMARY</Text>
+            </View>
           )}
         </View>
       </Animated.View>
@@ -121,79 +151,45 @@ function POSLocationSelector({ locations, vendorLogo, vendorName, onLocationSele
   useEffect(() => {
     Animated.timing(fadeAnim, {
       toValue: 1,
-      ...animation.timing.easeOut,
+      duration: 600,
+      useNativeDriver: true,
     }).start()
   }, [])
+
+  if (locations.length === 0) {
+    return (
+      <SafeAreaView style={styles.container} edges={['top', 'left', 'right', 'bottom']}>
+        <View style={styles.emptyContainer}>
+          <Text style={styles.emptyText}>No locations available</Text>
+          <Text style={styles.emptySubtext}>Contact support to configure your locations</Text>
+        </View>
+      </SafeAreaView>
+    )
+  }
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right', 'bottom']}>
       <Animated.View style={[styles.content, { opacity: fadeAnim }]}>
-        {/* Header - matches login design */}
-        <View style={styles.header} accessible={false}>
-          {vendorLogo ? (
-            <View style={styles.logoCircle}>
-              <View style={styles.logoCircleBg} accessibilityElementsHidden={true} importantForAccessibility="no">
-                <BlurView intensity={blur.thin} tint="dark" style={StyleSheet.absoluteFill} />
-              </View>
-              <Image
-                source={{ uri: vendorLogo }}
-                style={styles.logo}
-                resizeMode="contain"
-                accessible={true}
-                accessibilityRole="image"
-                accessibilityLabel={`${vendorName || 'Vendor'} logo`}
-              />
-            </View>
-          ) : (
-            <View style={styles.logoCircle} accessibilityElementsHidden={true} importantForAccessibility="no">
-              <View style={styles.logoCircleBg}>
-                <BlurView intensity={blur.thin} tint="dark" style={StyleSheet.absoluteFill} />
-              </View>
-              <Text style={styles.logoText}>
-                {vendorName?.charAt(0).toUpperCase() || 'W'}
-              </Text>
-            </View>
+        {/* Header */}
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Select Location</Text>
+          {vendorName && (
+            <Text style={styles.headerSubtitle}>{vendorName}</Text>
           )}
-
-          <Text style={styles.title}>{vendorName || 'WHALETOOLS'}</Text>
-          <View style={styles.divider} accessibilityElementsHidden={true} importantForAccessibility="no" />
-          <Text style={styles.subtitle} accessibilityRole="header">SELECT LOCATION</Text>
         </View>
 
-        {/* Locations List */}
-        <ScrollView
-          style={styles.locationsList}
-          contentContainerStyle={styles.locationsListContent}
-          showsVerticalScrollIndicator={false}
-          accessible={false}
-          accessibilityLabel={`${locations.length} locations available`}
-        >
+        {/* Grid */}
+        <View style={styles.grid}>
           {locations.map((location, index) => (
             <LocationCard
               key={location.id}
               location={location}
               index={index}
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
-                onLocationSelected(location.id, location.name)
-              }}
+              vendorLogo={vendorLogo}
+              onPress={() => onLocationSelected(location.id, location.name)}
             />
           ))}
-
-          {locations.length === 0 && (
-            <View
-              style={styles.emptyState}
-              accessible={true}
-              accessibilityRole="alert"
-              accessibilityLabel="No locations available. Contact support to configure your locations."
-            >
-              <Text style={styles.emptyStateText}>No locations available</Text>
-              <Text style={styles.emptyStateSubtext}>
-                Contact support to configure your locations
-              </Text>
-            </View>
-          )}
-        </ScrollView>
+        </View>
       </Animated.View>
     </SafeAreaView>
   )
@@ -205,128 +201,144 @@ export { POSLocationSelectorMemo as POSLocationSelector }
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.background.primary,
+    backgroundColor: '#000',
   },
   content: {
     flex: 1,
-    paddingHorizontal: spacing.xl,
+    paddingHorizontal: isTablet ? 80 : 20,
+    paddingVertical: isTablet ? 40 : 24,
   },
-  // Header - matches login design
+  // Header
   header: {
     alignItems: 'center',
-    paddingTop: spacing.huge,
-    paddingBottom: spacing.xxxl,
+    marginBottom: isTablet ? 48 : 32,
+    paddingTop: isTablet ? 40 : 30,
   },
-  logoCircle: {
-    width: 80,
-    height: 80,
-    borderRadius: radius.round,
+  headerTitle: {
+    fontSize: isTablet ? 34 : 28,
+    fontWeight: '700',
+    color: '#fff',
+    letterSpacing: -0.5,
+    marginBottom: 8,
+  },
+  headerSubtitle: {
+    fontSize: isTablet ? 15 : 13,
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.5)',
+    letterSpacing: -0.2,
+  },
+  // Grid
+  grid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: isTablet ? 24 : 20,
+    maxWidth: isTablet ? 1000 : width - 40,
+    alignSelf: 'center',
+  },
+  cardContainer: {
+    width: isTablet ? 300 : (width - 60) / 2,
+    height: isTablet ? 220 : 200,
+  },
+  card: {
+    flex: 1,
+    borderRadius: isTablet ? 32 : 28,
     overflow: 'hidden',
-    borderWidth: borderWidth.regular,
-    borderColor: colors.border.regular,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.3,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  cardContent: {
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: spacing.lg,
-    ...shadows.md,
+    padding: isTablet ? 24 : 20,
   },
-  logoCircleBg: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: colors.glass.thin,
+  // Logo
+  logoContainer: {
+    width: isTablet ? 72 : 64,
+    height: isTablet ? 72 : 64,
+    borderRadius: isTablet ? 20 : 18,
+    marginBottom: isTablet ? 16 : 14,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   logo: {
-    width: 50,
-    height: 50,
+    width: isTablet ? 48 : 42,
+    height: isTablet ? 48 : 42,
   },
-  logoText: {
-    ...typography.display,
-    color: colors.text.secondary,
+  logoPlaceholder: {
+    backgroundColor: 'transparent',
   },
-  title: {
-    ...typography.title.large,
+  logoPlaceholderText: {
+    fontSize: isTablet ? 32 : 28,
     fontWeight: '200',
-    letterSpacing: 4,
-    marginBottom: spacing.sm,
+    color: 'rgba(255,255,255,0.4)',
   },
-  divider: {
-    width: 60,
-    height: 1,
-    backgroundColor: colors.border.hairline,
-    marginBottom: spacing.sm,
-  },
-  subtitle: {
-    ...typography.uppercase,
-    color: colors.text.disabled,
-    letterSpacing: 3,
-  },
-  // Locations list
-  locationsList: {
-    flex: 1,
-  },
-  locationsListContent: {
-    paddingBottom: spacing.xxxl,
-    gap: spacing.md,
-  },
-  // Location card - matches POS card design
-  locationCard: {
-    marginBottom: 0,
-  },
-  locationCardInner: {
-    borderRadius: radius.lg,
-    overflow: 'hidden',
-    borderWidth: borderWidth.regular,
-    borderColor: colors.border.regular,
-    ...shadows.md,
-  },
-  locationCardBg: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: colors.glass.thin,
-  },
-  locationCardContent: {
-    padding: spacing.lg,
-  },
-  locationHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: spacing.xs,
-  },
+  // Text
   locationName: {
-    ...typography.body.large,
-    color: colors.text.primary,
-    flex: 1,
+    fontSize: isTablet ? 20 : 17,
+    fontWeight: '600',
+    color: '#fff',
+    letterSpacing: -0.4,
+    textAlign: 'center',
+    marginBottom: 6,
   },
+  address: {
+    fontSize: isTablet ? 13 : 12,
+    fontWeight: '400',
+    color: 'rgba(255,255,255,0.5)',
+    letterSpacing: -0.1,
+    textAlign: 'center',
+  },
+  // Primary badge
   primaryBadge: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xxs,
-    backgroundColor: colors.semantic.successBg,
-    borderRadius: radius.xs,
-    borderWidth: borderWidth.hairline,
-    borderColor: colors.semantic.successBorder,
-    marginLeft: spacing.sm,
+    position: 'absolute',
+    top: 14,
+    right: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(16,185,129,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(16,185,129,0.4)',
   },
   primaryBadgeText: {
-    ...typography.label.tiny,
-    color: colors.semantic.success,
-    letterSpacing: 1,
-  },
-  locationAddress: {
-    ...typography.caption.regular,
-    color: colors.text.tertiary,
-    lineHeight: 18,
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#10b981',
+    letterSpacing: 0.6,
   },
   // Empty state
-  emptyState: {
-    paddingVertical: spacing.massive,
+  emptyContainer: {
+    flex: 1,
     alignItems: 'center',
-    gap: spacing.sm,
+    justifyContent: 'center',
+    paddingHorizontal: 48,
   },
-  emptyStateText: {
-    ...typography.body.regular,
-    color: colors.text.subtle,
+  emptyText: {
+    fontSize: 20,
+    fontWeight: '300',
+    color: 'rgba(255,255,255,0.4)',
+    letterSpacing: -0.3,
+    marginBottom: 8,
+    textAlign: 'center',
   },
-  emptyStateSubtext: {
-    ...typography.caption.regular,
-    color: colors.text.ghost,
+  emptySubtext: {
+    fontSize: 13,
+    fontWeight: '400',
+    color: 'rgba(255,255,255,0.25)',
+    letterSpacing: -0.1,
     textAlign: 'center',
   },
 })

@@ -122,12 +122,12 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   errorTitle: {
-    ...typography.title.large,
+    ...typography.title1,
     color: colors.text.primary,
     textAlign: 'center',
   },
   errorMessage: {
-    ...typography.body.regular,
+    ...typography.body,
     color: colors.text.tertiary,
     textAlign: 'center',
   },
@@ -141,12 +141,12 @@ const styles = StyleSheet.create({
     borderColor: colors.border.subtle,
   },
   errorStackLabel: {
-    ...typography.uppercase,
+    ...typography.uppercaseLabel,
     color: colors.text.disabled,
     marginBottom: spacing.xs,
   },
   errorStackText: {
-    ...typography.caption.small,
+    ...typography.caption2,
     color: colors.text.subtle,
     fontFamily: 'monospace',
   },
@@ -160,7 +160,7 @@ const styles = StyleSheet.create({
     borderColor: colors.border.emphasis,
   },
   resetButtonText: {
-    ...typography.label.regular,
+    ...typography.subhead,
     color: colors.text.primary,
   },
 })

@@ -28,7 +28,7 @@ import { DashboardNavigator } from './src/navigation/DashboardNavigator'
 import { ErrorBoundary } from './src/components/ErrorBoundary'
 import { LoadingScreen } from './src/components/LoadingScreen'
 import { Button, TextInput as DSTextInput } from './src/theme'
-import { colors, typography, spacing, radius, blur, animation } from './src/theme/tokens'
+import { colors, typography, spacing, radius, animation } from './src/theme/tokens'
 import { logger } from './src/utils/logger'
 
 initializeSentry()
@@ -346,7 +346,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.huge,
   },
   title: {
-    ...typography.title.large,
+    ...typography.title1,
     fontWeight: '200',
     letterSpacing: 8,
     marginBottom: spacing.sm,
@@ -358,7 +358,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   subtitle: {
-    ...typography.uppercase,
+    ...typography.uppercaseLabel,
     color: colors.text.subtle,
     letterSpacing: 4,
   },
@@ -374,7 +374,7 @@ const styles = StyleSheet.create({
     borderTopColor: colors.border.subtle,
   },
   helpText: {
-    ...typography.caption.regular,
+    ...typography.caption1,
     color: colors.text.subtle,
   },
   footer: {
@@ -382,7 +382,7 @@ const styles = StyleSheet.create({
     marginTop: spacing.massive,
   },
   footerText: {
-    ...typography.caption.regular,
+    ...typography.caption1,
     color: colors.text.ghost,
   },
 })
