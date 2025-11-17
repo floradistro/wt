@@ -61,38 +61,66 @@ BEGIN
       v_points_earned := FLOOR(p_subtotal * COALESCE(v_loyalty_program.points_per_dollar, 0));
       v_points_redeemed := COALESCE(p_loyalty_points_redeemed, 0);
 
-      -- Update customer loyalty points
-      UPDATE customers
-      SET loyalty_points = GREATEST(0, COALESCE(loyalty_points, 0) + v_points_earned - v_points_redeemed),
-          updated_at = NOW()
-      WHERE id = p_customer_id;
+      -- NOTE: Do NOT manually update customer loyalty_points here!
+      -- The loyalty_transactions table has a trigger (update_customer_loyalty_balance)
+      -- that automatically updates the customer's balance when we INSERT below.
+      -- Doing both would DOUBLE-COUNT the points!
+
+      -- Create loyalty transaction record for points redeemed FIRST (if any)
+      -- This must happen BEFORE earning, so the balance is correct
+      IF v_points_redeemed > 0 THEN
+        DECLARE
+          v_balance_before_redeemed INT;
+        BEGIN
+          -- Get current balance
+          SELECT COALESCE(loyalty_points, 0) INTO v_balance_before_redeemed
+          FROM customers WHERE id = p_customer_id;
+
+          INSERT INTO loyalty_transactions (
+            customer_id, transaction_type, points,
+            reference_type, reference_id, description,
+            balance_before, created_at
+          )
+          VALUES (
+            p_customer_id, 'spent', -v_points_redeemed,  -- Negative for spent
+            'order', v_order_id::TEXT, 'Points redeemed for order ' || v_order_number,
+            v_balance_before_redeemed,
+            NOW()
+          );
+          -- Note: balance_after is set automatically by the trigger
+        EXCEPTION
+          WHEN OTHERS THEN
+            -- Log error but don't fail transaction
+            RAISE WARNING 'Failed to create redeemed loyalty transaction: %', SQLERRM;
+        END;
+      END IF;
 
       -- Create loyalty transaction record for points earned
       IF v_points_earned > 0 THEN
-        INSERT INTO loyalty_transactions (
-          customer_id, vendor_id, order_id, transaction_type,
-          points, description, created_at
-        )
-        VALUES (
-          p_customer_id, p_vendor_id, NULL, 'earned',
-          v_points_earned,
-          'Points earned from order ' || v_order_number,
-          NOW()
-        );
-      END IF;
+        DECLARE
+          v_balance_before_earned INT;
+        BEGIN
+          -- Get current balance (after redemption if any)
+          SELECT COALESCE(loyalty_points, 0) INTO v_balance_before_earned
+          FROM customers WHERE id = p_customer_id;
 
-      -- Create loyalty transaction record for points redeemed
-      IF v_points_redeemed > 0 THEN
-        INSERT INTO loyalty_transactions (
-          customer_id, vendor_id, order_id, transaction_type,
-          points, description, created_at
-        )
-        VALUES (
-          p_customer_id, p_vendor_id, NULL, 'redeemed',
-          -v_points_redeemed,
-          'Points redeemed for order ' || v_order_number,
-          NOW()
-        );
+          INSERT INTO loyalty_transactions (
+            customer_id, transaction_type, points,
+            reference_type, reference_id, description,
+            balance_before, created_at
+          )
+          VALUES (
+            p_customer_id, 'earned', v_points_earned,
+            'order', v_order_id::TEXT, 'Points earned from order ' || v_order_number,
+            v_balance_before_earned,
+            NOW()
+          );
+          -- Note: balance_after is set automatically by the trigger
+        EXCEPTION
+          WHEN OTHERS THEN
+            -- Log error but don't fail transaction
+            RAISE WARNING 'Failed to create earned loyalty transaction: %', SQLERRM;
+        END;
       END IF;
     END IF;
   END IF;
@@ -108,15 +136,6 @@ BEGIN
     'paid', 'completed', 'fulfilled', 'pickup', NOW(), NOW(), NOW()
   )
   RETURNING id INTO v_order_id;
-
-  -- Update loyalty transactions with order_id
-  IF p_customer_id IS NOT NULL AND v_loyalty_program.id IS NOT NULL THEN
-    UPDATE loyalty_transactions
-    SET order_id = v_order_id
-    WHERE customer_id = p_customer_id
-      AND order_id IS NULL
-      AND created_at >= NOW() - INTERVAL '1 minute';
-  END IF;
 
   FOR v_item IN SELECT * FROM jsonb_array_elements(p_items) LOOP
     INSERT INTO order_items (
