@@ -105,8 +105,15 @@ function POSModal({
       animationType="none"
       supportedOrientations={['portrait', 'landscape', 'landscape-left', 'landscape-right']}
       onRequestClose={handleClose}
+      accessibilityViewIsModal={true}
     >
-      <Animated.View style={[styles.overlayContainer, { opacity: fadeAnim }]}>
+      <Animated.View
+        style={[styles.overlayContainer, { opacity: fadeAnim }]}
+        accessible={true}
+        accessibilityRole="none"
+        accessibilityLabel={`${title}${subtitle ? `. ${subtitle}` : ''}`}
+        onAccessibilityEscape={handleClose}
+      >
         <LiquidGlassView
           effect="regular"
           colorScheme="dark"
@@ -114,16 +121,19 @@ function POSModal({
             StyleSheet.absoluteFill,
             !isLiquidGlassSupported && styles.overlayFallback,
           ]}
+          accessible={false}
         />
 
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={styles.keyboardView}
+          accessible={false}
         >
           <ScrollView
             contentContainerStyle={styles.scrollContent}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
+            accessible={false}
           >
             <Animated.View
               style={[
@@ -142,11 +152,12 @@ function POSModal({
                     styles.modalContent,
                     !isLiquidGlassSupported && styles.modalContentFallback,
                   ]}
+                  accessible={false}
                 >
                   {/* Header */}
-                  <View style={styles.header}>
+                  <View style={styles.header} accessible={false}>
                     <View style={styles.headerContent}>
-                      <Text style={styles.title}>{title}</Text>
+                      <Text style={styles.title} accessibilityRole="header">{title}</Text>
                       {subtitle && <Text style={styles.subtitle}>{subtitle}</Text>}
                     </View>
                     {showCloseButton && (
@@ -154,6 +165,10 @@ function POSModal({
                         onPress={handleClose}
                         style={styles.closeButton}
                         activeOpacity={0.7}
+                        accessible={true}
+                        accessibilityRole="button"
+                        accessibilityLabel="Close modal"
+                        accessibilityHint="Double tap to close this dialog"
                       >
                         <Text style={styles.closeButtonText}>✕</Text>
                       </TouchableOpacity>

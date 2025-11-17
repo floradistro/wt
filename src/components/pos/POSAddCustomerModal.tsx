@@ -432,8 +432,12 @@ function POSAddCustomerModal({
             styles.errorAlert,
             !isLiquidGlassSupported && styles.errorAlertFallback,
           ]}
+          accessible={true}
+          accessibilityRole="alert"
+          accessibilityLabel={`Error: ${error}`}
+          accessibilityLiveRegion="assertive"
         >
-          <Text style={styles.errorAlertTitle}>❌ ERROR</Text>
+          <Text style={styles.errorAlertTitle} accessible={false}>❌ ERROR</Text>
           <Text style={styles.errorAlertText}>{error}</Text>
         </LiquidGlassView>
       )}
@@ -499,6 +503,7 @@ function POSAddCustomerModal({
           setShowDatePicker(false)
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
         }}
+        accessibilityViewIsModal={true}
       >
         <TouchableOpacity
           style={styles.dateModalOverlay}
@@ -507,8 +512,22 @@ function POSAddCustomerModal({
             setShowDatePicker(false)
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
           }}
+          accessible={true}
+          accessibilityRole="button"
+          accessibilityLabel="Close date picker"
+          accessibilityHint="Double tap to dismiss date selection"
         >
-          <TouchableOpacity activeOpacity={1} style={styles.dateModalContent}>
+          <TouchableOpacity
+            activeOpacity={1}
+            style={styles.dateModalContent}
+            accessible={true}
+            accessibilityRole="none"
+            accessibilityLabel="Date picker dialog. Select date of birth"
+            onAccessibilityEscape={() => {
+              setShowDatePicker(false)
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+            }}
+          >
             <LiquidGlassView
               effect="regular"
               colorScheme="dark"
@@ -516,16 +535,21 @@ function POSAddCustomerModal({
                 styles.datePickerCard,
                 !isLiquidGlassSupported && styles.datePickerCardFallback,
               ]}
+              accessible={false}
             >
               {/* Header */}
-              <View style={styles.datePickerHeader}>
-                <Text style={styles.datePickerTitle}>SELECT DATE OF BIRTH</Text>
+              <View style={styles.datePickerHeader} accessible={false}>
+                <Text style={styles.datePickerTitle} accessibilityRole="header">SELECT DATE OF BIRTH</Text>
                 <TouchableOpacity
                   onPress={() => {
                     setShowDatePicker(false)
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
                   }}
                   style={styles.datePickerCloseButton}
+                  accessible={true}
+                  accessibilityRole="button"
+                  accessibilityLabel="Close"
+                  accessibilityHint="Double tap to close date picker"
                 >
                   <Text style={styles.datePickerCloseText}>✕</Text>
                 </TouchableOpacity>
@@ -543,6 +567,8 @@ function POSAddCustomerModal({
                   textColor="#FFFFFF"
                   themeVariant="dark"
                   style={styles.nativeDatePicker}
+                  accessibilityLabel="Date of birth picker"
+                  accessibilityHint="Swipe up or down to change date"
                 />
               </View>
 
@@ -555,11 +581,16 @@ function POSAddCustomerModal({
                   styles.datePickerDoneButton,
                   !isLiquidGlassSupported && styles.datePickerDoneButtonFallback,
                 ]}
+                accessible={false}
               >
                 <TouchableOpacity
                   style={styles.datePickerDoneButtonInner}
                   onPress={handleDateConfirm}
                   activeOpacity={0.7}
+                  accessible={true}
+                  accessibilityRole="button"
+                  accessibilityLabel="Done"
+                  accessibilityHint={`Double tap to confirm date ${dateOfBirth || 'selection'}`}
                 >
                   <Text style={styles.datePickerDoneButtonText}>DONE</Text>
                 </TouchableOpacity>

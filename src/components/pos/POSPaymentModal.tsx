@@ -85,13 +85,24 @@ function POSPaymentModal({
       animationType="none"
       onRequestClose={handleClose}
       supportedOrientations={['portrait', 'landscape']}
+      accessibilityViewIsModal={true}
     >
       {/* Backdrop */}
-      <Animated.View style={[styles.backdrop, { opacity: fadeAnim }]}>
+      <Animated.View
+        style={[styles.backdrop, { opacity: fadeAnim }]}
+        accessible={true}
+        accessibilityRole="none"
+        accessibilityLabel={`Checkout. Total: ${total.toFixed(2)} dollars`}
+        onAccessibilityEscape={handleClose}
+      >
         <TouchableOpacity
           style={StyleSheet.absoluteFill}
           onPress={handleClose}
           activeOpacity={1}
+          accessible={true}
+          accessibilityRole="button"
+          accessibilityLabel="Close checkout"
+          accessibilityHint="Double tap to cancel and return to cart"
         />
       </Animated.View>
 
@@ -103,19 +114,21 @@ function POSPaymentModal({
             transform: [{ translateY: slideAnim }],
           },
         ]}
+        accessible={false}
       >
         <LiquidGlassView
           effect="regular"
           colorScheme="dark"
           style={styles.modalCard}
+          accessible={false}
         >
           {/* Handle */}
-          <View style={styles.handle} />
+          <View style={styles.handle} accessibilityElementsHidden={true} importantForAccessibility="no" />
 
           {/* Header */}
-          <View style={styles.header}>
-            <Text style={styles.title}>CHECKOUT</Text>
-            <Text style={styles.totalLabel}>TOTAL</Text>
+          <View style={styles.header} accessible={false}>
+            <Text style={styles.title} accessibilityRole="header">CHECKOUT</Text>
+            <Text style={styles.totalLabel} accessible={false}>TOTAL</Text>
             <Text
               style={styles.totalAmount}
               accessibilityLabel={`Total amount: ${total.toFixed(2)} dollars`}
@@ -126,7 +139,7 @@ function POSPaymentModal({
           </View>
 
           {/* Payment Method Tabs */}
-          <View style={styles.tabs} accessibilityRole="tablist">
+          <View style={styles.tabs} accessibilityRole="tablist" accessible={false}>
             <TouchableOpacity
               style={[styles.tab, paymentMethod === 'cash' && styles.tabActive]}
               onPress={() => handleTabChange('cash')}
@@ -140,6 +153,8 @@ function POSPaymentModal({
                 name="cash-outline"
                 size={20}
                 color={paymentMethod === 'cash' ? '#10b981' : 'rgba(255,255,255,0.6)'}
+                accessibilityElementsHidden={true}
+                importantForAccessibility="no"
               />
               <Text style={[styles.tabText, paymentMethod === 'cash' && styles.tabTextActive]}>
                 CASH
@@ -159,6 +174,8 @@ function POSPaymentModal({
                 name="card-outline"
                 size={20}
                 color={paymentMethod === 'card' ? '#10b981' : 'rgba(255,255,255,0.6)'}
+                accessibilityElementsHidden={true}
+                importantForAccessibility="no"
               />
               <Text style={[styles.tabText, paymentMethod === 'card' && styles.tabTextActive]}>
                 CARD
@@ -178,6 +195,8 @@ function POSPaymentModal({
                 name="swap-horizontal-outline"
                 size={20}
                 color={paymentMethod === 'split' ? '#10b981' : 'rgba(255,255,255,0.6)'}
+                accessibilityElementsHidden={true}
+                importantForAccessibility="no"
               />
               <Text style={[styles.tabText, paymentMethod === 'split' && styles.tabTextActive]}>
                 SPLIT
@@ -231,16 +250,21 @@ function POSPaymentModal({
             )}
 
             {/* Summary */}
-            <View style={styles.summary}>
-              <View style={styles.summaryRow}>
+            <View
+              style={styles.summary}
+              accessible={true}
+              accessibilityRole="summary"
+              accessibilityLabel={`Order summary. ${itemCount} items. Subtotal: ${subtotal.toFixed(2)} dollars. ${taxName || 'Tax'} at ${(taxRate * 100).toFixed(2)} percent: ${taxAmount.toFixed(2)} dollars.`}
+            >
+              <View style={styles.summaryRow} accessible={false}>
                 <Text style={styles.summaryLabel}>Items</Text>
                 <Text style={styles.summaryValue}>{itemCount}</Text>
               </View>
-              <View style={styles.summaryRow}>
+              <View style={styles.summaryRow} accessible={false}>
                 <Text style={styles.summaryLabel}>Subtotal</Text>
                 <Text style={styles.summaryValue}>${subtotal.toFixed(2)}</Text>
               </View>
-              <View style={styles.summaryRow}>
+              <View style={styles.summaryRow} accessible={false}>
                 <Text style={styles.summaryLabel}>
                   {taxName || 'Tax'} ({(taxRate * 100).toFixed(2)}%)
                 </Text>
