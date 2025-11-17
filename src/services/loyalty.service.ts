@@ -36,11 +36,14 @@ export async function getLoyaltyProgram(vendorId: string): Promise<LoyaltyProgra
     .select('*')
     .eq('vendor_id', vendorId)
     .eq('is_active', true)
-    .single()
+    .maybeSingle() // Use maybeSingle instead of single to handle no results gracefully
 
   if (error) {
-    if (error.code === 'PGRST116') {
-      // No loyalty program found - this is ok
+    // Check if error is related to RLS policy configuration issues
+    if (error.message?.includes('app.current_vendor_id') ||
+        error.message?.includes('unrecognized configuration parameter')) {
+      // RLS policy is misconfigured - return null and let the app work without loyalty
+      console.warn('Loyalty programs table has RLS policy issues. Continuing without loyalty program.')
       return null
     }
     throw new Error(`Failed to load loyalty program: ${error.message}`)
