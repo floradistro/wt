@@ -71,11 +71,13 @@ const tabs = [
 
 function DockButton({
   icon: Icon,
+  name,
   isActive,
   isCenter,
   onPress
 }: {
   icon: any
+  name: string
   isActive: boolean
   isCenter: boolean
   onPress: () => void
@@ -94,7 +96,14 @@ function DockButton({
         !isLiquidGlassSupported && (isActive ? styles.activeIconFallback : styles.iconButtonFallback)
       ]}
     >
-      <Pressable onPress={onPress} style={styles.iconButtonInner}>
+      <Pressable
+        onPress={onPress}
+        style={styles.iconButtonInner}
+        accessibilityRole="tab"
+        accessibilityLabel={name}
+        accessibilityState={{ selected: isActive }}
+        accessibilityHint={`Navigate to ${name} screen`}
+      >
         <Icon color={color} />
       </Pressable>
     </LiquidGlassView>
@@ -123,6 +132,7 @@ function Dock({ activeTab, onTabChange }: DockProps) {
               <DockButton
                 key={tab.name}
                 icon={tab.Icon}
+                name={tab.name}
                 isActive={isActive}
                 isCenter={isCenter}
                 onPress={() => {
