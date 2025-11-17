@@ -486,7 +486,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   templateChevron: {
-    fontSize: 17,
+    fontSize: 15,
     color: 'rgba(235,235,245,0.6)',
   },
   templateNameInput: {
@@ -644,9 +644,10 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   templateName: {
-    fontSize: 17,
+    fontSize: 15,
     fontWeight: '600',
     color: '#fff',
+    letterSpacing: -0.2,
   },
   templateDescription: {
     fontSize: 13,

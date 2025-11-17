@@ -1385,8 +1385,10 @@ const styles = StyleSheet.create({
     borderBottomColor: 'rgba(255,255,255,0.05)',
   },
   rowLabel: {
-    fontSize: 17,
+    fontSize: 15,
+    fontWeight: '600',
     color: '#fff',
+    letterSpacing: -0.2,
   },
   rowRight: {
     flexDirection: 'row',
@@ -1394,11 +1396,11 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   rowValue: {
-    fontSize: 17,
+    fontSize: 15,
     color: 'rgba(235,235,245,0.6)',
   },
   rowChevron: {
-    fontSize: 17,
+    fontSize: 15,
     color: 'rgba(235,235,245,0.3)',
   },
   descriptionContainer: {

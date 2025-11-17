@@ -519,9 +519,10 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   fieldName: {
-    fontSize: 17,
+    fontSize: 15,
     fontWeight: '600',
     color: '#fff',
+    letterSpacing: -0.2,
   },
   fieldDescription: {
     fontSize: 13,
