@@ -4,9 +4,9 @@
  * Apple Engineering: Single component, zero redundancy
  */
 
-import { View, Text, StyleSheet, Pressable, ScrollView, TextInput } from 'react-native'
+import { View, Text, StyleSheet, Pressable, ScrollView, TextInput, Image } from 'react-native'
 import React, { ReactNode } from 'react'
-import { LiquidGlassView, isLiquidGlassSupported } from '@callstack/liquid-glass'
+import { LiquidGlassView, LiquidGlassContainerView, isLiquidGlassSupported } from '@callstack/liquid-glass'
 import * as Haptics from 'expo-haptics'
 import { layout } from '@/theme/layout'
 
@@ -79,6 +79,9 @@ interface NavSidebarProps {
   activeItemId: string
   onItemPress: (itemId: string) => void
   footer?: ReactNode
+  userName?: string
+  vendorName?: string
+  vendorLogo?: string | null
 }
 
 export function NavSidebar({
@@ -89,6 +92,9 @@ export function NavSidebar({
   activeItemId,
   onItemPress,
   footer,
+  userName,
+  vendorName,
+  vendorLogo,
 }: NavSidebarProps) {
   return (
     <View style={[styles.sidebar, { width }]}>
@@ -105,6 +111,43 @@ export function NavSidebar({
           >
             {/* Spacer for fixed search bar */}
             {onSearchChange && <View style={styles.searchSpacer} />}
+
+            {/* User Profile Section */}
+            {userName && (
+              <View style={styles.userProfileWrapper}>
+                <LiquidGlassContainerView spacing={0}>
+                  <LiquidGlassView
+                    effect="regular"
+                    colorScheme="dark"
+                    interactive
+                    style={[styles.userProfileCard, !isLiquidGlassSupported && styles.userProfileCardFallback]}
+                  >
+                    <Pressable
+                      style={styles.userProfile}
+                      onPress={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}
+                    >
+                      {vendorLogo && vendorLogo.trim() !== '' ? (
+                        <Image
+                          source={{ uri: vendorLogo }}
+                          style={styles.vendorLogo}
+                        />
+                      ) : (
+                        <View style={styles.vendorLogoPlaceholder}>
+                          <Text style={styles.vendorLogoText}>
+                            {vendorName?.charAt(0).toUpperCase() || 'V'}
+                          </Text>
+                        </View>
+                      )}
+                      <View style={styles.userInfo}>
+                        <Text style={styles.userName}>{userName}</Text>
+                        <Text style={styles.vendorName}>{vendorName || 'Vendor Account'}</Text>
+                      </View>
+                      <Text style={styles.userProfileChevron}>›</Text>
+                    </Pressable>
+                  </LiquidGlassView>
+                </LiquidGlassContainerView>
+              </View>
+            )}
 
             {/* Nav Items */}
             <View style={styles.navItems}>
@@ -276,6 +319,66 @@ const styles = StyleSheet.create({
   },
   searchSpacer: {
     height: 72, // Height of fixed search bar
+  },
+
+  // User Profile Section
+  userProfileWrapper: {
+    paddingHorizontal: layout.cardPadding,
+    marginBottom: 12,
+  },
+  userProfileCard: {
+    borderRadius: layout.pillRadius,
+    borderCurve: 'continuous',
+    overflow: 'hidden',
+  },
+  userProfileCardFallback: {
+    backgroundColor: 'rgba(255,255,255,0.05)',
+  },
+  userProfile: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    gap: 12,
+    minHeight: layout.minTouchTarget,
+  },
+  userProfileChevron: {
+    fontSize: 20,
+    color: 'rgba(235,235,245,0.3)',
+    marginLeft: 4,
+  },
+  vendorLogo: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+  },
+  vendorLogoPlaceholder: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: 'rgba(118,118,128,0.24)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  vendorLogoText: {
+    fontSize: 22,
+    fontWeight: '600',
+    color: 'rgba(235,235,245,0.6)',
+  },
+  userInfo: {
+    flex: 1,
+  },
+  userName: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: '#fff',
+    letterSpacing: -0.4,
+    marginBottom: 2,
+  },
+  vendorName: {
+    fontSize: 13,
+    color: 'rgba(235,235,245,0.6)',
   },
 
   // Fixed Search Bar - Floating overlay

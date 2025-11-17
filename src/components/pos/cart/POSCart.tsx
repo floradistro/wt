@@ -193,8 +193,8 @@ function POSCart({
         )}
       </View>
 
-      {/* Cart Items */}
-      <ScrollView style={styles.cartItems} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: layout.dockHeight }}>
+      {/* Cart Items - No ScrollView, show all items */}
+      <View style={styles.cartItems}>
         {cart.length === 0 ? (
           <View style={styles.emptyCart}>
             <Text style={styles.emptyCartText}>Cart is empty</Text>
@@ -234,7 +234,7 @@ function POSCart({
             )
           })
         )}
-      </ScrollView>
+      </View>
 
       {cart.length > 0 && (
         <>
@@ -505,7 +505,7 @@ const styles = StyleSheet.create({
   },
 
   cartItems: {
-    flex: 1,
+    paddingBottom: layout.dockHeight,
   },
   emptyCart: {
     paddingVertical: 60,

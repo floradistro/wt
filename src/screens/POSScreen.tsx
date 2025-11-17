@@ -188,6 +188,6 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   rightColumn: {
-    width: isTablet ? 380 : 320,
+    width: isTablet ? 450 : 380,
   },
 })

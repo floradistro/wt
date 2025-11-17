@@ -107,7 +107,8 @@ export function ProductsScreen() {
   const [activeNav, setActiveNav] = useState<NavSection>('all')
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null)
-  const [searchQuery, setSearchQuery] = useState('')
+  const [navSearchQuery, setNavSearchQuery] = useState('')
+  const [productSearchQuery, setProductSearchQuery] = useState('')
   const [vendorLogo, setVendorLogo] = useState<string | null>(null)
   const [vendorName, setVendorName] = useState<string>('')
 
@@ -127,7 +128,7 @@ export function ProductsScreen() {
   const { width } = useWindowDimensions()
   const contentWidth = width - layout.sidebarWidth
 
-  const { products: allProducts, isLoading, reload } = useProducts({ search: searchQuery })
+  const { products: allProducts, isLoading, reload } = useProducts({ search: productSearchQuery })
   const { categories, isLoading: categoriesLoading, reload: reloadCategories } = useCategories({ includeGlobal: true, parentId: null })
 
   // Create a category lookup map for fast access
@@ -245,13 +246,13 @@ export function ProductsScreen() {
     }).start()
   }, [selectedProduct, selectedCategoryId, activeNav, slideAnim])
 
-  // Filter categories by search
+  // Filter categories by nav search
   const filteredCategories = useMemo(() => {
-    if (!searchQuery || activeNav !== 'categories') return categories
+    if (!navSearchQuery || activeNav !== 'categories') return categories
     return categories.filter(cat =>
-      cat.name.toLowerCase().includes(searchQuery.toLowerCase())
+      cat.name.toLowerCase().includes(navSearchQuery.toLowerCase())
     )
-  }, [categories, searchQuery, activeNav])
+  }, [categories, navSearchQuery, activeNav])
 
   const selectedCategory = categories.find(c => c.id === selectedCategoryId)
 
@@ -284,8 +285,8 @@ export function ProductsScreen() {
         {/* LEFT NAV SIDEBAR */}
         <NavSidebar
           width={layout.sidebarWidth}
-          searchValue={searchQuery}
-          onSearchChange={setSearchQuery}
+          searchValue={navSearchQuery}
+          onSearchChange={setNavSearchQuery}
           items={navItems}
           activeItemId={activeNav}
           onItemPress={(id) => setActiveNav(id as NavSection)}
@@ -451,8 +452,8 @@ export function ProductsScreen() {
                         style={styles.stickySearchInput}
                         placeholder="Search"
                         placeholderTextColor="rgba(235,235,245,0.6)"
-                        value={searchQuery}
-                        onChangeText={setSearchQuery}
+                        value={productSearchQuery}
+                        onChangeText={setProductSearchQuery}
                         accessible={true}
                         accessibilityLabel="Search products"
                         accessibilityHint="Type to filter the products list"
