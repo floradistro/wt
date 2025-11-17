@@ -156,6 +156,7 @@ describe('Payment Processor Store', () => {
 
     it('should require authentication', async () => {
       // Mock no session
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
       const { supabase } = require('@/lib/supabase/client')
       supabase.auth.getSession.mockResolvedValueOnce({
         data: { session: null }

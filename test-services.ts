@@ -1,3 +1,4 @@
+/* eslint-disable no-console */
 /**
  * Service Integration Tests
  *
@@ -251,7 +252,7 @@ async function testOrdersService() {
 }
 
 async function runAllTests() {
-  console.log('=€ Starting Service Integration Tests...')
+  console.log('=ï¿½ Starting Service Integration Tests...')
   console.log('Testing against vendor:', TEST_VENDOR_ID)
   console.log('=' .repeat(60))
 
@@ -262,7 +263,7 @@ async function runAllTests() {
 
   // Summary
   console.log('\n' + '='.repeat(60))
-  console.log('=Ê TEST SUMMARY')
+  console.log('=ï¿½ TEST SUMMARY')
   console.log('='.repeat(60))
 
   const passed = results.filter((r) => r.passed).length
@@ -275,7 +276,7 @@ async function runAllTests() {
   console.log(`Success Rate: ${((passed / total) * 100).toFixed(1)}%`)
 
   if (failed > 0) {
-    console.log('\n   Failed Tests:')
+    console.log('\nï¿½  Failed Tests:')
     results
       .filter((r) => !r.passed)
       .forEach((r) => {

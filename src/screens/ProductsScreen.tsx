@@ -25,18 +25,18 @@ import { usePricingTemplates } from '@/hooks/usePricingTemplates'
 type NavSection = 'all' | 'low-stock' | 'out-of-stock' | 'categories'
 
 // Memoized Product Item to prevent flickering
-const ProductItem = React.memo(({
-  item,
-  isLast,
-  isSelected,
-  categoryName,
-  onPress
-}: {
+const ProductItem = React.memo<{
   item: Product
   isLast: boolean
   isSelected: boolean
   categoryName: string | null
   onPress: () => void
+}>(({
+  item,
+  isLast,
+  isSelected,
+  categoryName,
+  onPress
 }) => (
   <Pressable
     key={item.id}
@@ -99,6 +99,8 @@ const ProductItem = React.memo(({
     </View>
   </Pressable>
 ))
+
+ProductItem.displayName = 'ProductItem'
 
 export function ProductsScreen() {
   const [activeNav, setActiveNav] = useState<NavSection>('all')
@@ -320,7 +322,7 @@ export function ProductsScreen() {
                   scrollEventThrottle={16}
                 >
                   {/* Large Title - scrolls with content */}
-                  <View style={styles.largeTitleContainer}>
+                  <View style={[styles.largeTitleContainer, styles.cardWrapper]}>
                     <Text style={styles.largeTitleHeader}>Categories</Text>
                     <Pressable
                       style={styles.addButton}
@@ -333,30 +335,32 @@ export function ProductsScreen() {
                     </Pressable>
                   </View>
 
-                  {filteredCategories.map((category) => (
-                    <Pressable
-                      key={category.id}
-                      onPress={() => {
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                        setSelectedCategoryId(category.id)
-                      }}
-                    >
-                      <CategoryCard
-                        category={category}
-                        isExpanded={selectedCategoryId === category.id}
-                        onToggleExpansion={() => setSelectedCategoryId(category.id)}
-                        onEdit={() => {}}
-                        onDelete={() => {}}
-                        onManageFields={() => setShowFieldModal(true)}
-                        onManagePricing={() => setShowPricingModal(true)}
-                        fieldsCount={allFields.filter(f => f.category_id === category.id).length}
-                        templatesCount={allTemplates.filter(t =>
+                  <View style={styles.cardWrapper}>
+                    {filteredCategories.map((category) => (
+                      <Pressable
+                        key={category.id}
+                        onPress={() => {
+                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                          setSelectedCategoryId(category.id)
+                        }}
+                      >
+                        <CategoryCard
+                          category={category}
+                          isExpanded={selectedCategoryId === category.id}
+                          onToggleExpansion={() => setSelectedCategoryId(category.id)}
+                          onEdit={() => {}}
+                          onDelete={() => {}}
+                          onManageFields={() => setShowFieldModal(true)}
+                          onManagePricing={() => setShowPricingModal(true)}
+                          fieldsCount={allFields.filter(f => f.category_id === category.id).length}
+                          templatesCount={allTemplates.filter(t =>
         // @ts-expect-error - category_id will be added in database schema migration
-                          t.applicable_to_categories?.includes(category.id) || t.category_id === category.id
-                        ).length}
-                      />
-                    </Pressable>
-                  ))}
+                            t.applicable_to_categories?.includes(category.id) || t.category_id === category.id
+                          ).length}
+                        />
+                      </Pressable>
+                    ))}
+                  </View>
                 </ScrollView>
               </View>
             )
@@ -408,11 +412,13 @@ export function ProductsScreen() {
                   scrollEventThrottle={16}
                 >
                   {/* Large Title - scrolls with content */}
-                  <Text style={styles.largeTitleHeader}>
-                    {activeNav === 'all' ? 'All Products' : activeNav === 'low-stock' ? 'Low Stock' : 'Out of Stock'}
-                  </Text>
+                  <View style={styles.cardWrapper}>
+                    <Text style={styles.largeTitleHeader}>
+                      {activeNav === 'all' ? 'All Products' : activeNav === 'low-stock' ? 'Low Stock' : 'Out of Stock'}
+                    </Text>
+                  </View>
 
-                <View style={styles.cardWrapper}>
+                  <View style={styles.cardWrapper}>
                   <View style={styles.productsCardGlass}>
                     {products.map((item, index) => {
                     const isLast = index === products.length - 1
@@ -477,6 +483,7 @@ export function ProductsScreen() {
           )}
         </Animated.View>
       </View>
+      </View>
 
       {/* CATEGORY MODALS */}
       <CategoryModal
@@ -512,7 +519,6 @@ export function ProductsScreen() {
           />
         </>
       )}
-      </View>
     </SafeAreaView>
   )
 }
