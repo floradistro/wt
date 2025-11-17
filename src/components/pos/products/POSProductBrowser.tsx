@@ -10,7 +10,7 @@
  * - Filter dropdown UI
  */
 
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, memo } from 'react'
 import { View, Text, StyleSheet, ScrollView, Pressable, Animated } from 'react-native'
 import * as Haptics from 'expo-haptics'
 import { supabase } from '@/lib/supabase/client'
@@ -36,7 +36,7 @@ interface POSProductBrowserProps {
   onProductsLoaded?: (products: Product[]) => void
 }
 
-export function POSProductBrowser({ sessionInfo, onAddToCart, onProductsLoaded }: POSProductBrowserProps) {
+function POSProductBrowser({ sessionInfo, onAddToCart, onProductsLoaded }: POSProductBrowserProps) {
   // ========================================
   // STATE
   // ========================================
@@ -442,6 +442,9 @@ export function POSProductBrowser({ sessionInfo, onAddToCart, onProductsLoaded }
     </View>
   )
 }
+
+const POSProductBrowserMemo = memo(POSProductBrowser)
+export { POSProductBrowserMemo as POSProductBrowser }
 
 // ========================================
 // STYLES - Exact copy from POSScreen

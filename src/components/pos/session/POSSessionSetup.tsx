@@ -9,7 +9,7 @@
  * - Session creation
  */
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, memo } from 'react'
 import { View, StyleSheet, Animated } from 'react-native'
 import * as Haptics from 'expo-haptics'
 import { supabase } from '@/lib/supabase/client'
@@ -32,7 +32,7 @@ interface SessionData {
   openingCash: number
 }
 
-export function POSSessionSetup({ user, onSessionReady }: POSSessionSetupProps) {
+function POSSessionSetup({ user, onSessionReady }: POSSessionSetupProps) {
   // State
   const [sessionInfo, setSessionInfo] = useState<SessionInfo | null>(null)
   const [locations, setLocations] = useState<Location[]>([])
@@ -311,6 +311,9 @@ export function POSSessionSetup({ user, onSessionReady }: POSSessionSetupProps) 
     </>
   )
 }
+
+const POSSessionSetupMemo = memo(POSSessionSetup)
+export { POSSessionSetupMemo as POSSessionSetup }
 
 const styles = StyleSheet.create({
   container: {
