@@ -60,7 +60,14 @@ function POSCustomerActionSheet({
       onRequestClose={onClose}
     >
       <Animated.View style={[styles.overlay, { opacity: opacityAnim }]}>
-        <Pressable style={StyleSheet.absoluteFill} onPress={onClose}>
+        <Pressable
+          style={StyleSheet.absoluteFill}
+          onPress={onClose}
+          accessible={true}
+          accessibilityRole="button"
+          accessibilityLabel="Close customer selection"
+          accessibilityHint="Double tap to dismiss this menu"
+        >
           <BlurView intensity={60} tint="systemUltraThinMaterialDark" style={StyleSheet.absoluteFill} />
         </Pressable>
 
@@ -72,29 +79,34 @@ function POSCustomerActionSheet({
               transform: [{ translateY: slideAnim }],
             },
           ]}
+          accessible={false}
         >
           {/* Pull Handle */}
-          <View style={styles.pullHandle} />
+          <View style={styles.pullHandle} accessibilityElementsHidden={true} importantForAccessibility="no" />
 
           {/* Title */}
-          <Text style={styles.title}>Select Customer</Text>
+          <Text style={styles.title} accessibilityRole="header">Select Customer</Text>
 
           {/* iOS 26 Liquid Glass Action Pills */}
-          <View style={styles.actionsContainer}>
+          <View style={styles.actionsContainer} accessible={false}>
             {/* Scan ID - Primary Action */}
             <TouchableOpacity
               onPress={() => handleAction(onScanID)}
               style={styles.actionPillPrimary}
               activeOpacity={0.7}
+              accessible={true}
+              accessibilityRole="button"
+              accessibilityLabel="Scan ID badge"
+              accessibilityHint="Double tap to open camera for ID scanning. Fast and automatic customer verification."
             >
-              <BlurView intensity={80} tint="systemThickMaterialDark" style={StyleSheet.absoluteFill} />
-              <View style={styles.pillGradientPrimary} />
-              <Text style={styles.actionIconPrimary}>🪪</Text>
-              <View style={styles.actionContent}>
+              <BlurView intensity={80} tint="systemThickMaterialDark" style={StyleSheet.absoluteFill} accessible={false} />
+              <View style={styles.pillGradientPrimary} accessibilityElementsHidden={true} importantForAccessibility="no" />
+              <Text style={styles.actionIconPrimary} accessibilityElementsHidden={true} importantForAccessibility="no">🪪</Text>
+              <View style={styles.actionContent} accessible={false}>
                 <Text style={styles.actionTitlePrimary}>Scan ID</Text>
                 <Text style={styles.actionSubtitle}>Fast & automatic</Text>
               </View>
-              <Text style={styles.actionChevron}>›</Text>
+              <Text style={styles.actionChevron} accessibilityElementsHidden={true} importantForAccessibility="no">›</Text>
             </TouchableOpacity>
 
             {/* Select from List - Secondary Action */}
@@ -102,15 +114,19 @@ function POSCustomerActionSheet({
               onPress={() => handleAction(onSelectFromList)}
               style={styles.actionPill}
               activeOpacity={0.7}
+              accessible={true}
+              accessibilityRole="button"
+              accessibilityLabel="Select from customer list"
+              accessibilityHint="Double tap to search and select from existing customers"
             >
-              <BlurView intensity={70} tint="systemMaterialDark" style={StyleSheet.absoluteFill} />
-              <View style={styles.pillGradient} />
-              <Text style={styles.actionIcon}>👤</Text>
-              <View style={styles.actionContent}>
+              <BlurView intensity={70} tint="systemMaterialDark" style={StyleSheet.absoluteFill} accessible={false} />
+              <View style={styles.pillGradient} accessibilityElementsHidden={true} importantForAccessibility="no" />
+              <Text style={styles.actionIcon} accessibilityElementsHidden={true} importantForAccessibility="no">👤</Text>
+              <View style={styles.actionContent} accessible={false}>
                 <Text style={styles.actionTitle}>Select from List</Text>
                 <Text style={styles.actionSubtitle}>Search customers</Text>
               </View>
-              <Text style={styles.actionChevron}>›</Text>
+              <Text style={styles.actionChevron} accessibilityElementsHidden={true} importantForAccessibility="no">›</Text>
             </TouchableOpacity>
 
             {/* Walk-in - Tertiary Action */}
@@ -118,15 +134,19 @@ function POSCustomerActionSheet({
               onPress={() => handleAction(onWalkIn)}
               style={styles.actionPill}
               activeOpacity={0.7}
+              accessible={true}
+              accessibilityRole="button"
+              accessibilityLabel="Walk-in customer"
+              accessibilityHint="Double tap to continue without customer information"
             >
-              <BlurView intensity={70} tint="systemMaterialDark" style={StyleSheet.absoluteFill} />
-              <View style={styles.pillGradient} />
-              <Text style={styles.actionIcon}>🚶</Text>
-              <View style={styles.actionContent}>
+              <BlurView intensity={70} tint="systemMaterialDark" style={StyleSheet.absoluteFill} accessible={false} />
+              <View style={styles.pillGradient} accessibilityElementsHidden={true} importantForAccessibility="no" />
+              <Text style={styles.actionIcon} accessibilityElementsHidden={true} importantForAccessibility="no">🚶</Text>
+              <View style={styles.actionContent} accessible={false}>
                 <Text style={styles.actionTitle}>Walk-in Customer</Text>
                 <Text style={styles.actionSubtitle}>No customer info</Text>
               </View>
-              <Text style={styles.actionChevron}>›</Text>
+              <Text style={styles.actionChevron} accessibilityElementsHidden={true} importantForAccessibility="no">›</Text>
             </TouchableOpacity>
           </View>
 
@@ -135,9 +155,13 @@ function POSCustomerActionSheet({
             onPress={onClose}
             style={styles.cancelButton}
             activeOpacity={0.7}
+            accessible={true}
+            accessibilityRole="button"
+            accessibilityLabel="Cancel"
+            accessibilityHint="Double tap to close customer selection menu"
           >
-            <BlurView intensity={50} tint="systemMaterialDark" style={StyleSheet.absoluteFill} />
-            <View style={styles.cancelGradient} />
+            <BlurView intensity={50} tint="systemMaterialDark" style={StyleSheet.absoluteFill} accessible={false} />
+            <View style={styles.cancelGradient} accessibilityElementsHidden={true} importantForAccessibility="no" />
             <Text style={styles.cancelText}>Cancel</Text>
           </TouchableOpacity>
         </Animated.View>

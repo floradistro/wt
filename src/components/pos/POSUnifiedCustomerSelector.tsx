@@ -434,6 +434,7 @@ function POSUnifiedCustomerSelector({
                   styles.manualAddButton,
                   !isLiquidGlassSupported && styles.manualAddButtonFallback,
                 ]}
+                accessible={false}
               >
                 <TouchableOpacity
                   onPress={() => {
@@ -442,6 +443,10 @@ function POSUnifiedCustomerSelector({
                   }}
                   style={styles.manualAddButtonInner}
                   activeOpacity={0.7}
+                  accessible={true}
+                  accessibilityRole="button"
+                  accessibilityLabel="Add customer manually"
+                  accessibilityHint="Double tap to create a new customer without scanning ID"
                 >
                   <Text style={styles.manualAddText}>+ ADD CUSTOMER</Text>
                 </TouchableOpacity>
@@ -453,7 +458,12 @@ function POSUnifiedCustomerSelector({
         {/* Age Warning Message */}
         {scanMessage && (
           <View style={styles.scanMessageContainer}>
-            <View style={styles.scanMessage}>
+            <View
+              style={styles.scanMessage}
+              accessible={true}
+              accessibilityRole="alert"
+              accessibilityLabel={scanMessage}
+            >
               <Text style={styles.scanMessageText}>{scanMessage}</Text>
             </View>
           </View>
@@ -466,9 +476,17 @@ function POSUnifiedCustomerSelector({
               styles.unifiedCard,
               { opacity: previewOpacity }
             ]}
+            accessible={true}
+            accessibilityRole="alert"
+            accessibilityLabel={
+              matchedCustomer
+                ? `Customer found: ${matchedCustomer.display_name || `${matchedCustomer.first_name} ${matchedCustomer.last_name}`.trim() || matchedCustomer.email}${matchedCustomer.loyalty_points > 0 ? `. ${matchedCustomer.loyalty_points} loyalty points` : ''}`
+                : `Searching for customer: ${parsedData.firstName} ${parsedData.lastName}${parsedData.dateOfBirth ? `, age ${calculateAge(parsedData.dateOfBirth)}` : ''}`
+            }
+            accessibilityLiveRegion="polite"
           >
-            <BlurView intensity={80} tint="systemThickMaterialDark" style={StyleSheet.absoluteFill} />
-            <View style={styles.cardContent}>
+            <BlurView intensity={80} tint="systemThickMaterialDark" style={StyleSheet.absoluteFill} accessible={false} />
+            <View style={styles.cardContent} accessible={false}>
               {/* Circle - Shows loading spinner, then checkmark */}
               <View style={styles.checkmark}>
                 {/* Outline - always visible */}
@@ -546,7 +564,7 @@ function POSUnifiedCustomerSelector({
           <BlurView intensity={95} tint="systemThickMaterialDark" style={StyleSheet.absoluteFill} />
 
           {/* Unified Header with Search and Done */}
-          <View style={[styles.listHeader, { paddingTop: insets.top + 8 }]}>
+          <View style={[styles.listHeader, { paddingTop: insets.top + 8 }]} accessible={false}>
             <TextInput
               ref={searchInputRef}
               style={styles.searchInput}
@@ -558,8 +576,18 @@ function POSUnifiedCustomerSelector({
               autoCorrect={false}
               returnKeyType="search"
               autoFocus={false}
+              accessible={true}
+              accessibilityLabel="Search customers"
+              accessibilityHint="Type to search customers by name, email, or phone"
             />
-            <TouchableOpacity onPress={onClose} style={styles.doneButton}>
+            <TouchableOpacity
+              onPress={onClose}
+              style={styles.doneButton}
+              accessible={true}
+              accessibilityRole="button"
+              accessibilityLabel="Done"
+              accessibilityHint="Double tap to close customer selector"
+            >
               <Text style={styles.doneText}>Done</Text>
             </TouchableOpacity>
           </View>
@@ -575,13 +603,22 @@ function POSUnifiedCustomerSelector({
                 }}
                 style={styles.addCustomerButton}
                 activeOpacity={0.7}
+                accessible={true}
+                accessibilityRole="button"
+                accessibilityLabel="Add new customer"
+                accessibilityHint="Double tap to create a new customer profile"
               >
                 <Text style={styles.addCustomerText}>+ ADD NEW CUSTOMER</Text>
               </TouchableOpacity>
             )}
 
             {searching ? (
-              <View style={styles.centered}>
+              <View
+                style={styles.centered}
+                accessible={true}
+                accessibilityRole="progressbar"
+                accessibilityLabel="Searching customers"
+              >
                 <ActivityIndicator size="small" color="rgba(255,255,255,0.6)" />
               </View>
             ) : customers.length > 0 ? (
@@ -589,29 +626,40 @@ function POSUnifiedCustomerSelector({
                 <FlatList
                   data={customers}
                   keyExtractor={(item) => item.id}
-                  renderItem={({ item, index }) => (
-                    <TouchableOpacity
-                      onPress={() => {
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                        onCustomerSelected(item)
-                      }}
-                      style={[
-                        styles.customerItem,
-                        index === 0 && styles.customerItemFirst,
-                        index === customers.length - 1 && styles.customerItemLast,
-                      ]}
-                      activeOpacity={0.7}
-                    >
-                      <Text style={styles.customerName}>
-                        {item.display_name || `${item.first_name} ${item.last_name}`.trim() || item.email}
-                      </Text>
-                      {item.loyalty_points > 0 && (
-                        <Text style={styles.customerPoints}>
-                          {item.loyalty_points.toLocaleString()} pts
+                  renderItem={({ item, index }) => {
+                    const customerName = item.display_name || `${item.first_name} ${item.last_name}`.trim() || item.email
+                    const accessibilityLabel = item.loyalty_points > 0
+                      ? `${customerName}, ${item.loyalty_points.toLocaleString()} loyalty points`
+                      : customerName
+
+                    return (
+                      <TouchableOpacity
+                        onPress={() => {
+                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                          onCustomerSelected(item)
+                        }}
+                        style={[
+                          styles.customerItem,
+                          index === 0 && styles.customerItemFirst,
+                          index === customers.length - 1 && styles.customerItemLast,
+                        ]}
+                        activeOpacity={0.7}
+                        accessible={true}
+                        accessibilityRole="button"
+                        accessibilityLabel={accessibilityLabel}
+                        accessibilityHint="Double tap to select this customer"
+                      >
+                        <Text style={styles.customerName}>
+                          {customerName}
                         </Text>
-                      )}
-                    </TouchableOpacity>
-                  )}
+                        {item.loyalty_points > 0 && (
+                          <Text style={styles.customerPoints} accessibilityElementsHidden={true} importantForAccessibility="no">
+                            {item.loyalty_points.toLocaleString()} pts
+                          </Text>
+                        )}
+                      </TouchableOpacity>
+                    )
+                  }}
                   showsVerticalScrollIndicator={false}
                   keyboardShouldPersistTaps="handled"
                   keyboardDismissMode="on-drag"
@@ -624,7 +672,12 @@ function POSUnifiedCustomerSelector({
                 />
               </View>
             ) : searchQuery.trim() ? (
-              <View style={styles.centered}>
+              <View
+                style={styles.centered}
+                accessible={true}
+                accessibilityRole="alert"
+                accessibilityLabel="No customers found"
+              >
                 <Text style={styles.emptyText}>No customers found</Text>
               </View>
             ) : null}

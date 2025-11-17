@@ -62,6 +62,9 @@ function LocationCard({ location, index, onPress }: { location: Location; index:
     }).start()
   }
 
+  const addressText = [location.address_line1, location.city, location.state].filter(Boolean).join(', ')
+  const accessibilityLabel = `${location.name}${location.is_primary ? ', primary location' : ''}${addressText ? `. ${addressText}` : ''}`
+
   return (
     <TouchableOpacity
       onPress={onPress}
@@ -69,6 +72,11 @@ function LocationCard({ location, index, onPress }: { location: Location; index:
       onPressOut={handlePressOut}
       activeOpacity={1}
       style={styles.locationCard}
+      accessible={true}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+      accessibilityHint="Double tap to select this location"
+      accessibilityState={{ selected: location.is_primary }}
     >
       <Animated.View
         style={[
@@ -80,15 +88,15 @@ function LocationCard({ location, index, onPress }: { location: Location; index:
         ]}
       >
         {/* Glass background - matches POS design */}
-        <View style={styles.locationCardBg}>
+        <View style={styles.locationCardBg} accessibilityElementsHidden={true} importantForAccessibility="no">
           <BlurView intensity={blur.thin} tint="dark" style={StyleSheet.absoluteFill} />
         </View>
 
-        <View style={styles.locationCardContent}>
+        <View style={styles.locationCardContent} accessible={false}>
           <View style={styles.locationHeader}>
             <Text style={styles.locationName}>{location.name}</Text>
             {location.is_primary && (
-              <View style={styles.primaryBadge}>
+              <View style={styles.primaryBadge} accessible={false}>
                 <Text style={styles.primaryBadgeText}>PRIMARY</Text>
               </View>
             )}
@@ -121,16 +129,23 @@ function POSLocationSelector({ locations, vendorLogo, vendorName, onLocationSele
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right', 'bottom']}>
       <Animated.View style={[styles.content, { opacity: fadeAnim }]}>
         {/* Header - matches login design */}
-        <View style={styles.header}>
+        <View style={styles.header} accessible={false}>
           {vendorLogo ? (
             <View style={styles.logoCircle}>
-              <View style={styles.logoCircleBg}>
+              <View style={styles.logoCircleBg} accessibilityElementsHidden={true} importantForAccessibility="no">
                 <BlurView intensity={blur.thin} tint="dark" style={StyleSheet.absoluteFill} />
               </View>
-              <Image source={{ uri: vendorLogo }} style={styles.logo} resizeMode="contain" />
+              <Image
+                source={{ uri: vendorLogo }}
+                style={styles.logo}
+                resizeMode="contain"
+                accessible={true}
+                accessibilityRole="image"
+                accessibilityLabel={`${vendorName || 'Vendor'} logo`}
+              />
             </View>
           ) : (
-            <View style={styles.logoCircle}>
+            <View style={styles.logoCircle} accessibilityElementsHidden={true} importantForAccessibility="no">
               <View style={styles.logoCircleBg}>
                 <BlurView intensity={blur.thin} tint="dark" style={StyleSheet.absoluteFill} />
               </View>
@@ -141,8 +156,8 @@ function POSLocationSelector({ locations, vendorLogo, vendorName, onLocationSele
           )}
 
           <Text style={styles.title}>{vendorName || 'WHALETOOLS'}</Text>
-          <View style={styles.divider} />
-          <Text style={styles.subtitle}>SELECT LOCATION</Text>
+          <View style={styles.divider} accessibilityElementsHidden={true} importantForAccessibility="no" />
+          <Text style={styles.subtitle} accessibilityRole="header">SELECT LOCATION</Text>
         </View>
 
         {/* Locations List */}
@@ -150,6 +165,8 @@ function POSLocationSelector({ locations, vendorLogo, vendorName, onLocationSele
           style={styles.locationsList}
           contentContainerStyle={styles.locationsListContent}
           showsVerticalScrollIndicator={false}
+          accessible={false}
+          accessibilityLabel={`${locations.length} locations available`}
         >
           {locations.map((location, index) => (
             <LocationCard
@@ -164,7 +181,12 @@ function POSLocationSelector({ locations, vendorLogo, vendorName, onLocationSele
           ))}
 
           {locations.length === 0 && (
-            <View style={styles.emptyState}>
+            <View
+              style={styles.emptyState}
+              accessible={true}
+              accessibilityRole="alert"
+              accessibilityLabel="No locations available. Contact support to configure your locations."
+            >
               <Text style={styles.emptyStateText}>No locations available</Text>
               <Text style={styles.emptyStateSubtext}>
                 Contact support to configure your locations
