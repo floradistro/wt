@@ -8,7 +8,7 @@ export const layout = {
   sidebarWidth: 375,
 
   // Container Margins (iPad Settings pattern)
-  containerMargin: 16,
+  containerMargin: 20, // iOS Settings-style l/r padding
 
   // Content Margins
   contentHorizontal: 40,

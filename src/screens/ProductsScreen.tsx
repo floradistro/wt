@@ -222,7 +222,7 @@ export function ProductsScreen() {
 
                 <ScrollView
                   showsVerticalScrollIndicator={false}
-                  contentContainerStyle={{ paddingTop: 80, paddingBottom: layout.dockHeight, paddingHorizontal: spacing.sm }}
+                  contentContainerStyle={{ paddingTop: 80, paddingBottom: layout.dockHeight }}
                   onScroll={(e) => {
                     const offsetY = e.nativeEvent.contentOffset.y
                     const threshold = 40
@@ -886,13 +886,11 @@ const styles = StyleSheet.create({
     letterSpacing: -0.5,
     paddingTop: 16,
     paddingBottom: 8,
-    paddingHorizontal: spacing.sm,
   },
   largeTitleContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: spacing.sm,
     paddingTop: 16,
     paddingBottom: 8,
   },
@@ -900,10 +898,10 @@ const styles = StyleSheet.create({
   // MIDDLE PRODUCTS LIST
   productsList: {
     position: 'absolute',
-    left: 0,
+    left: 0, // No left padding - navbar margin handles it
     top: 0,
     bottom: 0,
-    width: '100%',
+    right: layout.containerMargin, // Match navbar's right margin (12px)
     backgroundColor: '#000',
   },
   productsListContent: {
@@ -911,7 +909,7 @@ const styles = StyleSheet.create({
   },
   cardWrapper: {
     marginVertical: layout.contentVertical,
-    marginHorizontal: spacing.sm, // Consistent 12px spacing everywhere
+    // No horizontal margin - parent contentArea handles it
   },
   productsCardContainer: {
     marginHorizontal: layout.contentHorizontal,
@@ -1067,10 +1065,10 @@ const styles = StyleSheet.create({
   // RIGHT DETAIL PANEL
   detailPanel: {
     position: 'absolute',
-    left: 0,
+    left: 0, // No left padding - navbar margin handles it
     top: 0,
     bottom: 0,
-    width: '100%',
+    right: layout.containerMargin, // Match navbar's right margin (12px)
     backgroundColor: '#000',
   },
   emptyDetail: {
@@ -1099,7 +1097,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: spacing.sm, // Consistent 12px spacing everywhere
     paddingVertical: layout.cardPadding,
     borderBottomWidth: 0.5,
     borderBottomColor: 'rgba(255,255,255,0.1)',
@@ -1142,7 +1139,6 @@ const styles = StyleSheet.create({
     color: '#60A5FA',
   },
   headerCardContainer: {
-    marginHorizontal: spacing.sm, // Consistent 12px spacing everywhere
     marginTop: layout.sectionSpacing,
     marginBottom: layout.sectionSpacing,
   },
@@ -1228,7 +1224,6 @@ const styles = StyleSheet.create({
 
   // SECTIONS
   section: {
-    marginHorizontal: spacing.sm, // Consistent 12px spacing everywhere
     marginBottom: layout.sectionSpacing,
   },
   sectionTitle: {
