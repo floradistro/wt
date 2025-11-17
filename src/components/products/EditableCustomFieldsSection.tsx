@@ -155,6 +155,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.xxl,
     borderCurve: 'continuous',
     overflow: 'hidden',
+    backgroundColor: 'rgba(255,255,255,0.05)',
   },
   cardGlassFallback: {
     backgroundColor: 'rgba(255,255,255,0.05)',
