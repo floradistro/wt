@@ -103,10 +103,13 @@ const ProductItem = React.memo<{
 ProductItem.displayName = 'ProductItem'
 
 export function ProductsScreen() {
+  const { user } = useAuth()
   const [activeNav, setActiveNav] = useState<NavSection>('all')
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
+  const [vendorLogo, setVendorLogo] = useState<string | null>(null)
+  const [vendorName, setVendorName] = useState<string>('')
 
   // Modal states for categories
   const [showCategoryModal, setShowCategoryModal] = useState(false)
@@ -137,6 +140,34 @@ export function ProductsScreen() {
   // Load all fields and templates for the vendor to properly count assignments
   const { fields: allFields, reload: reloadFields } = useCustomFields({ includeInherited: false })
   const { templates: allTemplates, reload: reloadTemplates } = usePricingTemplates({})
+
+  // Load vendor info for nav bar logo
+  useEffect(() => {
+    const loadVendorInfo = async () => {
+      if (!user?.email) return
+      try {
+        const { data: userData, error: userError } = await supabase
+          .from('users')
+          .select('vendor_id, vendors(id, store_name, logo_url)')
+          .eq('email', user.email)
+          .single()
+
+        if (userError) {
+          logger.error('User query error', { error: userError })
+          return
+        }
+
+        if (userData?.vendors) {
+          const vendor = userData.vendors as any
+          setVendorName(vendor.store_name || '')
+          setVendorLogo(vendor.logo_url || null)
+        }
+      } catch (error) {
+        logger.error('Failed to load vendor info', { error })
+      }
+    }
+    loadVendorInfo()
+  }, [user])
 
   const handleProductUpdated = () => {
     reload()
@@ -258,6 +289,9 @@ export function ProductsScreen() {
           items={navItems}
           activeItemId={activeNav}
           onItemPress={(id) => setActiveNav(id as NavSection)}
+          userName={user?.email?.split('@')[0] || 'User'}
+          vendorName={vendorName}
+          vendorLogo={vendorLogo}
         />
 
         {/* SLIDING CONTENT AREA */}
@@ -399,6 +433,33 @@ export function ProductsScreen() {
                   style={styles.fadeGradient}
                   pointerEvents="none"
                 />
+
+                {/* Sticky Search Bar - Top Right - Above Fade */}
+                <View style={styles.stickySearchContainer}>
+                  <LiquidGlassView
+                    effect="regular"
+                    colorScheme="dark"
+                    style={[styles.stickySearchBar, !isLiquidGlassSupported && styles.stickySearchBarFallback]}
+                    accessible={false}
+                  >
+                    <View style={styles.stickySearchInner} accessible={false}>
+                      <View style={styles.searchIconContainer}>
+                        <View style={styles.searchIconCircle} />
+                        <View style={styles.searchIconHandle} />
+                      </View>
+                      <TextInput
+                        style={styles.stickySearchInput}
+                        placeholder="Search"
+                        placeholderTextColor="rgba(235,235,245,0.6)"
+                        value={searchQuery}
+                        onChangeText={setSearchQuery}
+                        accessible={true}
+                        accessibilityLabel="Search products"
+                        accessibilityHint="Type to filter the products list"
+                      />
+                    </View>
+                  </LiquidGlassView>
+                </View>
 
                 <ScrollView
                   showsVerticalScrollIndicator={false}
@@ -855,6 +916,62 @@ const styles = StyleSheet.create({
   contentArea: {
     flex: 1,
     overflow: 'hidden',
+  },
+
+  // Sticky Search Bar - Top Right (matches nav bar size)
+  stickySearchContainer: {
+    position: 'absolute',
+    top: layout.cardPadding,
+    right: layout.cardPadding,
+    zIndex: 30, // Above fade gradient (10) and fixed header (20)
+    elevation: 30,
+    width: 260,
+  },
+  stickySearchBar: {
+    borderRadius: layout.pillRadius,
+    borderCurve: 'continuous',
+    overflow: 'hidden',
+    minHeight: layout.minTouchTarget,
+  },
+  stickySearchBarFallback: {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  stickySearchInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    gap: 12,
+  },
+  searchIconContainer: {
+    width: 16,
+    height: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  searchIconCircle: {
+    width: 11,
+    height: 11,
+    borderRadius: 5.5,
+    borderWidth: 1.5,
+    borderColor: 'rgba(235,235,245,0.6)',
+  },
+  searchIconHandle: {
+    width: 5,
+    height: 1.5,
+    backgroundColor: 'rgba(235,235,245,0.6)',
+    position: 'absolute',
+    bottom: 0.5,
+    right: 0.5,
+    transform: [{ rotate: '45deg' }],
+  },
+  stickySearchInput: {
+    flex: 1,
+    fontSize: 17,
+    color: '#fff',
+    letterSpacing: -0.4,
   },
 
   // iOS Collapsing Headers
