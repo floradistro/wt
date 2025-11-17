@@ -29,8 +29,24 @@ export interface LoyaltyProgram {
 
 /**
  * Get loyalty program for a vendor
+ *
+ * IMPORTANT: The loyalty_programs table has RLS policy that requires app.current_vendor_id
+ * to be set in the session. We set this using set_config() before querying.
  */
 export async function getLoyaltyProgram(vendorId: string): Promise<LoyaltyProgram | null> {
+  // Set the vendor_id in the session for RLS policy
+  // The RLS policy uses: (vendor_id = (current_setting('app.current_vendor_id'))::uuid)
+  const { error: configError } = await supabase.rpc('set_config', {
+    setting_name: 'app.current_vendor_id',
+    setting_value: vendorId,
+    is_local: true
+  })
+
+  if (configError) {
+    throw new Error(`Failed to set vendor context: ${configError.message}`)
+  }
+
+  // Now query with the session variable set
   const { data, error } = await supabase
     .from('loyalty_programs')
     .select('*')
@@ -39,13 +55,6 @@ export async function getLoyaltyProgram(vendorId: string): Promise<LoyaltyProgra
     .maybeSingle() // Use maybeSingle instead of single to handle no results gracefully
 
   if (error) {
-    // Check if error is related to RLS policy configuration issues
-    if (error.message?.includes('app.current_vendor_id') ||
-        error.message?.includes('unrecognized configuration parameter')) {
-      // RLS policy is misconfigured - return null and let the app work without loyalty
-      console.warn('Loyalty programs table has RLS policy issues. Continuing without loyalty program.')
-      return null
-    }
     throw new Error(`Failed to load loyalty program: ${error.message}`)
   }
 
