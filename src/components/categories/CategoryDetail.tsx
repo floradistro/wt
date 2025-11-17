@@ -92,7 +92,7 @@ export function CategoryDetail({
       {/* Header with Edit/Save toggle */}
       <View style={styles.detailHeader}>
         <Pressable onPress={onBack} style={styles.backButton}>
-          <Text style={styles.backButtonText}>􀆉 Categories</Text>
+          <Text style={styles.backButtonText}>‹ Categories</Text>
         </Pressable>
 
         {isEditing ? (

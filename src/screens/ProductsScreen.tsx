@@ -737,7 +737,7 @@ function ProductDetail({ product, onBack, onProductUpdated }: { product: Product
       {/* Header with Edit/Save toggle */}
       <View style={styles.detailHeader}>
         <Pressable onPress={onBack} style={styles.backButton}>
-          <Text style={styles.backButtonText}>􀆉 Products</Text>
+          <Text style={styles.backButtonText}>‹ Products</Text>
         </Pressable>
 
         {isEditing ? (
