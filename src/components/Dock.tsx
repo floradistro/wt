@@ -215,26 +215,6 @@ const styles = StyleSheet.create({
     height: 11,
     borderRadius: 3,
   },
-  cameraIcon: {
-    width: 32,
-    height: 28,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  lens: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    borderWidth: 2.5,
-  },
-  flash: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    position: 'absolute',
-    top: 0,
-    right: 2,
-  },
   receiptIcon: {
     gap: 4,
   },
