@@ -6,7 +6,6 @@
 
 import { View, Text, StyleSheet, Pressable, ScrollView, TextInput, ActivityIndicator } from 'react-native'
 import { useState } from 'react'
-import { LiquidGlassView, LiquidGlassContainerView, isLiquidGlassSupported } from '@callstack/liquid-glass'
 import * as Haptics from 'expo-haptics'
 import { colors, spacing, radius } from '@/theme/tokens'
 import { layout } from '@/theme/layout'
@@ -121,12 +120,7 @@ export function CategoryDetail({
 
       {/* Header Card */}
       <View style={styles.headerCardContainer}>
-        <LiquidGlassContainerView spacing={12}>
-          <LiquidGlassView
-            effect="regular"
-            colorScheme="dark"
-            style={[styles.headerCardGlass, !isLiquidGlassSupported && styles.headerCardGlassFallback]}
-          >
+        <View style={styles.headerCardGlass}>
           <View style={styles.headerCard}>
             <View style={[styles.headerIconPlaceholder, styles.headerIcon]}>
               <Text style={styles.headerIconText}>
@@ -161,19 +155,13 @@ export function CategoryDetail({
               )}
             </View>
           </View>
-          </LiquidGlassView>
-        </LiquidGlassContainerView>
+        </View>
       </View>
 
       {/* Stats Section */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>OVERVIEW</Text>
-        <LiquidGlassContainerView spacing={12}>
-          <LiquidGlassView
-            effect="regular"
-            colorScheme="dark"
-            style={[styles.cardGlass, !isLiquidGlassSupported && styles.cardGlassFallback]}
-          >
+        <View style={styles.cardGlass}>
           <View style={styles.statsGrid}>
             <View style={styles.statItem}>
               <Text style={styles.statValue}>{category.product_count || 0}</Text>
@@ -190,19 +178,13 @@ export function CategoryDetail({
               <Text style={styles.statLabel}>Templates</Text>
             </View>
           </View>
-          </LiquidGlassView>
-        </LiquidGlassContainerView>
+        </View>
       </View>
 
       {/* Description Section */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>DESCRIPTION</Text>
-        <LiquidGlassContainerView spacing={12}>
-          <LiquidGlassView
-            effect="regular"
-            colorScheme="dark"
-            style={[styles.cardGlass, !isLiquidGlassSupported && styles.cardGlassFallback]}
-          >
+        <View style={styles.cardGlass}>
           {isEditing ? (
             <View style={styles.descriptionContainer}>
               <TextInput
@@ -227,8 +209,7 @@ export function CategoryDetail({
               )}
             </View>
           )}
-          </LiquidGlassView>
-        </LiquidGlassContainerView>
+        </View>
       </View>
 
       {/* Pricing Templates Section */}
@@ -248,17 +229,11 @@ export function CategoryDetail({
       {/* Actions Section */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>ACTIONS</Text>
-        <LiquidGlassContainerView spacing={12}>
-          <LiquidGlassView
-            effect="regular"
-            colorScheme="dark"
-            style={[styles.cardGlass, !isLiquidGlassSupported && styles.cardGlassFallback]}
-          >
-            <SettingsRow label="View Products" showChevron />
-            <SettingsRow label="Manage Subcategories" showChevron />
-            <SettingsRow label="Delete Category" showChevron={false} />
-          </LiquidGlassView>
-        </LiquidGlassContainerView>
+        <View style={styles.cardGlass}>
+          <SettingsRow label="View Products" showChevron />
+          <SettingsRow label="Manage Subcategories" showChevron />
+          <SettingsRow label="Delete Category" showChevron={false} />
+        </View>
       </View>
     </ScrollView>
   )
@@ -303,8 +278,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 6, // Ultra-minimal iOS-style spacing (6px)
     paddingVertical: layout.cardPadding,
-    borderBottomWidth: 0.5,
-    borderBottomColor: 'rgba(255,255,255,0.1)',
   },
   backButton: {
     paddingVertical: 4,
@@ -495,8 +468,6 @@ const styles = StyleSheet.create({
     paddingVertical: layout.rowPaddingVertical,
     paddingHorizontal: layout.rowPaddingHorizontal,
     minHeight: layout.minTouchTarget,
-    borderBottomWidth: 0.5,
-    borderBottomColor: 'rgba(255,255,255,0.05)',
   },
   rowLabel: {
     fontSize: 17,

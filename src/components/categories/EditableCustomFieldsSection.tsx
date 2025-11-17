@@ -6,7 +6,6 @@
 
 import { View, Text, StyleSheet, Pressable, TextInput } from 'react-native'
 import { useState, useEffect, useCallback } from 'react'
-import { LiquidGlassView, LiquidGlassContainerView, isLiquidGlassSupported } from '@callstack/liquid-glass'
 import * as Haptics from 'expo-haptics'
 import { spacing, radius } from '@/theme/tokens'
 import { layout } from '@/theme/layout'
@@ -210,12 +209,7 @@ export function EditableCustomFieldsSection({
   return (
     <View style={styles.section}>
       <Text style={styles.sectionTitle}>CUSTOM FIELDS</Text>
-      <LiquidGlassContainerView spacing={12}>
-        <LiquidGlassView
-          effect="regular"
-          colorScheme="dark"
-          style={[styles.cardGlass, !isLiquidGlassSupported && styles.cardGlassFallback]}
-        >
+      <View style={styles.cardGlass}>
         {isEditing ? (
           <>
             {editedFields.length === 0 ? (
@@ -347,8 +341,7 @@ export function EditableCustomFieldsSection({
             })}
           </>
         )}
-        </LiquidGlassView>
-      </LiquidGlassContainerView>
+      </View>
     </View>
   )
 }
@@ -390,11 +383,8 @@ const styles = StyleSheet.create({
   fieldEditRow: {
     paddingVertical: 14,
     paddingHorizontal: layout.rowPaddingHorizontal,
-    borderBottomWidth: 0.5,
-    borderBottomColor: 'rgba(255,255,255,0.05)',
   },
   fieldEditRowLast: {
-    borderBottomWidth: 0,
   },
   fieldEditHeader: {
     flexDirection: 'row',
@@ -521,11 +511,8 @@ const styles = StyleSheet.create({
   fieldRow: {
     paddingVertical: layout.rowPaddingVertical,
     paddingHorizontal: layout.rowPaddingHorizontal,
-    borderBottomWidth: 0.5,
-    borderBottomColor: 'rgba(255,255,255,0.05)',
   },
   fieldRowLast: {
-    borderBottomWidth: 0,
   },
   fieldInfo: {
     gap: 4,

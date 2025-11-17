@@ -6,7 +6,6 @@
 
 import React, { useState, useEffect, useCallback } from 'react'
 import { View, Text, StyleSheet, Pressable, TextInput, ScrollView } from 'react-native'
-import { LiquidGlassView, LiquidGlassContainerView, isLiquidGlassSupported } from '@callstack/liquid-glass'
 import * as Haptics from 'expo-haptics'
 import { spacing, radius } from '@/theme/tokens'
 import { layout } from '@/theme/layout'
@@ -277,12 +276,7 @@ export function EditablePricingTemplatesSection({
   return (
     <View style={styles.section}>
       <Text style={styles.sectionTitle}>PRICING TEMPLATES</Text>
-      <LiquidGlassContainerView spacing={12}>
-        <LiquidGlassView
-          effect="regular"
-          colorScheme="dark"
-          style={[styles.cardGlass, !isLiquidGlassSupported && styles.cardGlassFallback]}
-        >
+      <View style={styles.cardGlass}>
         {isEditing ? (
           <>
             {editedTemplates.length === 0 ? (
@@ -433,8 +427,7 @@ export function EditablePricingTemplatesSection({
             })}
           </>
         )}
-        </LiquidGlassView>
-      </LiquidGlassContainerView>
+      </View>
     </View>
   )
 }
@@ -476,11 +469,8 @@ const styles = StyleSheet.create({
   templateEditRow: {
     paddingVertical: 14,
     paddingHorizontal: layout.rowPaddingHorizontal,
-    borderBottomWidth: 0.5,
-    borderBottomColor: 'rgba(255,255,255,0.05)',
   },
   templateEditRowLast: {
-    borderBottomWidth: 0,
   },
   templateEditHeader: {
     flexDirection: 'row',
@@ -646,11 +636,8 @@ const styles = StyleSheet.create({
   templateRow: {
     paddingVertical: layout.rowPaddingVertical,
     paddingHorizontal: layout.rowPaddingHorizontal,
-    borderBottomWidth: 0.5,
-    borderBottomColor: 'rgba(255,255,255,0.05)',
   },
   templateRowLast: {
-    borderBottomWidth: 0,
   },
   templateInfo: {
     gap: 8,

@@ -174,10 +174,13 @@ export const usePaymentProcessor = create<ProcessorStore>((set, get) => ({
       clearTimeout(timeoutId)
 
       if (!response.ok) {
+        const errorText = await response.text()
+        logger.error(`🔍 Health check failed: ${response.status} ${response.statusText}`, { errorText })
         throw new Error(`Health check failed: ${response.status} ${response.statusText}`)
       }
 
       const data = await response.json()
+      logger.debug('🔍 Raw response data:', JSON.stringify(data, null, 2))
       const duration = Date.now() - startTime
 
       logger.debug('🔍 Health check response:', data)
