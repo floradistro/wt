@@ -7,6 +7,7 @@ import { View, Text, StyleSheet, Pressable, ScrollView, ActivityIndicator, Image
 import { useState, useRef, useEffect, useMemo } from 'react'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { LiquidGlassView, LiquidGlassContainerView, isLiquidGlassSupported } from '@callstack/liquid-glass'
+import { LinearGradient } from 'expo-linear-gradient'
 import * as Haptics from 'expo-haptics'
 import { colors, spacing, radius } from '@/theme/tokens'
 import { layout } from '@/theme/layout'
@@ -37,6 +38,10 @@ export function ProductsScreen() {
 
   // Sliding animation
   const slideAnim = useRef(new Animated.Value(0)).current // 0 = list view, 1 = detail view
+
+  // Scroll tracking for collapsing headers - using Animated.Value for iOS-style smooth transitions
+  const categoriesHeaderOpacity = useRef(new Animated.Value(0)).current
+  const productsHeaderOpacity = useRef(new Animated.Value(0)).current
 
   const { width } = useWindowDimensions()
   const contentWidth = width - layout.sidebarWidth
@@ -203,22 +208,43 @@ export function ProductsScreen() {
               </View>
             ) : (
               <View style={styles.productsListContent}>
-                <View style={[styles.listHeader, { marginHorizontal: spacing.sm }]}>
-                  <Text style={styles.listHeaderTitle}>Categories</Text>
-                  <Pressable
-                    style={styles.addButton}
-                    onPress={() => {
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                      setShowCategoryModal(true)
-                    }}
-                  >
-                    <Text style={styles.addButtonText}>+</Text>
-                  </Pressable>
-                </View>
+                {/* Fixed Header - appears on scroll */}
+                <Animated.View style={[styles.fixedHeader, { opacity: categoriesHeaderOpacity }]}>
+                  <Text style={styles.fixedHeaderTitle}>Categories</Text>
+                </Animated.View>
+
+                {/* Fade Gradient */}
+                <LinearGradient
+                  colors={['rgba(0,0,0,0.95)', 'rgba(0,0,0,0.8)', 'rgba(0,0,0,0)']}
+                  style={styles.fadeGradient}
+                  pointerEvents="none"
+                />
+
                 <ScrollView
                   showsVerticalScrollIndicator={false}
-                  contentContainerStyle={{ paddingBottom: layout.dockHeight, paddingHorizontal: spacing.sm }}
+                  contentContainerStyle={{ paddingTop: 80, paddingBottom: layout.dockHeight, paddingHorizontal: spacing.sm }}
+                  onScroll={(e) => {
+                    const offsetY = e.nativeEvent.contentOffset.y
+                    const threshold = 40
+                    // Instant transition like iOS
+                    categoriesHeaderOpacity.setValue(offsetY > threshold ? 1 : 0)
+                  }}
+                  scrollEventThrottle={16}
                 >
+                  {/* Large Title - scrolls with content */}
+                  <View style={styles.largeTitleContainer}>
+                    <Text style={styles.largeTitleHeader}>Categories</Text>
+                    <Pressable
+                      style={styles.addButton}
+                      onPress={() => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                        setShowCategoryModal(true)
+                      }}
+                    >
+                      <Text style={styles.addButtonText}>+</Text>
+                    </Pressable>
+                  </View>
+
                   {filteredCategories.map((category) => (
                     <Pressable
                       key={category.id}
@@ -267,11 +293,37 @@ export function ProductsScreen() {
                 </Text>
               </View>
             ) : (
-              <ScrollView
-                style={styles.productsListContent}
-                contentContainerStyle={{ paddingBottom: layout.dockHeight }}
-                showsVerticalScrollIndicator={false}
-              >
+              <View style={styles.productsListContent}>
+                {/* Fixed Header - appears on scroll */}
+                <Animated.View style={[styles.fixedHeader, { opacity: productsHeaderOpacity }]}>
+                  <Text style={styles.fixedHeaderTitle}>
+                    {activeNav === 'all' ? 'All Products' : activeNav === 'low-stock' ? 'Low Stock' : 'Out of Stock'}
+                  </Text>
+                </Animated.View>
+
+                {/* Fade Gradient */}
+                <LinearGradient
+                  colors={['rgba(0,0,0,0.95)', 'rgba(0,0,0,0.8)', 'rgba(0,0,0,0)']}
+                  style={styles.fadeGradient}
+                  pointerEvents="none"
+                />
+
+                <ScrollView
+                  showsVerticalScrollIndicator={false}
+                  contentContainerStyle={{ paddingTop: 80, paddingBottom: layout.dockHeight }}
+                  onScroll={(e) => {
+                    const offsetY = e.nativeEvent.contentOffset.y
+                    const threshold = 40
+                    // Instant transition like iOS
+                    productsHeaderOpacity.setValue(offsetY > threshold ? 1 : 0)
+                  }}
+                  scrollEventThrottle={16}
+                >
+                  {/* Large Title - scrolls with content */}
+                  <Text style={styles.largeTitleHeader}>
+                    {activeNav === 'all' ? 'All Products' : activeNav === 'low-stock' ? 'Low Stock' : 'Out of Stock'}
+                  </Text>
+
                 <LiquidGlassContainerView spacing={12} style={styles.cardWrapper}>
                   <LiquidGlassView
                     effect="regular"
@@ -363,7 +415,8 @@ export function ProductsScreen() {
                   })}
                   </LiquidGlassView>
                 </LiquidGlassContainerView>
-              </ScrollView>
+                </ScrollView>
+              </View>
             )
           )}
         </Animated.View>
@@ -407,7 +460,6 @@ export function ProductsScreen() {
             )
           )}
         </Animated.View>
-        </View>
       </View>
 
       {/* CATEGORY MODALS */}
@@ -444,6 +496,7 @@ export function ProductsScreen() {
           />
         </>
       )}
+      </View>
     </SafeAreaView>
   )
 }
@@ -798,6 +851,50 @@ const styles = StyleSheet.create({
   contentArea: {
     flex: 1,
     overflow: 'hidden',
+  },
+
+  // iOS Collapsing Headers
+  fixedHeader: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingTop: 12,
+    paddingBottom: 12,
+    zIndex: 20, // Above fade gradient
+  },
+  fixedHeaderTitle: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: '#fff',
+    letterSpacing: -0.2,
+  },
+  fadeGradient: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 120,
+    zIndex: 10,
+  },
+  largeTitleHeader: {
+    fontSize: 34,
+    fontWeight: '700',
+    color: '#fff',
+    letterSpacing: -0.5,
+    paddingTop: 16,
+    paddingBottom: 8,
+    paddingHorizontal: spacing.sm,
+  },
+  largeTitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.sm,
+    paddingTop: 16,
+    paddingBottom: 8,
   },
 
   // MIDDLE PRODUCTS LIST
