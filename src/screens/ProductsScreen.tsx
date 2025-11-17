@@ -361,7 +361,8 @@ export function ProductsScreen() {
                 />
 
                 <ScrollView
-                  showsVerticalScrollIndicator={false}
+                  showsVerticalScrollIndicator={true}
+                  indicatorStyle="white"
                   contentContainerStyle={{ paddingTop: 80, paddingBottom: layout.dockHeight }}
                   onScroll={(e) => {
                     const offsetY = e.nativeEvent.contentOffset.y
@@ -499,7 +500,8 @@ export function ProductsScreen() {
                 </View>
 
                 <ScrollView
-                  showsVerticalScrollIndicator={false}
+                  showsVerticalScrollIndicator={true}
+                  indicatorStyle="white"
                   contentContainerStyle={{ paddingTop: 80, paddingBottom: layout.dockHeight }}
                   onScroll={(e) => {
                     const offsetY = e.nativeEvent.contentOffset.y
@@ -733,7 +735,12 @@ function ProductDetail({ product, onBack, onProductUpdated }: { product: Product
   }
 
   return (
-    <ScrollView style={styles.detail} contentContainerStyle={{ paddingBottom: layout.dockHeight }}>
+    <ScrollView
+      style={styles.detail}
+      contentContainerStyle={{ paddingBottom: layout.dockHeight }}
+      showsVerticalScrollIndicator={true}
+      indicatorStyle="white"
+    >
       {/* Header with Edit/Save toggle */}
       <View style={styles.detailHeader}>
         <Pressable onPress={onBack} style={styles.backButton}>

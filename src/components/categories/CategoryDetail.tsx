@@ -88,7 +88,12 @@ export function CategoryDetail({
   }
 
   return (
-    <ScrollView style={styles.detail} contentContainerStyle={{ paddingBottom: layout.dockHeight }}>
+    <ScrollView
+      style={styles.detail}
+      contentContainerStyle={{ paddingBottom: layout.dockHeight }}
+      showsVerticalScrollIndicator={true}
+      indicatorStyle="white"
+    >
       {/* Header with Edit/Save toggle */}
       <View style={styles.detailHeader}>
         <Pressable onPress={onBack} style={styles.backButton}>
