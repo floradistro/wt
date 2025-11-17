@@ -62,6 +62,10 @@ function POSCartItem({
                 }}
                 style={styles.tierBadge}
                 disabled={!onOpenTierSelector}
+                accessibilityRole="button"
+                accessibilityLabel={`Change tier from ${item.tierLabel}`}
+                accessibilityHint="Opens tier selection options"
+                accessibilityState={{ disabled: !onOpenTierSelector }}
               >
                 <Text style={styles.tierBadgeText}>{item.tierLabel}</Text>
                 {onOpenTierSelector && <Text style={styles.tierBadgeChevron}>›</Text>}
@@ -88,6 +92,9 @@ function POSCartItem({
                 onRemoveDiscount?.()
               }}
               style={styles.discountAppliedBadge}
+              accessibilityRole="button"
+              accessibilityLabel={`Remove ${item.manualDiscountType === 'percentage' ? `${item.manualDiscountValue}%` : `$${item.manualDiscountValue?.toFixed(2)}`} staff discount`}
+              accessibilityHint="Tap to remove discount"
             >
               <Text style={styles.discountAppliedText}>
                 {item.manualDiscountType === 'percentage'
@@ -110,11 +117,20 @@ function POSCartItem({
                   onRemove()
                 }}
                 style={styles.cartButton}
+                accessibilityRole="button"
+                accessibilityLabel="Decrease quantity"
+                accessibilityHint={`Remove one ${item.productName || item.name}`}
               >
                 <Text style={styles.cartButtonText}>−</Text>
               </TouchableOpacity>
 
-              <Text style={styles.cartItemQuantity}>{item.quantity}</Text>
+              <Text
+                style={styles.cartItemQuantity}
+                accessibilityLabel={`Quantity: ${item.quantity}`}
+                accessibilityRole="text"
+              >
+                {item.quantity}
+              </Text>
 
               <TouchableOpacity
                 onPress={() => {
@@ -122,6 +138,9 @@ function POSCartItem({
                   onAdd()
                 }}
                 style={styles.cartButton}
+                accessibilityRole="button"
+                accessibilityLabel="Increase quantity"
+                accessibilityHint={`Add one more ${item.productName || item.name}`}
               >
                 <Text style={styles.cartButtonText}>+</Text>
               </TouchableOpacity>
@@ -134,6 +153,9 @@ function POSCartItem({
                 onRemove()
               }}
               style={styles.cartRemoveButton}
+              accessibilityRole="button"
+              accessibilityLabel="Remove item"
+              accessibilityHint={`Remove ${item.productName || item.name} from cart`}
             >
               <Text style={styles.cartRemoveButtonText}>×</Text>
             </TouchableOpacity>
@@ -151,6 +173,9 @@ function POSCartItem({
             onStartDiscounting?.()
           }}
           style={styles.addDiscountLink}
+          accessibilityRole="button"
+          accessibilityLabel="Add staff discount"
+          accessibilityHint="Opens discount input form"
         >
           <Text style={styles.addDiscountLinkText}>+ Add Staff Discount</Text>
         </TouchableOpacity>
@@ -169,6 +194,9 @@ function POSCartItem({
                 styles.discountTypeBtn,
                 discountType === 'percentage' && styles.discountTypeBtnActive
               ]}
+              accessibilityRole="button"
+              accessibilityLabel="Percentage discount"
+              accessibilityState={{ selected: discountType === 'percentage' }}
             >
               <Text style={[
                 styles.discountTypeBtnText,
@@ -184,6 +212,9 @@ function POSCartItem({
                 styles.discountTypeBtn,
                 discountType === 'amount' && styles.discountTypeBtnActive
               ]}
+              accessibilityRole="button"
+              accessibilityLabel="Dollar amount discount"
+              accessibilityState={{ selected: discountType === 'amount' }}
             >
               <Text style={[
                 styles.discountTypeBtnText,
@@ -198,6 +229,9 @@ function POSCartItem({
               value={discountValue}
               onChangeText={setDiscountValue}
               autoFocus
+              accessibilityLabel="Discount amount"
+              accessibilityHint={discountType === 'percentage' ? 'Enter percentage to discount' : 'Enter dollar amount to discount'}
+              accessibilityRole="text"
             />
             <TouchableOpacity
               onPress={handleApplyDiscount}
@@ -206,6 +240,10 @@ function POSCartItem({
                 styles.discountApplyBtn,
                 (!discountValue || parseFloat(discountValue) <= 0) && styles.discountApplyBtnDisabled
               ]}
+              accessibilityRole="button"
+              accessibilityLabel="Apply discount"
+              accessibilityHint="Confirm and apply this discount"
+              accessibilityState={{ disabled: !discountValue || parseFloat(discountValue) <= 0 }}
             >
               <Text style={styles.discountApplyBtnText}>✓</Text>
             </TouchableOpacity>
@@ -216,6 +254,9 @@ function POSCartItem({
                 setDiscountValue('')
               }}
               style={styles.discountCancelBtn}
+              accessibilityRole="button"
+              accessibilityLabel="Cancel discount"
+              accessibilityHint="Close discount form without applying"
             >
               <Text style={styles.discountCancelBtnText}>×</Text>
             </TouchableOpacity>

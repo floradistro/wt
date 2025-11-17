@@ -106,6 +106,9 @@ function POSCart({
               }}
               style={styles.customerPillButtonPressable}
               activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel="Select customer"
+              accessibilityHint="Opens customer selection to apply loyalty points or track purchase"
             >
               <Text style={styles.customerPillText}>Customer</Text>
             </TouchableOpacity>
@@ -127,6 +130,9 @@ function POSCart({
               }}
               style={styles.customerPillPressable}
               activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityLabel={`Selected customer: ${selectedCustomer.display_name || `${selectedCustomer.first_name} ${selectedCustomer.last_name}`.trim() || selectedCustomer.email}${selectedCustomer.loyalty_points > 0 ? `, ${selectedCustomer.loyalty_points} loyalty points` : ''}`}
+              accessibilityHint="Tap to change customer or view customer details"
             >
             <View style={styles.customerPillContent}>
               <View style={styles.customerPillTextContainer}>
@@ -149,6 +155,9 @@ function POSCart({
                 }}
                 style={styles.customerPillClearButton}
                 activeOpacity={0.6}
+                accessibilityRole="button"
+                accessibilityLabel="Clear customer selection"
+                accessibilityHint="Removes customer from this transaction"
               >
                 <Text style={styles.customerPillClearText}>×</Text>
               </TouchableOpacity>
@@ -173,6 +182,9 @@ function POSCart({
                 onPress={onClearCart}
                 style={styles.actionButtonPressable}
                 activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel="Clear cart"
+                accessibilityHint={`Removes all ${cart.length} ${cart.length === 1 ? 'item' : 'items'} from cart`}
               >
                 <Text style={styles.actionButtonText}>Clear Cart</Text>
               </TouchableOpacity>
@@ -263,6 +275,14 @@ function POSCart({
                 minimumTrackTintColor="rgba(255,255,255,0.3)"
                 maximumTrackTintColor="rgba(255,255,255,0.1)"
                 thumbTintColor="#fff"
+                accessibilityLabel="Loyalty points to redeem"
+                accessibilityValue={{
+                  min: 0,
+                  max: maxRedeemablePoints,
+                  now: loyaltyPointsToRedeem,
+                  text: `${loyaltyPointsToRedeem} points, ${loyaltyDiscountAmount.toFixed(2)} dollars off`
+                }}
+                accessibilityHint={`Slide to redeem loyalty points. Maximum ${maxRedeemablePoints} points available`}
               />
 
               <View style={styles.loyaltyButtons}>
@@ -272,6 +292,9 @@ function POSCart({
                     onSetLoyaltyPoints(0)
                   }}
                   style={styles.loyaltyButtonClear}
+                  accessibilityRole="button"
+                  accessibilityLabel="Clear loyalty points"
+                  accessibilityHint="Sets redeemed points to zero"
                 >
                   <Text style={styles.loyaltyButtonClearText}>Clear</Text>
                 </TouchableOpacity>
@@ -281,6 +304,9 @@ function POSCart({
                     onSetLoyaltyPoints(maxRedeemablePoints)
                   }}
                   style={styles.loyaltyButtonMax}
+                  accessibilityRole="button"
+                  accessibilityLabel="Redeem maximum loyalty points"
+                  accessibilityHint={`Redeems all ${maxRedeemablePoints} available points for ${(maxRedeemablePoints * (loyaltyProgram?.point_value || 0.01)).toFixed(2)} dollars off`}
                 >
                   <Text style={styles.loyaltyButtonMaxText}>Max</Text>
                 </TouchableOpacity>
@@ -311,7 +337,13 @@ function POSCart({
       )}
 
       {/* Jobs Principle: End Session - Bottom of cart, subtle, out of the way */}
-      <TouchableOpacity onPress={onEndSession} style={styles.endSessionFooter}>
+      <TouchableOpacity
+        onPress={onEndSession}
+        style={styles.endSessionFooter}
+        accessibilityRole="button"
+        accessibilityLabel="End session"
+        accessibilityHint="Closes the current POS session and returns to session setup"
+      >
         <Text style={styles.endSessionFooterText}>End Session</Text>
       </TouchableOpacity>
 

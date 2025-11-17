@@ -73,7 +73,14 @@ export function CategoryCard({
         style={[styles.card, !isLiquidGlassSupported && styles.cardFallback]}
       >
         {/* Header - Always visible */}
-        <Pressable onPress={onToggleExpansion} style={styles.header}>
+        <Pressable
+          onPress={onToggleExpansion}
+          style={styles.header}
+          accessibilityRole="button"
+          accessibilityLabel={`${category.name} category${category.product_count ? `, ${category.product_count} products` : ''}`}
+          accessibilityHint={isExpanded ? 'Collapse category details' : 'Expand to view category options'}
+          accessibilityState={{ expanded: isExpanded }}
+        >
           <Animated.Text style={[styles.chevron, { transform: [{ rotate: chevronRotation }] }]}>
             ›
           </Animated.Text>
@@ -100,6 +107,10 @@ export function CategoryCard({
               <Pressable
                 style={[styles.sectionButton, expandedSection === 'fields' && styles.sectionButtonActive]}
                 onPress={() => handleSectionPress('fields')}
+                accessibilityRole="tab"
+                accessibilityLabel={`Custom fields, ${fieldsCount} ${fieldsCount === 1 ? 'field' : 'fields'}`}
+                accessibilityHint="View and manage custom fields for this category"
+                accessibilityState={{ selected: expandedSection === 'fields' }}
               >
                 <Text style={[styles.sectionButtonText, expandedSection === 'fields' && styles.sectionButtonTextActive]}>
                   􀏭 Fields ({fieldsCount})
@@ -108,6 +119,10 @@ export function CategoryCard({
               <Pressable
                 style={[styles.sectionButton, expandedSection === 'pricing' && styles.sectionButtonActive]}
                 onPress={() => handleSectionPress('pricing')}
+                accessibilityRole="tab"
+                accessibilityLabel={`Pricing templates, ${templatesCount} ${templatesCount === 1 ? 'template' : 'templates'}`}
+                accessibilityHint="View and manage pricing templates for this category"
+                accessibilityState={{ selected: expandedSection === 'pricing' }}
               >
                 <Text style={[styles.sectionButtonText, expandedSection === 'pricing' && styles.sectionButtonTextActive]}>
                   􀖅 Pricing ({templatesCount})
@@ -119,7 +134,13 @@ export function CategoryCard({
             {expandedSection === 'fields' && (
               <View style={styles.sectionContent}>
                 <Text style={styles.sectionLabel}>CUSTOM FIELDS</Text>
-                <Pressable style={styles.manageButton} onPress={onManageFields}>
+                <Pressable
+                  style={styles.manageButton}
+                  onPress={onManageFields}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Manage custom fields for ${category.name}`}
+                  accessibilityHint="Opens custom fields management screen"
+                >
                   <Text style={styles.manageButtonText}>Manage Fields</Text>
                   <Text style={styles.manageChevron}>􀆊</Text>
                 </Pressable>
@@ -130,7 +151,13 @@ export function CategoryCard({
             {expandedSection === 'pricing' && (
               <View style={styles.sectionContent}>
                 <Text style={styles.sectionLabel}>PRICING TEMPLATES</Text>
-                <Pressable style={styles.manageButton} onPress={onManagePricing}>
+                <Pressable
+                  style={styles.manageButton}
+                  onPress={onManagePricing}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Manage pricing templates for ${category.name}`}
+                  accessibilityHint="Opens pricing templates management screen"
+                >
                   <Text style={styles.manageButtonText}>Manage Templates</Text>
                   <Text style={styles.manageChevron}>􀆊</Text>
                 </Pressable>
@@ -139,11 +166,23 @@ export function CategoryCard({
 
             {/* Actions Row */}
             <View style={styles.actions}>
-              <Pressable style={styles.actionButton} onPress={onEdit}>
+              <Pressable
+                style={styles.actionButton}
+                onPress={onEdit}
+                accessibilityRole="button"
+                accessibilityLabel={`Edit ${category.name} category`}
+                accessibilityHint="Opens category editing form"
+              >
                 <Text style={styles.actionButtonText}>Edit</Text>
               </Pressable>
               <View style={styles.actionDivider} />
-              <Pressable style={styles.actionButton} onPress={onDelete}>
+              <Pressable
+                style={styles.actionButton}
+                onPress={onDelete}
+                accessibilityRole="button"
+                accessibilityLabel={`Delete ${category.name} category`}
+                accessibilityHint="Permanently removes this category. This action cannot be undone."
+              >
                 <Text style={[styles.actionButtonText, styles.actionButtonTextDanger]}>Delete</Text>
               </Pressable>
             </View>

@@ -4,7 +4,7 @@
  */
 
 import { View, Text, StyleSheet, Pressable, ScrollView, ActivityIndicator, Image, TextInput, Animated, useWindowDimensions } from 'react-native'
-import { useState, useRef, useEffect, useMemo } from 'react'
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { LiquidGlassView, LiquidGlassContainerView, isLiquidGlassSupported } from '@callstack/liquid-glass'
 import { LinearGradient } from 'expo-linear-gradient'
@@ -23,6 +23,93 @@ import { useCustomFields } from '@/hooks/useCustomFields'
 import { usePricingTemplates } from '@/hooks/usePricingTemplates'
 
 type NavSection = 'all' | 'low-stock' | 'out-of-stock' | 'categories'
+
+// Memoized Product Item to prevent flickering
+const ProductItem = React.memo(({
+  item,
+  isLast,
+  isSelected,
+  categoryName,
+  pricingDisplay,
+  onPress
+}: {
+  item: Product
+  isLast: boolean
+  isSelected: boolean
+  categoryName: string | null
+  pricingDisplay: string
+  onPress: () => void
+}) => (
+  <Pressable
+    key={item.id}
+    style={[
+      styles.productItem,
+      isSelected && styles.productItemActive,
+      isLast && styles.productItemLast,
+    ]}
+    onPress={onPress}
+  >
+    {/* Icon/Thumbnail */}
+    <View style={styles.productIcon}>
+      {item.featured_image ? (
+        <Image
+          source={{ uri: item.featured_image }}
+          style={styles.productIconImage}
+        />
+      ) : (
+        <View style={[styles.productIconPlaceholder, styles.productIconImage]}>
+          <Text style={styles.productIconText}>
+            {item.name.charAt(0).toUpperCase()}
+          </Text>
+        </View>
+      )}
+    </View>
+
+    {/* Product Name & Category */}
+    <View style={styles.productInfo}>
+      <Text style={styles.productName} numberOfLines={1}>
+        {item.name}
+      </Text>
+      <Text style={styles.productSKU} numberOfLines={1}>
+        {categoryName || 'Uncategorized'}
+      </Text>
+    </View>
+
+    {/* Price Column */}
+    <View style={styles.dataColumn}>
+      <Text style={styles.dataLabel}>PRICE</Text>
+      <Text style={styles.dataValue}>
+        {pricingDisplay}
+      </Text>
+    </View>
+
+    {/* Stock Column - Color Coded */}
+    <View style={styles.dataColumn}>
+      <Text style={styles.dataLabel}>STOCK</Text>
+      <Text
+        style={[
+          styles.dataValue,
+          styles.stockValue,
+          (item.total_stock ?? 0) === 0 && styles.stockOut,
+          (item.total_stock ?? 0) > 0 && (item.total_stock ?? 0) < 10 && styles.stockLow,
+          (item.total_stock ?? 0) >= 10 && styles.stockOk,
+        ]}
+      >
+        {item.total_stock ?? 0}g
+      </Text>
+    </View>
+
+    {/* Locations Column */}
+    <View style={styles.dataColumn}>
+      <Text style={styles.dataLabel}>LOCATIONS</Text>
+      <Text style={styles.dataValue}>
+        {item.inventory?.length || 0}
+      </Text>
+    </View>
+
+    <Text style={styles.productChevron}>􀆊</Text>
+  </Pressable>
+))
 
 export function ProductsScreen() {
   const [activeNav, setActiveNav] = useState<NavSection>('all')
@@ -49,6 +136,13 @@ export function ProductsScreen() {
   const { products: allProducts, isLoading, reload } = useProducts({ search: searchQuery })
   const { categories, isLoading: categoriesLoading, reload: reloadCategories } = useCategories({ includeGlobal: true, parentId: null })
 
+  // Create a category lookup map for fast access
+  const categoryMap = useMemo(() => {
+    const map = new Map<string, string>()
+    categories.forEach(cat => map.set(cat.id, cat.name))
+    return map
+  }, [categories])
+
   // Load all fields and templates for the vendor to properly count assignments
   const { fields: allFields, reload: reloadFields } = useCustomFields({ includeInherited: false })
   const { templates: allTemplates, reload: reloadTemplates } = usePricingTemplates({})
@@ -62,6 +156,11 @@ export function ProductsScreen() {
     reloadFields()
     reloadTemplates()
   }
+
+  // Memoize product selection handler
+  const handleProductSelect = useCallback((product: Product) => {
+    setSelectedProduct(product)
+  }, [])
 
   // Filter products based on active nav
   const products = allProducts.filter(product => {
@@ -332,85 +431,24 @@ export function ProductsScreen() {
                   >
                     {products.map((item, index) => {
                     const isLast = index === products.length - 1
+                    const categoryName = item.primary_category_id ? (categoryMap.get(item.primary_category_id) ?? null) : null
+
+                    // Determine pricing display - show template name if tiered
+                    const hasTiers = item.pricing_data?.mode === 'tiered' && item.pricing_data?.tiers && item.pricing_data.tiers.length > 0
+                    const pricingDisplay = hasTiers && item.pricing_data?.template_name
+                      ? item.pricing_data.template_name
+                      : `$${(item.price || item.regular_price || 0).toFixed(2)}`
+
                     return (
-                      <Pressable
+                      <ProductItem
                         key={item.id}
-                        style={[
-                          styles.productItem,
-                          selectedProduct?.id === item.id && styles.productItemActive,
-                          isLast && styles.productItemLast,
-                        ]}
-                        onPress={() => setSelectedProduct(item)}
-                      >
-                        {/* Icon/Thumbnail */}
-                        <View style={styles.productIcon}>
-                          {item.featured_image ? (
-                            <Image
-                              source={{ uri: item.featured_image }}
-                              style={styles.productIconImage}
-                            />
-                          ) : (
-                            <View style={[styles.productIconPlaceholder, styles.productIconImage]}>
-                              <Text style={styles.productIconText}>
-                                {item.name.charAt(0).toUpperCase()}
-                              </Text>
-                            </View>
-                          )}
-                        </View>
-
-                        {/* Product Name & SKU */}
-                        <View style={styles.productInfo}>
-                          <Text style={styles.productName} numberOfLines={1}>
-                            {item.name}
-                          </Text>
-                          <Text style={styles.productSKU} numberOfLines={1}>
-                            {item.sku || 'No SKU'}
-                          </Text>
-                        </View>
-
-                        {/* Price Column */}
-                        <View style={styles.dataColumn}>
-                          <Text style={styles.dataLabel}>PRICE</Text>
-                          <Text style={styles.dataValue}>
-                            ${(item.price || item.regular_price || 0).toFixed(2)}
-                          </Text>
-                        </View>
-
-                        {/* Stock Column - Color Coded */}
-                        <View style={styles.dataColumn}>
-                          <Text style={styles.dataLabel}>STOCK</Text>
-                          <Text
-                            style={[
-                              styles.dataValue,
-                              styles.stockValue,
-                              (item.total_stock ?? 0) === 0 && styles.stockOut,
-                              (item.total_stock ?? 0) > 0 && (item.total_stock ?? 0) < 10 && styles.stockLow,
-                              (item.total_stock ?? 0) >= 10 && styles.stockOk,
-                            ]}
-                          >
-                            {item.total_stock ?? 0}g
-                          </Text>
-                        </View>
-
-                        {/* Locations Column */}
-                        <View style={styles.dataColumn}>
-                          <Text style={styles.dataLabel}>LOCATIONS</Text>
-                          <Text style={styles.dataValue}>
-                            {item.inventory?.length || 0}
-                          </Text>
-                        </View>
-
-                        {/* Status Indicator */}
-                        <View
-                          style={[
-                            styles.statusDot,
-                            item.status === 'published' && styles.statusPublished,
-                            item.status === 'draft' && styles.statusDraft,
-                          ]}
-                        />
-
-                        <Text style={styles.productChevron}>􀆊</Text>
-                      </Pressable>
+                        item={item}
+                        isLast={isLast}
+                        isSelected={selectedProduct?.id === item.id}
+                        categoryName={categoryName}
+                        pricingDisplay={pricingDisplay}
+                        onPress={() => handleProductSelect(item)}
+                      />
                     )
                   })}
                   </LiquidGlassView>
@@ -1012,24 +1050,9 @@ const styles = StyleSheet.create({
     color: '#34c759',
   },
 
-  // Status Dot
-  statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginLeft: 12,
-  },
-  statusPublished: {
-    backgroundColor: '#34c759',
-  },
-  statusDraft: {
-    backgroundColor: 'rgba(235,235,245,0.3)',
-  },
-
   productChevron: {
     fontSize: 17,
     color: 'rgba(235,235,245,0.3)',
-    marginLeft: 8,
   },
   loadingContainer: {
     padding: 40,

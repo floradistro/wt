@@ -73,6 +73,10 @@ export function CashPaymentView({
               cashTendered === amount.toString() && styles.quickButtonActive,
             ]}
             activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel={`${amount} dollars`}
+            accessibilityHint="Quick select this cash amount"
+            accessibilityState={{ selected: cashTendered === amount.toString() }}
           >
             <Text
               style={[
@@ -102,6 +106,9 @@ export function CashPaymentView({
           placeholder={`$${total.toFixed(2)}`}
           placeholderTextColor="rgba(255,255,255,0.3)"
           selectionColor="#10b981"
+          accessibilityLabel="Cash received amount"
+          accessibilityHint={`Enter cash amount, minimum ${total.toFixed(2)} dollars`}
+          accessibilityRole="text"
         />
       </LiquidGlassView>
 
@@ -136,6 +143,10 @@ export function CashPaymentView({
         disabled={!canComplete}
         activeOpacity={0.7}
         style={styles.completeButtonWrapper}
+        accessibilityRole="button"
+        accessibilityLabel="Complete cash payment"
+        accessibilityHint={canComplete ? `Give customer $${changeAmount.toFixed(2)} in change` : `Enter at least $${total.toFixed(2)}`}
+        accessibilityState={{ disabled: !canComplete }}
       >
         <LiquidGlassView
           effect="regular"

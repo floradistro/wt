@@ -58,6 +58,9 @@ export const ProductCard = memo(function ProductCard({
         onPress={handlePress}
         onLongPress={handleLongPress}
         style={styles.pressable}
+        accessibilityRole="button"
+        accessibilityLabel={`${product.name}, ${displayPrice}, ${product.total_stock ?? 0} in stock${product.on_sale ? ', on sale' : ''}${product.featured ? ', featured' : ''}`}
+        accessibilityHint={onPress ? 'Tap to view product details. Long press for quick actions' : undefined}
       >
         {/* Compact Row Layout */}
         <View style={styles.row}>
@@ -68,16 +71,21 @@ export const ProductCard = memo(function ProductCard({
                 source={{ uri: product.featured_image }}
                 style={styles.thumbnail}
                 resizeMode="cover"
+                accessibilityLabel={`Product image for ${product.name}`}
+                accessibilityRole="image"
               />
             ) : (
-              <View style={styles.thumbnailPlaceholder}>
+              <View
+                style={styles.thumbnailPlaceholder}
+                accessibilityLabel={`No image available for ${product.name}`}
+              >
                 <Text style={styles.thumbnailPlaceholderText}>
                   {product.name.charAt(0).toUpperCase()}
                 </Text>
               </View>
             )}
             {product.featured && (
-              <View style={styles.featuredDot} />
+              <View style={styles.featuredDot} accessibilityLabel="Featured product indicator" />
             )}
           </View>
 
@@ -101,10 +109,17 @@ export const ProductCard = memo(function ProductCard({
 
           {/* Price & Stock */}
           <View style={styles.rightInfo}>
-            <Text style={[styles.price, product.on_sale && styles.salePrice]}>
+            <Text
+              style={[styles.price, product.on_sale && styles.salePrice]}
+              accessibilityLabel={`Price: ${displayPrice}${product.on_sale ? ' (on sale)' : ''}`}
+              accessibilityRole="text"
+            >
               {displayPrice}
             </Text>
-            <View style={[styles.stockBadge, { backgroundColor: stockBadgeColor }]}>
+            <View
+              style={[styles.stockBadge, { backgroundColor: stockBadgeColor }]}
+              accessibilityLabel={`Stock quantity: ${product.total_stock ?? 0} ${(product.total_stock ?? 0) === 0 ? 'out of stock' : (product.total_stock ?? 0) < 10 ? 'low stock' : 'in stock'}`}
+            >
               <Text style={styles.stockText}>{product.total_stock ?? 0}</Text>
             </View>
           </View>
