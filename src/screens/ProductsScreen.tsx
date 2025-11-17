@@ -30,14 +30,12 @@ const ProductItem = React.memo(({
   isLast,
   isSelected,
   categoryName,
-  pricingDisplay,
   onPress
 }: {
   item: Product
   isLast: boolean
   isSelected: boolean
   categoryName: string | null
-  pricingDisplay: string
   onPress: () => void
 }) => (
   <Pressable
@@ -48,6 +46,7 @@ const ProductItem = React.memo(({
       isLast && styles.productItemLast,
     ]}
     onPress={onPress}
+    accessibilityRole="none"
   >
     {/* Icon/Thumbnail */}
     <View style={styles.productIcon}>
@@ -75,14 +74,6 @@ const ProductItem = React.memo(({
       </Text>
     </View>
 
-    {/* Price Column */}
-    <View style={styles.dataColumn}>
-      <Text style={styles.dataLabel}>PRICE</Text>
-      <Text style={styles.dataValue}>
-        {pricingDisplay}
-      </Text>
-    </View>
-
     {/* Stock Column - Color Coded */}
     <View style={styles.dataColumn}>
       <Text style={styles.dataLabel}>STOCK</Text>
@@ -106,8 +97,6 @@ const ProductItem = React.memo(({
         {item.inventory?.length || 0}
       </Text>
     </View>
-
-    <Text style={styles.productChevron}>􀆊</Text>
   </Pressable>
 ))
 
@@ -423,21 +412,11 @@ export function ProductsScreen() {
                     {activeNav === 'all' ? 'All Products' : activeNav === 'low-stock' ? 'Low Stock' : 'Out of Stock'}
                   </Text>
 
-                <LiquidGlassContainerView spacing={12} style={styles.cardWrapper}>
-                  <LiquidGlassView
-                    effect="regular"
-                    colorScheme="dark"
-                    style={[styles.productsCardGlass, !isLiquidGlassSupported && styles.productsCardGlassFallback]}
-                  >
+                <View style={styles.cardWrapper}>
+                  <View style={styles.productsCardGlass}>
                     {products.map((item, index) => {
                     const isLast = index === products.length - 1
                     const categoryName = item.primary_category_id ? (categoryMap.get(item.primary_category_id) ?? null) : null
-
-                    // Determine pricing display - show template name if tiered
-                    const hasTiers = item.pricing_data?.mode === 'tiered' && item.pricing_data?.tiers && item.pricing_data.tiers.length > 0
-                    const pricingDisplay = hasTiers && item.pricing_data?.template_name
-                      ? item.pricing_data.template_name
-                      : `$${(item.price || item.regular_price || 0).toFixed(2)}`
 
                     return (
                       <ProductItem
@@ -446,13 +425,12 @@ export function ProductsScreen() {
                         isLast={isLast}
                         isSelected={selectedProduct?.id === item.id}
                         categoryName={categoryName}
-                        pricingDisplay={pricingDisplay}
                         onPress={() => handleProductSelect(item)}
                       />
                     )
                   })}
-                  </LiquidGlassView>
-                </LiquidGlassContainerView>
+                  </View>
+                </View>
                 </ScrollView>
               </View>
             )
@@ -958,9 +936,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.1)',
-  },
-  productsCardGlassFallback: {
-    backgroundColor: 'rgba(255,255,255,0.05)',
+    backgroundColor: 'rgba(255,255,255,0.05)', // Solid glass effect for smooth scrolling
   },
   productItem: {
     flexDirection: 'row',
@@ -1050,10 +1026,6 @@ const styles = StyleSheet.create({
     color: '#34c759',
   },
 
-  productChevron: {
-    fontSize: 17,
-    color: 'rgba(235,235,245,0.3)',
-  },
   loadingContainer: {
     padding: 40,
     alignItems: 'center',
@@ -1120,6 +1092,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    paddingHorizontal: spacing.lg,
     paddingVertical: layout.cardPadding,
     borderBottomWidth: 0.5,
     borderBottomColor: 'rgba(255,255,255,0.1)',
@@ -1162,6 +1135,7 @@ const styles = StyleSheet.create({
     color: '#60A5FA',
   },
   headerCardContainer: {
+    marginHorizontal: spacing.lg,
     marginTop: layout.sectionSpacing,
     marginBottom: layout.sectionSpacing,
   },
@@ -1247,6 +1221,7 @@ const styles = StyleSheet.create({
 
   // SECTIONS
   section: {
+    marginHorizontal: spacing.lg,
     marginBottom: layout.sectionSpacing,
   },
   sectionTitle: {
