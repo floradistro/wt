@@ -227,7 +227,7 @@ export function EditableCustomFieldsSection({
                 {editedFields.map((field, index) => {
                   const isLast = index === editedFields.length - 1
                   return (
-                    <View key={index} style={[styles.fieldEditRow, isLast && styles.fieldEditRowLast]}>
+                    <View key={field.id || `field-${index}`} style={[styles.fieldEditRow, isLast && styles.fieldEditRowLast]}>
                       {/* Field Header */}
                       <View style={styles.fieldEditHeader}>
                         <TextInput

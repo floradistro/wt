@@ -232,6 +232,9 @@ function POSAddCustomerModal({
                   placeholderTextColor="rgba(255,255,255,0.3)"
                   autoCapitalize="words"
                   editable={!creating}
+                  accessibilityLabel="First name"
+                  accessibilityHint="Required field"
+                  accessibilityRole="text"
                 />
               </View>
               <View style={styles.fieldHalf}>
@@ -244,6 +247,9 @@ function POSAddCustomerModal({
                   placeholderTextColor="rgba(255,255,255,0.3)"
                   autoCapitalize="words"
                   editable={!creating}
+                  accessibilityLabel="Middle name"
+                  accessibilityHint="Optional field"
+                  accessibilityRole="text"
                 />
               </View>
             </View>
@@ -259,6 +265,9 @@ function POSAddCustomerModal({
                 placeholderTextColor="rgba(255,255,255,0.3)"
                 autoCapitalize="words"
                 editable={!creating}
+                accessibilityLabel="Last name"
+                accessibilityHint="Required field"
+                accessibilityRole="text"
               />
             </View>
 
@@ -272,6 +281,10 @@ function POSAddCustomerModal({
                 disabled={creating}
                 activeOpacity={0.7}
                 style={[styles.input, styles.dateInputContainer]}
+                accessibilityLabel="Date of birth"
+                accessibilityHint="Optional field, tap to select date"
+                accessibilityRole="button"
+                accessibilityValue={{ text: dateOfBirth || 'No date selected' }}
               >
                 <Text style={dateOfBirth ? styles.dateText : styles.datePlaceholder}>
                   {dateOfBirth || 'Tap to select date'}
@@ -304,6 +317,9 @@ function POSAddCustomerModal({
                 placeholderTextColor="rgba(255,255,255,0.3)"
                 keyboardType="phone-pad"
                 editable={!creating}
+                accessibilityLabel="Phone number"
+                accessibilityHint="Optional field"
+                accessibilityRole="text"
               />
             </View>
 
@@ -319,6 +335,9 @@ function POSAddCustomerModal({
                 keyboardType="email-address"
                 autoCapitalize="none"
                 editable={!creating}
+                accessibilityLabel="Email address"
+                accessibilityHint="Optional field, auto-generated if empty"
+                accessibilityRole="text"
               />
               <Text style={styles.helperText}>Auto-generated if empty</Text>
             </View>
@@ -336,6 +355,9 @@ function POSAddCustomerModal({
                 placeholderTextColor="rgba(255,255,255,0.3)"
                 autoCapitalize="words"
                 editable={!creating}
+                accessibilityLabel="Street address"
+                accessibilityHint="Optional field"
+                accessibilityRole="text"
               />
             </View>
 
@@ -353,6 +375,9 @@ function POSAddCustomerModal({
                   placeholderTextColor="rgba(255,255,255,0.3)"
                   autoCapitalize="words"
                   editable={!creating}
+                  accessibilityLabel="City"
+                  accessibilityHint="Optional field"
+                  accessibilityRole="text"
                 />
               </View>
               <View style={styles.fieldHalf}>
@@ -368,6 +393,9 @@ function POSAddCustomerModal({
                   autoCapitalize="characters"
                   maxLength={2}
                   editable={!creating}
+                  accessibilityLabel="State"
+                  accessibilityHint="Optional field, two letter state code"
+                  accessibilityRole="text"
                 />
               </View>
             </View>
@@ -385,6 +413,9 @@ function POSAddCustomerModal({
                 placeholderTextColor="rgba(255,255,255,0.3)"
                 keyboardType="number-pad"
                 editable={!creating}
+                accessibilityLabel="Postal code"
+                accessibilityHint="Optional field"
+                accessibilityRole="text"
               />
             </View>
           </LiquidGlassView>
@@ -423,6 +454,10 @@ function POSAddCustomerModal({
             onPress={handleClose}
             activeOpacity={0.7}
             disabled={creating}
+            accessibilityRole="button"
+            accessibilityLabel="Cancel"
+            accessibilityHint="Close this modal without creating a customer"
+            accessibilityState={{ disabled: creating }}
           >
             <Text style={styles.cancelButtonText}>CANCEL</Text>
           </TouchableOpacity>
@@ -443,6 +478,10 @@ function POSAddCustomerModal({
             onPress={handleCreate}
             activeOpacity={0.7}
             disabled={creating}
+            accessibilityRole="button"
+            accessibilityLabel={creating ? 'Creating customer' : 'Create customer'}
+            accessibilityHint="Save the new customer profile"
+            accessibilityState={{ disabled: creating, busy: creating }}
           >
             <Text style={styles.submitButtonText}>
               {creating ? 'CREATING...' : 'CREATE CUSTOMER'}

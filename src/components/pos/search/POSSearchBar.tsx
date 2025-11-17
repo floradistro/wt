@@ -49,6 +49,10 @@ function POSSearchBar({
               }}
               style={styles.filterButtonInner}
               activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel="Filter products"
+              accessibilityHint={activeFilterCount > 0 ? `${activeFilterCount} filters active` : 'No filters active'}
+              accessibilityValue={{ text: activeFilterCount > 0 ? `${activeFilterCount} active` : 'None' }}
             >
               {activeFilterCount > 0 ? (
                 <View style={styles.filterBadge}>
@@ -81,6 +85,9 @@ function POSSearchBar({
                 }}
                 style={styles.filterClearButtonInner}
                 activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel="Clear filters"
+                accessibilityHint={`Remove all ${activeFilterCount} active filters`}
               >
                 <Text style={styles.filterClearText}>×</Text>
               </TouchableOpacity>
@@ -94,6 +101,9 @@ function POSSearchBar({
             placeholderTextColor="rgba(255,255,255,0.3)"
             value={searchQuery}
             onChangeText={onSearchChange}
+            accessibilityLabel="Search products"
+            accessibilityHint="Type to filter products by name or category"
+            accessibilityRole="search"
           />
         </LiquidGlassView>
       </View>

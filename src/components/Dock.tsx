@@ -69,7 +69,7 @@ const tabs = [
   { Icon: MoreIcon, name: 'More' },
 ]
 
-type IconComponent = (props: { color: string }) => JSX.Element
+type IconComponent = (props: { color: string }) => React.JSX.Element
 
 function DockButton({
   icon: Icon,

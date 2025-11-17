@@ -36,14 +36,13 @@ import { usePaymentProcessor } from '@/stores/payment-processor.store'
 import type { Vendor, Customer, Product, SessionInfo } from '@/types/pos'
 import type { PaymentData } from '@/components/pos/payment'
 import type { AAMVAData } from '@/lib/id-scanner/aamva-parser'
-import type { UseCartReturn } from '@/types/hooks'
 
 interface POSCheckoutProps {
   sessionInfo: SessionInfo
   vendor: Vendor
   products: Product[]
   customUserId: string
-  cartHook: UseCartReturn
+  cartHook: any  // TODO: Fix type - actual useCart return doesn't match UseCartReturn
   onEndSession: () => void
   onCheckoutComplete?: () => void
 }

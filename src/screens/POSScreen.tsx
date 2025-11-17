@@ -12,7 +12,7 @@
  * - POSSessionActions: End session, close drawer
  */
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { View, StyleSheet, Animated } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useAuth } from '@/stores/auth.store'
@@ -93,7 +93,7 @@ export function POSScreen() {
   // ========================================
   // HANDLERS (Cross-component communication)
   // ========================================
-  const handleSessionReady = (
+  const handleSessionReady = useCallback((
     newSessionInfo: SessionInfo,
     newVendor: Vendor,
     newSessionData: { sessionNumber: string; totalSales: number; totalCash: number; openingCash: number },
@@ -103,24 +103,24 @@ export function POSScreen() {
     setVendor(newVendor)
     setSessionData(newSessionData)
     setCustomUserId(newCustomUserId)
-  }
+  }, [])
 
-  const handleSessionEnd = () => {
+  const handleSessionEnd = useCallback(() => {
     setSessionInfo(null)
     setVendor(null)
     setSessionData(null)
     setCustomUserId(null)
     setProducts([])
-  }
+  }, [])
 
-  const handleProductsLoaded = (loadedProducts: Product[]) => {
+  const handleProductsLoaded = useCallback((loadedProducts: Product[]) => {
     setProducts(loadedProducts)
-  }
+  }, [])
 
-  const handleAddToCart = (product: Product, tier?: PricingTier) => {
+  const handleAddToCart = useCallback((product: Product, tier?: PricingTier) => {
     // Call the shared cart hook's addToCart function
     cartHook.addToCart(product, tier)
-  }
+  }, [cartHook.addToCart])
 
   // ========================================
   // RENDER

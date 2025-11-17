@@ -159,6 +159,10 @@ const POSProductCard = forwardRef<any, POSProductCardProps>(({ product, onAddToC
         activeOpacity={1}
         onPress={handleCardPress}
         disabled={!inStock}
+        accessibilityRole="button"
+        accessibilityLabel={`${product.name}, starting at $${lowestPrice.toFixed(2)}`}
+        accessibilityHint={inStock ? 'Tap to view pricing options' : 'Out of stock'}
+        accessibilityState={{ disabled: !inStock }}
       >
         <Animated.View
           style={[
@@ -180,6 +184,9 @@ const POSProductCard = forwardRef<any, POSProductCardProps>(({ product, onAddToC
                 source={{ uri: product.image_url }}
                 style={styles.image}
                 resizeMode="cover"
+                accessible={true}
+                accessibilityLabel={`${product.name} product image`}
+                accessibilityRole="image"
               />
             ) : product.vendor_logo_url ? (
               <View style={styles.vendorLogoContainer}>
@@ -187,10 +194,17 @@ const POSProductCard = forwardRef<any, POSProductCardProps>(({ product, onAddToC
                   source={{ uri: product.vendor_logo_url }}
                   style={styles.vendorLogo}
                   resizeMode="contain"
+                  accessible={true}
+                  accessibilityLabel="Vendor logo"
+                  accessibilityRole="image"
                 />
               </View>
             ) : (
-              <View style={styles.placeholderContainer}>
+              <View
+                style={styles.placeholderContainer}
+                accessible={true}
+                accessibilityLabel="No product image available"
+              >
                 <Text style={styles.placeholderText}>NO IMAGE</Text>
               </View>
             )}
@@ -198,8 +212,8 @@ const POSProductCard = forwardRef<any, POSProductCardProps>(({ product, onAddToC
             {/* JOBS PRINCIPLE: Subtle filter tags - only show when filters active */}
             {matchingFilters && matchingFilters.length > 0 && (
               <View style={styles.filterTagsContainer}>
-                {matchingFilters.slice(0, 2).map((filter, index) => (
-                  <View key={index} style={styles.filterTagWrapper}>
+                {matchingFilters.slice(0, 2).map((filter) => (
+                  <View key={filter} style={styles.filterTagWrapper}>
                     <BlurView intensity={80} tint="dark" style={StyleSheet.absoluteFill} />
                     <Text style={styles.filterTagText}>{filter}</Text>
                   </View>
@@ -300,6 +314,10 @@ const POSProductCard = forwardRef<any, POSProductCardProps>(({ product, onAddToC
                             isSuggested && styles.tierButtonSuggested,
                             isSelected && styles.tierButtonSelected,
                           ]}
+                          accessibilityRole="button"
+                          accessibilityLabel={`${tier.weight || tier.label || 'Option'} for $${price.toFixed(2)}`}
+                          accessibilityHint={isSuggested ? 'Suggested option, add to cart' : 'Add to cart'}
+                          accessibilityState={{ selected: isSelected }}
                         >
                           <View style={styles.tierButtonContent}>
                             <Text style={styles.tierLabel}>{tier.weight || tier.label || 'N/A'}</Text>
@@ -315,6 +333,9 @@ const POSProductCard = forwardRef<any, POSProductCardProps>(({ product, onAddToC
                     activeOpacity={0.7}
                     onPress={() => handleTierPress()}
                     style={[styles.tierButton, styles.tierButtonFirst, styles.tierButtonLast]}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Add to cart for $${(product.regular_price || 0).toFixed(2)}`}
+                    accessibilityHint="Add this product to your cart"
                   >
                     <View style={styles.tierButtonContent}>
                       <Text style={styles.tierLabel}>Add to cart</Text>
