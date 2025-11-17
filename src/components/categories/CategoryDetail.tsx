@@ -7,7 +7,7 @@
 import { View, Text, StyleSheet, Pressable, ScrollView, TextInput, ActivityIndicator } from 'react-native'
 import { useState } from 'react'
 import * as Haptics from 'expo-haptics'
-import { colors, spacing, radius } from '@/theme/tokens'
+import { radius } from '@/theme/tokens'
 import { layout } from '@/theme/layout'
 import { supabase } from '@/lib/supabase/client'
 import { logger } from '@/utils/logger'
@@ -93,7 +93,7 @@ export function CategoryDetail({
       contentContainerStyle={{ paddingBottom: layout.dockHeight }}
       showsVerticalScrollIndicator={true}
       indicatorStyle="white"
-      scrollIndicatorInsets={{ right: 0, bottom: layout.dockHeight }}
+      scrollIndicatorInsets={{ right: -layout.containerMargin, bottom: layout.dockHeight }}
     >
       {/* Header with Edit/Save toggle */}
       <View style={styles.detailHeader}>

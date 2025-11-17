@@ -363,7 +363,7 @@ export function ProductsScreen() {
                 <ScrollView
                   showsVerticalScrollIndicator={true}
                   indicatorStyle="white"
-                  scrollIndicatorInsets={{ right: 0, top: 80, bottom: layout.dockHeight }}
+                  scrollIndicatorInsets={{ right: -layout.containerMargin, top: 80, bottom: layout.dockHeight }}
                   contentContainerStyle={{ paddingTop: 80, paddingBottom: layout.dockHeight }}
                   onScroll={(e) => {
                     const offsetY = e.nativeEvent.contentOffset.y
@@ -503,7 +503,7 @@ export function ProductsScreen() {
                 <ScrollView
                   showsVerticalScrollIndicator={true}
                   indicatorStyle="white"
-                  scrollIndicatorInsets={{ right: 0, top: 80, bottom: layout.dockHeight }}
+                  scrollIndicatorInsets={{ right: -layout.containerMargin, top: 80, bottom: layout.dockHeight }}
                   contentContainerStyle={{ paddingTop: 80, paddingBottom: layout.dockHeight }}
                   onScroll={(e) => {
                     const offsetY = e.nativeEvent.contentOffset.y
@@ -742,7 +742,7 @@ function ProductDetail({ product, onBack, onProductUpdated }: { product: Product
       contentContainerStyle={{ paddingBottom: layout.dockHeight }}
       showsVerticalScrollIndicator={true}
       indicatorStyle="white"
-      scrollIndicatorInsets={{ right: 0, bottom: layout.dockHeight }}
+      scrollIndicatorInsets={{ right: -layout.containerMargin, bottom: layout.dockHeight }}
     >
       {/* Header with Edit/Save toggle */}
       <View style={styles.detailHeader}>
