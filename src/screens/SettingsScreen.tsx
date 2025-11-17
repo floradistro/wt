@@ -105,8 +105,8 @@ function AccountDetail({ user, headerOpacity }: { user: any; headerOpacity: Anim
         style={styles.detailScroll}
         showsVerticalScrollIndicator={true}
         indicatorStyle="white"
-        scrollIndicatorInsets={{ right: 2, bottom: layout.dockHeight }}
-        contentContainerStyle={{ paddingBottom: layout.dockHeight, paddingRight: layout.containerMargin }}
+        scrollIndicatorInsets={{ right: 2, top: 80, bottom: layout.dockHeight }}
+        contentContainerStyle={{ paddingTop: 80, paddingBottom: layout.dockHeight, paddingRight: layout.containerMargin }}
         onScroll={(e) => {
           const offsetY = e.nativeEvent.contentOffset.y
           const threshold = 40
@@ -212,8 +212,8 @@ function DeveloperToolsDetail({ headerOpacity }: { headerOpacity: Animated.Value
         style={styles.detailScroll}
         showsVerticalScrollIndicator={true}
         indicatorStyle="white"
-        scrollIndicatorInsets={{ right: 2, bottom: layout.dockHeight }}
-        contentContainerStyle={{ paddingBottom: layout.dockHeight, paddingRight: layout.containerMargin }}
+        scrollIndicatorInsets={{ right: 2, top: 80, bottom: layout.dockHeight }}
+        contentContainerStyle={{ paddingTop: 80, paddingBottom: layout.dockHeight, paddingRight: layout.containerMargin }}
         onScroll={(e) => {
           const offsetY = e.nativeEvent.contentOffset.y
           const threshold = 40
@@ -222,7 +222,9 @@ function DeveloperToolsDetail({ headerOpacity }: { headerOpacity: Animated.Value
         scrollEventThrottle={16}
       >
         {/* Large Title - INSIDE ScrollView */}
-        <Text style={styles.detailTitle} accessibilityRole="header">Developer Tools</Text>
+        <View style={styles.cardWrapper}>
+          <Text style={styles.detailTitle} accessibilityRole="header">Developer Tools</Text>
+        </View>
         <LiquidGlassContainerView spacing={12} style={styles.cardWrapper}>
           <LiquidGlassView
             effect="regular"
@@ -359,8 +361,8 @@ function LocationsDetail({ userLocations, headerOpacity }: { userLocations: User
         style={styles.detailScroll}
         showsVerticalScrollIndicator={true}
         indicatorStyle="white"
-        scrollIndicatorInsets={{ right: 2, bottom: layout.dockHeight }}
-        contentContainerStyle={{ paddingBottom: layout.dockHeight, paddingRight: layout.containerMargin }}
+        scrollIndicatorInsets={{ right: 2, top: 80, bottom: layout.dockHeight }}
+        contentContainerStyle={{ paddingTop: 80, paddingBottom: layout.dockHeight, paddingRight: layout.containerMargin }}
         onScroll={(e) => {
           const offsetY = e.nativeEvent.contentOffset.y
           const threshold = 40
@@ -369,7 +371,9 @@ function LocationsDetail({ userLocations, headerOpacity }: { userLocations: User
         scrollEventThrottle={16}
       >
         {/* Large Title - INSIDE ScrollView */}
-        <Text style={styles.detailTitle} accessibilityRole="header">Locations & Access</Text>
+        <View style={styles.cardWrapper}>
+          <Text style={styles.detailTitle} accessibilityRole="header">Locations & Access</Text>
+        </View>
         {userLocations.map((userLocation) => {
           const locationAddress = formatAddress(userLocation.location)
           const roleDisplay = getRoleDisplay(userLocation.role)
@@ -955,13 +959,12 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   detailTitle: {
-    ...typography.title.large,
     fontSize: 34,
     fontWeight: '700',
-    letterSpacing: 0.4,
-    marginBottom: spacing.lg,
-    paddingHorizontal: 6, // Ultra-minimal iOS-style spacing - matches ProductsScreen
-    paddingTop: spacing.lg, // Start below fade gradient
+    color: '#fff',
+    letterSpacing: -0.5,
+    paddingTop: 16,
+    paddingBottom: 8,
   },
   detailScroll: {
     flex: 1,
@@ -974,8 +977,8 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     height: layout.minTouchTarget,
+    alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 6, // Match minimal iOS spacing
     zIndex: 20,
   },
   fixedHeaderTitle: {
@@ -996,9 +999,8 @@ const styles = StyleSheet.create({
   // Detail Header (for Account)
   detailHeader: {
     alignItems: 'center',
-    paddingTop: spacing.lg, // Start below fade gradient
+    paddingTop: 16,
     paddingBottom: spacing.lg,
-    paddingHorizontal: 6, // Ultra-minimal iOS-style spacing - matches ProductsScreen
   },
   avatarLarge: {
     width: 100,
@@ -1040,7 +1042,8 @@ const styles = StyleSheet.create({
 
   // Detail Cards
   cardWrapper: {
-    marginBottom: spacing.sm,
+    marginHorizontal: 6, // Ultra-minimal iOS-style spacing (6px)
+    marginVertical: layout.contentVertical,
   },
   detailCard: {
     borderRadius: radius.xxl,

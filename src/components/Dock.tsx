@@ -118,7 +118,7 @@ function Dock({ activeTab, onTabChange }: DockProps) {
         >
           {tabs.map((tab, index) => {
             const isActive = activeTab === index
-            const isCenter = index === 2 // Scan is at index 2 (center of 5 items)
+            const isCenter = false // No center icon with 4 items
 
             return (
               <DockButton
@@ -128,11 +128,7 @@ function Dock({ activeTab, onTabChange }: DockProps) {
                 isActive={isActive}
                 isCenter={isCenter}
                 onPress={() => {
-                  Haptics.impactAsync(
-                    isCenter
-                      ? Haptics.ImpactFeedbackStyle.Medium
-                      : Haptics.ImpactFeedbackStyle.Light
-                  )
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
                   onTabChange(index)
                 }}
               />
