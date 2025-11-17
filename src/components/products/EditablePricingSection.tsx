@@ -104,11 +104,11 @@ export function EditablePricingSection({
 
     const tiers = template.default_tiers.map((tier: any, index: number) => ({
       id: tier.id || `tier_${index}`,
-      label: tier.label,
-      quantity: tier.quantity || tier.qty,
+      label: tier.label || '',
+      quantity: tier.quantity || tier.qty || 1,
       unit: tier.unit || 'g',
-      price: tier.price || 0,
-      enabled: true,
+      price: tier.default_price || tier.price || 0,
+      enabled: tier.enabled !== undefined ? tier.enabled : true,
       sort_order: tier.sort_order || index + 1,
     }))
 
