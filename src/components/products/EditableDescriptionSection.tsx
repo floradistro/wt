@@ -4,8 +4,7 @@
  */
 
 import { View, Text, StyleSheet, TextInput } from 'react-native'
-import { LiquidGlassView, LiquidGlassContainerView, isLiquidGlassSupported } from '@callstack/liquid-glass'
-import { spacing, radius } from '@/theme/tokens'
+import { radius } from '@/theme/tokens'
 import { layout } from '@/theme/layout'
 
 interface EditableDescriptionSectionProps {
@@ -27,13 +26,8 @@ export function EditableDescriptionSection({
   return (
     <View style={styles.section}>
       <Text style={styles.sectionTitle}>DESCRIPTION</Text>
-      <LiquidGlassContainerView spacing={12}>
-        <LiquidGlassView
-          effect="regular"
-          colorScheme="dark"
-          style={[styles.cardGlass, !isLiquidGlassSupported && styles.cardGlassFallback]}
-        >
-          {isEditing ? (
+      <View style={styles.cardGlass}>
+        {isEditing ? (
             <View style={styles.editRow}>
               <TextInput
                 style={styles.descriptionInput}
@@ -52,8 +46,7 @@ export function EditableDescriptionSection({
               </Text>
             </View>
           )}
-        </LiquidGlassView>
-      </LiquidGlassContainerView>
+      </View>
     </View>
   )
 }

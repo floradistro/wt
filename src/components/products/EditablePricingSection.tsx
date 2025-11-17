@@ -6,10 +6,9 @@
 
 import { View, Text, StyleSheet, Pressable, TextInput, ActivityIndicator, ScrollView } from 'react-native'
 import { useState, useEffect } from 'react'
-import { LiquidGlassView, LiquidGlassContainerView, isLiquidGlassSupported } from '@callstack/liquid-glass'
 import * as Haptics from 'expo-haptics'
 import type { PricingTier } from '@/hooks/useProducts'
-import { spacing, radius } from '@/theme/tokens'
+import { radius } from '@/theme/tokens'
 import { layout } from '@/theme/layout'
 
 interface EditablePricingSectionProps {
@@ -121,12 +120,7 @@ export function EditablePricingSection({
   return (
     <View style={styles.section}>
       <Text style={styles.sectionTitle}>PRICING</Text>
-      <LiquidGlassContainerView spacing={12}>
-        <LiquidGlassView
-          effect="regular"
-          colorScheme="dark"
-          style={[styles.cardGlass, !isLiquidGlassSupported && styles.cardGlassFallback]}
-        >
+      <View style={styles.cardGlass}>
         {isEditing ? (
           <>
             {/* Pricing Mode Toggle */}
@@ -335,8 +329,7 @@ export function EditablePricingSection({
             )}
           </>
         )}
-        </LiquidGlassView>
-      </LiquidGlassContainerView>
+      </View>
     </View>
   )
 }

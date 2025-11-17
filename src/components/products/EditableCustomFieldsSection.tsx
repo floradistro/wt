@@ -4,9 +4,8 @@
  */
 
 import { View, Text, StyleSheet, Pressable, TextInput } from 'react-native'
-import { LiquidGlassView, LiquidGlassContainerView, isLiquidGlassSupported } from '@callstack/liquid-glass'
 import * as Haptics from 'expo-haptics'
-import { spacing, radius } from '@/theme/tokens'
+import { radius } from '@/theme/tokens'
 import { layout } from '@/theme/layout'
 
 interface EditableCustomFieldsSectionProps {
@@ -69,12 +68,7 @@ export function EditableCustomFieldsSection({
   return (
     <View style={styles.section}>
       <Text style={styles.sectionTitle}>PRODUCT DETAILS</Text>
-      <LiquidGlassContainerView spacing={12}>
-        <LiquidGlassView
-          effect="regular"
-          colorScheme="dark"
-          style={[styles.cardGlass, !isLiquidGlassSupported && styles.cardGlassFallback]}
-        >
+      <View style={styles.cardGlass}>
         {isEditing ? (
           <>
             {Object.entries(editedCustomFields).length === 0 ? (
@@ -138,8 +132,7 @@ export function EditableCustomFieldsSection({
             })}
           </>
         )}
-        </LiquidGlassView>
-      </LiquidGlassContainerView>
+      </View>
     </View>
   )
 }
