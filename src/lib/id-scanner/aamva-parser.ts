@@ -19,33 +19,35 @@
  * - DBA: License expiration date
  */
 
+import { logger } from '@/utils/logger'
+
 export interface AAMVAData {
   // Name fields
-  fullName?: string;
-  firstName?: string;
-  middleName?: string;
-  lastName?: string;
+  fullName?: string
+  firstName?: string
+  middleName?: string
+  lastName?: string
 
   // Birth and ID
-  dateOfBirth?: string; // YYYY-MM-DD format
-  licenseNumber?: string;
+  dateOfBirth?: string // YYYY-MM-DD format
+  licenseNumber?: string
 
   // Address
-  streetAddress?: string;
-  city?: string;
-  state?: string;
-  zipCode?: string;
+  streetAddress?: string
+  city?: string
+  state?: string
+  zipCode?: string
 
   // Physical characteristics
-  height?: string;
-  eyeColor?: string;
+  height?: string
+  eyeColor?: string
 
   // License dates
-  issueDate?: string; // YYYY-MM-DD format
-  expirationDate?: string; // YYYY-MM-DD format
+  issueDate?: string // YYYY-MM-DD format
+  expirationDate?: string // YYYY-MM-DD format
 
   // Raw data for debugging
-  raw?: string;
+  raw?: string
 }
 
 /**
@@ -71,7 +73,7 @@ function parseAAMVADate(dateStr: string): string | undefined {
       return `${year}-${month}-${day}`;
     }
   } catch (err) {
-    console.error("Failed to parse AAMVA date:", dateStr, err);
+    logger.error("Failed to parse AAMVA date:", dateStr, err);
   }
 
   return undefined;
@@ -139,39 +141,39 @@ export function parseAAMVABarcode(barcodeData: string): AAMVAData {
     result.expirationDate = parseAAMVADate(expirationDateRaw);
   }
 
-  return result;
+  return result
 }
 
 /**
  * Format parsed AAMVA data for display
  */
 export function formatAAMVAData(data: AAMVAData): string {
-  const lines: string[] = [];
+  const lines: string[] = []
 
   if (data.firstName || data.lastName) {
     lines.push(
-      `Name: ${[data.firstName, data.middleName, data.lastName].filter(Boolean).join(" ")}`
-    );
+      `Name: ${[data.firstName, data.middleName, data.lastName].filter(Boolean).join(' ')}`
+    )
   } else if (data.fullName) {
-    lines.push(`Name: ${data.fullName}`);
+    lines.push(`Name: ${data.fullName}`)
   }
 
   if (data.dateOfBirth) {
-    lines.push(`DOB: ${data.dateOfBirth}`);
+    lines.push(`DOB: ${data.dateOfBirth}`)
   }
 
   if (data.licenseNumber) {
-    lines.push(`License: ${data.licenseNumber}`);
+    lines.push(`License: ${data.licenseNumber}`)
   }
 
   if (data.streetAddress || data.city || data.state) {
     const address = [data.streetAddress, data.city, data.state, data.zipCode]
       .filter(Boolean)
-      .join(", ");
-    lines.push(`Address: ${address}`);
+      .join(', ')
+    lines.push(`Address: ${address}`)
   }
 
-  return lines.join("\n");
+  return lines.join('\n')
 }
 
 /**
@@ -179,18 +181,18 @@ export function formatAAMVAData(data: AAMVAData): string {
  */
 export function calculateAge(dateOfBirth: string): number | undefined {
   try {
-    const dob = new Date(dateOfBirth);
-    const today = new Date();
-    let age = today.getFullYear() - dob.getFullYear();
-    const monthDiff = today.getMonth() - dob.getMonth();
+    const dob = new Date(dateOfBirth)
+    const today = new Date()
+    let age = today.getFullYear() - dob.getFullYear()
+    const monthDiff = today.getMonth() - dob.getMonth()
 
     if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < dob.getDate())) {
-      age--;
+      age--
     }
 
-    return age;
+    return age
   } catch {
-    return undefined;
+    return undefined
   }
 }
 
@@ -198,6 +200,6 @@ export function calculateAge(dateOfBirth: string): number | undefined {
  * Check if person is of legal age (21+)
  */
 export function isLegalAge(dateOfBirth: string): boolean {
-  const age = calculateAge(dateOfBirth);
-  return age !== undefined && age >= 21;
+  const age = calculateAge(dateOfBirth)
+  return age !== undefined && age >= 21
 }

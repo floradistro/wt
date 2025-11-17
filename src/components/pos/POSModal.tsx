@@ -1,0 +1,241 @@
+/**
+ * POSModal - Unified Modal Component
+ * The ONE way to do modals in WhaleTools POS
+ *
+ * Apple Philosophy: One perfect way to do things
+ * - Consistent design across all popouts
+ * - Beautiful liquid glass effects
+ * - Landscape/tablet support built-in
+ * - Smooth animations
+ * - Keyboard handling
+ *
+ * Usage:
+ * <POSModal
+ *   visible={visible}
+ *   title="NEW CUSTOMER"
+ *   subtitle="Enter customer information"
+ *   onClose={handleClose}
+ * >
+ *   {children}
+ * </POSModal>
+ */
+
+import {
+  View,
+  Text,
+  StyleSheet,
+  Modal,
+  Animated,
+  Dimensions,
+  ScrollView,
+  KeyboardAvoidingView,
+  Platform,
+  TouchableOpacity,
+} from 'react-native'
+import { LiquidGlassView, isLiquidGlassSupported } from '@callstack/liquid-glass'
+import * as Haptics from 'expo-haptics'
+import { memo, useRef, useEffect, ReactNode } from 'react'
+import { colors, typography, spacing, radius, blur, shadows, borderWidth } from '@/theme/tokens'
+
+const { width } = Dimensions.get('window')
+const isTablet = width > 600
+
+interface POSModalProps {
+  visible: boolean
+  title: string
+  subtitle?: string
+  maxWidth?: number
+  onClose: () => void
+  children: ReactNode
+  showCloseButton?: boolean
+}
+
+function POSModal({
+  visible,
+  title,
+  subtitle,
+  maxWidth = isTablet ? 900 : undefined,
+  onClose,
+  children,
+  showCloseButton = false,
+}: POSModalProps) {
+  const fadeAnim = useRef(new Animated.Value(0)).current
+  const scaleAnim = useRef(new Animated.Value(0.9)).current
+
+  useEffect(() => {
+    if (visible) {
+      Animated.parallel([
+        Animated.timing(fadeAnim, {
+          toValue: 1,
+          duration: 200,
+          useNativeDriver: true,
+        }),
+        Animated.spring(scaleAnim, {
+          toValue: 1,
+          tension: 50,
+          friction: 10,
+          useNativeDriver: true,
+        }),
+      ]).start()
+    } else {
+      Animated.parallel([
+        Animated.timing(fadeAnim, {
+          toValue: 0,
+          duration: 150,
+          useNativeDriver: true,
+        }),
+        Animated.timing(scaleAnim, {
+          toValue: 0.9,
+          duration: 150,
+          useNativeDriver: true,
+        }),
+      ]).start()
+    }
+  }, [visible])
+
+  const handleClose = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    onClose()
+  }
+
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="none"
+      supportedOrientations={['portrait', 'landscape', 'landscape-left', 'landscape-right']}
+      onRequestClose={handleClose}
+    >
+      <Animated.View style={[styles.overlayContainer, { opacity: fadeAnim }]}>
+        <LiquidGlassView
+          effect="regular"
+          colorScheme="dark"
+          style={[
+            StyleSheet.absoluteFill,
+            !isLiquidGlassSupported && styles.overlayFallback,
+          ]}
+        />
+
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.keyboardView}
+        >
+          <ScrollView
+            contentContainerStyle={styles.scrollContent}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
+            <Animated.View
+              style={[
+                {
+                  transform: [{ scale: scaleAnim }],
+                },
+              ]}
+            >
+              {/* @ts-expect-error - ViewStyle type issue with conditional maxWidth */}
+              <View style={[styles.modalContentWrapper, maxWidth && { maxWidth }]}>
+                <LiquidGlassView
+                  effect="regular"
+                  colorScheme="dark"
+                  tintColor="rgba(15,15,15,0.92)"
+                  style={[
+                    styles.modalContent,
+                    !isLiquidGlassSupported && styles.modalContentFallback,
+                  ]}
+                >
+                  {/* Header */}
+                  <View style={styles.header}>
+                    <View style={styles.headerContent}>
+                      <Text style={styles.title}>{title}</Text>
+                      {subtitle && <Text style={styles.subtitle}>{subtitle}</Text>}
+                    </View>
+                    {showCloseButton && (
+                      <TouchableOpacity
+                        onPress={handleClose}
+                        style={styles.closeButton}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={styles.closeButtonText}>✕</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+
+                  {/* Content */}
+                  {children}
+                </LiquidGlassView>
+              </View>
+            </Animated.View>
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </Animated.View>
+    </Modal>
+  )
+}
+
+const POSModalMemo = memo(POSModal)
+export { POSModalMemo as POSModal }
+
+const styles = StyleSheet.create({
+  overlayContainer: {
+    flex: 1,
+  },
+  overlayFallback: {
+    backgroundColor: 'rgba(0,0,0,0.85)',
+  },
+  keyboardView: {
+    flex: 1,
+  },
+  scrollContent: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    padding: isTablet ? spacing.huge : spacing.xl,
+  },
+  modalContentWrapper: {
+    alignSelf: 'center',
+    width: '100%',
+  },
+  modalContent: {
+    borderRadius: radius.xxl,
+    borderCurve: 'continuous' as any,
+    overflow: 'hidden',
+  },
+  modalContentFallback: {
+    backgroundColor: 'rgba(18,18,18,0.96)',
+  },
+  header: {
+    paddingHorizontal: spacing.xxxl,
+    paddingTop: spacing.xxxl,
+    paddingBottom: spacing.xl,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+  },
+  headerContent: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  title: {
+    fontSize: 20,
+    fontWeight: '200',
+    color: colors.text.primary,
+    letterSpacing: 3,
+    marginBottom: spacing.xs,
+    textAlign: 'center',
+  },
+  subtitle: {
+    ...typography.caption.regular,
+    color: colors.text.subtle,
+    textAlign: 'center',
+  },
+  closeButton: {
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  closeButtonText: {
+    fontSize: 24,
+    fontWeight: '200',
+    color: colors.text.tertiary,
+  },
+})

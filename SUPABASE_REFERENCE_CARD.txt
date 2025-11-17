@@ -1,0 +1,39 @@
+╔══════════════════════════════════════════════════════════════╗
+║              SUPABASE CONNECTION REFERENCE                   ║
+║                     whaletools-native                        ║
+╚══════════════════════════════════════════════════════════════╝
+
+📍 LOCATION: /Users/whale/Desktop/whaletools-native
+
+🔐 CONNECTION INFO:
+   Host: db.uaednwpxursknmwdeejn.supabase.co
+   Port: 5432
+   User: postgres
+   Pass: SelahEsco123!!
+   DB:   postgres
+
+🚀 QUICK COMMANDS:
+
+   ./db-query.sh "SELECT * FROM orders LIMIT 5;"
+   ./migrate.sh supabase/migrations/file.sql
+   ./db-console.sh
+
+⚠️  3 CRITICAL RULES:
+
+   1. Port MUST be 5432 (NOT 6543)
+   2. Username MUST be postgres (NOT postgres.PROJECT_REF)
+   3. IP whitelisted: 76.36.43.19/32
+
+📖 DOCUMENTATION:
+
+   README: README_SUPABASE.md (quick start)
+   FULL:   SUPABASE_MUST_READ.md (complete guide)
+
+🔗 DASHBOARD:
+
+   https://supabase.com/dashboard/project/uaednwpxursknmwdeejn
+
+✅ STATUS: 100% OPERATIONAL (363 orders)
+   Last verified: November 16, 2025
+
+═══════════════════════════════════════════════════════════════

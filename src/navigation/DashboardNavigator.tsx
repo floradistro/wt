@@ -6,9 +6,10 @@ import { POSScreen } from '@/screens/POSScreen'
 import { ProductsScreen } from '@/screens/ProductsScreen'
 import { ScanScreen } from '@/screens/ScanScreen'
 import { OrdersScreen } from '@/screens/OrdersScreen'
-import { MoreScreen } from '@/screens/MoreScreen'
+import { SettingsScreen } from '@/screens/SettingsScreen'
+import { ErrorBoundary } from '@/components/ErrorBoundary'
 
-const screens = [POSScreen, ProductsScreen, ScanScreen, OrdersScreen, MoreScreen]
+const screens = [POSScreen, ProductsScreen, ScanScreen, OrdersScreen, SettingsScreen]
 
 export function DashboardNavigator() {
   const [activeTab, setActiveTab] = useState(0)
@@ -18,7 +19,9 @@ export function DashboardNavigator() {
   return (
     <SafeAreaProvider>
       <View style={styles.container}>
-        <ActiveScreen />
+        <ErrorBoundary>
+          <ActiveScreen />
+        </ErrorBoundary>
         <Dock activeTab={activeTab} onTabChange={setActiveTab} />
       </View>
     </SafeAreaProvider>

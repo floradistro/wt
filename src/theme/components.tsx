@@ -4,7 +4,7 @@
  */
 
 import { View, Text, TouchableOpacity, StyleSheet, ViewStyle, ActivityIndicator, Pressable, Modal as RNModal, Animated, TextInput as RNTextInput } from 'react-native'
-import { BlurView } from 'expo-blur'
+import { LiquidGlassView, isLiquidGlassSupported } from '@callstack/liquid-glass'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import * as Haptics from 'expo-haptics'
 import { ReactNode, useRef, useEffect, forwardRef } from 'react'
@@ -169,15 +169,17 @@ export function Card({ children, style, blur: useBlur = true, blurIntensity = 't
           overflow: 'hidden',
           borderWidth: borderWidth.regular,
           borderColor: colors.border.regular,
-          backgroundColor: useBlur ? colors.glass.thin : colors.glass.regular,
+          backgroundColor: useBlur ? 'transparent' : colors.glass.regular,
         },
         style,
       ]}
     >
       {useBlur && (
-        <View style={StyleSheet.absoluteFill}>
-          <BlurView intensity={blur[blurIntensity]} tint="dark" style={StyleSheet.absoluteFill} />
-        </View>
+        <LiquidGlassView
+          effect="regular"
+          colorScheme="dark"
+          style={[StyleSheet.absoluteFill, !isLiquidGlassSupported && { backgroundColor: colors.glass.thin }]}
+        />
       )}
       <View style={{ position: 'relative' }}>{children}</View>
     </View>
@@ -240,7 +242,11 @@ export function Modal({ visible, onClose, children, title, showHandle = true }: 
       <Animated.View style={[StyleSheet.absoluteFill, { opacity: modalOpacity }]}>
         {/* Backdrop */}
         <Pressable style={StyleSheet.absoluteFill} onPress={handleClose}>
-          <BlurView intensity={blur.regular} tint="dark" style={StyleSheet.absoluteFill} />
+          <LiquidGlassView
+            effect="regular"
+            colorScheme="dark"
+            style={[StyleSheet.absoluteFill, !isLiquidGlassSupported && { backgroundColor: 'rgba(0,0,0,0.4)' }]}
+          />
         </Pressable>
 
         {/* Modal Content */}
@@ -268,7 +274,11 @@ export function Modal({ visible, onClose, children, title, showHandle = true }: 
               paddingBottom: spacing.huge,
             }}
           >
-            <BlurView intensity={blur.thin} tint="dark" style={StyleSheet.absoluteFill} />
+            <LiquidGlassView
+              effect="regular"
+              colorScheme="dark"
+              style={[StyleSheet.absoluteFill, !isLiquidGlassSupported && { backgroundColor: colors.glass.thin }]}
+            />
 
             {/* Handle */}
             {showHandle && (

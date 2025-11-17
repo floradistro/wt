@@ -8,7 +8,6 @@ import {
   View,
   Text,
   StyleSheet,
-  SafeAreaView,
   StatusBar,
   KeyboardAvoidingView,
   Platform,
@@ -16,17 +15,41 @@ import {
   Image,
   Alert,
 } from 'react-native'
-import { BlurView } from 'expo-blur'
+import { SafeAreaView } from 'react-native-safe-area-context'
+import { LiquidGlassView, isLiquidGlassSupported } from '@callstack/liquid-glass'
+import * as SplashScreen from 'expo-splash-screen'
 import * as Haptics from 'expo-haptics'
+
+// Initialize Sentry FIRST (before anything else)
+import { initializeSentry, Sentry } from './src/utils/sentry'
+import { validatePaymentEnvironment, checkForMockPaymentCode } from './src/utils/payment-validation'
 import { useAuth, useAuthActions } from './src/stores/auth.store'
 import { DashboardNavigator } from './src/navigation/DashboardNavigator'
 import { ErrorBoundary } from './src/components/ErrorBoundary'
+import { LoadingScreen } from './src/components/LoadingScreen'
 import { Button, TextInput as DSTextInput } from './src/theme'
 import { colors, typography, spacing, radius, blur, animation } from './src/theme/tokens'
+import { logger } from './src/utils/logger'
 
-export default function App() {
+initializeSentry()
+
+// Validate payment environment on app startup
+if (__DEV__) {
+  try {
+    validatePaymentEnvironment()
+    checkForMockPaymentCode()
+  } catch (error) {
+    console.error('⚠️ Payment Environment Validation Failed:', error)
+  }
+}
+
+// Keep the splash screen visible while we fetch resources
+SplashScreen.preventAutoHideAsync()
+
+function App() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [isRestoringSession, setIsRestoringSession] = useState(true)
 
   // Auth state from store
   const { user, session, isLoading, error } = useAuth()
@@ -39,7 +62,30 @@ export default function App() {
   const orb2 = useRef(new Animated.Value(0)).current
 
   useEffect(() => {
-    restoreSession()
+    // Restore session with minimum loading time for smooth UX
+    const restoreWithDelay = async () => {
+      try {
+        const startTime = Date.now()
+        await restoreSession()
+        const elapsed = Date.now() - startTime
+        const minimumLoadTime = 1500 // Show loading screen for at least 1.5s
+
+        if (elapsed < minimumLoadTime) {
+          await new Promise(resolve => setTimeout(resolve, minimumLoadTime - elapsed))
+        }
+
+        setIsRestoringSession(false)
+
+        // Hide the native splash screen
+        await SplashScreen.hideAsync()
+      } catch (error) {
+        logger.warn('Error during session restore', { error })
+        setIsRestoringSession(false)
+        await SplashScreen.hideAsync()
+      }
+    }
+
+    restoreWithDelay()
 
     // Entrance animation with spring
     Animated.parallel([
@@ -123,6 +169,15 @@ export default function App() {
     outputRange: [1, 1.3],
   })
 
+  // Show loading screen while restoring session
+  if (isRestoringSession) {
+    return (
+      <ErrorBoundary>
+        <LoadingScreen />
+      </ErrorBoundary>
+    )
+  }
+
   // If logged in, show dashboard
   if (user && session) {
     return (
@@ -157,9 +212,11 @@ export default function App() {
             {/* Logo - Matches POS location selector design */}
             <View style={styles.logoContainer}>
               <View style={styles.logoCircle}>
-                <View style={styles.logoCircleBg}>
-                  <BlurView intensity={blur.thin} tint="dark" style={StyleSheet.absoluteFill} />
-                </View>
+                <LiquidGlassView
+                  effect="regular"
+                  colorScheme="dark"
+                  style={[StyleSheet.absoluteFill, !isLiquidGlassSupported && styles.logoCircleFallback]}
+                />
                 <Image
                   source={require('./assets/logo.png')}
                   style={styles.logo}
@@ -276,8 +333,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  logoCircleBg: {
-    ...StyleSheet.absoluteFillObject,
+  logoCircleFallback: {
     backgroundColor: colors.glass.thin,
   },
   logo: {
@@ -330,3 +386,6 @@ const styles = StyleSheet.create({
     color: colors.text.ghost,
   },
 })
+
+// Wrap App with Sentry for error tracking
+export default Sentry.wrap(App)

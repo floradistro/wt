@@ -102,9 +102,18 @@ export interface SessionInfo {
 export interface LoyaltyProgram {
   id: string
   vendor_id: string
+  name: string
+  description?: string
+  is_active: boolean
   point_value: number
-  enabled: boolean
+  points_per_dollar: number
   min_redemption_points?: number
+  points_expiry_days?: number
+  allow_points_on_discounted_items?: boolean
+  points_on_tax?: boolean
+  tiers?: any
+  created_at: string
+  updated_at: string
 }
 
 export interface PaymentData {

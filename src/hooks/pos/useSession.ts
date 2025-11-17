@@ -8,6 +8,7 @@ import { useState, useCallback } from 'react'
 import type { SessionInfo, Vendor, Location } from '@/types/pos'
 import { supabase } from '@/lib/supabase/client'
 import * as Haptics from 'expo-haptics'
+import { logger } from '@/utils/logger'
 
 interface UseSessionReturn {
   sessionInfo: SessionInfo | null
@@ -107,7 +108,7 @@ export function useSession(): UseSessionReturn {
 
       setLocations(locs)
     } catch (err) {
-      console.error('Error loading vendor/locations:', err)
+      logger.error('Error loading vendor/locations:', err)
       setError(err instanceof Error ? err.message : 'Failed to load vendor/locations')
     } finally {
       setLoading(false)
@@ -139,7 +140,7 @@ export function useSession(): UseSessionReturn {
         taxName,
       })
     } catch (err) {
-      console.error('Error loading location tax config:', err)
+      logger.error('Error loading location tax config:', err)
       // Fallback with default tax rate
       setSessionInfo({
         locationId,
@@ -181,7 +182,7 @@ export function useSession(): UseSessionReturn {
         // No active session - needs cash drawer
         return { needsCashDrawer: true, registerId, registerName }
       } catch (err) {
-        console.error('Error selecting register:', err)
+        logger.error('Error selecting register:', err)
         throw err
       }
     },
@@ -223,7 +224,7 @@ export function useSession(): UseSessionReturn {
           openingCash,
         })
       } catch (err) {
-        console.error('Error opening cash drawer:', err)
+        logger.error('Error opening cash drawer:', err)
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
         throw err
       }
@@ -258,7 +259,7 @@ export function useSession(): UseSessionReturn {
         // Clear session
         clearSession()
       } catch (err) {
-        console.error('Error closing cash drawer:', err)
+        logger.error('Error closing cash drawer:', err)
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
         throw err
       }

@@ -4,6 +4,7 @@ import {  BlurView } from 'expo-blur'
 import * as Haptics from 'expo-haptics'
 import { memo,  useRef, useEffect, useState } from 'react'
 import {  supabase } from '@/lib/supabase/client'
+import { logger } from '@/utils/logger'
 
 const { width } = Dimensions.get('window')
 const isTablet = width > 600
@@ -184,6 +185,10 @@ function POSRegisterSelector({
   }, [locationId])
 
   const loadRegisters = async () => {
+    if (!locationId) {
+      return
+    }
+
     try {
       // Get all registers for this location
       const { data: registersData, error: registersError } = await supabase
@@ -194,7 +199,7 @@ function POSRegisterSelector({
         .order('register_number')
 
       if (registersError) {
-        console.error('Error loading registers:', registersError)
+        logger.error('Error loading registers:', registersError)
         throw registersError
       }
 
@@ -216,7 +221,7 @@ function POSRegisterSelector({
         .in('register_id', (registersData || []).map(r => r.id))
 
       if (sessionsError) {
-        console.error('Error loading sessions:', sessionsError)
+        logger.error('Error loading sessions:', sessionsError)
       }
 
       // Combine registers with their active sessions
@@ -244,7 +249,7 @@ function POSRegisterSelector({
 
       setRegisters(registersWithSessions)
     } catch (error) {
-      console.error('Error loading registers:', error)
+      logger.error('Error loading registers:', error)
     } finally {
       setLoading(false)
     }

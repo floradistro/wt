@@ -1,12 +1,13 @@
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions } from 'react-native'
 import { memo, useState, useRef } from 'react'
-import { BlurView } from 'expo-blur'
+import { LiquidGlassView, isLiquidGlassSupported } from '@callstack/liquid-glass'
 import Slider from '@react-native-community/slider'
 import * as Haptics from 'expo-haptics'
 import type { CartItem, Customer, LoyaltyProgram, Product, PricingTier } from '@/types/pos'
 import { POSCartItem } from './POSCartItem'
 import { POSTotalsSection } from './POSTotalsSection'
 import { POSProductCard } from '../POSProductCard'
+import { layout } from '@/theme/layout'
 
 const { width: _width } = Dimensions.get('window')
 
@@ -75,36 +76,58 @@ function POSCart({
     : null
 
   return (
-    <View style={styles.cartCard}>
-      <View style={styles.cartBg}>
-        <BlurView intensity={50} tint="dark" style={StyleSheet.absoluteFill} />
-      </View>
-
+    <LiquidGlassView
+      effect="clear"
+      colorScheme="dark"
+      tintColor="rgba(0,0,0,0.05)"
+      style={[
+        styles.cartCard,
+        !isLiquidGlassSupported && styles.cartCardFallback
+      ]}
+    >
       {/* iOS 26 Perfectly Simple Cart Header */}
       <View style={styles.cartHeader}>
         {/* Customer Section - iOS 26 Rounded Container or Pill Button */}
         {!selectedCustomer ? (
-          <TouchableOpacity
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-              onSelectCustomer()
-            }}
-            style={styles.customerPillButton}
-            activeOpacity={0.7}
+          <LiquidGlassView
+            effect="regular"
+            colorScheme="dark"
+            tintColor="rgba(255,255,255,0.05)"
+            interactive
+            style={[
+              styles.customerPillButton,
+              !isLiquidGlassSupported && styles.customerPillButtonFallback
+            ]}
           >
-            <BlurView intensity={60} tint="systemMaterialDark" style={StyleSheet.absoluteFill} />
-            <Text style={styles.customerPillText}>Customer</Text>
-          </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                onSelectCustomer()
+              }}
+              style={styles.customerPillButtonPressable}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.customerPillText}>Customer</Text>
+            </TouchableOpacity>
+          </LiquidGlassView>
         ) : (
-          <TouchableOpacity
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-              onSelectCustomer()
-            }}
-            style={styles.customerPill}
-            activeOpacity={0.8}
+          <LiquidGlassView
+            effect="regular"
+            colorScheme="dark"
+            interactive
+            style={[
+              styles.customerPill,
+              !isLiquidGlassSupported && styles.customerPillFallback
+            ]}
           >
-            <BlurView intensity={80} tint="systemChromeMaterialDark" style={StyleSheet.absoluteFill} />
+            <TouchableOpacity
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                onSelectCustomer()
+              }}
+              style={styles.customerPillPressable}
+              activeOpacity={0.8}
+            >
             <View style={styles.customerPillContent}>
               <View style={styles.customerPillTextContainer}>
                 <Text style={styles.customerPillName} numberOfLines={1}>
@@ -130,26 +153,36 @@ function POSCart({
                 <Text style={styles.customerPillClearText}>×</Text>
               </TouchableOpacity>
             </View>
-          </TouchableOpacity>
+            </TouchableOpacity>
+          </LiquidGlassView>
         )}
 
         {/* Action Buttons Row */}
         {cart.length > 0 && (
           <View style={styles.actionRow}>
-            <TouchableOpacity
-              onPress={onClearCart}
-              style={styles.actionButton}
-              activeOpacity={0.7}
+            <LiquidGlassView
+              effect="regular"
+              colorScheme="dark"
+              interactive
+              style={[
+                styles.actionButton,
+                !isLiquidGlassSupported && styles.actionButtonFallback
+              ]}
             >
-              <BlurView intensity={60} tint="systemMaterialDark" style={StyleSheet.absoluteFill} />
-              <Text style={styles.actionButtonText}>Clear Cart</Text>
-            </TouchableOpacity>
+              <TouchableOpacity
+                onPress={onClearCart}
+                style={styles.actionButtonPressable}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.actionButtonText}>Clear Cart</Text>
+              </TouchableOpacity>
+            </LiquidGlassView>
           </View>
         )}
       </View>
 
       {/* Cart Items */}
-      <ScrollView style={styles.cartItems} showsVerticalScrollIndicator={false}>
+      <ScrollView style={styles.cartItems} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: layout.dockHeight }}>
         {cart.length === 0 ? (
           <View style={styles.emptyCart}>
             <Text style={styles.emptyCartText}>Cart is empty</Text>
@@ -305,7 +338,7 @@ function POSCart({
           />
         </View>
       )}
-    </View>
+    </LiquidGlassView>
   )
 }
 
@@ -313,16 +346,17 @@ const POSCartMemo = memo(POSCart)
 export { POSCartMemo as POSCart }
 
 const styles = StyleSheet.create({
+  // Liquid Glass Cart Container - iOS 26 Best Practice
   cartCard: {
     flex: 1,
     borderRadius: 24,
+    borderCurve: 'continuous',
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
+    borderColor: 'rgba(255,255,255,0.2)',
   },
-  cartBg: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.4)',
+  cartCardFallback: {
+    backgroundColor: 'rgba(20,20,20,0.85)',
   },
 
   // Perfectly Simple Cart Header
@@ -333,15 +367,21 @@ const styles = StyleSheet.create({
     gap: 12,
   },
 
-  // Customer Pill Button (when no customer selected)
+  // Customer Pill Button (when no customer selected) - Liquid Glass
   customerPillButton: {
-    height: 48,
     borderRadius: 24,
+    borderCurve: 'continuous',
     overflow: 'hidden',
-    alignItems: 'center',
-    justifyContent: 'center',
     borderWidth: 0.5,
     borderColor: 'rgba(255,255,255,0.15)',
+  },
+  customerPillButtonFallback: {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  customerPillButtonPressable: {
+    height: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   customerPillText: {
     fontSize: 15,
@@ -350,12 +390,18 @@ const styles = StyleSheet.create({
     letterSpacing: -0.3,
   },
 
-  // Customer Pill (when customer selected) - Special, elegant pill
+  // Customer Pill (when customer selected) - Liquid Glass with regular effect
   customerPill: {
-    height: 48,
     borderRadius: 24,
+    borderCurve: 'continuous',
     overflow: 'hidden',
     borderWidth: 0,
+  },
+  customerPillFallback: {
+    backgroundColor: 'rgba(255,255,255,0.12)',
+  },
+  customerPillPressable: {
+    height: 48,
   },
   customerPillContent: {
     flex: 1,
@@ -402,16 +448,22 @@ const styles = StyleSheet.create({
     gap: 8,
   },
 
-  // Action Button - Transparent Pill
+  // Action Button - Liquid Glass Pill
   actionButton: {
     flex: 1,
-    height: 44,
     borderRadius: 100,
+    borderCurve: 'continuous',
     overflow: 'hidden',
-    alignItems: 'center',
-    justifyContent: 'center',
     borderWidth: 0.5,
     borderColor: 'rgba(255,255,255,0.15)',
+  },
+  actionButtonFallback: {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  actionButtonPressable: {
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   actionButtonText: {
     fontSize: 13,

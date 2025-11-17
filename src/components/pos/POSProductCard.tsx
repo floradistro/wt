@@ -7,9 +7,10 @@ import { useState, useRef, memo, forwardRef, useImperativeHandle } from 'react'
 const { width } = Dimensions.get('window')
 const isTablet = width > 600
 // Jobs Principle: 3-column grid accounting for cart sidebar
-// Cart width: 380px on tablet, 320px on phone, plus gaps and padding
+// Cart width: 380px on tablet, 320px on phone
+// Left padding: 16px, gap between columns: 16px = 32px total
 const cartWidth = isTablet ? 380 : 320
-const availableWidth = isTablet ? width - cartWidth - 60 : width - cartWidth - 48
+const availableWidth = width - cartWidth - 32 // 16px left padding + 16px gap
 const cardWidth = availableWidth / 3 - 12
 
 interface PricingTier {

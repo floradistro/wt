@@ -2,6 +2,7 @@ import { View, Text, StyleSheet, ScrollView, ActivityIndicator } from 'react-nat
 import { memo } from 'react'
 import type { Product, PricingTier } from '@/types/pos'
 import { POSProductCard } from '../POSProductCard'
+import { layout } from '@/theme/layout'
 
 interface POSProductGridProps {
   products: Product[]
@@ -121,8 +122,9 @@ const styles = StyleSheet.create({
   },
   productsGridWithHeader: {
     paddingTop: 80, // Space for floating search bar
-    paddingBottom: 24,
-    paddingHorizontal: 16,
+    paddingBottom: layout.dockHeight,
+    paddingLeft: 16,
+    paddingRight: 0,
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 16,

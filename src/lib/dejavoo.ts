@@ -3,6 +3,8 @@
  * Documentation: https://app.theneo.io/dejavoo/spin/spin-rest-api-methods
  */
 
+import { logger } from '@/utils/logger'
+
 // ============================================================
 // TYPES & INTERFACES
 // ============================================================
@@ -220,7 +222,7 @@ export class DejavooClient {
           } catch (_e) {
             // Not JSON
           }
-          console.error("🔴 DejaVoo API Error Response:", {
+          logger.error("🔴 DejaVoo API Error Response:", {
             status: response.status,
             statusText: response.statusText,
             body: errorBody,
@@ -368,7 +370,7 @@ export class DejavooClient {
         // Terminal errors (timeout, unavailable, etc.) mean we reached the API
         // but the terminal isn't responding
         if (error.isTimeout()) {
-          console.warn("⚠️ Terminal timeout", { error: error.message, statusCode: error.statusCode });
+          logger.warn("⚠️ Terminal timeout", { error: error.message, statusCode: error.statusCode });
           throw new DejavooApiError(
             "Terminal did not respond in time. Check that the terminal is:\n• Powered on\n• Connected to network\n• Not processing another transaction",
             error.statusCode,
@@ -377,7 +379,7 @@ export class DejavooClient {
         }
 
         if (error.isTerminalUnavailable()) {
-          console.warn("⚠️ Terminal unavailable", { error: error.message, statusCode: error.statusCode });
+          logger.warn("⚠️ Terminal unavailable", { error: error.message, statusCode: error.statusCode });
           throw new DejavooApiError(
             "Terminal is not available. Check that the terminal is:\n• Powered on\n• Connected to network\n• Registered with correct TPN",
             error.statusCode,
@@ -386,7 +388,7 @@ export class DejavooClient {
         }
 
         // Other API errors might mean credentials are wrong
-        console.error("❌ Terminal test failed - API error", {
+        logger.error("❌ Terminal test failed - API error", {
           error: error.message,
           statusCode: error.statusCode,
           resultCode: error.resultCode,
@@ -399,7 +401,7 @@ export class DejavooClient {
       }
 
       // Network errors mean we can't reach the API at all
-      console.error("❌ Terminal test failed - Network error", error);
+      logger.error("❌ Terminal test failed - Network error", error);
       const errorMsg = error instanceof Error ? error.message : "Unknown network error";
       throw new Error(
         `Unable to reach Dejavoo API: ${errorMsg}\n\nCheck your internet connection and firewall settings.`,

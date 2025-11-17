@@ -72,21 +72,21 @@ function LiquidGlass({
 
   // Map intensity to blur values and layer opacities
   const intensityMap = {
-    ultraThin: { blur: blur.ultraThin, vibrancy: 0.01, gradient: 0.03 },
-    thin: { blur: blur.thin, vibrancy: 0.02, gradient: 0.04 },
-    regular: { blur: blur.regular, vibrancy: 0.03, gradient: 0.05 },
-    thick: { blur: blur.thick, vibrancy: 0.04, gradient: 0.06 },
-    ultraThick: { blur: blur.ultraThick, vibrancy: 0.05, gradient: 0.08 },
+    ultraThin: { blur: blur.ultraThin, vibrancy: 0.01, gradient: 0.03, border: 0.1 },
+    thin: { blur: blur.thin, vibrancy: 0.02, gradient: 0.04, border: 0.12 },
+    regular: { blur: blur.regular, vibrancy: 0.03, gradient: 0.05, border: 0.15 },
+    thick: { blur: blur.thick, vibrancy: 0.05, gradient: 0.07, border: 0.18 },
+    ultraThick: { blur: blur.ultraThick, vibrancy: 0.07, gradient: 0.09, border: 0.2 },
   }
 
   const config = intensityMap[intensity]
 
   if (Platform.OS !== 'ios') {
-    // Android fallback - single layer with gradient
+    // Android fallback - frosted glass effect
     return (
       <View style={[styles.container, style]}>
-        <View style={styles.androidBg} />
-        <View style={[styles.vibrancyLayer, { opacity: config.vibrancy * 2 }]} />
+        <View style={[styles.androidBg, { opacity: 0.85 }]} />
+        <View style={[styles.vibrancyLayer, { opacity: config.vibrancy * 3 }]} />
         {children}
       </View>
     )
@@ -97,14 +97,14 @@ function LiquidGlass({
       {/* LAYER 1: Base Blur - UIVisualEffectView (Apple's native blur) */}
       <BlurView
         intensity={config.blur}
-        tint="systemUltraThinMaterial"
+        tint="dark"
         style={StyleSheet.absoluteFill}
       />
 
       {/* LAYER 2: Vibrancy Simulation - Mimics color sampling */}
       <View style={[
         styles.vibrancyLayer,
-        { backgroundColor: `rgba(255,255,255,${config.vibrancy})` }
+        { backgroundColor: `rgba(20,20,20,${config.vibrancy * 8})` }
       ]} />
 
       {/* LAYER 3: Light Refraction - Gradient overlay for depth */}
@@ -112,6 +112,10 @@ function LiquidGlass({
         <View style={[
           styles.topGradient,
           { opacity: config.gradient }
+        ]} />
+        <View style={[
+          styles.bottomGradient,
+          { opacity: config.gradient * 0.6 }
         ]} />
       </View>
 
@@ -126,7 +130,10 @@ function LiquidGlass({
       )}
 
       {/* LAYER 5: Border Highlight - Depth perception */}
-      <View style={styles.borderHighlight} />
+      <View style={[
+        styles.borderHighlight,
+        { borderColor: `rgba(255,255,255,${config.border})` }
+      ]} />
 
       {/* Content */}
       {children}
@@ -140,7 +147,7 @@ export { LiquidGlassMemo as LiquidGlass }
 const styles = StyleSheet.create({
   container: {
     overflow: 'hidden',
-    backgroundColor: colors.glass.ultraThin, // Fallback base
+    backgroundColor: 'transparent', // Let the blur show through
   },
 
   // Vibrancy layer - simulates dynamic color sampling
@@ -162,26 +169,36 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     height: '40%',
-    backgroundColor: 'rgba(255,255,255,0.05)',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+
+  // Bottom gradient - subtle depth at bottom
+  bottomGradient: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: '30%',
+    backgroundColor: 'rgba(0,0,0,0.06)',
   },
 
   // Shimmer layer - subtle animated light movement
   shimmerLayer: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(255,255,255,0.05)',
+    backgroundColor: 'rgba(255,255,255,0.08)',
   },
 
-  // Border highlight - creates depth perception
+  // Border highlight - creates depth perception with dynamic opacity
   borderHighlight: {
     ...StyleSheet.absoluteFillObject,
     borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.15)',
+    borderColor: 'rgba(255,255,255,0.15)', // Default, overridden by intensity
     pointerEvents: 'none',
   },
 
-  // Android fallback
+  // Android fallback - semi-transparent dark background
   androidBg: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: colors.background.secondary,
+    backgroundColor: 'rgba(20,20,20,0.92)',
   },
 })

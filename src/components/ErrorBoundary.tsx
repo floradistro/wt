@@ -9,6 +9,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { BlurView } from 'expo-blur'
 import * as Haptics from 'expo-haptics'
 import { colors, typography, spacing, radius } from '@/theme'
+import { logger } from '@/utils/logger'
 
 interface Props {
   children: ReactNode
@@ -37,7 +38,7 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-    console.error('Error Boundary caught error:', error, errorInfo)
+    logger.error('Error Boundary caught error:', error, errorInfo)
   }
 
   resetError = () => {

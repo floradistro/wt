@@ -1,5 +1,6 @@
 import { View, Text, StyleSheet, Modal, TouchableOpacity, TouchableWithoutFeedback, TextInput, FlatList, ActivityIndicator, Dimensions, Platform, Keyboard, Animated } from 'react-native'
 import { BlurView } from 'expo-blur'
+import { LiquidGlassView, isLiquidGlassSupported } from '@callstack/liquid-glass'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import * as Haptics from 'expo-haptics'
 import { memo, useState, useEffect, useRef, useCallback } from 'react'
@@ -8,6 +9,7 @@ import { parseAAMVABarcode, isLegalAge, calculateAge, type AAMVAData } from '@/l
 import { playSuccessBeep, playRejectionTone } from '@/lib/id-scanner/audio'
 import { supabase } from '@/lib/supabase/client'
 import type { Customer } from '@/types/pos'
+import { logger } from '@/utils/logger'
 
 const { height } = Dimensions.get('window')
 
@@ -16,6 +18,7 @@ interface POSUnifiedCustomerSelectorProps {
   vendorId: string
   onCustomerSelected: (customer: Customer) => void
   onNoMatchFoundWithData: (data: AAMVAData) => void
+  onAddCustomer?: () => void
   onClose: () => void
 }
 
@@ -24,6 +27,7 @@ function POSUnifiedCustomerSelector({
   vendorId,
   onCustomerSelected,
   onNoMatchFoundWithData,
+  onAddCustomer,
   onClose,
 }: POSUnifiedCustomerSelectorProps) {
   const insets = useSafeAreaInsets()
@@ -246,31 +250,22 @@ function POSUnifiedCustomerSelector({
       // Lookup customer and update SAME card
       lookupCustomer(data)
     } catch (error) {
-      console.error('Scan error:', error)
+      logger.error('Scan error:', error)
       resetScanner()
     }
   }
 
   const lookupCustomer = async (scannedData: AAMVAData) => {
     try {
-      const { data: { session } } = await supabase.auth.getSession()
-      if (!session?.access_token) {
-        onNoMatchFoundWithData(scannedData)
-        return
-      }
+      // Quick exact match lookup using Supabase
+      if (scannedData.firstName && scannedData.lastName) {
+        const { data: customers } = await supabase
+          .from('customers')
+          .select('*')
+          .ilike('first_name', scannedData.firstName)
+          .ilike('last_name', scannedData.lastName)
+          .limit(5)
 
-      const apiUrl = process.env.EXPO_PUBLIC_API_URL
-      const url = new URL(`${apiUrl}/api/pos/customers`)
-      url.searchParams.set('vendorId', vendorId)
-      url.searchParams.set('search', `${scannedData.firstName} ${scannedData.lastName}`)
-
-      const response = await fetch(url.toString(), {
-        method: 'GET',
-        headers: { 'Authorization': `Bearer ${session.access_token}` },
-      })
-
-      if (response.ok) {
-        const { customers } = await response.json()
         const exactMatch = customers?.find((c: any) =>
           c.first_name?.toUpperCase() === scannedData.firstName?.toUpperCase() &&
           c.last_name?.toUpperCase() === scannedData.lastName?.toUpperCase()
@@ -289,10 +284,10 @@ function POSUnifiedCustomerSelector({
         }
       }
 
-      // No match - close card and show create flow
+      // No match - trigger intelligent matching flow
       onNoMatchFoundWithData(scannedData)
     } catch (error) {
-      console.error('Lookup error:', error)
+      logger.error('Lookup error:', error)
       onNoMatchFoundWithData(scannedData)
     }
   }
@@ -364,25 +359,17 @@ function POSUnifiedCustomerSelector({
 
     setSearching(true)
     try {
-      const { data: { session } } = await supabase.auth.getSession()
-      if (!session?.access_token) return
+      // Search customers directly in Supabase
+      const { data: results } = await supabase
+        .from('customers')
+        .select('*')
+        .or(`first_name.ilike.%${query}%,last_name.ilike.%${query}%,email.ilike.%${query}%,phone.ilike.%${query}%`)
+        .order('created_at', { ascending: false })
+        .limit(50)
 
-      const apiUrl = process.env.EXPO_PUBLIC_API_URL
-      const url = new URL(`${apiUrl}/api/pos/customers`)
-      url.searchParams.set('vendorId', vendorId)
-      url.searchParams.set('search', query)
-
-      const response = await fetch(url.toString(), {
-        method: 'GET',
-        headers: { 'Authorization': `Bearer ${session.access_token}` },
-      })
-
-      if (response.ok) {
-        const { customers: results } = await response.json()
-        setCustomers(results || [])
-      }
+      setCustomers(results || [])
     } catch (error) {
-      console.error('Search error:', error)
+      logger.error('Search error:', error)
     } finally {
       setSearching(false)
     }
@@ -430,12 +417,36 @@ function POSUnifiedCustomerSelector({
           </TouchableWithoutFeedback>
         )}
 
-        {/* Scan ID Label - Only show when camera is active */}
+        {/* Scan ID Label + Manual Add Button - Only show when camera is active */}
         {!isTypingMode && isScanning && !isProcessing && !scanMessage && !parsedData && !matchedCustomer && (
           <View style={styles.scanLabelContainer}>
             <View style={styles.scanLabel}>
               <Text style={styles.scanLabelText}>Scan ID</Text>
             </View>
+
+            {/* Manual Add Customer Button - Always visible on scanner screen */}
+            {onAddCustomer && (
+              <LiquidGlassView
+                effect="regular"
+                colorScheme="dark"
+                interactive
+                style={[
+                  styles.manualAddButton,
+                  !isLiquidGlassSupported && styles.manualAddButtonFallback,
+                ]}
+              >
+                <TouchableOpacity
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                    onAddCustomer()
+                  }}
+                  style={styles.manualAddButtonInner}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.manualAddText}>+ ADD CUSTOMER</Text>
+                </TouchableOpacity>
+              </LiquidGlassView>
+            )}
           </View>
         )}
 
@@ -555,6 +566,20 @@ function POSUnifiedCustomerSelector({
 
           {/* Customer List - Grouped section with rounded container */}
           <View style={styles.listContent}>
+            {/* Add New Customer Button */}
+            {onAddCustomer && (
+              <TouchableOpacity
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                  onAddCustomer()
+                }}
+                style={styles.addCustomerButton}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.addCustomerText}>+ ADD NEW CUSTOMER</Text>
+              </TouchableOpacity>
+            )}
+
             {searching ? (
               <View style={styles.centered}>
                 <ActivityIndicator size="small" color="rgba(255,255,255,0.6)" />
@@ -682,6 +707,40 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
 
+  // Add New Customer Button
+  addCustomerButton: {
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    marginBottom: 16,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addCustomerIconContainer: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addCustomerIcon: {
+    fontSize: 18,
+    fontWeight: '400',
+    color: '#fff',
+    lineHeight: 18,
+  },
+  addCustomerText: {
+    fontSize: 10,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+    letterSpacing: 1.5,
+    color: '#fff',
+  },
+
   // Customer List Section - Rounded container that clips scrolling content
   customerListSection: {
     flex: 1,
@@ -697,6 +756,7 @@ const styles = StyleSheet.create({
     right: 0,
     alignItems: 'center',
     zIndex: 10,
+    gap: 16,
   },
   scanLabel: {
     paddingHorizontal: 24,
@@ -711,6 +771,27 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: '#fff',
     letterSpacing: -0.3,
+  },
+
+  // Manual Add Customer Button (on scanner screen)
+  manualAddButton: {
+    borderRadius: 100,
+    overflow: 'hidden',
+    marginTop: 12,
+  },
+  manualAddButtonFallback: {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  manualAddButtonInner: {
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    alignItems: 'center',
+  },
+  manualAddText: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: '#fff',
+    letterSpacing: 2,
   },
 
   // Scan Message

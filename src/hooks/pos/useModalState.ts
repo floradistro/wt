@@ -13,6 +13,8 @@ export type ModalType =
   | 'cashDrawerClose'
   | 'payment'
   | 'customerSelector'
+  | 'customerMatch'
+  | 'addCustomer'
   | 'categoryDropdown'
   | 'filtersDropdown'
 

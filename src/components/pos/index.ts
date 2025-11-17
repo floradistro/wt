@@ -8,9 +8,15 @@ export { POSRegisterSelector } from './POSRegisterSelector'
 
 // Customer & ID Scanning
 export { POSUnifiedCustomerSelector } from './POSUnifiedCustomerSelector'
+export { POSAddCustomerModal } from './POSAddCustomerModal'
+export { POSCustomerMatchModal } from './POSCustomerMatchModal'
+export type { CustomerMatch, MatchConfidence } from './POSCustomerMatchModal'
+
+// Unified Modal Component
+export { POSModal } from './POSModal'
 
 // Payment
-export { POSPaymentModal } from './POSPaymentModal'
+export { default as POSPaymentModal } from './POSPaymentModal'
 export { PaymentProcessorStatus } from './PaymentProcessorStatus'
 export { default as POSSaleSuccessModal } from './POSSaleSuccessModal'
 
@@ -25,3 +31,9 @@ export * from './products'
 
 // Search Components
 export * from './search'
+
+// Session Components
+export * from './session'
+
+// Checkout Components
+export * from './checkout'

@@ -1,12 +1,14 @@
 import { useState, useEffect } from 'react'
 import type { LoyaltyProgram, Customer } from '@/types/pos'
+import { loyaltyService } from '@/services'
+import { logger } from '@/utils/logger'
 
 export function useLoyalty(vendorId: string | null, selectedCustomer: Customer | null) {
   const [loyaltyProgram, setLoyaltyProgram] = useState<LoyaltyProgram | null>(null)
   const [loyaltyPointsToRedeem, setLoyaltyPointsToRedeem] = useState(0)
 
   /**
-   * Load loyalty program settings from API
+   * Load loyalty program settings from Supabase
    */
   useEffect(() => {
     const loadLoyaltyProgram = async () => {
@@ -15,20 +17,11 @@ export function useLoyalty(vendorId: string | null, selectedCustomer: Customer |
       }
 
       try {
-        const BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000'
-
-        const response = await fetch(`${BASE_URL}/api/vendor/loyalty/program`, {
-          headers: {
-            'x-vendor-id': vendorId,
-          },
-        })
-
-        if (response.ok) {
-          const data = await response.json()
-          setLoyaltyProgram(data.program)
-        }
-      } catch (_error) {
+        const program = await loyaltyService.getLoyaltyProgram(vendorId)
+        setLoyaltyProgram(program)
+      } catch (error) {
         // Silently fail - loyalty is optional
+        logger.error('Failed to load loyalty program:', error)
       }
     }
 

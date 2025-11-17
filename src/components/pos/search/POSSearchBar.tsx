@@ -1,6 +1,6 @@
 import { View, Text, StyleSheet, TextInput, TouchableOpacity } from 'react-native'
 import { memo, type ReactNode } from 'react'
-import { BlurView } from 'expo-blur'
+import { LiquidGlassView, isLiquidGlassSupported } from '@callstack/liquid-glass'
 import * as Haptics from 'expo-haptics'
 
 interface POSSearchBarProps {
@@ -23,46 +23,68 @@ function POSSearchBar({
   return (
     <View style={styles.searchHeaderFloating}>
       <View style={styles.unifiedSearchBar}>
-        <View style={styles.unifiedSearchBarPill}>
-          {/* BlurView for glass effect */}
-          <BlurView intensity={50} tint="dark" style={StyleSheet.absoluteFill} />
-
-          {/* Filter Button - Left Side - iOS 26 Style */}
-          <TouchableOpacity
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-              onFilterPress()
-            }}
+        <LiquidGlassView
+          style={[
+            styles.unifiedSearchBarPill,
+            !isLiquidGlassSupported && styles.fallback,
+          ]}
+          effect="clear"
+          colorScheme="dark"
+        >
+          {/* Filter Button - Left Side - iOS 26 Style with Liquid Glass */}
+          <LiquidGlassView
+            effect="regular"
+            colorScheme="dark"
+            interactive
             style={[
               styles.filterButton,
-              activeFilterCount > 0 && styles.filterButtonActive
+              activeFilterCount > 0 && styles.filterButtonActive,
+              !isLiquidGlassSupported && styles.filterButtonFallback
             ]}
-            activeOpacity={0.7}
           >
-            {activeFilterCount > 0 ? (
-              <View style={styles.filterBadge}>
-                <Text style={styles.filterBadgeText}>{activeFilterCount}</Text>
-              </View>
-            ) : (
-              <View style={styles.filterIconContainer}>
-                <View style={styles.filterIconLine} />
-                <View style={styles.filterIconLine} />
-                <View style={styles.filterIconLine} />
-              </View>
-            )}
-          </TouchableOpacity>
-
-          {activeFilterCount > 0 && (
             <TouchableOpacity
               onPress={() => {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                onClearFilters()
+                onFilterPress()
               }}
-              style={styles.filterClearButton}
+              style={styles.filterButtonInner}
               activeOpacity={0.7}
             >
-              <Text style={styles.filterClearText}>×</Text>
+              {activeFilterCount > 0 ? (
+                <View style={styles.filterBadge}>
+                  <Text style={styles.filterBadgeText}>{activeFilterCount}</Text>
+                </View>
+              ) : (
+                <View style={styles.filterIconContainer}>
+                  <View style={styles.filterIconLine} />
+                  <View style={styles.filterIconLine} />
+                  <View style={styles.filterIconLine} />
+                </View>
+              )}
             </TouchableOpacity>
+          </LiquidGlassView>
+
+          {activeFilterCount > 0 && (
+            <LiquidGlassView
+              effect="regular"
+              colorScheme="dark"
+              interactive
+              style={[
+                styles.filterClearButton,
+                !isLiquidGlassSupported && styles.filterClearButtonFallback
+              ]}
+            >
+              <TouchableOpacity
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                  onClearFilters()
+                }}
+                style={styles.filterClearButtonInner}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.filterClearText}>×</Text>
+              </TouchableOpacity>
+            </LiquidGlassView>
           )}
 
           {/* Search Input - Fills remaining space */}
@@ -73,7 +95,7 @@ function POSSearchBar({
             value={searchQuery}
             onChangeText={onSearchChange}
           />
-        </View>
+        </LiquidGlassView>
       </View>
       {children}
     </View>
@@ -88,7 +110,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 16,
     left: 16,
-    right: 16,
+    right: 0,
     zIndex: 10,
   },
   unifiedSearchBar: {
@@ -99,23 +121,33 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     height: 48,
     borderRadius: 24,
+    borderCurve: 'continuous',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.15)',
     overflow: 'hidden',
+  },
+  fallback: {
     backgroundColor: 'rgba(0,0,0,0.3)',
   },
-  // iOS 26 Filter Button
+  // iOS 26 Filter Button with Liquid Glass
   filterButton: {
     width: 36,
     height: 36,
     borderRadius: 18,
     marginLeft: 6,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    overflow: 'hidden',
   },
   filterButtonActive: {
-    backgroundColor: 'rgba(255,255,255,0.15)',
+    // Liquid glass provides the visual effect
+  },
+  filterButtonFallback: {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  filterButtonInner: {
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   filterBadge: {
     width: 20,
@@ -146,9 +178,16 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     marginLeft: 4,
     marginRight: 4,
+    overflow: 'hidden',
+  },
+  filterClearButtonFallback: {
+    backgroundColor: 'rgba(255,60,60,0.15)',
+  },
+  filterClearButtonInner: {
+    width: 28,
+    height: 28,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255,60,60,0.15)',
   },
   filterClearText: {
     fontSize: 18,

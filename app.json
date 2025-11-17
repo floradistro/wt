@@ -5,29 +5,34 @@
     "version": "1.0.0",
     "orientation": "default",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "dark",
     "newArchEnabled": true,
     "scheme": "whaletools",
     "splash": {
-      "image": "./assets/splash-icon.png",
+      "image": "./assets/logo.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#000000"
     },
+    "backgroundColor": "#000000",
+    "primaryColor": "#000000",
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.whaletools.app",
       "infoPlist": {
         "NSCameraUsageDescription": "Whaletools needs camera access to scan ID barcodes for age verification and product barcodes.",
         "NSPhotoLibraryUsageDescription": "Whaletools needs photo library access to select product images.",
-        "UIViewControllerBasedStatusBarAppearance": false
+        "UIViewControllerBasedStatusBarAppearance": false,
+        "UIStatusBarStyle": "UIStatusBarStyleLightContent"
       },
-      "requireFullScreen": true
+      "requireFullScreen": true,
+      "userInterfaceStyle": "dark"
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "backgroundColor": "#000000"
       },
+      "userInterfaceStyle": "dark",
       "package": "com.whaletools.app",
       "permissions": [
         "CAMERA",
@@ -41,7 +46,14 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "react-native-vision-camera"
+      "react-native-vision-camera",
+      [
+        "@sentry/react-native/expo",
+        {
+          "organization": "whaletools",
+          "project": "whaletools-native"
+        }
+      ]
     ]
   }
 }

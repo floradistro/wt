@@ -1,14 +1,15 @@
 /**
- * Dock Component - Refactored with Design System
- * Apple-quality dock with Liquid Glass effect
+ * Dock Component - Apple Liquid Glass Effect
+ * Using @callstack/liquid-glass for real iOS 26+ liquid glass
+ * With working touch handling
  */
 
-import { View, TouchableOpacity, StyleSheet } from 'react-native'
+import { View, Pressable, StyleSheet } from 'react-native'
 import { memo } from 'react'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import { LiquidGlassView, LiquidGlassContainerView, isLiquidGlassSupported } from '@callstack/liquid-glass'
 import * as Haptics from 'expo-haptics'
-import { colors, radius, spacing, shadows, borderWidth } from '@/theme'
-import { LiquidGlass } from '@/theme/LiquidGlass'
+import { colors, radius, spacing, shadows } from '@/theme'
 
 interface DockProps {
   activeTab: number
@@ -68,31 +69,62 @@ const tabs = [
   { Icon: MoreIcon, name: 'More' },
 ]
 
+function DockButton({
+  icon: Icon,
+  isActive,
+  isCenter,
+  onPress
+}: {
+  icon: any
+  isActive: boolean
+  isCenter: boolean
+  onPress: () => void
+}) {
+  const color = isActive ? colors.text.primary : colors.text.quaternary
+
+  return (
+    <LiquidGlassView
+      effect="regular"
+      colorScheme="dark"
+      interactive
+      style={[
+        styles.iconButton,
+        isCenter && styles.centerIcon,
+        isActive && styles.activeIcon,
+        !isLiquidGlassSupported && (isActive ? styles.activeIconFallback : styles.iconButtonFallback)
+      ]}
+    >
+      <Pressable onPress={onPress} style={styles.iconButtonInner}>
+        <Icon color={color} />
+      </Pressable>
+    </LiquidGlassView>
+  )
+}
+
 function Dock({ activeTab, onTabChange }: DockProps) {
   const insets = useSafeAreaInsets()
 
   return (
     <View style={[styles.container, { bottom: insets.bottom + spacing.xs }]}>
-      {/* JOBS: Real liquid glass effect - depth, fluidity, elegance */}
-      <LiquidGlass
-        intensity="ultraThick"
-        animate={false}
-        style={styles.dockWrapper}
-      >
-        <View style={styles.iconsContainer}>
+      <LiquidGlassContainerView spacing={12} style={styles.glassContainer}>
+        <LiquidGlassView
+          style={[
+            styles.dockWrapper,
+            !isLiquidGlassSupported && styles.fallback,
+          ]}
+          effect="clear"
+          colorScheme="dark"
+        >
           {tabs.map((tab, index) => {
             const isActive = activeTab === index
-            const isCenter = index === 2 // Scan is center
-            const color = isActive ? colors.text.primary : colors.text.quaternary
+            const isCenter = index === 2 // Scan is at index 2 (center of 5 items)
 
             return (
-              <TouchableOpacity
+              <DockButton
                 key={tab.name}
-                style={[
-                  styles.iconButton,
-                  isCenter && styles.centerIcon,
-                  isActive && styles.activeIcon,
-                ]}
+                icon={tab.Icon}
+                isActive={isActive}
+                isCenter={isCenter}
                 onPress={() => {
                   Haptics.impactAsync(
                     isCenter
@@ -101,14 +133,11 @@ function Dock({ activeTab, onTabChange }: DockProps) {
                   )
                   onTabChange(index)
                 }}
-                activeOpacity={0.7}
-              >
-                <tab.Icon color={color} />
-              </TouchableOpacity>
+              />
             )
           })}
-        </View>
-      </LiquidGlass>
+        </LiquidGlassView>
+      </LiquidGlassContainerView>
     </View>
   )
 }
@@ -124,47 +153,60 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     pointerEvents: 'box-none',
   },
-  dockWrapper: {
-    borderRadius: radius.pill, // Pill shaped - Jobs: Like iOS dock
-    borderWidth: borderWidth.regular,
-    borderColor: colors.border.regular,
-    ...shadows.lg, // Proper elevation
+  glassContainer: {
+    alignItems: 'center',
   },
-  iconsContainer: {
+  dockWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: spacing.xxs + 2, // 6px
-    paddingVertical: spacing.xxs + 2,
-    gap: spacing.xxs,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    gap: spacing.xs,
+    borderRadius: 100,
+    borderCurve: 'continuous',
+    ...shadows.lg,
+  },
+  fallback: {
+    backgroundColor: 'rgba(40,40,40,0.8)',
   },
   iconButton: {
     width: 56,
     height: 56,
+    borderRadius: 999,
+    overflow: 'hidden',
+  },
+  iconButtonInner: {
+    width: '100%',
+    height: '100%',
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: radius.round, // Round icons - Jobs: Perfect circles
+  },
+  iconButtonFallback: {
+    backgroundColor: 'rgba(255,255,255,0.05)',
   },
   centerIcon: {
     width: 60,
     height: 60,
-    borderRadius: radius.round, // Round center icon
   },
   activeIcon: {
-    backgroundColor: colors.glass.thick, // Match active state in selectors
+    // Liquid glass provides the visual effect
+  },
+  activeIconFallback: {
+    backgroundColor: 'rgba(255,255,255,0.1)',
   },
 
   // Icon styles
   icon: {
     width: 28,
     height: 28,
-    borderRadius: radius.xs + 2,
+    borderRadius: 8,
   },
   gridIcon: {
     width: 28,
     height: 28,
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: spacing.xxs,
+    gap: 4,
   },
   dot: {
     width: 11,
@@ -192,7 +234,7 @@ const styles = StyleSheet.create({
     right: 2,
   },
   receiptIcon: {
-    gap: spacing.xxs,
+    gap: 4,
   },
   line: {
     width: 24,

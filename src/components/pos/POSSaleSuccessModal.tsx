@@ -127,7 +127,7 @@ function POSSaleSuccessModal({ visible, saleData, onClose }: POSSaleSuccessModal
               <BlurView intensity={15} tint="light" style={StyleSheet.absoluteFill} />
             </View>
             <Text style={styles.orderNumberLabel}>ORDER #</Text>
-            <Text style={styles.orderNumber}>{saleData.orderNumber || 'Unknown'}</Text>
+            <Text style={styles.orderNumber}>{String(saleData.orderNumber || 'Unknown')}</Text>
           </View>
 
           {/* Total Amount */}
@@ -154,9 +154,9 @@ function POSSaleSuccessModal({ visible, saleData, onClose }: POSSaleSuccessModal
               <View style={styles.detailTextContainer}>
                 <Text style={styles.detailLabel}>Payment Method</Text>
                 <Text style={styles.detailValue}>
-                  {saleData.paymentMethod === 'cash' ? 'Cash' : 'Card'}
-                  {saleData.cardType ? ` - ${saleData.cardType}` : ''}
-                  {saleData.cardLast4 ? ` ****${saleData.cardLast4}` : ''}
+                  {String(saleData.paymentMethod === 'cash' ? 'Cash' : 'Card')}
+                  {saleData.cardType ? String(` - ${saleData.cardType}`) : ''}
+                  {saleData.cardLast4 ? String(` ****${saleData.cardLast4}`) : ''}
                 </Text>
               </View>
             </View>
@@ -169,7 +169,7 @@ function POSSaleSuccessModal({ visible, saleData, onClose }: POSSaleSuccessModal
                 </View>
                 <View style={styles.detailTextContainer}>
                   <Text style={styles.detailLabel}>Authorization Code</Text>
-                  <Text style={styles.detailValue}>{saleData.authorizationCode || 'N/A'}</Text>
+                  <Text style={styles.detailValue}>{String(saleData.authorizationCode || 'N/A')}</Text>
                 </View>
               </View>
             )}
@@ -182,7 +182,7 @@ function POSSaleSuccessModal({ visible, saleData, onClose }: POSSaleSuccessModal
                 </View>
                 <View style={styles.detailTextContainer}>
                   <Text style={styles.detailLabel}>Terminal</Text>
-                  <Text style={styles.detailValue}>{saleData.processorName || 'Unknown'}</Text>
+                  <Text style={styles.detailValue}>{String(saleData.processorName || 'Unknown')}</Text>
                 </View>
               </View>
             )}
@@ -195,7 +195,7 @@ function POSSaleSuccessModal({ visible, saleData, onClose }: POSSaleSuccessModal
                 </View>
                 <View style={styles.detailTextContainer}>
                   <Text style={styles.detailLabel}>Transaction #</Text>
-                  <Text style={styles.detailValue}>{saleData.transactionNumber || 'N/A'}</Text>
+                  <Text style={styles.detailValue}>{String(saleData.transactionNumber || 'N/A')}</Text>
                 </View>
               </View>
             )}
@@ -207,7 +207,7 @@ function POSSaleSuccessModal({ visible, saleData, onClose }: POSSaleSuccessModal
               </View>
               <View style={styles.detailTextContainer}>
                 <Text style={styles.detailLabel}>Items</Text>
-                <Text style={styles.detailValue}>{saleData.itemCount || 0}</Text>
+                <Text style={styles.detailValue}>{String(saleData.itemCount || 0)}</Text>
               </View>
             </View>
 
@@ -223,7 +223,7 @@ function POSSaleSuccessModal({ visible, saleData, onClose }: POSSaleSuccessModal
               <View style={styles.detailTextContainer}>
                 <Text style={styles.detailLabel}>Inventory</Text>
                 <Text style={styles.detailValue}>
-                  {saleData.inventoryDeducted ? 'Deducted' : 'Pending'}
+                  {String(saleData.inventoryDeducted ? 'Deducted' : 'Pending')}
                 </Text>
               </View>
             </View>
@@ -236,7 +236,7 @@ function POSSaleSuccessModal({ visible, saleData, onClose }: POSSaleSuccessModal
                 </View>
                 <View style={styles.detailTextContainer}>
                   <Text style={styles.detailLabel}>Points Redeemed</Text>
-                  <Text style={styles.detailValue}>{saleData.loyaltyPointsRedeemed} pts</Text>
+                  <Text style={styles.detailValue}>{String(saleData.loyaltyPointsRedeemed)} pts</Text>
                 </View>
               </View>
             )}
@@ -249,7 +249,7 @@ function POSSaleSuccessModal({ visible, saleData, onClose }: POSSaleSuccessModal
                 </View>
                 <View style={styles.detailTextContainer}>
                   <Text style={styles.detailLabel}>Points Earned</Text>
-                  <Text style={styles.detailValue}>+{saleData.loyaltyPointsAdded} pts</Text>
+                  <Text style={styles.detailValue}>+{String(saleData.loyaltyPointsAdded)} pts</Text>
                 </View>
               </View>
             )}

@@ -1,25 +1,786 @@
-import { View, Text, StyleSheet, ScrollView } from 'react-native'
+/**
+ * Products Screen
+ * iPad Settings-style interface with Liquid Glass
+ */
+
+import { View, Text, StyleSheet, Pressable, ScrollView, ActivityIndicator, Image, TextInput, Animated, useWindowDimensions } from 'react-native'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import { SafeAreaView } from 'react-native-safe-area-context'
+import { LiquidGlassView, LiquidGlassContainerView, isLiquidGlassSupported } from '@callstack/liquid-glass'
+import * as Haptics from 'expo-haptics'
+import { colors, spacing, radius } from '@/theme/tokens'
+import { layout } from '@/theme/layout'
+import { useProducts, type Product, type PricingTier } from '@/hooks/useProducts'
+import { supabase } from '@/lib/supabase/client'
+import { useAuth } from '@/stores/auth.store'
+import { logger } from '@/utils/logger'
+import { EditableDescriptionSection, EditablePricingSection, EditableCustomFieldsSection } from '@/components/products'
+import { NavSidebar, type NavItem } from '@/components/NavSidebar'
+import { CategoryCard, CategoryDetail, CategoryModal, CustomFieldModal, FieldVisibilityModal, PricingTemplateModal } from '@/components/categories'
+import { useCategories } from '@/hooks/useCategories'
+import { useCustomFields } from '@/hooks/useCustomFields'
+import { usePricingTemplates } from '@/hooks/usePricingTemplates'
+
+type NavSection = 'all' | 'low-stock' | 'out-of-stock' | 'categories'
 
 export function ProductsScreen() {
+  const [activeNav, setActiveNav] = useState<NavSection>('all')
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
+  const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null)
+  const [searchQuery, setSearchQuery] = useState('')
+
+  // Modal states for categories
+  const [showCategoryModal, setShowCategoryModal] = useState(false)
+  const [showFieldModal, setShowFieldModal] = useState(false)
+  const [showVisibilityModal, setShowVisibilityModal] = useState(false)
+  const [showPricingModal, setShowPricingModal] = useState(false)
+
+  // Sliding animation
+  const slideAnim = useRef(new Animated.Value(0)).current // 0 = list view, 1 = detail view
+
+  const { width } = useWindowDimensions()
+  const contentWidth = width - layout.sidebarWidth
+
+  const { products: allProducts, isLoading, reload } = useProducts({ search: searchQuery })
+  const { categories, isLoading: categoriesLoading, reload: reloadCategories } = useCategories({ includeGlobal: true, parentId: null })
+
+  // Load all fields and templates for the vendor to properly count assignments
+  const { fields: allFields, reload: reloadFields } = useCustomFields({ includeInherited: false })
+  const { templates: allTemplates, reload: reloadTemplates } = usePricingTemplates({})
+
+  const handleProductUpdated = () => {
+    reload()
+  }
+
+  const handleCategoryUpdated = () => {
+    reloadCategories()
+    reloadFields()
+    reloadTemplates()
+  }
+
+  // Filter products based on active nav
+  const products = allProducts.filter(product => {
+    if (activeNav === 'all') return true
+    if (activeNav === 'low-stock') {
+      const stock = product.total_stock ?? 0
+      return stock > 0 && stock < 10
+    }
+    if (activeNav === 'out-of-stock') {
+      return (product.total_stock ?? 0) === 0
+    }
+    return true
+  })
+
+  // Calculate counts for badges
+  const lowStockCount = allProducts.filter(p => {
+    const stock = p.total_stock ?? 0
+    return stock > 0 && stock < 10
+  }).length
+
+  const outOfStockCount = allProducts.filter(p => (p.total_stock ?? 0) === 0).length
+
+  // Nav items configuration
+  const navItems: NavItem[] = useMemo(() => [
+    {
+      id: 'all',
+      icon: 'grid',
+      label: 'All Products',
+      count: allProducts.length,
+    },
+    {
+      id: 'low-stock',
+      icon: 'warning',
+      label: 'Low Stock',
+      count: lowStockCount,
+      badge: 'warning' as const,
+    },
+    {
+      id: 'out-of-stock',
+      icon: 'box',
+      label: 'Out of Stock',
+      count: outOfStockCount,
+      badge: 'error' as const,
+    },
+    {
+      id: 'categories',
+      icon: 'folder',
+      label: 'Categories',
+    },
+  ], [allProducts.length, lowStockCount, outOfStockCount])
+
+  // Animate when product/category is selected/deselected
+  useEffect(() => {
+    const shouldSlide = activeNav === 'categories' ? selectedCategoryId !== null : selectedProduct !== null
+    Animated.spring(slideAnim, {
+      toValue: shouldSlide ? 1 : 0,
+      useNativeDriver: true,
+      tension: 80,
+      friction: 12,
+    }).start()
+  }, [selectedProduct, selectedCategoryId, activeNav, slideAnim])
+
+  // Filter categories by search
+  const filteredCategories = useMemo(() => {
+    if (!searchQuery || activeNav !== 'categories') return categories
+    return categories.filter(cat =>
+      cat.name.toLowerCase().includes(searchQuery.toLowerCase())
+    )
+  }, [categories, searchQuery, activeNav])
+
+  const selectedCategory = categories.find(c => c.id === selectedCategoryId)
+
+  // Calculate field and template counts for selected category
+  const categoryFieldsCount = selectedCategoryId
+    ? allFields.filter(f => f.category_id === selectedCategoryId).length
+    : 0
+
+  const categoryTemplatesCount = selectedCategoryId
+    ? allTemplates.filter(t =>
+    // @ts-expect-error - category_id will be added in database schema migration
+        t.applicable_to_categories?.includes(selectedCategoryId) || t.category_id === selectedCategoryId
+      ).length
+    : 0
+
+  // Calculate translateX for sliding panels using actual content width
+  const listTranslateX = slideAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, -contentWidth], // Slides left off screen (full content width)
+  })
+
+  const detailTranslateX = slideAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [contentWidth, 0], // Slides in from right (full content width)
+  })
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <ScrollView
-        style={styles.content}
-        contentInsetAdjustmentBehavior="automatic"
-      >
-        <View style={styles.header}>
-          <Text style={styles.title}>PRODUCTS</Text>
-          <Text style={styles.subtitle}>Catalog Management</Text>
-        </View>
+      <View style={styles.layout}>
+        {/* LEFT NAV SIDEBAR */}
+        <NavSidebar
+          width={layout.sidebarWidth}
+          searchValue={searchQuery}
+          onSearchChange={setSearchQuery}
+          items={navItems}
+          activeItemId={activeNav}
+          onItemPress={(id) => setActiveNav(id as NavSection)}
+        />
 
-        <View style={styles.placeholder}>
-          <Text style={styles.placeholderText}>
-            Product catalog coming soon
-          </Text>
+        {/* SLIDING CONTENT AREA */}
+        <View style={styles.contentArea}>
+          {/* MIDDLE LIST - Products or Categories */}
+        <Animated.View
+          style={[
+            styles.productsList,
+            {
+              transform: [{ translateX: listTranslateX }],
+            },
+          ]}
+        >
+          {activeNav === 'categories' ? (
+            // CATEGORIES VIEW
+            categoriesLoading ? (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator color={colors.text.secondary} />
+              </View>
+            ) : filteredCategories.length === 0 ? (
+              <View style={styles.emptyState}>
+                <Text style={styles.emptyStateIcon}>􀈄</Text>
+                <Text style={styles.emptyStateTitle}>No Categories</Text>
+                <Text style={styles.emptyStateText}>
+                  {searchQuery ? 'Try adjusting your search' : 'Create your first category to get started'}
+                </Text>
+                {!searchQuery && (
+                  <Pressable
+                    style={styles.emptyStateButton}
+                    onPress={() => {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                      setShowCategoryModal(true)
+                    }}
+                  >
+                    <Text style={styles.emptyStateButtonText}>+ Add Category</Text>
+                  </Pressable>
+                )}
+              </View>
+            ) : (
+              <View style={styles.productsListContent}>
+                <View style={[styles.listHeader, { marginHorizontal: spacing.sm }]}>
+                  <Text style={styles.listHeaderTitle}>Categories</Text>
+                  <Pressable
+                    style={styles.addButton}
+                    onPress={() => {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                      setShowCategoryModal(true)
+                    }}
+                  >
+                    <Text style={styles.addButtonText}>+</Text>
+                  </Pressable>
+                </View>
+                <ScrollView
+                  showsVerticalScrollIndicator={false}
+                  contentContainerStyle={{ paddingBottom: layout.dockHeight, paddingHorizontal: spacing.sm }}
+                >
+                  {filteredCategories.map((category) => (
+                    <Pressable
+                      key={category.id}
+                      onPress={() => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                        setSelectedCategoryId(category.id)
+                      }}
+                    >
+                      <CategoryCard
+                        category={category}
+                        isExpanded={selectedCategoryId === category.id}
+                        onToggleExpansion={() => setSelectedCategoryId(category.id)}
+                        onEdit={() => {}}
+                        onDelete={() => {}}
+                        onManageFields={() => setShowFieldModal(true)}
+                        onManagePricing={() => setShowPricingModal(true)}
+                        fieldsCount={allFields.filter(f => f.category_id === category.id).length}
+                        templatesCount={allTemplates.filter(t =>
+        // @ts-expect-error - category_id will be added in database schema migration
+                          t.applicable_to_categories?.includes(category.id) || t.category_id === category.id
+                        ).length}
+                      />
+                    </Pressable>
+                  ))}
+                </ScrollView>
+              </View>
+            )
+          ) : (
+            // PRODUCTS VIEW
+            isLoading ? (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator color={colors.text.secondary} />
+              </View>
+            ) : products.length === 0 ? (
+              <View style={styles.emptyState}>
+                <Text style={styles.emptyStateIcon}>􀈄</Text>
+                <Text style={styles.emptyStateTitle}>No Products Found</Text>
+                <Text style={styles.emptyStateText}>
+                  {activeNav === 'low-stock'
+                    ? 'No products with low stock levels'
+                    : activeNav === 'out-of-stock'
+                    ? 'No products are out of stock'
+                    : searchQuery
+                    ? 'Try adjusting your search'
+                    : 'No products available'}
+                </Text>
+              </View>
+            ) : (
+              <ScrollView
+                style={styles.productsListContent}
+                contentContainerStyle={{ paddingBottom: layout.dockHeight }}
+                showsVerticalScrollIndicator={false}
+              >
+                <LiquidGlassContainerView spacing={12} style={styles.cardWrapper}>
+                  <LiquidGlassView
+                    effect="regular"
+                    colorScheme="dark"
+                    style={[styles.productsCardGlass, !isLiquidGlassSupported && styles.productsCardGlassFallback]}
+                  >
+                    {products.map((item, index) => {
+                    const isLast = index === products.length - 1
+                    return (
+                      <Pressable
+                        key={item.id}
+                        style={[
+                          styles.productItem,
+                          selectedProduct?.id === item.id && styles.productItemActive,
+                          isLast && styles.productItemLast,
+                        ]}
+                        onPress={() => setSelectedProduct(item)}
+                      >
+                        {/* Icon/Thumbnail */}
+                        <View style={styles.productIcon}>
+                          {item.featured_image ? (
+                            <Image
+                              source={{ uri: item.featured_image }}
+                              style={styles.productIconImage}
+                            />
+                          ) : (
+                            <View style={[styles.productIconPlaceholder, styles.productIconImage]}>
+                              <Text style={styles.productIconText}>
+                                {item.name.charAt(0).toUpperCase()}
+                              </Text>
+                            </View>
+                          )}
+                        </View>
+
+                        {/* Product Name & SKU */}
+                        <View style={styles.productInfo}>
+                          <Text style={styles.productName} numberOfLines={1}>
+                            {item.name}
+                          </Text>
+                          <Text style={styles.productSKU} numberOfLines={1}>
+                            {item.sku || 'No SKU'}
+                          </Text>
+                        </View>
+
+                        {/* Price Column */}
+                        <View style={styles.dataColumn}>
+                          <Text style={styles.dataLabel}>PRICE</Text>
+                          <Text style={styles.dataValue}>
+                            ${(item.price || item.regular_price || 0).toFixed(2)}
+                          </Text>
+                        </View>
+
+                        {/* Stock Column - Color Coded */}
+                        <View style={styles.dataColumn}>
+                          <Text style={styles.dataLabel}>STOCK</Text>
+                          <Text
+                            style={[
+                              styles.dataValue,
+                              styles.stockValue,
+                              (item.total_stock ?? 0) === 0 && styles.stockOut,
+                              (item.total_stock ?? 0) > 0 && (item.total_stock ?? 0) < 10 && styles.stockLow,
+                              (item.total_stock ?? 0) >= 10 && styles.stockOk,
+                            ]}
+                          >
+                            {item.total_stock ?? 0}g
+                          </Text>
+                        </View>
+
+                        {/* Locations Column */}
+                        <View style={styles.dataColumn}>
+                          <Text style={styles.dataLabel}>LOCATIONS</Text>
+                          <Text style={styles.dataValue}>
+                            {item.inventory?.length || 0}
+                          </Text>
+                        </View>
+
+                        {/* Status Indicator */}
+                        <View
+                          style={[
+                            styles.statusDot,
+                            item.status === 'published' && styles.statusPublished,
+                            item.status === 'draft' && styles.statusDraft,
+                          ]}
+                        />
+
+                        <Text style={styles.productChevron}>􀆊</Text>
+                      </Pressable>
+                    )
+                  })}
+                  </LiquidGlassView>
+                </LiquidGlassContainerView>
+              </ScrollView>
+            )
+          )}
+        </Animated.View>
+
+        {/* RIGHT DETAIL PANEL */}
+        <Animated.View
+          style={[
+            styles.detailPanel,
+            {
+              transform: [{ translateX: detailTranslateX }],
+            },
+          ]}
+        >
+          {activeNav === 'categories' ? (
+            // Category Detail
+            selectedCategory ? (
+              <CategoryDetail
+                category={selectedCategory}
+                onBack={() => setSelectedCategoryId(null)}
+                onCategoryUpdated={handleCategoryUpdated}
+                fieldsCount={categoryFieldsCount}
+                templatesCount={categoryTemplatesCount}
+              />
+            ) : (
+              <View style={styles.emptyDetail}>
+                <Text style={styles.emptyTitle}>Select a category</Text>
+                <Text style={styles.emptyText}>Choose a category from the list to view details</Text>
+              </View>
+            )
+          ) : (
+            // Product Detail
+            selectedProduct ? (
+              <ProductDetail product={selectedProduct} onBack={() => setSelectedProduct(null)} onProductUpdated={handleProductUpdated} />
+            ) : (
+              <View style={styles.emptyDetail}>
+                <Text style={styles.emptyTitle}>Select a product</Text>
+                <Text style={styles.emptyText}>
+                  Choose a product from the list to view details
+                </Text>
+              </View>
+            )
+          )}
+        </Animated.View>
         </View>
-      </ScrollView>
+      </View>
+
+      {/* CATEGORY MODALS */}
+      <CategoryModal
+        visible={showCategoryModal}
+        categories={categories}
+        onClose={() => setShowCategoryModal(false)}
+        onSaved={() => {
+          reloadCategories()
+          setShowCategoryModal(false)
+        }}
+      />
+
+      {selectedCategoryId && (
+        <>
+          <CustomFieldModal
+            visible={showFieldModal}
+            categoryId={selectedCategoryId}
+            onClose={() => setShowFieldModal(false)}
+            onSaved={() => {
+              reloadFields()
+              setShowFieldModal(false)
+            }}
+          />
+
+          <PricingTemplateModal
+            visible={showPricingModal}
+            categoryId={selectedCategoryId}
+            onClose={() => setShowPricingModal(false)}
+            onSaved={() => {
+              reloadTemplates()
+              setShowPricingModal(false)
+            }}
+          />
+        </>
+      )}
     </SafeAreaView>
+  )
+}
+
+function ProductDetail({ product, onBack, onProductUpdated }: { product: Product; onBack: () => void; onProductUpdated: () => void }) {
+  const [isEditing, setIsEditing] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const { user } = useAuth()
+
+  // Edit state
+  const [editedName, setEditedName] = useState(product.name)
+  const [editedSKU, setEditedSKU] = useState(product.sku || '')
+  const [editedDescription, setEditedDescription] = useState(product.description || '')
+  const [editedPrice, setEditedPrice] = useState(product.price?.toString() || product.regular_price?.toString() || '')
+  const [editedCostPrice, setEditedCostPrice] = useState(product.cost_price?.toString() || '')
+  const [pricingMode, setPricingMode] = useState<'single' | 'tiered'>(product.pricing_data?.mode || 'single')
+  const [pricingTiers, setPricingTiers] = useState<PricingTier[]>(product.pricing_data?.tiers || [])
+  const [availableTemplates, setAvailableTemplates] = useState<any[]>([])
+  const [selectedTemplateId, setSelectedTemplateId] = useState(product.pricing_data?.template_id || null)
+  const [editedCustomFields, setEditedCustomFields] = useState<Record<string, any>>(product.custom_fields || {})
+
+  const displayPrice = product.price || product.regular_price || 0
+  const hasMultipleLocations = (product.inventory?.length || 0) > 1
+
+  // Load pricing templates when entering edit mode
+  useEffect(() => {
+    if (isEditing && product.primary_category_id) {
+      loadPricingTemplates(product.primary_category_id)
+    }
+  }, [isEditing, product.primary_category_id])
+
+  const loadPricingTemplates = async (categoryId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('pricing_tier_templates')
+        .select('*')
+        .eq('category_id', categoryId)
+        .eq('is_active', true)
+        .order('display_order')
+
+      if (error) throw error
+      setAvailableTemplates(data || [])
+    } catch (error) {
+      logger.error('Failed to load pricing templates:', error)
+    }
+  }
+
+  const handleSave = async () => {
+    if (!user?.email) return
+
+    try {
+      setSaving(true)
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy)
+
+      const { data: userData, error: userError } = await supabase
+        .from('users')
+        .select('vendor_id')
+        .eq('email', user.email)
+        .single()
+
+      if (userError) throw userError
+
+      const pricingData = {
+        mode: pricingMode,
+        single_price: pricingMode === 'single' ? parseFloat(editedPrice) || null : null,
+        tiers: pricingMode === 'tiered' ? pricingTiers : undefined,
+        template_id: selectedTemplateId,
+        updated_at: new Date().toISOString(),
+      }
+
+      const { error: updateError } = await supabase
+        .from('products')
+        .update({
+          name: editedName,
+          sku: editedSKU,
+          description: editedDescription,
+          price: parseFloat(editedPrice) || null,
+          regular_price: parseFloat(editedPrice) || null,
+          cost_price: parseFloat(editedCostPrice) || null,
+          pricing_data: pricingData,
+          custom_fields: editedCustomFields,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', product.id)
+        .eq('vendor_id', userData.vendor_id)
+
+      if (updateError) throw updateError
+
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+      setIsEditing(false)
+      // Trigger parent reload
+      onProductUpdated()
+    } catch (error) {
+      logger.error('Failed to save product:', error)
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleCancel = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    // Reset to original values
+    setEditedName(product.name)
+    setEditedSKU(product.sku || '')
+    setEditedDescription(product.description || '')
+    setEditedPrice(product.price?.toString() || product.regular_price?.toString() || '')
+    setEditedCostPrice(product.cost_price?.toString() || '')
+    setPricingMode(product.pricing_data?.mode || 'single')
+    setPricingTiers(product.pricing_data?.tiers || [])
+    setSelectedTemplateId(product.pricing_data?.template_id || null)
+    setEditedCustomFields(product.custom_fields || {})
+    setIsEditing(false)
+  }
+
+  return (
+    <ScrollView style={styles.detail} contentContainerStyle={{ paddingBottom: layout.dockHeight }}>
+      {/* Header with Edit/Save toggle */}
+      <View style={styles.detailHeader}>
+        <Pressable onPress={onBack} style={styles.backButton}>
+          <Text style={styles.backButtonText}>􀆉 Products</Text>
+        </Pressable>
+
+        {isEditing ? (
+          <View style={styles.editActions}>
+            <Pressable onPress={handleCancel} style={styles.cancelButton}>
+              <Text style={styles.cancelButtonText}>Cancel</Text>
+            </Pressable>
+            <Pressable onPress={handleSave} style={styles.saveButton} disabled={saving}>
+              {saving ? (
+                <ActivityIndicator size="small" color="#60A5FA" />
+              ) : (
+                <Text style={styles.saveButtonText}>Save</Text>
+              )}
+            </Pressable>
+          </View>
+        ) : (
+          <Pressable onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+            setIsEditing(true)
+          }} style={styles.editButton}>
+            <Text style={styles.editButtonText}>Edit</Text>
+          </Pressable>
+        )}
+      </View>
+
+      {/* Header Card - Edit mode or view mode */}
+      <View style={styles.headerCardContainer}>
+        <LiquidGlassContainerView spacing={12}>
+          <LiquidGlassView
+            effect="regular"
+            colorScheme="dark"
+            style={[styles.headerCardGlass, !isLiquidGlassSupported && styles.headerCardGlassFallback]}
+          >
+            <View style={styles.headerCard}>
+            {product.featured_image ? (
+              <Image source={{ uri: product.featured_image }} style={styles.headerIcon} />
+            ) : (
+              <View style={[styles.headerIconPlaceholder, styles.headerIcon]}>
+                <Text style={styles.headerIconText}>
+                  {(isEditing ? editedName : product.name).charAt(0).toUpperCase()}
+                </Text>
+              </View>
+            )}
+            <View style={styles.headerInfo}>
+              {isEditing ? (
+                <>
+                  <TextInput
+                    style={styles.headerTitleInput}
+                    value={editedName}
+                    onChangeText={setEditedName}
+                    placeholder="Product name"
+                    placeholderTextColor="rgba(235,235,245,0.3)"
+                  />
+                  <TextInput
+                    style={styles.headerSubtitleInput}
+                    value={editedSKU}
+                    onChangeText={setEditedSKU}
+                    placeholder="SKU"
+                    placeholderTextColor="rgba(235,235,245,0.3)"
+                  />
+                </>
+              ) : (
+                <>
+                  <Text style={styles.headerTitle}>{product.name}</Text>
+                  <View style={styles.headerMeta}>
+                    <Text style={styles.headerSubtitle}>{product.sku || 'No SKU'}</Text>
+                    {product.status && (
+                      <>
+                        <Text style={styles.headerDot}>•</Text>
+                        <Text style={[
+                          styles.headerSubtitle,
+                          product.status === 'published' && styles.statusTextPublished
+                        ]}>
+                          {product.status.charAt(0).toUpperCase() + product.status.slice(1)}
+                        </Text>
+                      </>
+                    )}
+                  </View>
+                </>
+              )}
+            </View>
+          </View>
+          </LiquidGlassView>
+        </LiquidGlassContainerView>
+      </View>
+
+      {/* Pricing Section */}
+      <EditablePricingSection
+        price={product.price}
+        costPrice={product.cost_price}
+        salePrice={product.sale_price}
+        onSale={product.on_sale}
+        pricingMode={pricingMode}
+        pricingTiers={pricingTiers}
+        templateId={selectedTemplateId}
+        isEditing={isEditing}
+        editedPrice={editedPrice}
+        editedCostPrice={editedCostPrice}
+        onPriceChange={setEditedPrice}
+        onCostPriceChange={setEditedCostPrice}
+        onPricingModeChange={setPricingMode}
+        onTiersChange={setPricingTiers}
+        onTemplateChange={setSelectedTemplateId}
+        categoryId={product.primary_category_id}
+        availableTemplates={availableTemplates}
+        loadTemplates={loadPricingTemplates}
+      />
+
+      {/* Inventory Section */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>INVENTORY</Text>
+        <LiquidGlassContainerView spacing={12}>
+          <LiquidGlassView
+            effect="regular"
+            colorScheme="dark"
+            style={[styles.cardGlass, !isLiquidGlassSupported && styles.cardGlassFallback]}
+          >
+          <View style={styles.inventoryHeader}>
+            <Text style={styles.rowLabel}>Total Stock</Text>
+            <Text style={[
+              styles.inventoryTotal,
+              (product.total_stock ?? 0) === 0 && styles.stockOut,
+              (product.total_stock ?? 0) > 0 && (product.total_stock ?? 0) < 10 && styles.stockLow,
+              (product.total_stock ?? 0) >= 10 && styles.stockOk,
+            ]}>
+              {product.total_stock ?? 0}g
+            </Text>
+          </View>
+
+          {/* Multi-location breakdown */}
+          {hasMultipleLocations && product.inventory && (
+            <View style={styles.locationBreakdown}>
+              <View style={styles.locationDivider} />
+              {product.inventory.map((inv, index) => (
+                <View key={inv.location_id} style={styles.locationRow}>
+                  <View style={styles.locationInfo}>
+                    <Text style={styles.locationName}>{inv.location_name}</Text>
+                    <View style={styles.locationBar}>
+                      <View
+                        style={[
+                          styles.locationBarFill,
+                          { width: `${((inv.quantity || 0) / (product.total_stock || 1)) * 100}%` }
+                        ]}
+                      />
+                    </View>
+                  </View>
+                  <Text style={styles.locationStock}>{inv.quantity || 0}g</Text>
+                </View>
+              ))}
+            </View>
+          )}
+          </LiquidGlassView>
+        </LiquidGlassContainerView>
+      </View>
+
+      {/* Description */}
+      <EditableDescriptionSection
+        description={product.description}
+        editedDescription={editedDescription}
+        isEditing={isEditing}
+        onChangeText={setEditedDescription}
+      />
+
+      {/* Custom Fields */}
+      <EditableCustomFieldsSection
+        customFields={product.custom_fields}
+        editedCustomFields={editedCustomFields}
+        isEditing={isEditing}
+        onCustomFieldsChange={setEditedCustomFields}
+      />
+
+      {/* Actions */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>ACTIONS</Text>
+        <LiquidGlassContainerView spacing={12}>
+          <LiquidGlassView
+            effect="regular"
+            colorScheme="dark"
+            style={[styles.cardGlass, !isLiquidGlassSupported && styles.cardGlassFallback]}
+          >
+            <SettingsRow label="Adjust Inventory" />
+            <SettingsRow label="View Sales History" />
+            {hasMultipleLocations && <SettingsRow label="Transfer Stock" />}
+          </LiquidGlassView>
+        </LiquidGlassContainerView>
+      </View>
+    </ScrollView>
+  )
+}
+
+function SettingsRow({
+  label,
+  value,
+  showChevron = true,
+  onPress,
+}: {
+  label: string
+  value?: string
+  showChevron?: boolean
+  onPress?: () => void
+}) {
+  const handlePress = () => {
+    if (onPress) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+      onPress()
+    }
+  }
+
+  return (
+    <Pressable style={styles.row} onPress={handlePress} disabled={!onPress}>
+      <Text style={styles.rowLabel}>{label}</Text>
+      <View style={styles.rowRight}>
+        {value && <Text style={styles.rowValue}>{value}</Text>}
+        {showChevron && <Text style={styles.rowChevron}>􀆊</Text>}
+      </View>
+    </Pressable>
   )
 }
 
@@ -28,37 +789,586 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#000',
   },
-  content: {
+  layout: {
+    flex: 1,
+    flexDirection: 'row',
+  },
+
+  // Content area - Contains sliding panels
+  contentArea: {
+    flex: 1,
+    overflow: 'hidden',
+  },
+
+  // MIDDLE PRODUCTS LIST
+  productsList: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: '100%',
+    backgroundColor: '#000',
+  },
+  productsListContent: {
     flex: 1,
   },
-  header: {
-    paddingHorizontal: 24,
-    paddingTop: 20,
-    paddingBottom: 32,
+  cardWrapper: {
+    marginVertical: layout.contentVertical,
+    marginHorizontal: spacing.sm, // Consistent 12px spacing everywhere
   },
-  title: {
-    fontSize: 32,
-    fontWeight: '200',
+  productsCardContainer: {
+    marginHorizontal: layout.contentHorizontal,
+  },
+  productsCardGlass: {
+    borderRadius: radius.xxl,
+    borderCurve: 'continuous',
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  productsCardGlassFallback: {
+    backgroundColor: 'rgba(255,255,255,0.05)',
+  },
+  productItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: layout.rowPaddingVertical,
+    paddingHorizontal: layout.rowPaddingHorizontal,
+    gap: 12,
+    backgroundColor: 'transparent',
+    borderBottomWidth: 0.5,
+    borderBottomColor: 'rgba(255,255,255,0.05)',
+    minHeight: layout.minTouchTarget,
+  },
+  productItemActive: {
+    backgroundColor: 'rgba(99,99,102,0.2)',
+  },
+  productItemLast: {
+    borderBottomWidth: 0,
+  },
+  productIcon: {
+    width: 44,
+    height: 44,
+  },
+  productIconImage: {
+    width: 44,
+    height: 44,
+    borderRadius: 8,
+  },
+  productIconPlaceholder: {
+    backgroundColor: 'rgba(118,118,128,0.24)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  productIconText: {
+    fontSize: 20,
+    color: 'rgba(235,235,245,0.6)',
+  },
+  productInfo: {
+    flex: 1,
+    gap: 2,
+    minWidth: 180,
+  },
+  productName: {
+    fontSize: 15,
+    fontWeight: '600',
     color: '#fff',
-    letterSpacing: 2,
-    marginBottom: 8,
+    letterSpacing: -0.2,
   },
-  subtitle: {
+  productSKU: {
     fontSize: 11,
-    fontWeight: '300',
-    color: 'rgba(255,255,255,0.4)',
-    letterSpacing: 3,
+    fontWeight: '400',
+    color: 'rgba(235,235,245,0.6)',
+    letterSpacing: 0.2,
     textTransform: 'uppercase',
   },
-  placeholder: {
-    paddingHorizontal: 24,
-    paddingVertical: 100,
+
+  // Data Columns
+  dataColumn: {
+    minWidth: 80,
+    alignItems: 'flex-end',
+    gap: 2,
+  },
+  dataLabel: {
+    fontSize: 9,
+    fontWeight: '600',
+    color: 'rgba(235,235,245,0.4)',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+  },
+  dataValue: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#fff',
+    letterSpacing: -0.2,
+  },
+
+  // Stock Color Coding
+  stockValue: {
+    fontVariant: ['tabular-nums'],
+  },
+  stockOut: {
+    color: '#ff3b30',
+  },
+  stockLow: {
+    color: '#ff9500',
+  },
+  stockOk: {
+    color: '#34c759',
+  },
+
+  // Status Dot
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginLeft: 12,
+  },
+  statusPublished: {
+    backgroundColor: '#34c759',
+  },
+  statusDraft: {
+    backgroundColor: 'rgba(235,235,245,0.3)',
+  },
+
+  productChevron: {
+    fontSize: 17,
+    color: 'rgba(235,235,245,0.3)',
+    marginLeft: 8,
+  },
+  loadingContainer: {
+    padding: 40,
     alignItems: 'center',
   },
-  placeholderText: {
+
+  // Empty State
+  emptyState: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 40,
+    paddingVertical: 80,
+  },
+  emptyStateIcon: {
+    fontSize: 64,
+    color: 'rgba(235,235,245,0.2)',
+    marginBottom: 16,
+  },
+  emptyStateTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: 'rgba(235,235,245,0.8)',
+    marginBottom: 8,
+  },
+  emptyStateText: {
+    fontSize: 15,
+    color: 'rgba(235,235,245,0.5)',
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+
+  // RIGHT DETAIL PANEL
+  detailPanel: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: '100%',
+    backgroundColor: '#000',
+  },
+  emptyDetail: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 40,
+  },
+  emptyTitle: {
+    fontSize: 28,
+    fontWeight: '700',
+    color: '#fff',
+    marginBottom: 8,
+  },
+  emptyText: {
+    fontSize: 17,
+    color: 'rgba(235,235,245,0.6)',
+    textAlign: 'center',
+  },
+
+  // DETAIL CONTENT
+  detail: {
+    flex: 1,
+  },
+  detailHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.sm, // Consistent 12px spacing everywhere
+    paddingVertical: layout.cardPadding,
+    borderBottomWidth: 0.5,
+    borderBottomColor: 'rgba(255,255,255,0.1)',
+  },
+  backButton: {
+    paddingVertical: 4,
+  },
+  backButtonText: {
+    fontSize: 17,
+    color: '#60A5FA',
+  },
+  editButton: {
+    paddingVertical: 4,
+    paddingHorizontal: 12,
+  },
+  editButtonText: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: '#60A5FA',
+  },
+  editActions: {
+    flexDirection: 'row',
+    gap: 16,
+  },
+  cancelButton: {
+    paddingVertical: 4,
+    paddingHorizontal: 12,
+  },
+  cancelButtonText: {
+    fontSize: 17,
+    color: 'rgba(235,235,245,0.6)',
+  },
+  saveButton: {
+    paddingVertical: 4,
+    paddingHorizontal: 12,
+  },
+  saveButtonText: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: '#60A5FA',
+  },
+  headerCardContainer: {
+    marginHorizontal: spacing.sm, // Consistent 12px spacing everywhere
+    marginTop: layout.sectionSpacing,
+    marginBottom: layout.sectionSpacing,
+  },
+  headerCardGlass: {
+    borderRadius: radius.xxl,
+    borderCurve: 'continuous',
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  headerCardGlassFallback: {
+    backgroundColor: 'rgba(255,255,255,0.05)',
+  },
+  headerCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: layout.cardPadding,
+    gap: layout.cardPadding,
+  },
+  headerIcon: {
+    width: 60,
+    height: 60,
+    borderRadius: layout.cardRadius,
+  },
+  headerIconPlaceholder: {
+    backgroundColor: 'rgba(118,118,128,0.24)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerIconText: {
+    fontSize: 28,
+    color: 'rgba(235,235,245,0.6)',
+  },
+  headerInfo: {
+    flex: 1,
+  },
+  headerTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#fff',
+    marginBottom: 4,
+  },
+  headerTitleInput: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#fff',
+    marginBottom: 4,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 8,
+    borderCurve: 'continuous',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  headerMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  headerSubtitle: {
+    fontSize: 13,
+    color: 'rgba(235,235,245,0.6)',
+  },
+  headerSubtitleInput: {
+    fontSize: 13,
+    color: 'rgba(235,235,245,0.9)',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 6,
+    borderCurve: 'continuous',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  headerDot: {
+    fontSize: 13,
+    color: 'rgba(235,235,245,0.3)',
+  },
+  statusTextPublished: {
+    color: '#34c759',
+  },
+
+  // SECTIONS
+  section: {
+    marginHorizontal: spacing.sm, // Consistent 12px spacing everywhere
+    marginBottom: layout.sectionSpacing,
+  },
+  sectionTitle: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: 'rgba(235,235,245,0.5)',
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+    marginBottom: 8,
+    paddingHorizontal: layout.cardPadding,
+  },
+  cardGlass: {
+    borderRadius: radius.xxl,
+    borderCurve: 'continuous',
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  cardGlassFallback: {
+    backgroundColor: 'rgba(255,255,255,0.05)',
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: layout.rowPaddingVertical,
+    paddingHorizontal: layout.rowPaddingHorizontal,
+    minHeight: layout.minTouchTarget,
+    borderBottomWidth: 0.5,
+    borderBottomColor: 'rgba(255,255,255,0.05)',
+  },
+  rowLabel: {
+    fontSize: 17,
+    color: '#fff',
+  },
+  rowRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  rowValue: {
+    fontSize: 17,
+    color: 'rgba(235,235,245,0.6)',
+  },
+  rowChevron: {
+    fontSize: 17,
+    color: 'rgba(235,235,245,0.3)',
+  },
+  descriptionContainer: {
+    padding: 16,
+  },
+  descriptionText: {
+    fontSize: 15,
+    color: 'rgba(235,235,245,0.6)',
+    lineHeight: 22,
+  },
+
+  // Inventory
+  inventoryHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+  },
+  inventoryTotal: {
+    fontSize: 20,
+    fontWeight: '700',
+    letterSpacing: -0.3,
+  },
+
+  // Location Breakdown
+  locationBreakdown: {
+    paddingTop: 8,
+  },
+  locationDivider: {
+    height: 0.5,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    marginBottom: 8,
+  },
+  locationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    gap: 16,
+  },
+  locationInfo: {
+    flex: 1,
+    gap: 6,
+  },
+  locationName: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: 'rgba(235,235,245,0.9)',
+    letterSpacing: -0.1,
+  },
+  locationBar: {
+    height: 4,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  locationBarFill: {
+    height: '100%',
+    backgroundColor: '#34c759',
+    borderRadius: 2,
+  },
+  locationStock: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: 'rgba(235,235,245,0.7)',
+    letterSpacing: -0.2,
+    minWidth: 50,
+    textAlign: 'right',
+  },
+
+  // Pricing Tiers
+  pricingModeHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderBottomWidth: 0.5,
+    borderBottomColor: 'rgba(255,255,255,0.1)',
+  },
+  tierCount: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: 'rgba(235,235,245,0.5)',
+    letterSpacing: 0.3,
+    textTransform: 'uppercase',
+  },
+  tiersContainer: {
+    paddingVertical: 8,
+  },
+  tierRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    gap: 12,
+  },
+  tierInfo: {
+    flex: 1,
+    gap: 2,
+  },
+  tierWeight: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: 'rgba(235,235,245,0.9)',
+    letterSpacing: -0.2,
+  },
+  tierQty: {
     fontSize: 12,
+    fontWeight: '400',
+    color: 'rgba(235,235,245,0.5)',
+    letterSpacing: -0.1,
+  },
+  tierPrice: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#34c759',
+    letterSpacing: -0.3,
+    minWidth: 70,
+    textAlign: 'right',
+  },
+
+  // Custom Fields
+  customFieldRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    paddingVertical: 11,
+    paddingHorizontal: 16,
+    gap: 16,
+    borderBottomWidth: 0.5,
+    borderBottomColor: 'rgba(255,255,255,0.05)',
+  },
+  customFieldRowLast: {
+    borderBottomWidth: 0,
+  },
+  customFieldLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: 'rgba(235,235,245,0.7)',
+    letterSpacing: -0.1,
+    flex: 1,
+  },
+  customFieldValue: {
+    fontSize: 14,
+    fontWeight: '400',
+    color: 'rgba(235,235,245,0.9)',
+    letterSpacing: -0.1,
+    flex: 1,
+    textAlign: 'right',
+  },
+
+  // Categories Section
+  listHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 20,
+  },
+  listHeaderTitle: {
+    fontSize: 28,
+    fontWeight: '700',
+    color: '#fff',
+    letterSpacing: -0.5,
+  },
+  addButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addButtonText: {
+    fontSize: 24,
+    color: '#60A5FA',
     fontWeight: '300',
-    color: 'rgba(255,255,255,0.3)',
-    letterSpacing: 1,
+  },
+  emptyStateButton: {
+    marginTop: 20,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 10,
+  },
+  emptyStateButtonText: {
+    fontSize: 15,
+    color: '#60A5FA',
+    fontWeight: '600',
   },
 })
