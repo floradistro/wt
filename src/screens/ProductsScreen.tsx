@@ -18,9 +18,11 @@ import { logger } from '@/utils/logger'
 import { EditableDescriptionSection, EditablePricingSection, EditableCustomFieldsSection } from '@/components/products'
 import { NavSidebar, type NavItem } from '@/components/NavSidebar'
 import { CategoryCard, CategoryDetail, CategoryModal, CustomFieldModal, FieldVisibilityModal, PricingTemplateModal } from '@/components/categories'
+import { LocationSelector } from '@/components/LocationSelector'
 import { useCategories } from '@/hooks/useCategories'
 import { useCustomFields } from '@/hooks/useCustomFields'
 import { usePricingTemplates } from '@/hooks/usePricingTemplates'
+import { useUserLocations } from '@/hooks/useUserLocations'
 
 type NavSection = 'all' | 'low-stock' | 'out-of-stock' | 'categories'
 
@@ -117,6 +119,19 @@ export function ProductsScreen() {
   const [showFieldModal, setShowFieldModal] = useState(false)
   const [showVisibilityModal, setShowVisibilityModal] = useState(false)
   const [showPricingModal, setShowPricingModal] = useState(false)
+  const [showLocationSelector, setShowLocationSelector] = useState(false)
+
+  // Location filtering
+  const { locations: userLocations } = useUserLocations()
+  const [selectedLocationIds, setSelectedLocationIds] = useState<string[]>([]) // Empty = all locations
+
+  // Calculate selected location names for display
+  const selectedLocationNames = useMemo(() => {
+    if (selectedLocationIds.length === 0) return []
+    return userLocations
+      .filter(ul => selectedLocationIds.includes(ul.location.id))
+      .map(ul => ul.location.name)
+  }, [selectedLocationIds, userLocations])
 
   // Sliding animation
   const slideAnim = useRef(new Animated.Value(0)).current // 0 = list view, 1 = detail view
@@ -189,7 +204,16 @@ export function ProductsScreen() {
   // Filter products based on active nav and search query (client-side)
   const products = useMemo(() => {
     return allProducts.filter(product => {
-      // First filter by nav section
+      // First filter by location (if specific locations selected)
+      if (selectedLocationIds.length > 0) {
+        // Only show products that have inventory in at least one of the selected locations
+        const hasInventoryInSelectedLocations = product.inventory?.some(inv =>
+          selectedLocationIds.includes(inv.location_id)
+        )
+        if (!hasInventoryInSelectedLocations) return false
+      }
+
+      // Then filter by nav section
       if (activeNav === 'low-stock') {
         const stock = product.total_stock ?? 0
         if (!(stock > 0 && stock < 10)) return false
@@ -197,7 +221,7 @@ export function ProductsScreen() {
         if ((product.total_stock ?? 0) !== 0) return false
       }
 
-      // Then filter by search query
+      // Finally filter by search query
       if (productSearchQuery) {
         const searchLower = productSearchQuery.toLowerCase()
         const nameMatch = product.name.toLowerCase().includes(searchLower)
@@ -211,7 +235,7 @@ export function ProductsScreen() {
 
       return true
     })
-  }, [allProducts, activeNav, productSearchQuery, categoryMap])
+  }, [allProducts, activeNav, productSearchQuery, categoryMap, selectedLocationIds])
 
   // Calculate counts for badges
   const lowStockCount = allProducts.filter(p => {
@@ -308,6 +332,8 @@ export function ProductsScreen() {
           userName={user?.email?.split('@')[0] || 'User'}
           vendorName={vendorName}
           vendorLogo={vendorLogo}
+          onUserProfilePress={() => setShowLocationSelector(true)}
+          selectedLocationNames={selectedLocationNames}
         />
 
         {/* SLIDING CONTENT AREA */}
@@ -596,6 +622,14 @@ export function ProductsScreen() {
           reloadCategories()
           setShowCategoryModal(false)
         }}
+      />
+
+      <LocationSelector
+        visible={showLocationSelector}
+        userLocations={userLocations}
+        selectedLocationIds={selectedLocationIds}
+        onClose={() => setShowLocationSelector(false)}
+        onSelect={setSelectedLocationIds}
       />
 
       {selectedCategoryId && (

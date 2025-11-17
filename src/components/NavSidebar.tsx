@@ -82,6 +82,8 @@ interface NavSidebarProps {
   userName?: string
   vendorName?: string
   vendorLogo?: string | null
+  onUserProfilePress?: () => void
+  selectedLocationNames?: string[] // Names of selected locations to display
 }
 
 export function NavSidebar({
@@ -95,6 +97,8 @@ export function NavSidebar({
   userName,
   vendorName,
   vendorLogo,
+  onUserProfilePress,
+  selectedLocationNames = [],
 }: NavSidebarProps) {
   return (
     <View style={[styles.sidebar, { width }]}>
@@ -124,7 +128,14 @@ export function NavSidebar({
                   >
                     <Pressable
                       style={styles.userProfile}
-                      onPress={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}
+                      onPress={() => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                        onUserProfilePress?.()
+                      }}
+                      accessible={true}
+                      accessibilityRole="button"
+                      accessibilityLabel={`${vendorName || 'Vendor'}, ${userName || 'User'}${onUserProfilePress ? ', tap to change location' : ''}`}
+                      accessibilityHint={onUserProfilePress ? "Double tap to select locations" : undefined}
                     >
                       {vendorLogo && vendorLogo.trim() !== '' ? (
                         <Image
@@ -141,11 +152,25 @@ export function NavSidebar({
                       <View style={styles.userInfo}>
                         <Text style={styles.userName}>{userName}</Text>
                         <Text style={styles.vendorName}>{vendorName || 'Vendor Account'}</Text>
+                        {selectedLocationNames.length > 0 && (
+                          <Text style={styles.selectedLocations} numberOfLines={1}>
+                            {selectedLocationNames.join(', ')}
+                          </Text>
+                        )}
                       </View>
                       <Text style={styles.userProfileChevron}>›</Text>
                     </Pressable>
                   </LiquidGlassView>
                 </LiquidGlassContainerView>
+              </View>
+            )}
+
+            {/* Location Filter Indicator (when locations selected) */}
+            {selectedLocationNames.length > 0 && (
+              <View style={styles.locationFilterBadge}>
+                <Text style={styles.locationFilterText}>
+                  Filtering: {selectedLocationNames.length} location{selectedLocationNames.length !== 1 ? 's' : ''}
+                </Text>
               </View>
             )}
 
@@ -390,6 +415,31 @@ const styles = StyleSheet.create({
   vendorName: {
     fontSize: 13,
     color: 'rgba(235,235,245,0.6)',
+  },
+  selectedLocations: {
+    fontSize: 12,
+    color: '#60A5FA',
+    marginTop: 2,
+    fontWeight: '500',
+  },
+  locationFilterBadge: {
+    marginHorizontal: 8,
+    marginTop: 12,
+    marginBottom: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: 'rgba(96,165,250,0.15)',
+    borderRadius: 6,
+    borderWidth: 0.5,
+    borderColor: 'rgba(96,165,250,0.3)',
+  },
+  locationFilterText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#60A5FA',
+    textAlign: 'center',
+    letterSpacing: 0.3,
+    textTransform: 'uppercase',
   },
 
   // Fixed Search Bar - Floating overlay
