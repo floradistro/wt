@@ -18,19 +18,12 @@ import { layout } from '@/theme/layout'
 import { useAuth, useAuthActions } from '@/stores/auth.store'
 import { useUserLocations, type UserLocationAccess } from '@/hooks/useUserLocations'
 import { runAllSentryTests, quickSentryTest } from '@/utils/test-sentry'
+import { NavSidebar, type NavItem } from '@/components/NavSidebar'
 
 const { width } = Dimensions.get('window')
 const isTablet = width > 600
 
-// Monochrome Icons (like Dock)
-function SearchIcon({ color }: { color: string }) {
-  return (
-    <View style={styles.searchIconContainer}>
-      <View style={[styles.searchIconCircle, { borderColor: color }]} />
-      <View style={[styles.searchIconHandle, { backgroundColor: color }]} />
-    </View>
-  )
-}
+// Monochrome Icons for Settings Categories
 
 function UserIcon({ color }: { color: string }) {
   return (
@@ -477,7 +470,24 @@ function SettingsScreen() {
     },
   ], [user, userName, userLocations, accountHeaderOpacity, locationsHeaderOpacity, devToolsHeaderOpacity])
 
-  const [selectedCategory, setSelectedCategory] = useState(categories[0])
+  const [selectedCategoryId, setSelectedCategoryId] = useState<string>('account')
+  const [searchQuery, setSearchQuery] = useState('')
+
+  // Convert categories to NavItems for NavSidebar
+  const navItems: NavItem[] = useMemo(() =>
+    categories.map(cat => ({
+      id: cat.id,
+      icon: cat.icon,
+      label: cat.title,
+      count: cat.badge,
+    })),
+    [categories]
+  )
+
+  const selectedCategory = useMemo(
+    () => categories.find(c => c.id === selectedCategoryId) || categories[0],
+    [categories, selectedCategoryId]
+  )
 
   const handleSignOut = async () => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning)
@@ -486,170 +496,30 @@ function SettingsScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <View style={styles.splitView}>
-        {/* Left Sidebar - iOS Settings full height */}
-        <View style={styles.sidebar}>
-          {/* iOS-style container background */}
-          <LiquidGlassView
-            effect="regular"
-            colorScheme="dark"
-            style={[styles.sidebarContainer, !isLiquidGlassSupported && styles.sidebarContainerFallback]}
-          >
-            {/* Scrollable Content */}
-            <ScrollView
-              style={styles.sidebarScroll}
-              showsVerticalScrollIndicator={true}
-              indicatorStyle="white"
-              scrollIndicatorInsets={{ right: -spacing.sm + 2, bottom: layout.dockHeight }}
-              contentContainerStyle={styles.sidebarScrollContent}
-            >
-              {/* Spacer for fixed search bar */}
-              <View style={styles.searchSpacer} />
-
-            {/* User Profile Card - Pill */}
-            <View style={styles.pillWrapper}>
-              <LiquidGlassView
-                effect="regular"
-                colorScheme="dark"
-                interactive
-                style={[styles.pill, !isLiquidGlassSupported && styles.pillFallback]}
-              >
-                <Pressable
-                  onPress={() => {
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                    setSelectedCategory(categories[0])
-                  }}
-                  style={styles.profilePill}
-                  accessible={true}
-                  accessibilityRole="tab"
-                  accessibilityLabel={`${userName}, account settings`}
-                  accessibilityHint="Double tap to view account details"
-                  accessibilityState={{ selected: selectedCategory.id === 'account' }}
-                >
-                  <View style={styles.profileAvatar} accessibilityElementsHidden={true} importantForAccessibility="no">
-                    <Text style={styles.profileAvatarText} accessible={false}>
-                      {userName.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2)}
-                    </Text>
-                  </View>
-                  <View style={styles.profileInfo} accessible={false}>
-                    <Text style={styles.profileName} accessible={false}>{userName}</Text>
-                    <Text style={styles.profileSubtitle} accessible={false}>Apple Account, iCloud+, and more</Text>
-                  </View>
-                </Pressable>
-              </LiquidGlassView>
-            </View>
-
-            {/* Category Items - Floating with pill on selection */}
-            {categories.slice(1).map((category) => {
-              const isSelected = selectedCategory.id === category.id
-              const IconComponent = category.icon
-              const iconColor = colors.text.primary
-              const accessibilityLabel = category.badge
-                ? `${category.title}, ${category.badge} ${category.id === 'locations' ? 'locations' : 'items'}`
-                : category.title
-
-              return (
-                <View key={category.id} style={styles.categoryItemWrapper}>
-                  {isSelected ? (
-                    <LiquidGlassView
-                      effect="regular"
-                      colorScheme="dark"
-                      style={[styles.categoryItemPill, !isLiquidGlassSupported && styles.pillFallback]}
-                    >
-                      <Pressable
-                        onPress={() => {
-                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                          setSelectedCategory(category)
-                        }}
-                        style={styles.categoryItemContent}
-                        accessible={true}
-                        accessibilityRole="tab"
-                        accessibilityLabel={accessibilityLabel}
-                        accessibilityHint={`Currently viewing ${category.title}`}
-                        accessibilityState={{ selected: true }}
-                      >
-                        <View accessibilityElementsHidden={true} importantForAccessibility="no">
-                          <IconComponent color={iconColor} />
-                        </View>
-                        <Text style={styles.categoryItemText} accessible={false}>
-                          {category.title}
-                        </Text>
-                        {category.badge && (
-                          <View style={styles.pillBadge} accessibilityElementsHidden={true} importantForAccessibility="no">
-                            <Text style={styles.pillBadgeText} accessible={false}>{category.badge}</Text>
-                          </View>
-                        )}
-                        <Text style={styles.pillChevron} accessibilityElementsHidden={true} importantForAccessibility="no">›</Text>
-                      </Pressable>
-                    </LiquidGlassView>
-                  ) : (
-                    <Pressable
-                      onPress={() => {
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                        setSelectedCategory(category)
-                      }}
-                      style={styles.categoryItemContent}
-                      accessible={true}
-                      accessibilityRole="tab"
-                      accessibilityLabel={accessibilityLabel}
-                      accessibilityHint={`Double tap to view ${category.title}`}
-                      accessibilityState={{ selected: false }}
-                    >
-                      <View accessibilityElementsHidden={true} importantForAccessibility="no">
-                        <IconComponent color={iconColor} />
-                      </View>
-                      <Text style={styles.categoryItemText} accessible={false}>
-                        {category.title}
-                      </Text>
-                      {category.badge && (
-                        <View style={styles.pillBadge} accessibilityElementsHidden={true} importantForAccessibility="no">
-                          <Text style={styles.pillBadgeText} accessible={false}>{category.badge}</Text>
-                        </View>
-                      )}
-                      <Text style={styles.pillChevron} accessibilityElementsHidden={true} importantForAccessibility="no">›</Text>
-                    </Pressable>
-                  )}
-                </View>
-              )
-            })}
-
-            {/* Sign Out - Pill */}
-            <View style={styles.pillWrapper}>
+      <View style={styles.layout}>
+        {/* LEFT NAV SIDEBAR */}
+        <NavSidebar
+          width={375}
+          searchValue={searchQuery}
+          onSearchChange={setSearchQuery}
+          items={navItems}
+          activeItemId={selectedCategoryId}
+          onItemPress={setSelectedCategoryId}
+          footer={
+            <View style={styles.footerWrapper}>
               <Pressable
                 onPress={handleSignOut}
                 accessible={true}
                 accessibilityRole="button"
                 accessibilityLabel="Sign out"
                 accessibilityHint="Double tap to sign out of your account"
+                style={styles.signOutButton}
               >
-                <Text style={styles.signOutText} accessible={false}>Sign Out</Text>
+                <Text style={styles.signOutText}>Sign Out</Text>
               </Pressable>
             </View>
-            </ScrollView>
-
-            {/* Search Bar - Floating overlay on top */}
-            <View style={styles.searchContainer}>
-            <LiquidGlassContainerView spacing={8}>
-              <LiquidGlassView
-                effect="regular"
-                colorScheme="dark"
-                style={[styles.searchBarContainer, !isLiquidGlassSupported && styles.searchBarContainerFallback]}
-              >
-                <View
-                  style={styles.searchInner}
-                  accessible={true}
-                  accessibilityRole="search"
-                  accessibilityLabel="Search settings"
-                  accessibilityHint="Search functionality coming soon"
-                >
-                  <SearchIcon color={colors.text.quaternary} />
-                  <Text style={styles.searchPlaceholder} accessible={false}>Search</Text>
-                </View>
-              </LiquidGlassView>
-            </LiquidGlassContainerView>
-            </View>
-          </LiquidGlassView>
-        </View>
+          }
+        />
 
         {/* Right Detail Panel */}
         <View style={styles.detailPanel}>
@@ -663,215 +533,29 @@ function SettingsScreen() {
 const SettingsScreenMemo = memo(SettingsScreen)
 export { SettingsScreenMemo as SettingsScreen }
 
-const SIDEBAR_WIDTH = 375
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background.primary,
   },
-  splitView: {
+  layout: {
     flex: 1,
     flexDirection: 'row',
-    gap: spacing.sm, // iOS-style gap between sidebar and detail panel
   },
 
-  // Left Sidebar - iOS Settings full height
-  sidebar: {
-    width: SIDEBAR_WIDTH,
-    backgroundColor: colors.background.primary,
+  // Footer
+  footerWrapper: {
+    paddingHorizontal: layout.cardPadding,
   },
-  sidebarContainer: {
-    flex: 1,
-    marginLeft: 8, // Ultra-minimal iOS-style left padding
-    marginRight: 0, // No right margin - extends to sidebar edge for scroll indicator
-    marginTop: spacing.md,
-    marginBottom: spacing.md,
-    borderRadius: radius.xl,
-    borderCurve: 'continuous',
-    overflow: 'hidden',
+  signOutButton: {
+    paddingVertical: 12,
   },
-  sidebarContainerFallback: {
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
-  },
-  sidebarScroll: {
-    flex: 1,
-  },
-  sidebarScrollContent: {
-    paddingBottom: layout.dockHeight,
-    paddingRight: spacing.md, // Right padding for content (container extends to edge)
-  },
-  searchSpacer: {
-    height: 72, // Height of fixed search bar
-  },
-
-  // Search Bar - Floating overlay on top
-  searchContainer: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    paddingLeft: 8,
-    paddingRight: spacing.md, // Match content padding
-    paddingTop: spacing.md,
-    paddingBottom: spacing.sm,
-    zIndex: 10,
-  },
-  searchBarContainer: {
-    borderRadius: 100, // Match pill shape
-    borderCurve: 'continuous',
-    overflow: 'hidden',
-    minHeight: 44,
-  },
-  searchBarContainerFallback: {
-    backgroundColor: 'rgba(255,255,255,0.08)',
-  },
-  searchInner: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    gap: 12,
-  },
-  searchPlaceholder: {
-    flex: 1,
-    fontSize: 17,
-    fontWeight: '400',
-    color: colors.text.quaternary,
-    letterSpacing: -0.4,
-  },
-
-  // Search Icon
-  searchIconContainer: {
-    width: 16,
-    height: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  searchIconCircle: {
-    width: 11,
-    height: 11,
-    borderRadius: 5.5,
-    borderWidth: 1.5,
-  },
-  searchIconHandle: {
-    width: 5,
-    height: 1.5,
-    position: 'absolute',
-    bottom: 0.5,
-    right: 0.5,
-    transform: [{ rotate: '45deg' }],
-  },
-
-  // Pill Wrapper
-  pillWrapper: {
-    paddingHorizontal: 8,
-    marginBottom: 12,
-  },
-
-  // Pill Container - True pill shape
-  pill: {
-    borderRadius: 100,
-    borderCurve: 'continuous',
-    overflow: 'hidden',
-  },
-  pillFallback: {
-    backgroundColor: 'rgba(255,255,255,0.05)',
-  },
-
-  // Profile Pill
-  profilePill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 8,
-    gap: 10,
-  },
-  profileAvatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: colors.glass.ultraThick,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  profileAvatarText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: colors.text.primary,
-  },
-  profileInfo: {
-    flex: 1,
-  },
-  profileName: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: colors.text.primary,
-    letterSpacing: -0.4,
-    marginBottom: 2,
-  },
-  profileSubtitle: {
-    fontSize: 13,
-    fontWeight: '400',
-    color: colors.text.tertiary,
-    letterSpacing: -0.1,
-  },
-
-  // Category Items - Floating
-  categoryItemWrapper: {
-    paddingHorizontal: 8,
-    marginBottom: 8,
-  },
-  categoryItemPill: {
-    borderRadius: 100,
-    borderCurve: 'continuous',
-    overflow: 'hidden',
-  },
-  categoryItemContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    gap: 12,
-    minHeight: 44,
-  },
-  categoryItemText: {
-    flex: 1,
-    fontSize: 17,
-    fontWeight: '400',
-    color: colors.text.primary,
-    letterSpacing: -0.4,
-  },
-  pillBadge: {
-    minWidth: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: colors.glass.ultraThick,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 6,
-  },
-  pillBadgeText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.text.primary,
-  },
-  pillChevron: {
-    fontSize: 20,
-    fontWeight: '500',
-    color: colors.text.quaternary,
-  },
-
-  // Sign Out
   signOutText: {
     fontSize: 17,
     fontWeight: '400',
     color: '#ff3b30',
     letterSpacing: -0.4,
     textAlign: 'center',
-    paddingVertical: 12,
   },
 
   // Icon Styles

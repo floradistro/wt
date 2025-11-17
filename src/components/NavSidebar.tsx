@@ -65,7 +65,7 @@ function FolderIcon({ color }: { color: string }) {
 
 export interface NavItem {
   id: string
-  icon: 'grid' | 'warning' | 'box' | 'folder' // Icon type instead of SF Symbol
+  icon: 'grid' | 'warning' | 'box' | 'folder' | React.ComponentType<{ color: string }> // Icon type or custom component
   label: string
   count?: number
   badge?: 'warning' | 'error' | 'info'
@@ -158,21 +158,29 @@ export function NavSidebar({
               // Get icon component
               const iconColor = isActive ? '#fff' : 'rgba(235,235,245,0.6)'
               let IconComponent: React.ReactElement
-              switch (item.icon) {
-                case 'grid':
-                  IconComponent = <GridIcon color={iconColor} />
-                  break
-                case 'warning':
-                  IconComponent = <WarningIcon color={iconColor} />
-                  break
-                case 'box':
-                  IconComponent = <BoxIcon color={iconColor} />
-                  break
-                case 'folder':
-                  IconComponent = <FolderIcon color={iconColor} />
-                  break
-                default:
-                  IconComponent = <GridIcon color={iconColor} />
+
+              // Check if icon is a custom component
+              if (typeof item.icon === 'function') {
+                const CustomIcon = item.icon
+                IconComponent = <CustomIcon color={iconColor} />
+              } else {
+                // Use built-in icons
+                switch (item.icon) {
+                  case 'grid':
+                    IconComponent = <GridIcon color={iconColor} />
+                    break
+                  case 'warning':
+                    IconComponent = <WarningIcon color={iconColor} />
+                    break
+                  case 'box':
+                    IconComponent = <BoxIcon color={iconColor} />
+                    break
+                  case 'folder':
+                    IconComponent = <FolderIcon color={iconColor} />
+                    break
+                  default:
+                    IconComponent = <GridIcon color={iconColor} />
+                }
               }
 
               const accessibilityLabel = item.count !== undefined

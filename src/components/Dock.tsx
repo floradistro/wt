@@ -32,7 +32,7 @@ function ProductsIcon({ color }: { color: string }) {
   )
 }
 
-function MoreIcon({ color }: { color: string }) {
+function SettingsIcon({ color }: { color: string }) {
   return (
     <View style={styles.dotsIcon}>
       <View style={[styles.dot, { backgroundColor: color }]} />
@@ -45,7 +45,7 @@ function MoreIcon({ color }: { color: string }) {
 const tabs = [
   { Icon: POSIcon, name: 'POS' },
   { Icon: ProductsIcon, name: 'Products' },
-  { Icon: MoreIcon, name: 'More' },
+  { Icon: SettingsIcon, name: 'Settings' },
 ]
 
 type IconComponent = (props: { color: string }) => React.JSX.Element
