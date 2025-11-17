@@ -89,11 +89,16 @@ function AccountDetail({ user }: { user: any }) {
   return (
     <View style={styles.detailContainer}>
       {/* Header with avatar */}
-      <View style={styles.detailHeader}>
-        <View style={styles.avatarLarge}>
-          <Text style={styles.avatarLargeText}>{initials}</Text>
+      <View style={styles.detailHeader} accessible={false}>
+        <View
+          style={styles.avatarLarge}
+          accessible={true}
+          accessibilityRole="image"
+          accessibilityLabel={`Profile picture, ${initials}`}
+        >
+          <Text style={styles.avatarLargeText} accessible={false}>{initials}</Text>
         </View>
-        <Text style={styles.detailName}>{userName}</Text>
+        <Text style={styles.detailName} accessibilityRole="header">{userName}</Text>
         <Text style={styles.detailEmail}>{userEmail}</Text>
       </View>
 
@@ -166,7 +171,7 @@ function DeveloperToolsDetail() {
 
   return (
     <View style={styles.detailContainer}>
-      <Text style={styles.detailTitle}>Developer Tools</Text>
+      <Text style={styles.detailTitle} accessibilityRole="header">Developer Tools</Text>
 
       <ScrollView style={styles.detailScroll} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: layout.dockHeight }}>
         <LiquidGlassContainerView spacing={12} style={styles.cardWrapper}>
@@ -186,22 +191,32 @@ function DeveloperToolsDetail() {
                 onPress={handleQuickTest}
                 disabled={isRunning}
                 style={styles.testButton}
+                accessible={true}
+                accessibilityRole="button"
+                accessibilityLabel="Quick test, send one test message to Sentry"
+                accessibilityHint="Double tap to send a test message"
+                accessibilityState={{ disabled: isRunning }}
               >
-                <Text style={styles.testButtonText}>⚡️ Quick Test</Text>
-                <Text style={styles.testButtonSubtext}>Send one test message</Text>
+                <Text style={styles.testButtonText} accessible={false}>⚡️ Quick Test</Text>
+                <Text style={styles.testButtonSubtext} accessible={false}>Send one test message</Text>
               </Pressable>
 
               <Pressable
                 onPress={handleFullTest}
                 disabled={isRunning}
                 style={[styles.testButton, styles.testButtonPrimary]}
+                accessible={true}
+                accessibilityRole="button"
+                accessibilityLabel={isRunning ? "Running tests" : "Run all tests, complete integration test, approximately 7 seconds"}
+                accessibilityHint="Double tap to run all Sentry tests"
+                accessibilityState={{ disabled: isRunning, busy: isRunning }}
               >
                 {isRunning ? (
-                  <ActivityIndicator color="#fff" />
+                  <ActivityIndicator color="#fff" accessibilityElementsHidden={true} importantForAccessibility="no" />
                 ) : (
                   <>
-                    <Text style={styles.testButtonTextPrimary}>🚀 Run All Tests</Text>
-                    <Text style={styles.testButtonSubtextPrimary}>Complete integration test (~7s)</Text>
+                    <Text style={styles.testButtonTextPrimary} accessible={false}>🚀 Run All Tests</Text>
+                    <Text style={styles.testButtonSubtextPrimary} accessible={false}>Complete integration test (~7s)</Text>
                   </>
                 )}
               </Pressable>
@@ -263,10 +278,15 @@ function LocationsDetail({ userLocations }: { userLocations: UserLocationAccess[
   if (userLocations.length === 0) {
     return (
       <View style={styles.detailContainer}>
-        <Text style={styles.detailTitle}>Locations & Access</Text>
-        <View style={styles.emptyState}>
-          <Text style={styles.emptyStateText}>No locations assigned</Text>
-          <Text style={styles.emptyStateSubtext}>Contact your administrator to get access</Text>
+        <Text style={styles.detailTitle} accessibilityRole="header">Locations & Access</Text>
+        <View
+          style={styles.emptyState}
+          accessible={true}
+          accessibilityRole="alert"
+          accessibilityLabel="No locations assigned. Contact your administrator to get access."
+        >
+          <Text style={styles.emptyStateText} accessible={false}>No locations assigned</Text>
+          <Text style={styles.emptyStateSubtext} accessible={false}>Contact your administrator to get access</Text>
         </View>
       </View>
     )
@@ -274,36 +294,46 @@ function LocationsDetail({ userLocations }: { userLocations: UserLocationAccess[
 
   return (
     <View style={styles.detailContainer}>
-      <Text style={styles.detailTitle}>Locations & Access</Text>
+      <Text style={styles.detailTitle} accessibilityRole="header">Locations & Access</Text>
 
       <ScrollView style={styles.detailScroll} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: layout.dockHeight }}>
-        {userLocations.map((userLocation) => (
-          <LiquidGlassContainerView key={userLocation.location.id} spacing={12} style={styles.cardWrapper}>
-            <LiquidGlassView
-              effect="regular"
-              colorScheme="dark"
-              interactive
-              style={[styles.detailCard, !isLiquidGlassSupported && styles.cardFallback]}
-            >
-              <Pressable
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                }}
-                style={styles.locationCard}
+        {userLocations.map((userLocation) => {
+          const locationAddress = formatAddress(userLocation.location)
+          const roleDisplay = getRoleDisplay(userLocation.role)
+          const accessibilityLabel = `${userLocation.location.name}. ${locationAddress}. ${roleDisplay}`
+
+          return (
+            <LiquidGlassContainerView key={userLocation.location.id} spacing={12} style={styles.cardWrapper}>
+              <LiquidGlassView
+                effect="regular"
+                colorScheme="dark"
+                interactive
+                style={[styles.detailCard, !isLiquidGlassSupported && styles.cardFallback]}
               >
-                <View style={styles.locationIconContainer}>
-                  <LocationIcon color={colors.text.primary} />
-                </View>
-                <View style={styles.locationInfo}>
-                  <Text style={styles.locationName}>{userLocation.location.name}</Text>
-                  <Text style={styles.locationAddress}>{formatAddress(userLocation.location)}</Text>
-                  <Text style={styles.locationRole}>{getRoleDisplay(userLocation.role)}</Text>
-                </View>
-                <Text style={styles.chevron}>›</Text>
-              </Pressable>
-            </LiquidGlassView>
-          </LiquidGlassContainerView>
-        ))}
+                <Pressable
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                  }}
+                  style={styles.locationCard}
+                  accessible={true}
+                  accessibilityRole="button"
+                  accessibilityLabel={accessibilityLabel}
+                  accessibilityHint="Double tap to view location details"
+                >
+                  <View style={styles.locationIconContainer} accessibilityElementsHidden={true} importantForAccessibility="no">
+                    <LocationIcon color={colors.text.primary} />
+                  </View>
+                  <View style={styles.locationInfo} accessible={false}>
+                    <Text style={styles.locationName} accessible={false}>{userLocation.location.name}</Text>
+                    <Text style={styles.locationAddress} accessible={false}>{locationAddress}</Text>
+                    <Text style={styles.locationRole} accessible={false}>{roleDisplay}</Text>
+                  </View>
+                  <Text style={styles.chevron} accessibilityElementsHidden={true} importantForAccessibility="no">›</Text>
+                </Pressable>
+              </LiquidGlassView>
+            </LiquidGlassContainerView>
+          )
+        })}
       </ScrollView>
     </View>
   )
@@ -406,15 +436,20 @@ function SettingsScreen() {
                     setSelectedCategory(categories[0])
                   }}
                   style={styles.profilePill}
+                  accessible={true}
+                  accessibilityRole="tab"
+                  accessibilityLabel={`${userName}, account settings`}
+                  accessibilityHint="Double tap to view account details"
+                  accessibilityState={{ selected: selectedCategory.id === 'account' }}
                 >
-                  <View style={styles.profileAvatar}>
-                    <Text style={styles.profileAvatarText}>
+                  <View style={styles.profileAvatar} accessibilityElementsHidden={true} importantForAccessibility="no">
+                    <Text style={styles.profileAvatarText} accessible={false}>
                       {userName.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2)}
                     </Text>
                   </View>
-                  <View style={styles.profileInfo}>
-                    <Text style={styles.profileName}>{userName}</Text>
-                    <Text style={styles.profileSubtitle}>Apple Account, iCloud+, and more</Text>
+                  <View style={styles.profileInfo} accessible={false}>
+                    <Text style={styles.profileName} accessible={false}>{userName}</Text>
+                    <Text style={styles.profileSubtitle} accessible={false}>Apple Account, iCloud+, and more</Text>
                   </View>
                 </Pressable>
               </LiquidGlassView>
@@ -425,6 +460,9 @@ function SettingsScreen() {
               const isSelected = selectedCategory.id === category.id
               const IconComponent = category.icon
               const iconColor = colors.text.primary
+              const accessibilityLabel = category.badge
+                ? `${category.title}, ${category.badge} ${category.id === 'locations' ? 'locations' : 'items'}`
+                : category.title
 
               return (
                 <View key={category.id} style={styles.categoryItemWrapper}>
@@ -440,17 +478,24 @@ function SettingsScreen() {
                           setSelectedCategory(category)
                         }}
                         style={styles.categoryItemContent}
+                        accessible={true}
+                        accessibilityRole="tab"
+                        accessibilityLabel={accessibilityLabel}
+                        accessibilityHint={`Currently viewing ${category.title}`}
+                        accessibilityState={{ selected: true }}
                       >
-                        <IconComponent color={iconColor} />
-                        <Text style={styles.categoryItemText}>
+                        <View accessibilityElementsHidden={true} importantForAccessibility="no">
+                          <IconComponent color={iconColor} />
+                        </View>
+                        <Text style={styles.categoryItemText} accessible={false}>
                           {category.title}
                         </Text>
                         {category.badge && (
-                          <View style={styles.pillBadge}>
-                            <Text style={styles.pillBadgeText}>{category.badge}</Text>
+                          <View style={styles.pillBadge} accessibilityElementsHidden={true} importantForAccessibility="no">
+                            <Text style={styles.pillBadgeText} accessible={false}>{category.badge}</Text>
                           </View>
                         )}
-                        <Text style={styles.pillChevron}>›</Text>
+                        <Text style={styles.pillChevron} accessibilityElementsHidden={true} importantForAccessibility="no">›</Text>
                       </Pressable>
                     </LiquidGlassView>
                   ) : (
@@ -460,17 +505,24 @@ function SettingsScreen() {
                         setSelectedCategory(category)
                       }}
                       style={styles.categoryItemContent}
+                      accessible={true}
+                      accessibilityRole="tab"
+                      accessibilityLabel={accessibilityLabel}
+                      accessibilityHint={`Double tap to view ${category.title}`}
+                      accessibilityState={{ selected: false }}
                     >
-                      <IconComponent color={iconColor} />
-                      <Text style={styles.categoryItemText}>
+                      <View accessibilityElementsHidden={true} importantForAccessibility="no">
+                        <IconComponent color={iconColor} />
+                      </View>
+                      <Text style={styles.categoryItemText} accessible={false}>
                         {category.title}
                       </Text>
                       {category.badge && (
-                        <View style={styles.pillBadge}>
-                          <Text style={styles.pillBadgeText}>{category.badge}</Text>
+                        <View style={styles.pillBadge} accessibilityElementsHidden={true} importantForAccessibility="no">
+                          <Text style={styles.pillBadgeText} accessible={false}>{category.badge}</Text>
                         </View>
                       )}
-                      <Text style={styles.pillChevron}>›</Text>
+                      <Text style={styles.pillChevron} accessibilityElementsHidden={true} importantForAccessibility="no">›</Text>
                     </Pressable>
                   )}
                 </View>
@@ -479,8 +531,14 @@ function SettingsScreen() {
 
             {/* Sign Out - Pill */}
             <View style={styles.pillWrapper}>
-              <Pressable onPress={handleSignOut}>
-                <Text style={styles.signOutText}>Sign Out</Text>
+              <Pressable
+                onPress={handleSignOut}
+                accessible={true}
+                accessibilityRole="button"
+                accessibilityLabel="Sign out"
+                accessibilityHint="Double tap to sign out of your account"
+              >
+                <Text style={styles.signOutText} accessible={false}>Sign Out</Text>
               </Pressable>
             </View>
             </ScrollView>
