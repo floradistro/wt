@@ -308,7 +308,7 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    top: '40%',
+    top: '15%',
   },
   modalCard: {
     flex: 1,
@@ -383,7 +383,7 @@ const styles = StyleSheet.create({
     color: '#10b981',
   },
   content: {
-    maxHeight: SCREEN_HEIGHT * 0.5,
+    maxHeight: SCREEN_HEIGHT * 0.75,
   },
   summary: {
     gap: 8,
