@@ -116,15 +116,25 @@ function POSPaymentModal({
           <View style={styles.header}>
             <Text style={styles.title}>CHECKOUT</Text>
             <Text style={styles.totalLabel}>TOTAL</Text>
-            <Text style={styles.totalAmount}>${total.toFixed(2)}</Text>
+            <Text
+              style={styles.totalAmount}
+              accessibilityLabel={`Total amount: ${total.toFixed(2)} dollars`}
+              accessibilityRole="text"
+            >
+              ${total.toFixed(2)}
+            </Text>
           </View>
 
           {/* Payment Method Tabs */}
-          <View style={styles.tabs}>
+          <View style={styles.tabs} accessibilityRole="tablist">
             <TouchableOpacity
               style={[styles.tab, paymentMethod === 'cash' && styles.tabActive]}
               onPress={() => handleTabChange('cash')}
               activeOpacity={0.7}
+              accessibilityRole="tab"
+              accessibilityLabel="Cash payment"
+              accessibilityState={{ selected: paymentMethod === 'cash' }}
+              accessibilityHint="Pay with cash"
             >
               <Ionicons
                 name="cash-outline"
@@ -140,6 +150,10 @@ function POSPaymentModal({
               style={[styles.tab, paymentMethod === 'card' && styles.tabActive]}
               onPress={() => handleTabChange('card')}
               activeOpacity={0.7}
+              accessibilityRole="tab"
+              accessibilityLabel="Card payment"
+              accessibilityState={{ selected: paymentMethod === 'card' }}
+              accessibilityHint="Pay with credit or debit card"
             >
               <Ionicons
                 name="card-outline"
@@ -155,6 +169,10 @@ function POSPaymentModal({
               style={[styles.tab, paymentMethod === 'split' && styles.tabActive]}
               onPress={() => handleTabChange('split')}
               activeOpacity={0.7}
+              accessibilityRole="tab"
+              accessibilityLabel="Split payment"
+              accessibilityState={{ selected: paymentMethod === 'split' }}
+              accessibilityHint="Split payment between cash and card"
             >
               <Ionicons
                 name="swap-horizontal-outline"
@@ -237,6 +255,9 @@ function POSPaymentModal({
               onPress={handleClose}
               activeOpacity={0.7}
               style={styles.actionButtonWrapper}
+              accessibilityRole="button"
+              accessibilityLabel="Cancel payment"
+              accessibilityHint="Close checkout and return to cart"
             >
               <LiquidGlassView
                 effect="regular"
