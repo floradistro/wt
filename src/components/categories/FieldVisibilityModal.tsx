@@ -170,7 +170,7 @@ export function FieldVisibilityModal({
           {/* Info Footer */}
           <View style={styles.footer}>
             <Text style={styles.footerText}>
-              Hidden fields preserve their data. They just won't be displayed in the selected context.
+              Hidden fields preserve their data. They just won&apos;t be displayed in the selected context.
             </Text>
           </View>
         </LiquidGlassView>

@@ -1,10 +1,9 @@
-import { View, Text, StyleSheet } from 'react-native'
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native'
 import { memo } from 'react'
 import Slider from '@react-native-community/slider'
 import * as Haptics from 'expo-haptics'
 import type { Customer, LoyaltyProgram } from '@/types/pos'
 import { Button } from '@/theme'
-import { TouchableOpacity } from 'react-native'
 
 interface POSTotalsSectionProps {
   subtotal: number

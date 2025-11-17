@@ -5,8 +5,7 @@ import { Camera, useCameraDevice, useCodeScanner } from 'react-native-vision-cam
 import * as Haptics from 'expo-haptics'
 import { parseAAMVABarcode, calculateAge, isLegalAge, type AAMVAData } from '@/lib/id-scanner/aamva-parser'
 import { playSuccessBeep, playRejectionTone } from '@/lib/id-scanner/audio'
-import { colors, typography, spacing, radius } from '@/theme'
-import { Button } from '@/theme'
+import { colors, typography, spacing, radius, Button } from '@/theme'
 import { logger } from '@/utils/logger'
 
 export function ScanScreen() {
