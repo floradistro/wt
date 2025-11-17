@@ -85,6 +85,7 @@ function POSSaleSuccessModal({ visible, saleData, onClose }: POSSaleSuccessModal
       animationType="none"
       supportedOrientations={['portrait', 'landscape', 'landscape-left', 'landscape-right']}
       onRequestClose={handleClose}
+      accessibilityViewIsModal={true}
     >
       <Animated.View style={[styles.overlay, { opacity: fadeAnim }]}>
         <BlurView intensity={50} tint="dark" style={StyleSheet.absoluteFill} />
@@ -97,6 +98,11 @@ function POSSaleSuccessModal({ visible, saleData, onClose }: POSSaleSuccessModal
               transform: [{ scale: scaleAnim }],
             },
           ]}
+          accessible={true}
+          accessibilityRole="alert"
+          accessibilityLabel={`Sale complete. Order ${saleData.orderNumber}. Total: ${saleData.total.toFixed(2)} dollars`}
+          accessibilityLiveRegion="assertive"
+          onAccessibilityEscape={handleClose}
         >
           {/* Glass morphism background */}
           <View style={styles.modalBg}>
@@ -111,6 +117,8 @@ function POSSaleSuccessModal({ visible, saleData, onClose }: POSSaleSuccessModal
                 transform: [{ scale: checkmarkAnim }],
               },
             ]}
+            accessibilityElementsHidden={true}
+            importantForAccessibility="no"
           >
             <View style={styles.checkmarkBg}>
               <BlurView intensity={20} tint="light" style={StyleSheet.absoluteFill} />
@@ -119,21 +127,30 @@ function POSSaleSuccessModal({ visible, saleData, onClose }: POSSaleSuccessModal
           </Animated.View>
 
           {/* Title */}
-          <Text style={styles.title}>SALE COMPLETE</Text>
+          <Text style={styles.title} accessibilityRole="header" accessible={false}>SALE COMPLETE</Text>
 
           {/* Order Number */}
-          <View style={styles.orderNumberContainer}>
+          <View
+            style={styles.orderNumberContainer}
+            accessible={true}
+            accessibilityLabel={`Order number ${saleData.orderNumber}`}
+          >
             <View style={styles.orderNumberBg}>
               <BlurView intensity={15} tint="light" style={StyleSheet.absoluteFill} />
             </View>
-            <Text style={styles.orderNumberLabel}>ORDER #</Text>
-            <Text style={styles.orderNumber}>{String(saleData.orderNumber || 'Unknown')}</Text>
+            <Text style={styles.orderNumberLabel} accessible={false}>ORDER #</Text>
+            <Text style={styles.orderNumber} accessible={false}>{String(saleData.orderNumber || 'Unknown')}</Text>
           </View>
 
           {/* Total Amount */}
-          <View style={styles.totalContainer}>
-            <Text style={styles.totalLabel}>TOTAL</Text>
-            <Text style={styles.totalAmount}>${(saleData.total || 0).toFixed(2)}</Text>
+          <View
+            style={styles.totalContainer}
+            accessible={true}
+            accessibilityRole="summary"
+            accessibilityLabel={`Total: ${saleData.total.toFixed(2)} dollars`}
+          >
+            <Text style={styles.totalLabel} accessible={false}>TOTAL</Text>
+            <Text style={styles.totalAmount} accessible={false}>${(saleData.total || 0).toFixed(2)}</Text>
           </View>
 
           {/* Transaction Details */}
@@ -143,17 +160,21 @@ function POSSaleSuccessModal({ visible, saleData, onClose }: POSSaleSuccessModal
             </View>
 
             {/* Payment Method */}
-            <View style={styles.detailRow}>
-              <View style={styles.detailIconContainer}>
+            <View
+              style={styles.detailRow}
+              accessible={true}
+              accessibilityLabel={`Payment method: ${saleData.paymentMethod === 'cash' ? 'Cash' : 'Card'}${saleData.cardType ? ` ${saleData.cardType}` : ''}${saleData.cardLast4 ? ` ending in ${saleData.cardLast4}` : ''}`}
+            >
+              <View style={styles.detailIconContainer} accessibilityElementsHidden={true} importantForAccessibility="no">
                 <Ionicons
                   name={saleData.paymentMethod === 'cash' ? 'cash-outline' : 'card-outline'}
                   size={18}
                   color="#34C759"
                 />
               </View>
-              <View style={styles.detailTextContainer}>
-                <Text style={styles.detailLabel}>Payment Method</Text>
-                <Text style={styles.detailValue}>
+              <View style={styles.detailTextContainer} accessible={false}>
+                <Text style={styles.detailLabel} accessible={false}>Payment Method</Text>
+                <Text style={styles.detailValue} accessible={false}>
                   {String(saleData.paymentMethod === 'cash' ? 'Cash' : 'Card')}
                   {saleData.cardType ? String(` - ${saleData.cardType}`) : ''}
                   {saleData.cardLast4 ? String(` ****${saleData.cardLast4}`) : ''}
@@ -163,66 +184,86 @@ function POSSaleSuccessModal({ visible, saleData, onClose }: POSSaleSuccessModal
 
             {/* Authorization Code (for card payments) */}
             {saleData.authorizationCode && (
-              <View style={styles.detailRow}>
-                <View style={styles.detailIconContainer}>
+              <View
+                style={styles.detailRow}
+                accessible={true}
+                accessibilityLabel={`Authorization code: ${saleData.authorizationCode}`}
+              >
+                <View style={styles.detailIconContainer} accessibilityElementsHidden={true} importantForAccessibility="no">
                   <Ionicons name="shield-checkmark-outline" size={18} color="#34C759" />
                 </View>
-                <View style={styles.detailTextContainer}>
-                  <Text style={styles.detailLabel}>Authorization Code</Text>
-                  <Text style={styles.detailValue}>{String(saleData.authorizationCode || 'N/A')}</Text>
+                <View style={styles.detailTextContainer} accessible={false}>
+                  <Text style={styles.detailLabel} accessible={false}>Authorization Code</Text>
+                  <Text style={styles.detailValue} accessible={false}>{String(saleData.authorizationCode || 'N/A')}</Text>
                 </View>
               </View>
             )}
 
             {/* Processor Name (for card payments) */}
             {saleData.processorName && (
-              <View style={styles.detailRow}>
-                <View style={styles.detailIconContainer}>
+              <View
+                style={styles.detailRow}
+                accessible={true}
+                accessibilityLabel={`Terminal: ${saleData.processorName}`}
+              >
+                <View style={styles.detailIconContainer} accessibilityElementsHidden={true} importantForAccessibility="no">
                   <Ionicons name="hardware-chip-outline" size={18} color="#34C759" />
                 </View>
-                <View style={styles.detailTextContainer}>
-                  <Text style={styles.detailLabel}>Terminal</Text>
-                  <Text style={styles.detailValue}>{String(saleData.processorName || 'Unknown')}</Text>
+                <View style={styles.detailTextContainer} accessible={false}>
+                  <Text style={styles.detailLabel} accessible={false}>Terminal</Text>
+                  <Text style={styles.detailValue} accessible={false}>{String(saleData.processorName || 'Unknown')}</Text>
                 </View>
               </View>
             )}
 
             {/* Transaction Number */}
             {saleData.transactionNumber && (
-              <View style={styles.detailRow}>
-                <View style={styles.detailIconContainer}>
+              <View
+                style={styles.detailRow}
+                accessible={true}
+                accessibilityLabel={`Transaction number: ${saleData.transactionNumber}`}
+              >
+                <View style={styles.detailIconContainer} accessibilityElementsHidden={true} importantForAccessibility="no">
                   <Ionicons name="receipt-outline" size={18} color="#34C759" />
                 </View>
-                <View style={styles.detailTextContainer}>
-                  <Text style={styles.detailLabel}>Transaction #</Text>
-                  <Text style={styles.detailValue}>{String(saleData.transactionNumber || 'N/A')}</Text>
+                <View style={styles.detailTextContainer} accessible={false}>
+                  <Text style={styles.detailLabel} accessible={false}>Transaction #</Text>
+                  <Text style={styles.detailValue} accessible={false}>{String(saleData.transactionNumber || 'N/A')}</Text>
                 </View>
               </View>
             )}
 
             {/* Items Count */}
-            <View style={styles.detailRow}>
-              <View style={styles.detailIconContainer}>
+            <View
+              style={styles.detailRow}
+              accessible={true}
+              accessibilityLabel={`${saleData.itemCount} ${saleData.itemCount === 1 ? 'item' : 'items'}`}
+            >
+              <View style={styles.detailIconContainer} accessibilityElementsHidden={true} importantForAccessibility="no">
                 <Ionicons name="cube-outline" size={18} color="#34C759" />
               </View>
-              <View style={styles.detailTextContainer}>
-                <Text style={styles.detailLabel}>Items</Text>
-                <Text style={styles.detailValue}>{String(saleData.itemCount || 0)}</Text>
+              <View style={styles.detailTextContainer} accessible={false}>
+                <Text style={styles.detailLabel} accessible={false}>Items</Text>
+                <Text style={styles.detailValue} accessible={false}>{String(saleData.itemCount || 0)}</Text>
               </View>
             </View>
 
             {/* Inventory Status */}
-            <View style={styles.detailRow}>
-              <View style={styles.detailIconContainer}>
+            <View
+              style={styles.detailRow}
+              accessible={true}
+              accessibilityLabel={`Inventory: ${saleData.inventoryDeducted ? 'Deducted' : 'Pending'}`}
+            >
+              <View style={styles.detailIconContainer} accessibilityElementsHidden={true} importantForAccessibility="no">
                 <Ionicons
                   name={saleData.inventoryDeducted ? 'checkmark-circle' : 'alert-circle-outline'}
                   size={18}
                   color={saleData.inventoryDeducted ? '#34C759' : '#FF9500'}
                 />
               </View>
-              <View style={styles.detailTextContainer}>
-                <Text style={styles.detailLabel}>Inventory</Text>
-                <Text style={styles.detailValue}>
+              <View style={styles.detailTextContainer} accessible={false}>
+                <Text style={styles.detailLabel} accessible={false}>Inventory</Text>
+                <Text style={styles.detailValue} accessible={false}>
                   {String(saleData.inventoryDeducted ? 'Deducted' : 'Pending')}
                 </Text>
               </View>
@@ -230,37 +271,53 @@ function POSSaleSuccessModal({ visible, saleData, onClose }: POSSaleSuccessModal
 
             {/* Loyalty Points Redeemed */}
             {saleData.loyaltyPointsRedeemed && saleData.loyaltyPointsRedeemed > 0 && (
-              <View style={styles.detailRow}>
-                <View style={styles.detailIconContainer}>
+              <View
+                style={styles.detailRow}
+                accessible={true}
+                accessibilityLabel={`Points redeemed: ${saleData.loyaltyPointsRedeemed} points`}
+              >
+                <View style={styles.detailIconContainer} accessibilityElementsHidden={true} importantForAccessibility="no">
                   <Ionicons name="gift-outline" size={18} color="#FF9500" />
                 </View>
-                <View style={styles.detailTextContainer}>
-                  <Text style={styles.detailLabel}>Points Redeemed</Text>
-                  <Text style={styles.detailValue}>{String(saleData.loyaltyPointsRedeemed)} pts</Text>
+                <View style={styles.detailTextContainer} accessible={false}>
+                  <Text style={styles.detailLabel} accessible={false}>Points Redeemed</Text>
+                  <Text style={styles.detailValue} accessible={false}>{String(saleData.loyaltyPointsRedeemed)} pts</Text>
                 </View>
               </View>
             )}
 
             {/* Loyalty Points Earned */}
             {saleData.loyaltyPointsAdded && saleData.loyaltyPointsAdded > 0 && (
-              <View style={styles.detailRow}>
-                <View style={styles.detailIconContainer}>
+              <View
+                style={styles.detailRow}
+                accessible={true}
+                accessibilityLabel={`Points earned: ${saleData.loyaltyPointsAdded} points`}
+              >
+                <View style={styles.detailIconContainer} accessibilityElementsHidden={true} importantForAccessibility="no">
                   <Ionicons name="star-outline" size={18} color="#FFD700" />
                 </View>
-                <View style={styles.detailTextContainer}>
-                  <Text style={styles.detailLabel}>Points Earned</Text>
-                  <Text style={styles.detailValue}>+{String(saleData.loyaltyPointsAdded)} pts</Text>
+                <View style={styles.detailTextContainer} accessible={false}>
+                  <Text style={styles.detailLabel} accessible={false}>Points Earned</Text>
+                  <Text style={styles.detailValue} accessible={false}>+{String(saleData.loyaltyPointsAdded)} pts</Text>
                 </View>
               </View>
             )}
           </View>
 
           {/* Close Button */}
-          <TouchableOpacity style={styles.closeButton} onPress={handleClose} activeOpacity={0.8}>
+          <TouchableOpacity
+            style={styles.closeButton}
+            onPress={handleClose}
+            activeOpacity={0.8}
+            accessible={true}
+            accessibilityRole="button"
+            accessibilityLabel="Done"
+            accessibilityHint="Double tap to close and return to POS"
+          >
             <View style={styles.closeButtonBg}>
               <BlurView intensity={20} tint="light" style={StyleSheet.absoluteFill} />
             </View>
-            <Text style={styles.closeButtonText}>DONE</Text>
+            <Text style={styles.closeButtonText} accessible={false}>DONE</Text>
           </TouchableOpacity>
         </Animated.View>
       </Animated.View>

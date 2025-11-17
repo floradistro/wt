@@ -48,6 +48,7 @@ function OpenCashDrawerModal({ visible, onSubmit, onCancel }: OpenCashDrawerModa
       animationType="fade"
       supportedOrientations={['portrait', 'landscape', 'landscape-left', 'landscape-right']}
       onRequestClose={handleCancel}
+      accessibilityViewIsModal={true}
     >
       {/* Background Overlay */}
       <View style={styles.overlay}>
@@ -70,7 +71,13 @@ function OpenCashDrawerModal({ visible, onSubmit, onCancel }: OpenCashDrawerModa
             keyboardShouldPersistTaps="handled"
           >
             {/* Modal Content Card */}
-            <View style={styles.modalCard}>
+            <View
+              style={styles.modalCard}
+              accessible={true}
+              accessibilityRole="none"
+              accessibilityLabel="Count cash drawer dialog"
+              onAccessibilityEscape={handleCancel}
+            >
               <LiquidGlassView
                 effect="regular"
                 colorScheme="dark"
@@ -81,8 +88,8 @@ function OpenCashDrawerModal({ visible, onSubmit, onCancel }: OpenCashDrawerModa
                 ]}
               >
                 {/* Header */}
-                <View style={styles.header}>
-                  <Text style={styles.title}>COUNT CASH DRAWER</Text>
+                <View style={styles.header} accessible={false}>
+                  <Text style={styles.title} accessibilityRole="header">COUNT CASH DRAWER</Text>
                   <Text style={styles.subtitle}>Count all bills and coins before starting</Text>
                 </View>
 
@@ -94,20 +101,22 @@ function OpenCashDrawerModal({ visible, onSubmit, onCancel }: OpenCashDrawerModa
                     styles.instructions,
                     !isLiquidGlassSupported && styles.instructionsFallback
                   ]}
+                  accessible={true}
+                  accessibilityLabel="Before you start: 1. Count all bills and coins in drawer. 2. Include change from previous shift. 3. Enter total amount below"
                 >
-                  <Text style={styles.instructionsTitle}>BEFORE YOU START</Text>
-                  <View style={styles.instructionsList}>
-                    <Text style={styles.instructionItem}>1. Count all bills and coins in drawer</Text>
-                    <Text style={styles.instructionItem}>2. Include change from previous shift</Text>
-                    <Text style={styles.instructionItem}>3. Enter total amount below</Text>
+                  <Text style={styles.instructionsTitle} accessible={false}>BEFORE YOU START</Text>
+                  <View style={styles.instructionsList} accessible={false}>
+                    <Text style={styles.instructionItem} accessible={false}>1. Count all bills and coins in drawer</Text>
+                    <Text style={styles.instructionItem} accessible={false}>2. Include change from previous shift</Text>
+                    <Text style={styles.instructionItem} accessible={false}>3. Enter total amount below</Text>
                   </View>
                 </LiquidGlassView>
 
                 {/* Amount Input */}
                 <View style={styles.inputSection}>
-                  <Text style={styles.inputLabel}>OPENING CASH COUNT</Text>
+                  <Text style={styles.inputLabel} accessible={false}>OPENING CASH COUNT</Text>
                   <View style={styles.inputContainer}>
-                    <Text style={styles.dollarSign}>$</Text>
+                    <Text style={styles.dollarSign} accessibilityElementsHidden={true} importantForAccessibility="no">$</Text>
                     <TextInput
                       style={styles.input}
                       value={openingCash}
@@ -116,6 +125,9 @@ function OpenCashDrawerModal({ visible, onSubmit, onCancel }: OpenCashDrawerModa
                       placeholderTextColor="rgba(255,255,255,0.3)"
                       keyboardType="decimal-pad"
                       autoFocus
+                      accessible={true}
+                      accessibilityLabel="Opening cash count"
+                      accessibilityHint="Enter the total dollar amount counted in the drawer"
                     />
                   </View>
                 </View>
@@ -137,8 +149,12 @@ function OpenCashDrawerModal({ visible, onSubmit, onCancel }: OpenCashDrawerModa
                         style={styles.quickButtonInner}
                         onPress={() => handleQuickAmount(amount)}
                         activeOpacity={0.7}
+                        accessible={true}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Quick amount: ${amount} dollars`}
+                        accessibilityHint="Double tap to set this as the opening cash amount"
                       >
-                        <Text style={styles.quickButtonText}>${amount}</Text>
+                        <Text style={styles.quickButtonText} accessible={false}>${amount}</Text>
                       </TouchableOpacity>
                     </LiquidGlassView>
                   ))}
@@ -146,7 +162,7 @@ function OpenCashDrawerModal({ visible, onSubmit, onCancel }: OpenCashDrawerModa
 
                 {/* Notes */}
                 <View style={styles.notesSection}>
-                  <Text style={styles.inputLabel}>NOTES (OPTIONAL)</Text>
+                  <Text style={styles.inputLabel} accessible={false}>NOTES (OPTIONAL)</Text>
                   <TextInput
                     style={styles.notesInput}
                     value={notes}
@@ -155,6 +171,9 @@ function OpenCashDrawerModal({ visible, onSubmit, onCancel }: OpenCashDrawerModa
                     placeholderTextColor="rgba(255,255,255,0.3)"
                     multiline
                     numberOfLines={2}
+                    accessible={true}
+                    accessibilityLabel="Notes, optional"
+                    accessibilityHint="Enter any notes about the opening cash count"
                   />
                 </View>
 
@@ -173,8 +192,12 @@ function OpenCashDrawerModal({ visible, onSubmit, onCancel }: OpenCashDrawerModa
                       style={styles.cancelButtonInner}
                       onPress={handleCancel}
                       activeOpacity={0.7}
+                      accessible={true}
+                      accessibilityRole="button"
+                      accessibilityLabel="Cancel"
+                      accessibilityHint="Double tap to cancel and return without starting shift"
                     >
-                      <Text style={styles.cancelButtonText}>CANCEL</Text>
+                      <Text style={styles.cancelButtonText} accessible={false}>CANCEL</Text>
                     </TouchableOpacity>
                   </LiquidGlassView>
                   <LiquidGlassView
@@ -190,8 +213,12 @@ function OpenCashDrawerModal({ visible, onSubmit, onCancel }: OpenCashDrawerModa
                       style={styles.submitButtonInner}
                       onPress={handleSubmit}
                       activeOpacity={0.7}
+                      accessible={true}
+                      accessibilityRole="button"
+                      accessibilityLabel="Start shift"
+                      accessibilityHint="Double tap to record opening cash and start your shift"
                     >
-                      <Text style={styles.submitButtonText}>START SHIFT</Text>
+                      <Text style={styles.submitButtonText} accessible={false}>START SHIFT</Text>
                     </TouchableOpacity>
                   </LiquidGlassView>
                 </View>

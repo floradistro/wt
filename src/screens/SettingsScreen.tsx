@@ -493,9 +493,15 @@ function SettingsScreen() {
                 colorScheme="dark"
                 style={[styles.searchBarContainer, !isLiquidGlassSupported && styles.searchBarContainerFallback]}
               >
-                <View style={styles.searchInner}>
+                <View
+                  style={styles.searchInner}
+                  accessible={true}
+                  accessibilityRole="search"
+                  accessibilityLabel="Search settings"
+                  accessibilityHint="Search functionality coming soon"
+                >
                   <SearchIcon color={colors.text.quaternary} />
-                  <Text style={styles.searchPlaceholder}>Search</Text>
+                  <Text style={styles.searchPlaceholder} accessible={false}>Search</Text>
                 </View>
               </LiquidGlassView>
             </LiquidGlassContainerView>

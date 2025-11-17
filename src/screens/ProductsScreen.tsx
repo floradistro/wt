@@ -1014,13 +1014,12 @@ const styles = StyleSheet.create({
   // iOS Collapsing Headers
   fixedHeader: {
     position: 'absolute',
-    top: 0,
+    top: layout.cardPadding, // Align with search bar top position
     left: 0,
     right: 0,
+    height: layout.minTouchTarget, // Match search bar height
     alignItems: 'center',
     justifyContent: 'center',
-    paddingTop: 12,
-    paddingBottom: 12,
     zIndex: 20, // Above fade gradient
   },
   fixedHeaderTitle: {

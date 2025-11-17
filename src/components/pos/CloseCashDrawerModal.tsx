@@ -88,6 +88,7 @@ function CloseCashDrawerModal({
       animationType="none"
       supportedOrientations={['portrait', 'landscape', 'landscape-left', 'landscape-right']}
       onRequestClose={handleCancel}
+      accessibilityViewIsModal={true}
     >
       <Animated.View style={[styles.overlay, { opacity: fadeAnim }]}>
         <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} />
@@ -109,62 +110,75 @@ function CloseCashDrawerModal({
                   transform: [{ scale: scaleAnim }],
                 },
               ]}
+              accessible={true}
+              accessibilityRole="none"
+              accessibilityLabel="Count cash drawer and close shift dialog"
+              onAccessibilityEscape={handleCancel}
             >
               <View style={styles.modalBg}>
                 <BlurView intensity={20} tint="dark" style={StyleSheet.absoluteFill} />
               </View>
 
               {/* Header */}
-              <View style={styles.header}>
-                <Text style={styles.title}>COUNT CASH DRAWER</Text>
+              <View style={styles.header} accessible={false}>
+                <Text style={styles.title} accessibilityRole="header">COUNT CASH DRAWER</Text>
                 <Text style={styles.subtitle}>Count all cash to close your shift</Text>
               </View>
 
               {/* JOBS PRINCIPLE: Two-column layout for landscape */}
-              <View style={styles.twoColumnContainer}>
+              <View style={styles.twoColumnContainer} accessible={false}>
                 {/* Session Summary */}
-                <View style={styles.summary}>
+                <View
+                  style={styles.summary}
+                  accessible={true}
+                  accessibilityRole="summary"
+                  accessibilityLabel={`Shift summary. Total sales: ${totalSales.toFixed(2)} dollars. Opening cash: ${openingCash.toFixed(2)} dollars. Cash sales: ${totalCash.toFixed(2)} dollars. Expected cash: ${expectedCash.toFixed(2)} dollars`}
+                >
                   <View style={styles.summaryBg}>
                     <BlurView intensity={10} tint="light" style={StyleSheet.absoluteFill} />
                   </View>
-                  <Text style={styles.summaryTitle}>SHIFT SUMMARY</Text>
-                  <View style={styles.summaryRow}>
-                    <Text style={styles.summaryLabel}>Total Sales</Text>
-                    <Text style={styles.summaryValue}>${totalSales.toFixed(2)}</Text>
+                  <Text style={styles.summaryTitle} accessible={false}>SHIFT SUMMARY</Text>
+                  <View style={styles.summaryRow} accessible={false}>
+                    <Text style={styles.summaryLabel} accessible={false}>Total Sales</Text>
+                    <Text style={styles.summaryValue} accessible={false}>${totalSales.toFixed(2)}</Text>
                   </View>
-                  <View style={styles.summaryRow}>
-                    <Text style={styles.summaryLabel}>Opening Cash</Text>
-                    <Text style={styles.summaryValue}>${openingCash.toFixed(2)}</Text>
+                  <View style={styles.summaryRow} accessible={false}>
+                    <Text style={styles.summaryLabel} accessible={false}>Opening Cash</Text>
+                    <Text style={styles.summaryValue} accessible={false}>${openingCash.toFixed(2)}</Text>
                   </View>
-                  <View style={styles.summaryRow}>
-                    <Text style={styles.summaryLabel}>Cash Sales</Text>
-                    <Text style={styles.summaryValue}>${totalCash.toFixed(2)}</Text>
+                  <View style={styles.summaryRow} accessible={false}>
+                    <Text style={styles.summaryLabel} accessible={false}>Cash Sales</Text>
+                    <Text style={styles.summaryValue} accessible={false}>${totalCash.toFixed(2)}</Text>
                   </View>
-                  <View style={[styles.summaryRow, styles.summaryRowFinal]}>
-                    <Text style={styles.summaryLabelFinal}>EXPECTED CASH</Text>
-                    <Text style={styles.summaryValueFinal}>${expectedCash.toFixed(2)}</Text>
+                  <View style={[styles.summaryRow, styles.summaryRowFinal]} accessible={false}>
+                    <Text style={styles.summaryLabelFinal} accessible={false}>EXPECTED CASH</Text>
+                    <Text style={styles.summaryValueFinal} accessible={false}>${expectedCash.toFixed(2)}</Text>
                   </View>
                 </View>
 
                 {/* Instructions */}
-                <View style={styles.instructions}>
+                <View
+                  style={styles.instructions}
+                  accessible={true}
+                  accessibilityLabel="Before you close: 1. Count all bills and coins in drawer. 2. Compare to expected cash above. 3. Note any differences"
+                >
                   <View style={styles.instructionsBg}>
                     <BlurView intensity={10} tint="light" style={StyleSheet.absoluteFill} />
                   </View>
-                  <Text style={styles.instructionsTitle}>BEFORE YOU CLOSE</Text>
-                  <View style={styles.instructionsList}>
-                    <Text style={styles.instructionItem}>1. Count all bills and coins in drawer</Text>
-                    <Text style={styles.instructionItem}>2. Compare to expected cash above</Text>
-                    <Text style={styles.instructionItem}>3. Note any differences</Text>
+                  <Text style={styles.instructionsTitle} accessible={false}>BEFORE YOU CLOSE</Text>
+                  <View style={styles.instructionsList} accessible={false}>
+                    <Text style={styles.instructionItem} accessible={false}>1. Count all bills and coins in drawer</Text>
+                    <Text style={styles.instructionItem} accessible={false}>2. Compare to expected cash above</Text>
+                    <Text style={styles.instructionItem} accessible={false}>3. Note any differences</Text>
                   </View>
                 </View>
               </View>
 
               {/* Amount Input */}
               <View style={styles.inputSection}>
-                <Text style={styles.inputLabel}>CLOSING CASH COUNT</Text>
+                <Text style={styles.inputLabel} accessible={false}>CLOSING CASH COUNT</Text>
                 <View style={styles.inputContainer}>
-                  <Text style={styles.dollarSign}>$</Text>
+                  <Text style={styles.dollarSign} accessibilityElementsHidden={true} importantForAccessibility="no">$</Text>
                   <TextInput
                     style={styles.input}
                     value={closingCash}
@@ -173,16 +187,25 @@ function CloseCashDrawerModal({
                     placeholderTextColor="rgba(255,255,255,0.3)"
                     keyboardType="decimal-pad"
                     autoFocus
+                    accessible={true}
+                    accessibilityLabel="Closing cash count"
+                    accessibilityHint={`Enter the total dollar amount counted in the drawer. Expected: ${expectedCash.toFixed(2)} dollars`}
                   />
                 </View>
               </View>
 
               {/* Cash Difference Alert */}
               {closingCash && cashDifference !== 0 && (
-                <View style={[
-                  styles.alert,
-                  cashDifference > 0 ? styles.alertOver : styles.alertShort
-                ]}>
+                <View
+                  style={[
+                    styles.alert,
+                    cashDifference > 0 ? styles.alertOver : styles.alertShort
+                  ]}
+                  accessible={true}
+                  accessibilityRole="alert"
+                  accessibilityLabel={`${cashDifference > 0 ? 'Cash over' : 'Cash short'}. Difference: ${Math.abs(cashDifference).toFixed(2)} dollars`}
+                  accessibilityLiveRegion="polite"
+                >
                   <View style={[
                     styles.alertBg,
                     cashDifference > 0 ? styles.alertBgOver : styles.alertBgShort
@@ -192,10 +215,10 @@ function CloseCashDrawerModal({
                   <Text style={[
                     styles.alertTitle,
                     cashDifference > 0 ? styles.alertTitleOver : styles.alertTitleShort
-                  ]}>
+                  ]} accessible={false}>
                     {cashDifference > 0 ? '⚠️ CASH OVER' : '❌ CASH SHORT'}
                   </Text>
-                  <Text style={styles.alertText}>
+                  <Text style={styles.alertText} accessible={false}>
                     Difference: ${Math.abs(cashDifference).toFixed(2)}
                   </Text>
                 </View>
@@ -203,7 +226,7 @@ function CloseCashDrawerModal({
 
               {/* Notes */}
               <View style={styles.notesSection}>
-                <Text style={styles.inputLabel}>NOTES (OPTIONAL)</Text>
+                <Text style={styles.inputLabel} accessible={false}>NOTES (OPTIONAL)</Text>
                 <TextInput
                   style={styles.notesInput}
                   value={notes}
@@ -212,6 +235,9 @@ function CloseCashDrawerModal({
                   placeholderTextColor="rgba(255,255,255,0.3)"
                   multiline
                   numberOfLines={2}
+                  accessible={true}
+                  accessibilityLabel="Notes, optional"
+                  accessibilityHint="Enter any notes about the closing cash count or shift"
                 />
               </View>
 
@@ -221,15 +247,23 @@ function CloseCashDrawerModal({
                   style={styles.cancelButton}
                   onPress={handleCancel}
                   activeOpacity={0.7}
+                  accessible={true}
+                  accessibilityRole="button"
+                  accessibilityLabel="Cancel"
+                  accessibilityHint="Double tap to cancel and return without closing shift"
                 >
-                  <Text style={styles.cancelButtonText}>CANCEL</Text>
+                  <Text style={styles.cancelButtonText} accessible={false}>CANCEL</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.submitButton}
                   onPress={handleSubmit}
                   activeOpacity={0.7}
+                  accessible={true}
+                  accessibilityRole="button"
+                  accessibilityLabel="Close shift"
+                  accessibilityHint="Double tap to record closing cash and end your shift"
                 >
-                  <Text style={styles.submitButtonText}>CLOSE SHIFT</Text>
+                  <Text style={styles.submitButtonText} accessible={false}>CLOSE SHIFT</Text>
                 </TouchableOpacity>
               </View>
             </Animated.View>
