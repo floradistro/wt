@@ -132,6 +132,10 @@ export function NavSidebar({
                   IconComponent = <GridIcon color={iconColor} />
               }
 
+              const accessibilityLabel = item.count !== undefined
+                ? `${item.label}, ${item.count} items${item.badge ? `, ${item.badge}` : ''}`
+                : item.label
+
               return (
                 <View key={item.id} style={styles.navItemWrapper}>
                   {isActive ? (
@@ -139,6 +143,7 @@ export function NavSidebar({
                       effect="regular"
                       colorScheme="dark"
                       style={[styles.navItemPill, !isLiquidGlassSupported && styles.navItemPillFallback]}
+                      accessible={false}
                     >
                       <Pressable
                         onPress={() => {
@@ -146,8 +151,13 @@ export function NavSidebar({
                           onItemPress(item.id)
                         }}
                         style={styles.navItemContent}
+                        accessible={true}
+                        accessibilityRole="tab"
+                        accessibilityLabel={accessibilityLabel}
+                        accessibilityState={{ selected: true }}
+                        accessibilityHint={`Currently viewing ${item.label}`}
                       >
-                        <View style={styles.navIconWrapper}>{IconComponent}</View>
+                        <View style={styles.navIconWrapper} accessibilityElementsHidden={true} importantForAccessibility="no">{IconComponent}</View>
                         <Text style={styles.navLabel}>{item.label}</Text>
                         {item.count !== undefined && (
                           <View
@@ -157,11 +167,13 @@ export function NavSidebar({
                               item.badge === 'error' && styles.navBadgeError,
                               item.badge === 'info' && styles.navBadgeInfo,
                             ]}
+                            accessibilityElementsHidden={true}
+                            importantForAccessibility="no"
                           >
                             <Text style={styles.navBadgeText}>{item.count}</Text>
                           </View>
                         )}
-                        <Text style={styles.navChevron}>›</Text>
+                        <Text style={styles.navChevron} accessibilityElementsHidden={true} importantForAccessibility="no">›</Text>
                       </Pressable>
                     </LiquidGlassView>
                   ) : (
@@ -171,8 +183,13 @@ export function NavSidebar({
                         onItemPress(item.id)
                       }}
                       style={styles.navItemContent}
+                      accessible={true}
+                      accessibilityRole="tab"
+                      accessibilityLabel={accessibilityLabel}
+                      accessibilityState={{ selected: false }}
+                      accessibilityHint={`Double tap to view ${item.label}`}
                     >
-                      <View style={styles.navIconWrapper}>{IconComponent}</View>
+                      <View style={styles.navIconWrapper} accessibilityElementsHidden={true} importantForAccessibility="no">{IconComponent}</View>
                       <Text style={[styles.navLabel, styles.navLabelInactive]}>{item.label}</Text>
                       {item.count !== undefined && (
                         <View
@@ -182,11 +199,13 @@ export function NavSidebar({
                             item.badge === 'error' && styles.navBadgeError,
                             item.badge === 'info' && styles.navBadgeInfo,
                           ]}
+                          accessibilityElementsHidden={true}
+                          importantForAccessibility="no"
                         >
                           <Text style={styles.navBadgeText}>{item.count}</Text>
                         </View>
                       )}
-                      <Text style={[styles.navChevron, styles.navChevronInactive]}>›</Text>
+                      <Text style={[styles.navChevron, styles.navChevronInactive]} accessibilityElementsHidden={true} importantForAccessibility="no">›</Text>
                     </Pressable>
                   )}
                 </View>
@@ -205,8 +224,9 @@ export function NavSidebar({
                 effect="regular"
                 colorScheme="dark"
                 style={[styles.searchBar, !isLiquidGlassSupported && styles.searchBarFallback]}
+                accessible={false}
               >
-                <View style={styles.searchInner}>
+                <View style={styles.searchInner} accessible={false}>
                   <SearchIcon color="rgba(235,235,245,0.6)" />
                   <TextInput
                     style={styles.searchInput}
@@ -214,6 +234,9 @@ export function NavSidebar({
                     placeholderTextColor="rgba(235,235,245,0.6)"
                     value={searchValue}
                     onChangeText={onSearchChange}
+                    accessible={true}
+                    accessibilityLabel="Search navigation items"
+                    accessibilityHint="Type to filter the navigation list"
                   />
                 </View>
               </LiquidGlassView>

@@ -183,6 +183,10 @@ function POSCustomerMatchModal({
               onPress={handleClose}
               style={styles.cancelAutoSelect}
               activeOpacity={0.7}
+              accessible={true}
+              accessibilityRole="button"
+              accessibilityLabel="Cancel automatic selection"
+              accessibilityHint="Double tap to stop auto-selecting this customer"
             >
               <Text style={styles.cancelAutoSelectText}>TAP TO CANCEL</Text>
             </TouchableOpacity>
@@ -193,57 +197,71 @@ function POSCustomerMatchModal({
       {/* HIGH/MEDIUM CONFIDENCE: Show matches */}
       {bestMatch && bestMatch.confidence !== 'exact' && (
         <View style={styles.matchesContainer}>
-          {matches.slice(0, 3).map((match, index) => (
-            <LiquidGlassView
-              key={match.customer.id}
-              effect="regular"
-              colorScheme="dark"
-              interactive
-              style={[
-                styles.matchCard,
-                !isLiquidGlassSupported && styles.matchCardFallback,
-              ]}
-            >
-              <TouchableOpacity
-                onPress={() => handleSelectMatch(match)}
-                style={styles.matchCardInner}
-                activeOpacity={0.7}
+          {matches.slice(0, 3).map((match, index) => {
+            const customerName = match.customer.display_name ||
+              `${match.customer.first_name} ${match.customer.last_name}`
+            const accessibilityLabel = `${customerName}, ${match.confidenceScore} percent match${
+              match.customer.email ? `. Email: ${match.customer.email}` : ''
+            }${match.customer.phone ? `. Phone: ${match.customer.phone}` : ''}${
+              match.customer.loyalty_points > 0 ? `. ${match.customer.loyalty_points} loyalty points` : ''
+            }. ${match.reason}`
+
+            return (
+              <LiquidGlassView
+                key={match.customer.id}
+                effect="regular"
+                colorScheme="dark"
+                interactive
+                style={[
+                  styles.matchCard,
+                  !isLiquidGlassSupported && styles.matchCardFallback,
+                ]}
+                accessible={false}
               >
-                <View style={styles.matchCardHeader}>
-                  <Text style={styles.matchCardName}>
-                    {match.customer.display_name ||
-                      `${match.customer.first_name} ${match.customer.last_name}`}
-                  </Text>
-                  <View style={[
-                    styles.confidenceBadge,
-                    match.confidence === 'high' && styles.confidenceBadgeHigh,
-                    match.confidence === 'medium' && styles.confidenceBadgeMedium,
-                  ]}>
-                    <Text style={styles.confidenceBadgeText}>
-                      {match.confidenceScore}% MATCH
+                <TouchableOpacity
+                  onPress={() => handleSelectMatch(match)}
+                  style={styles.matchCardInner}
+                  activeOpacity={0.7}
+                  accessible={true}
+                  accessibilityRole="button"
+                  accessibilityLabel={accessibilityLabel}
+                  accessibilityHint="Double tap to select this customer"
+                >
+                  <View style={styles.matchCardHeader} accessible={false}>
+                    <Text style={styles.matchCardName}>
+                      {customerName}
                     </Text>
+                    <View style={[
+                      styles.confidenceBadge,
+                      match.confidence === 'high' && styles.confidenceBadgeHigh,
+                      match.confidence === 'medium' && styles.confidenceBadgeMedium,
+                    ]} accessibilityElementsHidden={true} importantForAccessibility="no">
+                      <Text style={styles.confidenceBadgeText}>
+                        {match.confidenceScore}% MATCH
+                      </Text>
+                    </View>
                   </View>
-                </View>
 
-                {/* Customer Details */}
-                <View style={styles.matchCardDetails}>
-                  {match.customer.email && (
-                    <Text style={styles.matchCardDetail}>{match.customer.email}</Text>
-                  )}
-                  {match.customer.phone && (
-                    <Text style={styles.matchCardDetail}>{match.customer.phone}</Text>
-                  )}
-                  {match.customer.loyalty_points > 0 && (
-                    <Text style={styles.matchCardDetail}>
-                      {match.customer.loyalty_points.toLocaleString()} loyalty points
-                    </Text>
-                  )}
-                </View>
+                  {/* Customer Details */}
+                  <View style={styles.matchCardDetails} accessible={false}>
+                    {match.customer.email && (
+                      <Text style={styles.matchCardDetail}>{match.customer.email}</Text>
+                    )}
+                    {match.customer.phone && (
+                      <Text style={styles.matchCardDetail}>{match.customer.phone}</Text>
+                    )}
+                    {match.customer.loyalty_points > 0 && (
+                      <Text style={styles.matchCardDetail}>
+                        {match.customer.loyalty_points.toLocaleString()} loyalty points
+                      </Text>
+                    )}
+                  </View>
 
-                <Text style={styles.matchReason}>{match.reason}</Text>
-              </TouchableOpacity>
-            </LiquidGlassView>
-          ))}
+                  <Text style={styles.matchReason}>{match.reason}</Text>
+                </TouchableOpacity>
+              </LiquidGlassView>
+            )
+          })}
         </View>
       )}
 
@@ -258,11 +276,16 @@ function POSCustomerMatchModal({
             styles.actionButton,
             !isLiquidGlassSupported && styles.actionButtonFallback,
           ]}
+          accessible={false}
         >
           <TouchableOpacity
             style={styles.actionButtonInner}
             onPress={handleCreateNew}
             activeOpacity={0.7}
+            accessible={true}
+            accessibilityRole="button"
+            accessibilityLabel="Create new customer profile"
+            accessibilityHint={`Double tap to create new profile for ${scannedData ? `${scannedData.firstName} ${scannedData.lastName}` : 'this person'}`}
           >
             <Text style={styles.actionButtonText}>+ CREATE NEW</Text>
           </TouchableOpacity>
@@ -277,11 +300,16 @@ function POSCustomerMatchModal({
             styles.actionButton,
             !isLiquidGlassSupported && styles.actionButtonFallback,
           ]}
+          accessible={false}
         >
           <TouchableOpacity
             style={styles.actionButtonInner}
             onPress={handleSearchManually}
             activeOpacity={0.7}
+            accessible={true}
+            accessibilityRole="button"
+            accessibilityLabel="Search customers manually"
+            accessibilityHint="Double tap to open customer search"
           >
             <Text style={styles.actionButtonText}>🔍 SEARCH</Text>
           </TouchableOpacity>

@@ -47,6 +47,10 @@ function AppIcon({ item, onPress }: { item: NavItem; onPress: () => void }) {
     ]).start()
   }
 
+  const accessibilityLabel = item.comingSoon
+    ? `${item.label}, coming soon${item.badge ? `, ${item.badge} notifications` : ''}`
+    : `${item.label}${item.badge ? `, ${item.badge} notifications` : ''}`
+
   return (
     <TouchableOpacity
       onPress={onPress}
@@ -54,6 +58,11 @@ function AppIcon({ item, onPress }: { item: NavItem; onPress: () => void }) {
       onPressOut={handlePressOut}
       activeOpacity={1}
       style={styles.appIconWrapper}
+      accessible={true}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+      accessibilityHint={item.comingSoon ? "Feature not yet available" : `Double tap to open ${item.label}`}
+      accessibilityState={{ disabled: item.comingSoon }}
     >
       <Animated.View
         style={[
@@ -71,28 +80,30 @@ function AppIcon({ item, onPress }: { item: NavItem; onPress: () => void }) {
               opacity: glowAnim,
             },
           ]}
+          accessibilityElementsHidden={true}
+          importantForAccessibility="no"
         />
 
         {/* Icon background - glassmorphic */}
-        <View style={styles.iconBg}>
+        <View style={styles.iconBg} accessibilityElementsHidden={true} importantForAccessibility="no">
           <BlurView intensity={20} tint="dark" style={StyleSheet.absoluteFill} />
         </View>
 
-        <Text style={styles.iconEmoji}>{item.icon}</Text>
+        <Text style={styles.iconEmoji} accessibilityElementsHidden={true} importantForAccessibility="no">{item.icon}</Text>
 
         {item.badge && (
-          <View style={styles.badge}>
+          <View style={styles.badge} accessibilityElementsHidden={true} importantForAccessibility="no">
             <Text style={styles.badgeText}>{item.badge}</Text>
           </View>
         )}
       </Animated.View>
 
-      <Text style={styles.appLabel} numberOfLines={1}>
+      <Text style={styles.appLabel} numberOfLines={1} accessible={false}>
         {item.label}
       </Text>
 
       {item.comingSoon && (
-        <View style={styles.comingSoonBadge}>
+        <View style={styles.comingSoonBadge} accessibilityElementsHidden={true} importantForAccessibility="no">
           <Text style={styles.comingSoonText}>SOON</Text>
         </View>
       )}
@@ -269,11 +280,15 @@ export function MoreScreen() {
           style={styles.logoutCard}
           onPress={handleLogout}
           activeOpacity={0.8}
+          accessible={true}
+          accessibilityRole="button"
+          accessibilityLabel="Sign out"
+          accessibilityHint="Double tap to sign out of your account"
         >
-          <View style={styles.logoutBg}>
+          <View style={styles.logoutBg} accessibilityElementsHidden={true} importantForAccessibility="no">
             <BlurView intensity={10} tint="dark" style={StyleSheet.absoluteFill} />
           </View>
-          <Text style={styles.logoutIcon}>🚪</Text>
+          <Text style={styles.logoutIcon} accessibilityElementsHidden={true} importantForAccessibility="no">🚪</Text>
           <Text style={styles.logoutText}>SIGN OUT</Text>
         </TouchableOpacity>
 
