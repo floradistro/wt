@@ -283,17 +283,20 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   backButtonText: {
-    fontSize: 17,
-    color: '#60A5FA',
+    fontSize: 15,
+    fontWeight: '400',
+    color: 'rgba(235,235,245,0.6)',
+    letterSpacing: -0.2,
   },
   editButton: {
     paddingVertical: 4,
     paddingHorizontal: 12,
   },
   editButtonText: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: '#60A5FA',
+    fontSize: 15,
+    fontWeight: '400',
+    color: 'rgba(235,235,245,0.6)',
+    letterSpacing: -0.2,
   },
   editActions: {
     flexDirection: 'row',
@@ -304,17 +307,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
   },
   cancelButtonText: {
-    fontSize: 17,
+    fontSize: 15,
+    fontWeight: '400',
     color: 'rgba(235,235,245,0.6)',
+    letterSpacing: -0.2,
   },
   saveButton: {
     paddingVertical: 4,
     paddingHorizontal: 12,
   },
   saveButtonText: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: '#60A5FA',
+    fontSize: 15,
+    fontWeight: '400',
+    color: 'rgba(235,235,245,0.6)',
+    letterSpacing: -0.2,
   },
   headerCardContainer: {
     marginHorizontal: 6, // Ultra-minimal iOS-style spacing (6px)
