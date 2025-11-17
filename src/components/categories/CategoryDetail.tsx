@@ -93,6 +93,7 @@ export function CategoryDetail({
       contentContainerStyle={{ paddingBottom: layout.dockHeight }}
       showsVerticalScrollIndicator={true}
       indicatorStyle="white"
+      scrollIndicatorInsets={{ right: 2 }}
     >
       {/* Header with Edit/Save toggle */}
       <View style={styles.detailHeader}>
