@@ -7,10 +7,11 @@
  * Just like iOS Settings on iPad
  */
 
-import { View, Text, StyleSheet, ScrollView, Pressable, Dimensions, ActivityIndicator, Alert } from 'react-native'
-import { memo, useState, useMemo } from 'react'
+import { View, Text, StyleSheet, ScrollView, Pressable, Dimensions, ActivityIndicator, Alert, Animated } from 'react-native'
+import { memo, useState, useMemo, useRef } from 'react'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { LiquidGlassView, LiquidGlassContainerView, isLiquidGlassSupported } from '@callstack/liquid-glass'
+import { LinearGradient } from 'expo-linear-gradient'
 import * as Haptics from 'expo-haptics'
 import { colors, typography, spacing, radius } from '@/theme/tokens'
 import { layout } from '@/theme/layout'
@@ -75,7 +76,7 @@ interface SettingsCategory {
 }
 
 // Category detail views
-function AccountDetail({ user }: { user: any }) {
+function AccountDetail({ user, headerOpacity }: { user: any; headerOpacity: Animated.Value }) {
   // Get user initials from email or metadata
   const userEmail = user?.email || 'user@example.com'
   const userName = user?.user_metadata?.full_name || userEmail.split('@')[0]
@@ -88,22 +89,46 @@ function AccountDetail({ user }: { user: any }) {
 
   return (
     <View style={styles.detailContainer}>
-      {/* Header with avatar */}
-      <View style={styles.detailHeader} accessible={false}>
-        <View
-          style={styles.avatarLarge}
-          accessible={true}
-          accessibilityRole="image"
-          accessibilityLabel={`Profile picture, ${initials}`}
-        >
-          <Text style={styles.avatarLargeText} accessible={false}>{initials}</Text>
-        </View>
-        <Text style={styles.detailName} accessibilityRole="header">{userName}</Text>
-        <Text style={styles.detailEmail}>{userEmail}</Text>
-      </View>
+      {/* Fixed Header - appears on scroll */}
+      <Animated.View style={[styles.fixedHeader, { opacity: headerOpacity }]}>
+        <Text style={styles.fixedHeaderTitle}>{userName}</Text>
+      </Animated.View>
 
-      {/* Cards */}
-      <ScrollView style={styles.detailScroll} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: layout.dockHeight }}>
+      {/* Fade Gradient */}
+      <LinearGradient
+        colors={['rgba(0,0,0,0.95)', 'rgba(0,0,0,0.8)', 'rgba(0,0,0,0)']}
+        style={styles.fadeGradient}
+        pointerEvents="none"
+      />
+
+      <ScrollView
+        style={styles.detailScroll}
+        showsVerticalScrollIndicator={true}
+        indicatorStyle="white"
+        scrollIndicatorInsets={{ right: 2, bottom: layout.dockHeight }}
+        contentContainerStyle={{ paddingBottom: layout.dockHeight, paddingRight: layout.containerMargin }}
+        onScroll={(e) => {
+          const offsetY = e.nativeEvent.contentOffset.y
+          const threshold = 40
+          headerOpacity.setValue(offsetY > threshold ? 1 : 0)
+        }}
+        scrollEventThrottle={16}
+      >
+        {/* Header with avatar - INSIDE ScrollView */}
+        <View style={styles.detailHeader} accessible={false}>
+          <View
+            style={styles.avatarLarge}
+            accessible={true}
+            accessibilityRole="image"
+            accessibilityLabel={`Profile picture, ${initials}`}
+          >
+            <Text style={styles.avatarLargeText} accessible={false}>{initials}</Text>
+          </View>
+          <Text style={styles.detailName} accessibilityRole="header">{userName}</Text>
+          <Text style={styles.detailEmail}>{userEmail}</Text>
+        </View>
+
+        {/* Cards */}
         <LiquidGlassContainerView spacing={12} style={styles.cardWrapper}>
           <LiquidGlassView
             effect="regular"
@@ -127,7 +152,7 @@ function AccountDetail({ user }: { user: any }) {
   )
 }
 
-function DeveloperToolsDetail() {
+function DeveloperToolsDetail({ headerOpacity }: { headerOpacity: Animated.Value }) {
   const [isRunning, setIsRunning] = useState(false)
 
   const handleQuickTest = () => {
@@ -171,9 +196,33 @@ function DeveloperToolsDetail() {
 
   return (
     <View style={styles.detailContainer}>
-      <Text style={styles.detailTitle} accessibilityRole="header">Developer Tools</Text>
+      {/* Fixed Header - appears on scroll */}
+      <Animated.View style={[styles.fixedHeader, { opacity: headerOpacity }]}>
+        <Text style={styles.fixedHeaderTitle}>Developer Tools</Text>
+      </Animated.View>
 
-      <ScrollView style={styles.detailScroll} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: layout.dockHeight }}>
+      {/* Fade Gradient */}
+      <LinearGradient
+        colors={['rgba(0,0,0,0.95)', 'rgba(0,0,0,0.8)', 'rgba(0,0,0,0)']}
+        style={styles.fadeGradient}
+        pointerEvents="none"
+      />
+
+      <ScrollView
+        style={styles.detailScroll}
+        showsVerticalScrollIndicator={true}
+        indicatorStyle="white"
+        scrollIndicatorInsets={{ right: 2, bottom: layout.dockHeight }}
+        contentContainerStyle={{ paddingBottom: layout.dockHeight, paddingRight: layout.containerMargin }}
+        onScroll={(e) => {
+          const offsetY = e.nativeEvent.contentOffset.y
+          const threshold = 40
+          headerOpacity.setValue(offsetY > threshold ? 1 : 0)
+        }}
+        scrollEventThrottle={16}
+      >
+        {/* Large Title - INSIDE ScrollView */}
+        <Text style={styles.detailTitle} accessibilityRole="header">Developer Tools</Text>
         <LiquidGlassContainerView spacing={12} style={styles.cardWrapper}>
           <LiquidGlassView
             effect="regular"
@@ -256,7 +305,7 @@ function DeveloperToolsDetail() {
   )
 }
 
-function LocationsDetail({ userLocations }: { userLocations: UserLocationAccess[] }) {
+function LocationsDetail({ userLocations, headerOpacity }: { userLocations: UserLocationAccess[]; headerOpacity: Animated.Value }) {
   const getRoleDisplay = (role: string) => {
     const roleMap: Record<string, string> = {
       owner: 'Owner • Full Access',
@@ -294,9 +343,33 @@ function LocationsDetail({ userLocations }: { userLocations: UserLocationAccess[
 
   return (
     <View style={styles.detailContainer}>
-      <Text style={styles.detailTitle} accessibilityRole="header">Locations & Access</Text>
+      {/* Fixed Header - appears on scroll */}
+      <Animated.View style={[styles.fixedHeader, { opacity: headerOpacity }]}>
+        <Text style={styles.fixedHeaderTitle}>Locations & Access</Text>
+      </Animated.View>
 
-      <ScrollView style={styles.detailScroll} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: layout.dockHeight }}>
+      {/* Fade Gradient */}
+      <LinearGradient
+        colors={['rgba(0,0,0,0.95)', 'rgba(0,0,0,0.8)', 'rgba(0,0,0,0)']}
+        style={styles.fadeGradient}
+        pointerEvents="none"
+      />
+
+      <ScrollView
+        style={styles.detailScroll}
+        showsVerticalScrollIndicator={true}
+        indicatorStyle="white"
+        scrollIndicatorInsets={{ right: 2, bottom: layout.dockHeight }}
+        contentContainerStyle={{ paddingBottom: layout.dockHeight, paddingRight: layout.containerMargin }}
+        onScroll={(e) => {
+          const offsetY = e.nativeEvent.contentOffset.y
+          const threshold = 40
+          headerOpacity.setValue(offsetY > threshold ? 1 : 0)
+        }}
+        scrollEventThrottle={16}
+      >
+        {/* Large Title - INSIDE ScrollView */}
+        <Text style={styles.detailTitle} accessibilityRole="header">Locations & Access</Text>
         {userLocations.map((userLocation) => {
           const locationAddress = formatAddress(userLocation.location)
           const roleDisplay = getRoleDisplay(userLocation.role)
@@ -371,6 +444,11 @@ function SettingsScreen() {
   const { logout } = useAuthActions()
   const { locations: userLocations, isLoading: locationsLoading } = useUserLocations()
 
+  // iOS-style collapsing headers - instant transitions
+  const accountHeaderOpacity = useRef(new Animated.Value(0)).current
+  const locationsHeaderOpacity = useRef(new Animated.Value(0)).current
+  const devToolsHeaderOpacity = useRef(new Animated.Value(0)).current
+
   // Get user name for account category
   const userName = useMemo(() => {
     if (!user) return 'Account'
@@ -379,21 +457,21 @@ function SettingsScreen() {
 
   // Categories configuration - only show what we have real data for
   const categories: SettingsCategory[] = useMemo(() => [
-    { id: 'account', title: userName, icon: UserIcon, renderDetail: () => <AccountDetail user={user} /> },
+    { id: 'account', title: userName, icon: UserIcon, renderDetail: () => <AccountDetail user={user} headerOpacity={accountHeaderOpacity} /> },
     {
       id: 'locations',
       title: 'Locations & Access',
       icon: LocationIcon,
       badge: userLocations.length > 0 ? userLocations.length : undefined,
-      renderDetail: () => <LocationsDetail userLocations={userLocations} />
+      renderDetail: () => <LocationsDetail userLocations={userLocations} headerOpacity={locationsHeaderOpacity} />
     },
     {
       id: 'devtools',
       title: 'Developer Tools',
       icon: DevToolsIcon,
-      renderDetail: () => <DeveloperToolsDetail />
+      renderDetail: () => <DeveloperToolsDetail headerOpacity={devToolsHeaderOpacity} />
     },
-  ], [user, userName, userLocations])
+  ], [user, userName, userLocations, accountHeaderOpacity, locationsHeaderOpacity, devToolsHeaderOpacity])
 
   const [selectedCategory, setSelectedCategory] = useState(categories[0])
 
@@ -416,7 +494,9 @@ function SettingsScreen() {
             {/* Scrollable Content */}
             <ScrollView
               style={styles.sidebarScroll}
-              showsVerticalScrollIndicator={false}
+              showsVerticalScrollIndicator={true}
+              indicatorStyle="white"
+              scrollIndicatorInsets={{ right: -spacing.sm + 2, bottom: layout.dockHeight }}
               contentContainerStyle={styles.sidebarScrollContent}
             >
               {/* Spacer for fixed search bar */}
@@ -589,6 +669,7 @@ const styles = StyleSheet.create({
   splitView: {
     flex: 1,
     flexDirection: 'row',
+    gap: spacing.sm, // iOS-style gap between sidebar and detail panel
   },
 
   // Left Sidebar - iOS Settings full height
@@ -598,7 +679,10 @@ const styles = StyleSheet.create({
   },
   sidebarContainer: {
     flex: 1,
-    margin: spacing.md,
+    marginLeft: 8, // Ultra-minimal iOS-style left padding
+    marginRight: 0, // No right margin - extends to sidebar edge for scroll indicator
+    marginTop: spacing.md,
+    marginBottom: spacing.md,
     borderRadius: radius.xl,
     borderCurve: 'continuous',
     overflow: 'hidden',
@@ -613,6 +697,7 @@ const styles = StyleSheet.create({
   },
   sidebarScrollContent: {
     paddingBottom: layout.dockHeight,
+    paddingRight: spacing.md, // Right padding for content (container extends to edge)
   },
   searchSpacer: {
     height: 72, // Height of fixed search bar
@@ -624,7 +709,8 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
-    paddingHorizontal: spacing.md,
+    paddingLeft: 8,
+    paddingRight: spacing.md, // Match content padding
     paddingTop: spacing.md,
     paddingBottom: spacing.sm,
     zIndex: 10,
@@ -678,7 +764,7 @@ const styles = StyleSheet.create({
 
   // Pill Wrapper
   pillWrapper: {
-    paddingHorizontal: 16,
+    paddingHorizontal: 8,
     marginBottom: 12,
   },
 
@@ -731,7 +817,7 @@ const styles = StyleSheet.create({
 
   // Category Items - Floating
   categoryItemWrapper: {
-    paddingHorizontal: 16,
+    paddingHorizontal: 8,
     marginBottom: 8,
   },
   categoryItemPill: {
@@ -863,11 +949,10 @@ const styles = StyleSheet.create({
   detailPanel: {
     flex: 1,
     backgroundColor: colors.background.primary,
-    paddingHorizontal: spacing.sm, // Consistent 12px spacing everywhere
+    // No padding - children handle their own padding for scroll indicator positioning
   },
   detailContainer: {
     flex: 1,
-    paddingTop: spacing.lg,
   },
   detailTitle: {
     ...typography.title.large,
@@ -875,15 +960,45 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 0.4,
     marginBottom: spacing.lg,
+    paddingHorizontal: 6, // Ultra-minimal iOS-style spacing - matches ProductsScreen
+    paddingTop: spacing.lg, // Start below fade gradient
   },
   detailScroll: {
     flex: 1,
   },
 
+  // iOS Collapsing Headers - matches ProductsScreen exactly
+  fixedHeader: {
+    position: 'absolute',
+    top: layout.cardPadding,
+    left: 0,
+    right: 0,
+    height: layout.minTouchTarget,
+    justifyContent: 'center',
+    paddingHorizontal: 6, // Match minimal iOS spacing
+    zIndex: 20,
+  },
+  fixedHeaderTitle: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: '#fff',
+    letterSpacing: -0.2,
+  },
+  fadeGradient: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 120,
+    zIndex: 10,
+  },
+
   // Detail Header (for Account)
   detailHeader: {
     alignItems: 'center',
+    paddingTop: spacing.lg, // Start below fade gradient
     paddingBottom: spacing.lg,
+    paddingHorizontal: 6, // Ultra-minimal iOS-style spacing - matches ProductsScreen
   },
   avatarLarge: {
     width: 100,

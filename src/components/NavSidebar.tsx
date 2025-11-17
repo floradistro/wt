@@ -297,7 +297,10 @@ const styles = StyleSheet.create({
   },
   sidebarContainer: {
     flex: 1,
-    margin: layout.containerMargin,
+    marginLeft: 8, // Ultra-minimal iOS-style left padding
+    marginRight: layout.containerMargin,
+    marginTop: layout.containerMargin,
+    marginBottom: layout.containerMargin,
     borderRadius: layout.containerRadius,
     borderCurve: 'continuous',
     overflow: 'hidden',

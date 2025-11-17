@@ -150,7 +150,12 @@ export function CategoryModal({
             </Pressable>
           </View>
 
-          <ScrollView style={styles.content}>
+          <ScrollView
+            style={styles.content}
+            showsVerticalScrollIndicator={true}
+            indicatorStyle="white"
+            scrollIndicatorInsets={{ right: 2 }}
+          >
             {/* Name Input */}
             <View style={styles.section}>
               <Text style={styles.label}>Category Name *</Text>

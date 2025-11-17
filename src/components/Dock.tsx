@@ -32,15 +32,6 @@ function ProductsIcon({ color }: { color: string }) {
   )
 }
 
-function ScanIcon({ color }: { color: string }) {
-  return (
-    <View style={styles.cameraIcon}>
-      <View style={[styles.lens, { borderColor: color }]} />
-      <View style={[styles.flash, { backgroundColor: color }]} />
-    </View>
-  )
-}
-
 function OrdersIcon({ color }: { color: string }) {
   return (
     <View style={styles.receiptIcon}>
@@ -64,7 +55,6 @@ function MoreIcon({ color }: { color: string }) {
 const tabs = [
   { Icon: POSIcon, name: 'POS' },
   { Icon: ProductsIcon, name: 'Products' },
-  { Icon: ScanIcon, name: 'Scan' },
   { Icon: OrdersIcon, name: 'Orders' },
   { Icon: MoreIcon, name: 'More' },
 ]

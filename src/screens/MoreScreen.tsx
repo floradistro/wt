@@ -5,6 +5,7 @@ import { useAuth, useAuthActions } from '@/stores/auth.store'
 import * as Haptics from 'expo-haptics'
 import { allSections, systemItems, type NavItem, type NavSection } from '@/lib/navigation'
 import { useRef, useEffect } from 'react'
+import { layout } from '@/theme/layout'
 
 const { width } = Dimensions.get('window')
 const isTablet = width > 600
@@ -224,7 +225,9 @@ export function MoreScreen() {
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
+        showsVerticalScrollIndicator={true}
+        indicatorStyle="white"
+        scrollIndicatorInsets={{ right: 2, bottom: layout.dockHeight }}
       >
         {/* Elegant Header */}
         <Animated.View

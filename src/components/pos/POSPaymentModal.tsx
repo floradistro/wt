@@ -204,7 +204,12 @@ function POSPaymentModal({
             </TouchableOpacity>
           </View>
 
-          <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+          <ScrollView
+            style={styles.content}
+            showsVerticalScrollIndicator={true}
+            indicatorStyle="white"
+            scrollIndicatorInsets={{ right: 2 }}
+          >
             {/* Payment Views */}
             {paymentMethod === 'cash' && (
               <CashPaymentView

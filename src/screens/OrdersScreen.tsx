@@ -1,5 +1,6 @@
 import { View, Text, StyleSheet, ScrollView } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
+import { layout } from '@/theme/layout'
 
 export function OrdersScreen() {
   return (
@@ -7,6 +8,9 @@ export function OrdersScreen() {
       <ScrollView
         style={styles.content}
         contentInsetAdjustmentBehavior="automatic"
+        showsVerticalScrollIndicator={true}
+        indicatorStyle="white"
+        scrollIndicatorInsets={{ right: 2, bottom: layout.dockHeight }}
       >
         <View style={styles.header}>
           <Text style={styles.title}>ORDERS</Text>

@@ -192,7 +192,13 @@ export function EditProductModal({ visible, product, onClose, onSave }: EditProd
           </Pressable>
         </View>
 
-        <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
+        <ScrollView
+          style={styles.content}
+          contentContainerStyle={styles.contentContainer}
+          showsVerticalScrollIndicator={true}
+          indicatorStyle="white"
+          scrollIndicatorInsets={{ right: 2 }}
+        >
           {/* Basic Info */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>BASIC INFORMATION</Text>

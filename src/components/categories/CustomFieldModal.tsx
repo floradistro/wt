@@ -166,7 +166,12 @@ export function CustomFieldModal({
             </Pressable>
           </View>
 
-          <ScrollView style={styles.content}>
+          <ScrollView
+            style={styles.content}
+            showsVerticalScrollIndicator={true}
+            indicatorStyle="white"
+            scrollIndicatorInsets={{ right: 2 }}
+          >
             <View style={styles.section}>
               <Text style={styles.label}>Field Label *</Text>
               <TextInput

@@ -739,10 +739,10 @@ function ProductDetail({ product, onBack, onProductUpdated }: { product: Product
   return (
     <ScrollView
       style={styles.detail}
-      contentContainerStyle={{ paddingBottom: layout.dockHeight }}
+      contentContainerStyle={{ paddingBottom: layout.dockHeight, paddingRight: layout.containerMargin }}
       showsVerticalScrollIndicator={true}
       indicatorStyle="white"
-      scrollIndicatorInsets={{ right: 1, bottom: layout.dockHeight }}
+      scrollIndicatorInsets={{ right: 2, bottom: layout.dockHeight }}
     >
       {/* Header with Edit/Save toggle */}
       <View style={styles.detailHeader}>
@@ -1212,7 +1212,7 @@ const styles = StyleSheet.create({
     left: 0, // No left padding - navbar margin handles it
     top: 0,
     bottom: 0,
-    right: layout.containerMargin, // Match navbar's right margin (12px)
+    right: 0, // Extend to screen edge for scroll indicator
     backgroundColor: '#000',
   },
   emptyDetail: {

@@ -194,7 +194,13 @@ function POSCart({
       </View>
 
       {/* Cart Items */}
-      <ScrollView style={styles.cartItems} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: layout.dockHeight }}>
+      <ScrollView
+        style={styles.cartItems}
+        showsVerticalScrollIndicator={true}
+        indicatorStyle="white"
+        scrollIndicatorInsets={{ right: 2, bottom: layout.dockHeight }}
+        contentContainerStyle={{ paddingBottom: layout.dockHeight }}
+      >
         {cart.length === 0 ? (
           <View style={styles.emptyCart}>
             <Text style={styles.emptyCartText}>Cart is empty</Text>

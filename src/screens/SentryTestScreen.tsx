@@ -18,6 +18,7 @@ import {
   runAllSentryTests,
   quickSentryTest,
 } from '@/utils/test-sentry'
+import { layout } from '@/theme/layout'
 
 export function SentryTestScreen() {
   const handleTestComplete = (testName: string) => {
@@ -29,7 +30,12 @@ export function SentryTestScreen() {
   }
 
   return (
-    <ScrollView style={styles.container}>
+    <ScrollView
+      style={styles.container}
+      showsVerticalScrollIndicator={true}
+      indicatorStyle="white"
+      scrollIndicatorInsets={{ right: 2, bottom: layout.dockHeight }}
+    >
       <View style={styles.header}>
         <Text style={styles.title}>🔍 Sentry Integration Tests</Text>
         <Text style={styles.subtitle}>
