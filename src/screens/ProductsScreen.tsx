@@ -386,30 +386,51 @@ export function ProductsScreen() {
                   </View>
 
                   <View style={styles.cardWrapper}>
-                    {filteredCategories.map((category) => (
-                      <Pressable
-                        key={category.id}
-                        onPress={() => {
-                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                          setSelectedCategoryId(category.id)
-                        }}
-                      >
-                        <CategoryCard
-                          category={category}
-                          isExpanded={selectedCategoryId === category.id}
-                          onToggleExpansion={() => setSelectedCategoryId(category.id)}
-                          onEdit={() => {}}
-                          onDelete={() => {}}
-                          onManageFields={() => setShowFieldModal(true)}
-                          onManagePricing={() => setShowPricingModal(true)}
-                          fieldsCount={allFields.filter(f => f.category_id === category.id).length}
-                          templatesCount={allTemplates.filter(t =>
-        // @ts-expect-error - category_id will be added in database schema migration
-                            t.applicable_to_categories?.includes(category.id) || t.category_id === category.id
-                          ).length}
-                        />
-                      </Pressable>
-                    ))}
+                    <View style={styles.productsCardGlass}>
+                      {filteredCategories.map((category, index) => {
+                        const isLast = index === filteredCategories.length - 1
+                        return (
+                          <Pressable
+                            key={category.id}
+                            style={[
+                              styles.categoryItem,
+                              selectedCategoryId === category.id && styles.categoryItemActive,
+                              isLast && styles.categoryItemLast,
+                            ]}
+                            onPress={() => {
+                              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                              setSelectedCategoryId(category.id)
+                            }}
+                          >
+                            {/* Icon */}
+                            <View style={styles.categoryIcon}>
+                              <Text style={styles.categoryIconText}>
+                                {category.name.charAt(0).toUpperCase()}
+                              </Text>
+                            </View>
+
+                            {/* Category Name & Description */}
+                            <View style={styles.categoryInfo}>
+                              <Text style={styles.categoryName} numberOfLines={1}>
+                                {category.name}
+                              </Text>
+                              {category.description && (
+                                <Text style={styles.categoryDescription} numberOfLines={1}>
+                                  {category.description}
+                                </Text>
+                              )}
+                            </View>
+
+                            {/* Product Count Badge */}
+                            {category.product_count !== undefined && category.product_count > 0 && (
+                              <View style={styles.categoryBadge}>
+                                <Text style={styles.categoryBadgeText}>{category.product_count}</Text>
+                              </View>
+                            )}
+                          </Pressable>
+                        )
+                      })}
+                    </View>
                   </View>
                 </ScrollView>
               </View>
@@ -1559,6 +1580,68 @@ const styles = StyleSheet.create({
     fontSize: 24,
     color: '#60A5FA',
     fontWeight: '300',
+  },
+
+  // CATEGORY LIST ITEMS (matching product list style)
+  categoryItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: layout.rowPaddingVertical,
+    paddingHorizontal: layout.rowPaddingHorizontal,
+    gap: 12,
+    backgroundColor: 'transparent',
+    borderBottomWidth: 0.5,
+    borderBottomColor: 'rgba(255,255,255,0.05)',
+    minHeight: layout.minTouchTarget,
+  },
+  categoryItemActive: {
+    backgroundColor: 'rgba(99,99,102,0.2)',
+  },
+  categoryItemLast: {
+    borderBottomWidth: 0,
+  },
+  categoryIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 8,
+    backgroundColor: 'rgba(118,118,128,0.24)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  categoryIconText: {
+    fontSize: 20,
+    color: 'rgba(235,235,245,0.6)',
+  },
+  categoryInfo: {
+    flex: 1,
+    gap: 2,
+  },
+  categoryName: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#fff',
+    letterSpacing: -0.2,
+  },
+  categoryDescription: {
+    fontSize: 11,
+    fontWeight: '400',
+    color: 'rgba(235,235,245,0.6)',
+    letterSpacing: 0.2,
+  },
+  categoryBadge: {
+    minWidth: 24,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 6,
+  },
+  categoryBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#fff',
+    letterSpacing: -0.2,
   },
   emptyStateButton: {
     marginTop: 20,
