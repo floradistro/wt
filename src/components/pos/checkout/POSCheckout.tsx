@@ -17,6 +17,7 @@ import { supabase } from '@/lib/supabase/client'
 import { validateRealPaymentData, normalizePaymentMethod, validatePaymentMethod } from '@/utils/payment-validation'
 import { Sentry } from '@/utils/sentry'
 import { logger } from '@/utils/logger'
+import { ErrorModal } from '@/components/ErrorModal'
 
 // POS Components
 import { POSUnifiedCustomerSelector } from '../POSUnifiedCustomerSelector'
@@ -63,6 +64,15 @@ export function POSCheckout({
   const [scannedDataForNewCustomer, setScannedDataForNewCustomer] = useState<AAMVAData | null>(null)
   const [customerMatches, setCustomerMatches] = useState<CustomerMatch[]>([])
   const [showSuccessModal, setShowSuccessModal] = useState(false)
+  const [errorModal, setErrorModal] = useState<{
+    visible: boolean
+    title: string
+    message: string
+  }>({
+    visible: false,
+    title: '',
+    message: '',
+  })
   const [successData, setSuccessData] = useState<{
     orderNumber: string
     transactionNumber?: string
@@ -395,7 +405,11 @@ export function POSCheckout({
 
       // transaction.finish()
 
-      alert(`Error: ${error instanceof Error ? error.message : 'Failed to process sale'}`)
+      setErrorModal({
+        visible: true,
+        title: 'Checkout Error',
+        message: error instanceof Error ? error.message : 'Failed to process sale. Please try again or contact support.',
+      })
     } finally {
       setProcessingCheckout(false)
     }
@@ -498,6 +512,15 @@ export function POSCheckout({
    */
   return (
     <View style={styles.container}>
+      {/* Error Modal */}
+      <ErrorModal
+        visible={errorModal.visible}
+        title={errorModal.title}
+        message={errorModal.message}
+        onPrimaryPress={() => setErrorModal({ visible: false, title: '', message: '' })}
+        variant="error"
+      />
+
       {/* Unified Customer Selector */}
       {vendor && (
         <POSUnifiedCustomerSelector

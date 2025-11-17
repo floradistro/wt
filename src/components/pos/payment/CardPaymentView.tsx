@@ -5,12 +5,13 @@
  */
 
 import { useState } from 'react'
-import { View, Text, Alert, StyleSheet, TouchableOpacity } from 'react-native'
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native'
 import { LiquidGlassView } from '@callstack/liquid-glass'
 import { Ionicons } from '@expo/vector-icons'
 import * as Haptics from 'expo-haptics'
 import { validateProcessor, validatePaymentResponse } from '@/utils/payment-validation'
 import { Sentry } from '@/utils/sentry'
+import { ErrorModal } from '@/components/ErrorModal'
 import type { BasePaymentViewProps, PaymentData, PaymentStage } from './PaymentTypes'
 import { logger } from '@/utils/logger'
 
@@ -33,6 +34,17 @@ export function CardPaymentView({
 }: CardPaymentViewProps) {
   const [processingCard, setProcessingCard] = useState(false)
   const [paymentStage, setPaymentStage] = useState<PaymentStage>('initializing')
+  const [errorModal, setErrorModal] = useState<{
+    visible: boolean
+    title: string
+    message: string
+    canRetry: boolean
+  }>({
+    visible: false,
+    title: '',
+    message: '',
+    canRetry: false,
+  })
 
   const hasActiveProcessor = !!currentProcessor
 
@@ -73,7 +85,12 @@ export function CardPaymentView({
           },
         },
       })
-      alert('No payment processor configured')
+      setErrorModal({
+        visible: true,
+        title: 'No Payment Processor',
+        message: 'No payment processor is configured. Please set up a payment terminal in settings.',
+        canRetry: false,
+      })
       return
     }
 
@@ -96,7 +113,12 @@ export function CardPaymentView({
           },
         },
       })
-      alert(error instanceof Error ? error.message : 'Invalid processor configuration')
+      setErrorModal({
+        visible: true,
+        title: 'Configuration Error',
+        message: error instanceof Error ? error.message : 'Invalid processor configuration. Please check your payment terminal settings.',
+        canRetry: false,
+      })
       return
     }
 
@@ -337,22 +359,12 @@ export function CardPaymentView({
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
 
       // Show user-friendly error with retry option
-      if (shouldRetry) {
-        Alert.alert(
-          'Payment Failed',
-          userMessage,
-          [
-            { text: 'Cancel', style: 'cancel' },
-            {
-              text: 'Retry Payment',
-              onPress: () => handleCardPayment(),
-              style: 'default'
-            }
-          ]
-        )
-      } else {
-        Alert.alert('Payment Failed', userMessage)
-      }
+      setErrorModal({
+        visible: true,
+        title: 'Payment Failed',
+        message: userMessage,
+        canRetry: shouldRetry,
+      })
     } finally {
       setProcessingCard(false)
     }
@@ -362,6 +374,27 @@ export function CardPaymentView({
 
   return (
     <View style={styles.container}>
+      {/* Error Modal */}
+      <ErrorModal
+        visible={errorModal.visible}
+        title={errorModal.title}
+        message={errorModal.message}
+        primaryButtonText={errorModal.canRetry ? 'Retry Payment' : 'OK'}
+        secondaryButtonText={errorModal.canRetry ? 'Cancel' : undefined}
+        onPrimaryPress={() => {
+          setErrorModal({ visible: false, title: '', message: '', canRetry: false })
+          if (errorModal.canRetry) {
+            handleCardPayment()
+          }
+        }}
+        onSecondaryPress={
+          errorModal.canRetry
+            ? () => setErrorModal({ visible: false, title: '', message: '', canRetry: false })
+            : undefined
+        }
+        variant="error"
+      />
+
       {processingCard ? (
         <View style={styles.processingContainer}>
           <View style={styles.processingHeader}>

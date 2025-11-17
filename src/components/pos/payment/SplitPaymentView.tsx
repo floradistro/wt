@@ -5,11 +5,12 @@
  */
 
 import { useState, useMemo } from 'react'
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert } from 'react-native'
+import { View, Text, TextInput, TouchableOpacity, StyleSheet } from 'react-native'
 import { LiquidGlassView } from '@callstack/liquid-glass'
 import { Ionicons } from '@expo/vector-icons'
 import * as Haptics from 'expo-haptics'
 import { validatePaymentResponse } from '@/utils/payment-validation'
+import { ErrorModal } from '@/components/ErrorModal'
 import type { BasePaymentViewProps, PaymentData } from './PaymentTypes'
 import { logger } from '@/utils/logger'
 
@@ -30,6 +31,17 @@ export function SplitPaymentView({
   const [splitCashAmount, setSplitCashAmount] = useState('')
   const [splitCardAmount, setSplitCardAmount] = useState('')
   const [processing, setProcessing] = useState(false)
+  const [errorModal, setErrorModal] = useState<{
+    visible: boolean
+    title: string
+    message: string
+    canRetry: boolean
+  }>({
+    visible: false,
+    title: '',
+    message: '',
+    canRetry: false,
+  })
 
   // Calculate totals
   const splitCash = parseFloat(splitCashAmount) || 0
@@ -58,7 +70,12 @@ export function SplitPaymentView({
     // Process card portion first if > 0
     if (splitCard > 0) {
       if (!currentProcessor) {
-        alert('No payment processor configured for card portion')
+        setErrorModal({
+          visible: true,
+          title: 'No Payment Processor',
+          message: 'No payment processor is configured for the card portion. Please set up a payment terminal in settings.',
+          canRetry: false,
+        })
         return
       }
 
@@ -187,22 +204,12 @@ export function SplitPaymentView({
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
 
         // Show user-friendly error with retry option
-        if (shouldRetry) {
-          Alert.alert(
-            'Split Payment Failed',
-            userMessage,
-            [
-              { text: 'Cancel', style: 'cancel' },
-              {
-                text: 'Retry Payment',
-                onPress: () => handleSplitPayment(),
-                style: 'default'
-              }
-            ]
-          )
-        } else {
-          Alert.alert('Split Payment Failed', userMessage)
-        }
+        setErrorModal({
+          visible: true,
+          title: 'Split Payment Failed',
+          message: userMessage,
+          canRetry: shouldRetry,
+        })
       } finally {
         setProcessing(false)
       }
@@ -218,6 +225,27 @@ export function SplitPaymentView({
 
   return (
     <View style={styles.container}>
+      {/* Error Modal */}
+      <ErrorModal
+        visible={errorModal.visible}
+        title={errorModal.title}
+        message={errorModal.message}
+        primaryButtonText={errorModal.canRetry ? 'Retry Payment' : 'OK'}
+        secondaryButtonText={errorModal.canRetry ? 'Cancel' : undefined}
+        onPrimaryPress={() => {
+          setErrorModal({ visible: false, title: '', message: '', canRetry: false })
+          if (errorModal.canRetry) {
+            handleSplitPayment()
+          }
+        }}
+        onSecondaryPress={
+          errorModal.canRetry
+            ? () => setErrorModal({ visible: false, title: '', message: '', canRetry: false })
+            : undefined
+        }
+        variant="error"
+      />
+
       <Text style={styles.sectionLabel}>SPLIT PAYMENT</Text>
 
       {/* Cash Portion */}
