@@ -154,7 +154,7 @@ export async function createCustomer(params: {
   vendor_id?: string
 }): Promise<Customer> {
   // Normalize data
-  const customerData: any = {
+  const customerData: Partial<Customer> & { loyalty_points: number; total_spent: number; total_orders: number } = {
     ...params,
     loyalty_points: 0,
     total_spent: 0,
@@ -255,7 +255,9 @@ export async function getCustomerWithOrders(customerId: string): Promise<Custome
   return {
     ...data,
     recent_orders: data.orders
-      ?.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+      ?.sort((a: { created_at: string }, b: { created_at: string }) =>
+        new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      )
       .slice(0, 5),
   }
 }
