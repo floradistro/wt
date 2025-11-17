@@ -503,8 +503,8 @@ export function ProductsScreen() {
                 <ScrollView
                   showsVerticalScrollIndicator={true}
                   indicatorStyle="white"
-                  scrollIndicatorInsets={{ right: 1, top: 80, bottom: layout.dockHeight }}
-                  contentContainerStyle={{ paddingTop: 80, paddingBottom: layout.dockHeight }}
+                  scrollIndicatorInsets={{ right: 2, top: 80, bottom: layout.dockHeight }}
+                  contentContainerStyle={{ paddingTop: 80, paddingBottom: layout.dockHeight, paddingRight: layout.containerMargin }}
                   onScroll={(e) => {
                     const offsetY = e.nativeEvent.contentOffset.y
                     const threshold = 40
@@ -1068,7 +1068,7 @@ const styles = StyleSheet.create({
     left: 0, // No left padding - navbar margin handles it
     top: 0,
     bottom: 0,
-    right: layout.containerMargin, // Match navbar's right margin (12px)
+    right: 0, // Extend to screen edge for scroll indicator
     backgroundColor: '#000',
   },
   productsListContent: {
