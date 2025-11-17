@@ -4,8 +4,9 @@
  */
 
 import { View, Text, StyleSheet, Pressable, TextInput } from 'react-native'
-import { LiquidGlassView, isLiquidGlassSupported } from '@callstack/liquid-glass'
+import { LiquidGlassView, LiquidGlassContainerView, isLiquidGlassSupported } from '@callstack/liquid-glass'
 import * as Haptics from 'expo-haptics'
+import { spacing, radius } from '@/theme/tokens'
 import { layout } from '@/theme/layout'
 
 interface EditableCustomFieldsSectionProps {
@@ -67,19 +68,13 @@ export function EditableCustomFieldsSection({
 
   return (
     <View style={styles.section}>
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>PRODUCT DETAILS</Text>
-        {isEditing && (
-          <Pressable onPress={handleAddField}>
-            <Text style={styles.addButton}>+ Add Field</Text>
-          </Pressable>
-        )}
-      </View>
-      <LiquidGlassView
-        effect="regular"
-        colorScheme="dark"
-        style={[styles.cardGlass, !isLiquidGlassSupported && styles.cardGlassFallback]}
-      >
+      <Text style={styles.sectionTitle}>PRODUCT DETAILS</Text>
+      <LiquidGlassContainerView spacing={12}>
+        <LiquidGlassView
+          effect="regular"
+          colorScheme="dark"
+          style={[styles.cardGlass, !isLiquidGlassSupported && styles.cardGlassFallback]}
+        >
         {isEditing ? (
           <>
             {Object.entries(editedCustomFields).length === 0 ? (
@@ -143,22 +138,16 @@ export function EditableCustomFieldsSection({
             })}
           </>
         )}
-      </LiquidGlassView>
+        </LiquidGlassView>
+      </LiquidGlassContainerView>
     </View>
   )
 }
 
 const styles = StyleSheet.create({
   section: {
-    marginHorizontal: layout.contentHorizontal,
+    marginHorizontal: spacing.sm, // Consistent 12px spacing everywhere
     marginBottom: layout.sectionSpacing,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-    paddingHorizontal: layout.cardPadding,
   },
   sectionTitle: {
     fontSize: 11,
@@ -166,14 +155,11 @@ const styles = StyleSheet.create({
     color: 'rgba(235,235,245,0.5)',
     letterSpacing: 0.6,
     textTransform: 'uppercase',
-  },
-  addButton: {
-    fontSize: 13,
-    color: '#60A5FA',
-    fontWeight: '600',
+    marginBottom: 8,
+    paddingHorizontal: layout.cardPadding,
   },
   cardGlass: {
-    borderRadius: layout.cardRadius,
+    borderRadius: radius.xxl,
     borderCurve: 'continuous',
     overflow: 'hidden',
   },
