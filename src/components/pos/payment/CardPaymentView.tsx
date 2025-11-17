@@ -12,11 +12,12 @@ import * as Haptics from 'expo-haptics'
 import { validateProcessor, validatePaymentResponse } from '@/utils/payment-validation'
 import { Sentry } from '@/utils/sentry'
 import { ErrorModal } from '@/components/ErrorModal'
+import type { ProcessorInfo } from '@/stores/payment-processor.store'
 import type { BasePaymentViewProps, PaymentData, PaymentStage } from './PaymentTypes'
 import { logger } from '@/utils/logger'
 
 interface CardPaymentViewProps extends BasePaymentViewProps {
-  currentProcessor: any
+  currentProcessor: ProcessorInfo | null
   processorStatus: string
   locationId?: string
   registerId?: string

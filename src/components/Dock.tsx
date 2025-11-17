@@ -69,6 +69,8 @@ const tabs = [
   { Icon: MoreIcon, name: 'More' },
 ]
 
+type IconComponent = (props: { color: string }) => JSX.Element
+
 function DockButton({
   icon: Icon,
   name,
@@ -76,7 +78,7 @@ function DockButton({
   isCenter,
   onPress
 }: {
-  icon: any
+  icon: IconComponent
   name: string
   isActive: boolean
   isCenter: boolean

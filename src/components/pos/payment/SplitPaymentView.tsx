@@ -11,11 +11,12 @@ import { Ionicons } from '@expo/vector-icons'
 import * as Haptics from 'expo-haptics'
 import { validatePaymentResponse } from '@/utils/payment-validation'
 import { ErrorModal } from '@/components/ErrorModal'
+import type { ProcessorInfo } from '@/stores/payment-processor.store'
 import type { BasePaymentViewProps, PaymentData } from './PaymentTypes'
 import { logger } from '@/utils/logger'
 
 interface SplitPaymentViewProps extends BasePaymentViewProps {
-  currentProcessor: any
+  currentProcessor: ProcessorInfo | null
   locationId?: string
   registerId?: string
   onComplete: (paymentData: PaymentData) => void
