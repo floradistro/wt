@@ -32,16 +32,6 @@ function ProductsIcon({ color }: { color: string }) {
   )
 }
 
-function OrdersIcon({ color }: { color: string }) {
-  return (
-    <View style={styles.receiptIcon}>
-      <View style={[styles.line, { backgroundColor: color }]} />
-      <View style={[styles.line, { backgroundColor: color }]} />
-      <View style={[styles.line, { backgroundColor: color }]} />
-    </View>
-  )
-}
-
 function MoreIcon({ color }: { color: string }) {
   return (
     <View style={styles.dotsIcon}>
@@ -55,7 +45,6 @@ function MoreIcon({ color }: { color: string }) {
 const tabs = [
   { Icon: POSIcon, name: 'POS' },
   { Icon: ProductsIcon, name: 'Products' },
-  { Icon: OrdersIcon, name: 'Orders' },
   { Icon: MoreIcon, name: 'More' },
 ]
 
@@ -118,7 +107,7 @@ function Dock({ activeTab, onTabChange }: DockProps) {
         >
           {tabs.map((tab, index) => {
             const isActive = activeTab === index
-            const isCenter = false // No center icon with 4 items
+            const isCenter = false // No center icon with 3 items
 
             return (
               <DockButton
@@ -210,14 +199,6 @@ const styles = StyleSheet.create({
     width: 11,
     height: 11,
     borderRadius: 3,
-  },
-  receiptIcon: {
-    gap: 4,
-  },
-  line: {
-    width: 24,
-    height: 3,
-    borderRadius: 1.5,
   },
   dotsIcon: {
     flexDirection: 'row',

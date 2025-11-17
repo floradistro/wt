@@ -159,7 +159,7 @@ function DeveloperToolsDetail({ headerOpacity }: { headerOpacity: Animated.Value
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
     quickSentryTest()
     Alert.alert(
-      'Test Sent ✅',
+      'Test Sent',
       'Quick test message sent to Sentry.\n\nCheck your dashboard at:\nhttps://sentry.io/',
       [{ text: 'OK' }]
     )
@@ -179,7 +179,7 @@ function DeveloperToolsDetail({ headerOpacity }: { headerOpacity: Animated.Value
             await runAllSentryTests()
             setIsRunning(false)
             Alert.alert(
-              'All Tests Complete! ✅',
+              'All Tests Complete',
               'Check your Sentry dashboard to see:\n\n' +
               '• 7 new errors in Issues\n' +
               '• 4 performance transactions\n' +
@@ -232,9 +232,9 @@ function DeveloperToolsDetail({ headerOpacity }: { headerOpacity: Animated.Value
             style={[styles.detailCard, !isLiquidGlassSupported && styles.cardFallback]}
           >
             <View style={styles.cardInner}>
-              <Text style={styles.cardTitle}>🔍 Sentry Integration</Text>
+              <Text style={styles.cardTitle}>Sentry Integration</Text>
               <Text style={styles.cardDescription}>
-                Test Sentry error tracking and performance monitoring
+                Test error tracking and performance monitoring
               </Text>
               <View style={styles.cardDivider} />
 
@@ -248,14 +248,14 @@ function DeveloperToolsDetail({ headerOpacity }: { headerOpacity: Animated.Value
                 accessibilityHint="Double tap to send a test message"
                 accessibilityState={{ disabled: isRunning }}
               >
-                <Text style={styles.testButtonText} accessible={false}>⚡️ Quick Test</Text>
+                <Text style={styles.testButtonText} accessible={false}>Quick Test</Text>
                 <Text style={styles.testButtonSubtext} accessible={false}>Send one test message</Text>
               </Pressable>
 
               <Pressable
                 onPress={handleFullTest}
                 disabled={isRunning}
-                style={[styles.testButton, styles.testButtonPrimary]}
+                style={[styles.testButton, styles.testButtonLast]}
                 accessible={true}
                 accessibilityRole="button"
                 accessibilityLabel={isRunning ? "Running tests" : "Run all tests, complete integration test, approximately 7 seconds"}
@@ -263,11 +263,11 @@ function DeveloperToolsDetail({ headerOpacity }: { headerOpacity: Animated.Value
                 accessibilityState={{ disabled: isRunning, busy: isRunning }}
               >
                 {isRunning ? (
-                  <ActivityIndicator color="#fff" accessibilityElementsHidden={true} importantForAccessibility="no" />
+                  <ActivityIndicator color="rgba(235,235,245,0.6)" accessibilityElementsHidden={true} importantForAccessibility="no" />
                 ) : (
                   <>
-                    <Text style={styles.testButtonTextPrimary} accessible={false}>🚀 Run All Tests</Text>
-                    <Text style={styles.testButtonSubtextPrimary} accessible={false}>Complete integration test (~7s)</Text>
+                    <Text style={styles.testButtonText} accessible={false}>Run All Tests</Text>
+                    <Text style={styles.testButtonSubtext} accessible={false}>Complete integration test (~7s)</Text>
                   </>
                 )}
               </Pressable>
@@ -289,7 +289,7 @@ function DeveloperToolsDetail({ headerOpacity }: { headerOpacity: Animated.Value
             style={[styles.detailCard, !isLiquidGlassSupported && styles.cardFallback]}
           >
             <View style={styles.cardInner}>
-              <Text style={styles.cardTitle}>📊 What Gets Tested</Text>
+              <Text style={styles.cardTitle}>What Gets Tested</Text>
               <View style={styles.cardDivider} />
 
               <DetailRow label="Error Capture" value="Basic error reporting" />
@@ -1211,42 +1211,28 @@ const styles = StyleSheet.create({
   },
   testButton: {
     borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border.regular,
-    backgroundColor: colors.glass.ultraThin,
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: 'rgba(255,255,255,0.03)',
     padding: spacing.md,
     marginTop: spacing.sm,
     minHeight: 60,
     justifyContent: 'center',
   },
-  testButtonPrimary: {
-    backgroundColor: '#007AFF',
-    borderColor: '#007AFF',
+  testButtonLast: {
+    marginBottom: 0,
   },
   testButtonText: {
-    fontSize: 17,
+    fontSize: 15,
     fontWeight: '600',
-    color: colors.text.primary,
-    letterSpacing: -0.4,
-    marginBottom: 2,
-  },
-  testButtonTextPrimary: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: '#fff',
-    letterSpacing: -0.4,
+    color: 'rgba(235,235,245,0.9)',
+    letterSpacing: -0.2,
     marginBottom: 2,
   },
   testButtonSubtext: {
     fontSize: 13,
     fontWeight: '400',
-    color: colors.text.tertiary,
-    letterSpacing: -0.1,
-  },
-  testButtonSubtextPrimary: {
-    fontSize: 13,
-    fontWeight: '400',
-    color: 'rgba(255,255,255,0.7)',
+    color: 'rgba(235,235,245,0.6)',
     letterSpacing: -0.1,
   },
   infoBox: {
