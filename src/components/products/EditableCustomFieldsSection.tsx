@@ -162,9 +162,11 @@ const styles = StyleSheet.create({
     borderRadius: radius.xxl,
     borderCurve: 'continuous',
     overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
   },
   cardGlassFallback: {
-    backgroundColor: '#1c1c1e',
+    backgroundColor: 'rgba(255,255,255,0.05)',
   },
 
   // Empty state

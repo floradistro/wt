@@ -6,9 +6,10 @@
 
 import { View, Text, StyleSheet, Pressable, TextInput, ActivityIndicator, ScrollView } from 'react-native'
 import { useState, useEffect } from 'react'
-import { LiquidGlassView, isLiquidGlassSupported } from '@callstack/liquid-glass'
+import { LiquidGlassView, LiquidGlassContainerView, isLiquidGlassSupported } from '@callstack/liquid-glass'
 import * as Haptics from 'expo-haptics'
 import type { PricingTier } from '@/hooks/useProducts'
+import { spacing, radius } from '@/theme/tokens'
 import { layout } from '@/theme/layout'
 
 interface EditablePricingSectionProps {
@@ -120,11 +121,12 @@ export function EditablePricingSection({
   return (
     <View style={styles.section}>
       <Text style={styles.sectionTitle}>PRICING</Text>
-      <LiquidGlassView
-        effect="regular"
-        colorScheme="dark"
-        style={[styles.cardGlass, !isLiquidGlassSupported && styles.cardGlassFallback]}
-      >
+      <LiquidGlassContainerView spacing={12}>
+        <LiquidGlassView
+          effect="regular"
+          colorScheme="dark"
+          style={[styles.cardGlass, !isLiquidGlassSupported && styles.cardGlassFallback]}
+        >
         {isEditing ? (
           <>
             {/* Pricing Mode Toggle */}
@@ -333,14 +335,15 @@ export function EditablePricingSection({
             )}
           </>
         )}
-      </LiquidGlassView>
+        </LiquidGlassView>
+      </LiquidGlassContainerView>
     </View>
   )
 }
 
 const styles = StyleSheet.create({
   section: {
-    marginHorizontal: layout.contentHorizontal,
+    marginHorizontal: spacing.sm, // Consistent 12px spacing everywhere
     marginBottom: layout.sectionSpacing,
   },
   sectionTitle: {
@@ -353,12 +356,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: layout.cardPadding,
   },
   cardGlass: {
-    borderRadius: layout.cardRadius,
+    borderRadius: radius.xxl,
     borderCurve: 'continuous',
     overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
   },
   cardGlassFallback: {
-    backgroundColor: '#1c1c1e',
+    backgroundColor: 'rgba(255,255,255,0.05)',
   },
 
   // Mode Toggle

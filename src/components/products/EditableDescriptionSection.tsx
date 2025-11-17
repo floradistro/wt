@@ -4,7 +4,8 @@
  */
 
 import { View, Text, StyleSheet, TextInput } from 'react-native'
-import { LiquidGlassView, isLiquidGlassSupported } from '@callstack/liquid-glass'
+import { LiquidGlassView, LiquidGlassContainerView, isLiquidGlassSupported } from '@callstack/liquid-glass'
+import { spacing, radius } from '@/theme/tokens'
 import { layout } from '@/theme/layout'
 
 interface EditableDescriptionSectionProps {
@@ -26,38 +27,40 @@ export function EditableDescriptionSection({
   return (
     <View style={styles.section}>
       <Text style={styles.sectionTitle}>DESCRIPTION</Text>
-      <LiquidGlassView
-        effect="regular"
-        colorScheme="dark"
-        style={[styles.cardGlass, !isLiquidGlassSupported && styles.cardGlassFallback]}
-      >
-        {isEditing ? (
-          <View style={styles.editRow}>
-            <TextInput
-              style={styles.descriptionInput}
-              value={editedDescription}
-              onChangeText={onChangeText}
-              placeholder="Add a description..."
-              placeholderTextColor="rgba(235,235,245,0.3)"
-              multiline
-              textAlignVertical="top"
-            />
-          </View>
-        ) : (
-          <View style={styles.viewRow}>
-            <Text style={styles.descriptionText}>
-              {description?.replace(/<[^>]*>/g, '') || ''}
-            </Text>
-          </View>
-        )}
-      </LiquidGlassView>
+      <LiquidGlassContainerView spacing={12}>
+        <LiquidGlassView
+          effect="regular"
+          colorScheme="dark"
+          style={[styles.cardGlass, !isLiquidGlassSupported && styles.cardGlassFallback]}
+        >
+          {isEditing ? (
+            <View style={styles.editRow}>
+              <TextInput
+                style={styles.descriptionInput}
+                value={editedDescription}
+                onChangeText={onChangeText}
+                placeholder="Add a description..."
+                placeholderTextColor="rgba(235,235,245,0.3)"
+                multiline
+                textAlignVertical="top"
+              />
+            </View>
+          ) : (
+            <View style={styles.viewRow}>
+              <Text style={styles.descriptionText}>
+                {description?.replace(/<[^>]*>/g, '') || ''}
+              </Text>
+            </View>
+          )}
+        </LiquidGlassView>
+      </LiquidGlassContainerView>
     </View>
   )
 }
 
 const styles = StyleSheet.create({
   section: {
-    marginHorizontal: layout.contentHorizontal,
+    marginHorizontal: spacing.sm, // Consistent 12px spacing everywhere
     marginBottom: layout.sectionSpacing,
   },
   sectionTitle: {
@@ -70,12 +73,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: layout.cardPadding,
   },
   cardGlass: {
-    borderRadius: layout.cardRadius,
+    borderRadius: radius.xxl,
     borderCurve: 'continuous',
     overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
   },
   cardGlassFallback: {
-    backgroundColor: '#1c1c1e',
+    backgroundColor: 'rgba(255,255,255,0.05)',
   },
   editRow: {
     paddingVertical: 14,
