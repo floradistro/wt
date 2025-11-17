@@ -128,7 +128,8 @@ export function ProductsScreen() {
   const { width } = useWindowDimensions()
   const contentWidth = width - layout.sidebarWidth
 
-  const { products: allProducts, isLoading, reload } = useProducts({ search: productSearchQuery })
+  // Load all products without search - we'll filter client-side
+  const { products: allProducts, isLoading, reload } = useProducts({ search: '' })
   const { categories, isLoading: categoriesLoading, reload: reloadCategories } = useCategories({ includeGlobal: true, parentId: null })
 
   // Create a category lookup map for fast access
@@ -185,18 +186,32 @@ export function ProductsScreen() {
     setSelectedProduct(product)
   }, [])
 
-  // Filter products based on active nav
-  const products = allProducts.filter(product => {
-    if (activeNav === 'all') return true
-    if (activeNav === 'low-stock') {
-      const stock = product.total_stock ?? 0
-      return stock > 0 && stock < 10
-    }
-    if (activeNav === 'out-of-stock') {
-      return (product.total_stock ?? 0) === 0
-    }
-    return true
-  })
+  // Filter products based on active nav and search query (client-side)
+  const products = useMemo(() => {
+    return allProducts.filter(product => {
+      // First filter by nav section
+      if (activeNav === 'low-stock') {
+        const stock = product.total_stock ?? 0
+        if (!(stock > 0 && stock < 10)) return false
+      } else if (activeNav === 'out-of-stock') {
+        if ((product.total_stock ?? 0) !== 0) return false
+      }
+
+      // Then filter by search query
+      if (productSearchQuery) {
+        const searchLower = productSearchQuery.toLowerCase()
+        const nameMatch = product.name.toLowerCase().includes(searchLower)
+        const skuMatch = product.sku?.toLowerCase().includes(searchLower)
+        const categoryMatch = product.primary_category_id
+          ? categoryMap.get(product.primary_category_id)?.toLowerCase().includes(searchLower)
+          : false
+
+        return nameMatch || skuMatch || categoryMatch
+      }
+
+      return true
+    })
+  }, [allProducts, activeNav, productSearchQuery, categoryMap])
 
   // Calculate counts for badges
   const lowStockCount = allProducts.filter(p => {
@@ -317,9 +332,9 @@ export function ProductsScreen() {
                 <Text style={styles.emptyStateIcon}>􀈄</Text>
                 <Text style={styles.emptyStateTitle}>No Categories</Text>
                 <Text style={styles.emptyStateText}>
-                  {searchQuery ? 'Try adjusting your search' : 'Create your first category to get started'}
+                  {navSearchQuery ? 'Try adjusting your search' : 'Create your first category to get started'}
                 </Text>
-                {!searchQuery && (
+                {!navSearchQuery && (
                   <Pressable
                     style={styles.emptyStateButton}
                     onPress={() => {
@@ -414,7 +429,7 @@ export function ProductsScreen() {
                     ? 'No products with low stock levels'
                     : activeNav === 'out-of-stock'
                     ? 'No products are out of stock'
-                    : searchQuery
+                    : productSearchQuery
                     ? 'Try adjusting your search'
                     : 'No products available'}
                 </Text>
