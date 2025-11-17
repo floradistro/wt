@@ -441,7 +441,7 @@ export function EditablePricingTemplatesSection({
 
 const styles = StyleSheet.create({
   section: {
-    marginHorizontal: spacing.sm, // Consistent 12px spacing everywhere
+    marginHorizontal: 6, // Ultra-minimal iOS-style spacing (6px)
     marginBottom: layout.sectionSpacing,
   },
   sectionTitle: {
@@ -457,8 +457,6 @@ const styles = StyleSheet.create({
     borderRadius: radius.xxl,
     borderCurve: 'continuous',
     overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
   },
   cardGlassFallback: {
     backgroundColor: 'rgba(255,255,255,0.05)',

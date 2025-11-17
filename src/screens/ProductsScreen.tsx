@@ -667,13 +667,8 @@ function ProductDetail({ product, onBack, onProductUpdated }: { product: Product
 
       {/* Header Card - Edit mode or view mode */}
       <View style={styles.headerCardContainer}>
-        <LiquidGlassContainerView spacing={12}>
-          <LiquidGlassView
-            effect="regular"
-            colorScheme="dark"
-            style={[styles.headerCardGlass, !isLiquidGlassSupported && styles.headerCardGlassFallback]}
-          >
-            <View style={styles.headerCard}>
+        <View style={styles.headerCardGlass}>
+          <View style={styles.headerCard}>
             {product.featured_image ? (
               <Image source={{ uri: product.featured_image }} style={styles.headerIcon} />
             ) : (
@@ -722,8 +717,7 @@ function ProductDetail({ product, onBack, onProductUpdated }: { product: Product
               )}
             </View>
           </View>
-          </LiquidGlassView>
-        </LiquidGlassContainerView>
+        </View>
       </View>
 
       {/* Pricing Section */}
@@ -751,12 +745,7 @@ function ProductDetail({ product, onBack, onProductUpdated }: { product: Product
       {/* Inventory Section */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>INVENTORY</Text>
-        <LiquidGlassContainerView spacing={12}>
-          <LiquidGlassView
-            effect="regular"
-            colorScheme="dark"
-            style={[styles.cardGlass, !isLiquidGlassSupported && styles.cardGlassFallback]}
-          >
+        <View style={styles.cardGlass}>
           <View style={styles.inventoryHeader}>
             <Text style={styles.rowLabel}>Total Stock</Text>
             <Text style={[
@@ -791,8 +780,7 @@ function ProductDetail({ product, onBack, onProductUpdated }: { product: Product
               ))}
             </View>
           )}
-          </LiquidGlassView>
-        </LiquidGlassContainerView>
+        </View>
       </View>
 
       {/* Description */}
@@ -814,17 +802,11 @@ function ProductDetail({ product, onBack, onProductUpdated }: { product: Product
       {/* Actions */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>ACTIONS</Text>
-        <LiquidGlassContainerView spacing={12}>
-          <LiquidGlassView
-            effect="regular"
-            colorScheme="dark"
-            style={[styles.cardGlass, !isLiquidGlassSupported && styles.cardGlassFallback]}
-          >
-            <SettingsRow label="Adjust Inventory" />
-            <SettingsRow label="View Sales History" />
-            {hasMultipleLocations && <SettingsRow label="Transfer Stock" />}
-          </LiquidGlassView>
-        </LiquidGlassContainerView>
+        <View style={styles.cardGlass}>
+          <SettingsRow label="Adjust Inventory" />
+          <SettingsRow label="View Sales History" />
+          {hasMultipleLocations && <SettingsRow label="Transfer Stock" />}
+        </View>
       </View>
     </ScrollView>
   )
@@ -930,8 +912,8 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   cardWrapper: {
+    marginHorizontal: 6, // Ultra-minimal iOS-style spacing (6px)
     marginVertical: layout.contentVertical,
-    // No horizontal margin - parent contentArea handles it
   },
   productsCardContainer: {
     marginHorizontal: layout.contentHorizontal,
@@ -940,8 +922,6 @@ const styles = StyleSheet.create({
     borderRadius: radius.xxl,
     borderCurve: 'continuous',
     overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
     backgroundColor: 'rgba(255,255,255,0.05)', // Solid glass effect for smooth scrolling
   },
   productItem: {
@@ -1098,7 +1078,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: spacing.lg,
+    paddingHorizontal: 6, // Ultra-minimal iOS-style spacing (6px)
     paddingVertical: layout.cardPadding,
     borderBottomWidth: 0.5,
     borderBottomColor: 'rgba(255,255,255,0.1)',
@@ -1141,7 +1121,7 @@ const styles = StyleSheet.create({
     color: '#60A5FA',
   },
   headerCardContainer: {
-    marginHorizontal: spacing.lg,
+    marginHorizontal: 6, // Ultra-minimal iOS-style spacing (6px)
     marginTop: layout.sectionSpacing,
     marginBottom: layout.sectionSpacing,
   },
@@ -1149,10 +1129,6 @@ const styles = StyleSheet.create({
     borderRadius: radius.xxl,
     borderCurve: 'continuous',
     overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-  },
-  headerCardGlassFallback: {
     backgroundColor: 'rgba(255,255,255,0.05)',
   },
   headerCard: {
@@ -1227,7 +1203,7 @@ const styles = StyleSheet.create({
 
   // SECTIONS
   section: {
-    marginHorizontal: spacing.lg,
+    marginHorizontal: 6, // Ultra-minimal iOS-style spacing (6px)
     marginBottom: layout.sectionSpacing,
   },
   sectionTitle: {
@@ -1243,10 +1219,6 @@ const styles = StyleSheet.create({
     borderRadius: radius.xxl,
     borderCurve: 'continuous',
     overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-  },
-  cardGlassFallback: {
     backgroundColor: 'rgba(255,255,255,0.05)',
   },
   row: {

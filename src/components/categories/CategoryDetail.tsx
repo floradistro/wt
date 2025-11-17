@@ -301,7 +301,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: spacing.sm, // Consistent 12px spacing everywhere
+    paddingHorizontal: 6, // Ultra-minimal iOS-style spacing (6px)
     paddingVertical: layout.cardPadding,
     borderBottomWidth: 0.5,
     borderBottomColor: 'rgba(255,255,255,0.1)',
@@ -344,7 +344,7 @@ const styles = StyleSheet.create({
     color: '#60A5FA',
   },
   headerCardContainer: {
-    marginHorizontal: spacing.sm, // Consistent 12px spacing everywhere
+    marginHorizontal: 6, // Ultra-minimal iOS-style spacing (6px)
     marginTop: layout.sectionSpacing,
     marginBottom: layout.sectionSpacing,
   },
@@ -352,8 +352,6 @@ const styles = StyleSheet.create({
     borderRadius: radius.xxl,
     borderCurve: 'continuous',
     overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
   },
   headerCardGlassFallback: {
     backgroundColor: 'rgba(255,255,255,0.05)',
@@ -421,7 +419,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   section: {
-    marginHorizontal: spacing.sm, // Consistent 12px spacing everywhere
+    marginHorizontal: 6, // Ultra-minimal iOS-style spacing (6px)
     marginBottom: layout.sectionSpacing,
   },
   sectionTitle: {
@@ -437,8 +435,6 @@ const styles = StyleSheet.create({
     borderRadius: radius.xxl,
     borderCurve: 'continuous',
     overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
   },
   cardGlassFallback: {
     backgroundColor: 'rgba(255,255,255,0.05)',
