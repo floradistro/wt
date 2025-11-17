@@ -81,6 +81,16 @@ function POSTotalsSection({
                 minimumTrackTintColor="rgba(255,255,255,0.3)"
                 maximumTrackTintColor="rgba(255,255,255,0.1)"
                 thumbTintColor="#fff"
+                accessible={true}
+                accessibilityRole="adjustable"
+                accessibilityLabel="Loyalty points to redeem"
+                accessibilityValue={{
+                  min: 0,
+                  max: maxRedeemablePoints,
+                  now: loyaltyPointsToRedeem,
+                  text: `${loyaltyPointsToRedeem} points, saving ${loyaltyDiscountAmount.toFixed(2)} dollars`
+                }}
+                accessibilityHint="Swipe up to increase points, swipe down to decrease points"
               />
 
               <View style={styles.loyaltyRedemptionActions}>
@@ -90,6 +100,10 @@ function POSTotalsSection({
                     onSetLoyaltyPoints(0)
                   }}
                   style={styles.loyaltyClearButton}
+                  accessible={true}
+                  accessibilityRole="button"
+                  accessibilityLabel="Clear loyalty points"
+                  accessibilityHint="Double tap to remove all redeemed points"
                 >
                   <Text style={styles.loyaltyClearButtonText}>Clear</Text>
                 </TouchableOpacity>
@@ -99,6 +113,10 @@ function POSTotalsSection({
                     onSetLoyaltyPoints(maxRedeemablePoints)
                   }}
                   style={styles.loyaltyMaxButton}
+                  accessible={true}
+                  accessibilityRole="button"
+                  accessibilityLabel="Use maximum loyalty points"
+                  accessibilityHint={`Double tap to redeem ${maxRedeemablePoints} points for ${(maxRedeemablePoints * (loyaltyProgram.point_value || 0.01)).toFixed(2)} dollar discount`}
                 >
                   <Text style={styles.loyaltyMaxButtonText}>Use Maximum</Text>
                 </TouchableOpacity>
@@ -111,6 +129,10 @@ function POSTotalsSection({
                 onSetLoyaltyPoints(maxRedeemablePoints)
               }}
               style={styles.loyaltyRedeemButton}
+              accessible={true}
+              accessibilityRole="button"
+              accessibilityLabel="Redeem loyalty points"
+              accessibilityHint={`Double tap to redeem ${maxRedeemablePoints} points for ${(maxRedeemablePoints * (loyaltyProgram.point_value || 0.01)).toFixed(2)} dollar discount`}
             >
               <Text style={styles.loyaltyRedeemButtonText}>
                 Redeem Points ({maxRedeemablePoints.toLocaleString()} pts = -$
@@ -122,15 +144,22 @@ function POSTotalsSection({
       )}
 
       {/* Totals */}
-      <View style={styles.totals}>
-        <View style={styles.totalRow}>
+      <View
+        style={styles.totals}
+        accessible={true}
+        accessibilityRole="summary"
+        accessibilityLabel={`Order totals. Subtotal: ${subtotal.toFixed(2)} dollars${
+          loyaltyDiscountAmount > 0 ? `. Loyalty discount: ${loyaltyDiscountAmount.toFixed(2)} dollars` : ''
+        }. Tax at ${(taxRate * 100).toFixed(2)} percent: ${taxAmount.toFixed(2)} dollars. Total: ${total.toFixed(2)} dollars`}
+      >
+        <View style={styles.totalRow} accessible={false}>
           <Text style={styles.totalLabel}>Subtotal</Text>
           <Text style={styles.totalValue}>${subtotal.toFixed(2)}</Text>
         </View>
 
         {/* JOBS PRINCIPLE: Show loyalty discount if active */}
         {loyaltyDiscountAmount > 0 && (
-          <View style={styles.totalRow}>
+          <View style={styles.totalRow} accessible={false}>
             <Text style={[styles.totalLabel, styles.loyaltyLabel]}>Loyalty Discount</Text>
             <Text style={[styles.totalValue, styles.loyaltyValue]}>
               -${loyaltyDiscountAmount.toFixed(2)}
@@ -138,12 +167,12 @@ function POSTotalsSection({
           </View>
         )}
 
-        <View style={styles.totalRow}>
+        <View style={styles.totalRow} accessible={false}>
           <Text style={styles.totalLabel}>Tax ({(taxRate * 100).toFixed(2)}%)</Text>
           <Text style={styles.totalValue}>${taxAmount.toFixed(2)}</Text>
         </View>
 
-        <View style={[styles.totalRow, styles.finalTotalRow]}>
+        <View style={[styles.totalRow, styles.finalTotalRow]} accessible={false}>
           <Text style={styles.finalTotalLabel}>TOTAL</Text>
           <Text style={styles.finalTotalValue}>${total.toFixed(2)}</Text>
         </View>

@@ -95,6 +95,15 @@ function RegisterCard({ register, index, onPress }: { register: Register; index:
       onPressOut={handlePressOut}
       activeOpacity={1}
       style={styles.registerCard}
+      accessible={true}
+      accessibilityRole="button"
+      accessibilityLabel={`${register.register_name}, ${register.register_number}`}
+      accessibilityHint={
+        hasActiveSession
+          ? `Active session. Staff: ${activeSession!.user_name}. Sales: ${activeSession!.total_sales.toFixed(2)} dollars. Duration: ${formatDuration(activeSession!.opened_at)}. Double tap to resume this session.`
+          : `Register available. Double tap to start a new session.`
+      }
+      accessibilityState={{ selected: hasActiveSession }}
     >
       <Animated.View
         style={[
@@ -105,11 +114,11 @@ function RegisterCard({ register, index, onPress }: { register: Register; index:
           },
         ]}
       >
-        <View style={styles.registerCardBg} pointerEvents="none">
+        <View style={styles.registerCardBg} pointerEvents="none" accessibilityElementsHidden={true} importantForAccessibility="no">
           <BlurView intensity={15} tint="dark" style={StyleSheet.absoluteFill} />
         </View>
 
-        <View style={styles.registerCardContent}>
+        <View style={styles.registerCardContent} accessible={false}>
           {/* Top Row: Register Info + Status */}
           <View style={styles.topRow}>
             <View style={styles.registerInfo}>
@@ -117,12 +126,12 @@ function RegisterCard({ register, index, onPress }: { register: Register; index:
               <Text style={styles.registerNumber}>{register.register_number}</Text>
             </View>
             {hasActiveSession ? (
-              <View style={styles.statusActive}>
-                <View style={styles.activeDot} />
+              <View style={styles.statusActive} accessible={false}>
+                <View style={styles.activeDot} accessibilityElementsHidden={true} importantForAccessibility="no" />
                 <Text style={styles.statusText}>ACTIVE</Text>
               </View>
             ) : (
-              <View style={styles.statusAvailable}>
+              <View style={styles.statusAvailable} accessible={false}>
                 <Text style={styles.statusText}>OPEN</Text>
               </View>
             )}
@@ -283,16 +292,30 @@ function POSRegisterSelector({
         showsVerticalScrollIndicator={false}
       >
         {onBackToLocationSelector && (
-          <TouchableOpacity onPress={handleBackPress} style={styles.backButton}>
+          <TouchableOpacity
+            onPress={handleBackPress}
+            style={styles.backButton}
+            accessible={true}
+            accessibilityRole="button"
+            accessibilityLabel="Change location"
+            accessibilityHint="Double tap to return to location selector"
+          >
             <Text style={styles.backButtonText}>CHANGE LOCATION</Text>
           </TouchableOpacity>
         )}
 
-        <Animated.View style={[styles.header, { opacity: headerFade }]}>
+        <Animated.View style={[styles.header, { opacity: headerFade }]} accessible={false}>
           {vendorLogo && (
             <View style={styles.logoContainer}>
               <View style={styles.logoCircle}>
-                <Image source={{ uri: vendorLogo }} style={styles.logo} resizeMode="contain" />
+                <Image
+                  source={{ uri: vendorLogo }}
+                  style={styles.logo}
+                  resizeMode="contain"
+                  accessible={true}
+                  accessibilityRole="image"
+                  accessibilityLabel="Vendor logo"
+                />
               </View>
             </View>
           )}

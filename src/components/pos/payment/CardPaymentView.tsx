@@ -397,18 +397,51 @@ export function CardPaymentView({
       />
 
       {processingCard ? (
-        <View style={styles.processingContainer}>
+        <View
+          style={styles.processingContainer}
+          accessible={true}
+          accessibilityRole="alert"
+          accessibilityLabel="Payment processing"
+          accessibilityValue={{
+            text: `Processing ${total.toFixed(2)} dollars. ${
+              paymentStage === 'initializing' ? 'Preparing terminal' :
+              paymentStage === 'sending' ? 'Connecting to terminal' :
+              paymentStage === 'waiting' ? 'Follow prompts on terminal' :
+              paymentStage === 'processing' ? 'Authorizing payment' :
+              paymentStage === 'approving' ? 'Finalizing transaction' :
+              paymentStage === 'success' ? 'Payment approved' : ''
+            }`
+          }}
+        >
           <View style={styles.processingHeader}>
-            <Ionicons name="radio-outline" size={20} color="#10b981" />
+            <Ionicons
+              name="radio-outline"
+              size={20}
+              color="#10b981"
+              accessibilityElementsHidden={true}
+              importantForAccessibility="no"
+            />
             <Text style={styles.listeningText}>LISTENING</Text>
           </View>
 
           <View style={styles.processingBody}>
-            <Text style={styles.processingAmount}>${total.toFixed(2)}</Text>
+            <Text
+              style={styles.processingAmount}
+              accessibilityLabel={`${total.toFixed(2)} dollars`}
+            >
+              ${total.toFixed(2)}
+            </Text>
 
-            <View style={styles.statusDivider} />
+            <View
+              style={styles.statusDivider}
+              accessibilityElementsHidden={true}
+              importantForAccessibility="no"
+            />
 
-            <Text style={styles.statusText}>
+            <Text
+              style={styles.statusText}
+              accessibilityLiveRegion="polite"
+            >
               {paymentStage === 'initializing' && 'Preparing terminal...'}
               {paymentStage === 'sending' && 'Connecting...'}
               {paymentStage === 'waiting' && 'Follow prompts on terminal'}
@@ -423,8 +456,19 @@ export function CardPaymentView({
           </View>
         </View>
       ) : !hasActiveProcessor ? (
-        <View style={styles.cardInfoContainer}>
-          <Ionicons name="alert-circle-outline" size={48} color="#ef4444" />
+        <View
+          style={styles.cardInfoContainer}
+          accessible={true}
+          accessibilityRole="alert"
+          accessibilityLabel={`No payment terminal connected. Status: ${processorStatus}. Please connect a payment terminal to accept card payments.`}
+        >
+          <Ionicons
+            name="alert-circle-outline"
+            size={48}
+            color="#ef4444"
+            accessibilityElementsHidden={true}
+            importantForAccessibility="no"
+          />
           <Text style={styles.cardInfoTitle}>No Terminal Connected</Text>
           <Text style={styles.cardInfoSubtext}>
             Status: {processorStatus}
@@ -434,6 +478,7 @@ export function CardPaymentView({
             colorScheme="dark"
             tintColor="rgba(239,68,68,0.15)"
             style={styles.instructionCard}
+            accessible={false}
           >
             <Text style={styles.instructionText}>
               Please connect a payment terminal to accept card payments
@@ -443,18 +488,30 @@ export function CardPaymentView({
       ) : (
         <>
           <View style={styles.cardInfoContainer}>
-            <Ionicons name="card-outline" size={48} color="#10b981" />
+            <Ionicons
+              name="card-outline"
+              size={48}
+              color="#10b981"
+              accessibilityElementsHidden={true}
+              importantForAccessibility="no"
+            />
             <Text style={styles.cardInfoTitle}>Card Payment</Text>
             <Text style={styles.cardInfoSubtext}>
               Terminal: {currentProcessor?.processor_name || 'Not configured'}
             </Text>
-            <Text style={styles.cardInfoAmount}>${total.toFixed(2)}</Text>
+            <Text
+              style={styles.cardInfoAmount}
+              accessibilityLabel={`Total: ${total.toFixed(2)} dollars`}
+            >
+              ${total.toFixed(2)}
+            </Text>
           </View>
 
           <LiquidGlassView
             effect="regular"
             colorScheme="dark"
             style={styles.instructionCard}
+            accessible={false}
           >
             <Text style={styles.instructionText}>
               Click COMPLETE to process card payment on terminal
@@ -467,6 +524,11 @@ export function CardPaymentView({
             disabled={!canComplete}
             activeOpacity={0.7}
             style={styles.completeButtonWrapper}
+            accessible={true}
+            accessibilityRole="button"
+            accessibilityLabel="Complete payment"
+            accessibilityHint={`Process ${total.toFixed(2)} dollar card payment on terminal`}
+            accessibilityState={{ disabled: !canComplete }}
           >
             <LiquidGlassView
               effect="regular"
@@ -476,6 +538,7 @@ export function CardPaymentView({
                 styles.completeButton,
                 !canComplete && styles.completeButtonDisabled,
               ]}
+              accessible={false}
             >
               <Text style={[
                 styles.completeButtonText,

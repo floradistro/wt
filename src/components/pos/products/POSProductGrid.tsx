@@ -26,7 +26,12 @@ function POSProductGrid({
 }: POSProductGridProps) {
   if (loading) {
     return (
-      <View style={styles.loadingContainer}>
+      <View
+        style={styles.loadingContainer}
+        accessible={true}
+        accessibilityRole="progressbar"
+        accessibilityLabel="Loading products"
+      >
         <ActivityIndicator size="large" color="#fff" />
         <Text style={styles.loadingText}>Loading products...</Text>
       </View>
@@ -35,7 +40,16 @@ function POSProductGrid({
 
   if (products.length === 0) {
     return (
-      <View style={styles.emptyProductsContainer}>
+      <View
+        style={styles.emptyProductsContainer}
+        accessible={true}
+        accessibilityRole="alert"
+        accessibilityLabel={
+          activeFilters?.category && activeFilters.category !== 'All'
+            ? 'No products found. Try a different category'
+            : 'No products available'
+        }
+      >
         <Text style={styles.emptyProductsText}>No products found</Text>
         <Text style={styles.emptyProductsSubtext}>
           {activeFilters?.category && activeFilters.category !== 'All'
@@ -51,6 +65,8 @@ function POSProductGrid({
       style={styles.productsScrollBehind}
       contentContainerStyle={styles.productsGridWithHeader}
       showsVerticalScrollIndicator={false}
+      accessible={false}
+      accessibilityLabel={`Product grid with ${products.length} products`}
     >
       {products.map((product) => {
         // Get matching filters for this product (if any)
