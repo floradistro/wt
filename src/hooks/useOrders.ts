@@ -13,11 +13,12 @@ export interface UseOrdersOptions {
   limit?: number
   status?: string
   customerId?: string
+  locationIds?: string[]
   autoLoad?: boolean // Auto-load on mount
 }
 
 export function useOrders(options: UseOrdersOptions = {}) {
-  const { limit = 20, status, customerId, autoLoad = true } = options
+  const { limit = 20, status, customerId, locationIds, autoLoad = true } = options
 
   const [orders, setOrders] = useState<Order[]>([])
   const [loading, setLoading] = useState(false)
@@ -30,7 +31,7 @@ export function useOrders(options: UseOrdersOptions = {}) {
     try {
       setLoading(true)
       setError(null)
-      const data = await ordersService.getOrders({ limit, status, customerId })
+      const data = await ordersService.getOrders({ limit, status, customerId, locationIds })
       setOrders(data)
     } catch (err) {
       setError(err as Error)
@@ -38,7 +39,7 @@ export function useOrders(options: UseOrdersOptions = {}) {
     } finally {
       setLoading(false)
     }
-  }, [limit, status, customerId])
+  }, [limit, status, customerId, locationIds])
 
   /**
    * Load today's orders (for POS)

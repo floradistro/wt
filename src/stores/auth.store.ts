@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { Session, User } from '@supabase/supabase-js'
 import { AuthService } from '@/features/auth/services/auth.service'
+import { useLocationFilter } from './location-filter.store'
 
 interface AuthState {
   // State
@@ -55,6 +56,9 @@ export const useAuthStore = create<AuthState>((set, _get) => ({
       set({ isLoading: true, error: null })
 
       await AuthService.logout()
+
+      // Reset location filter on logout
+      useLocationFilter.getState().reset()
 
       set({
         user: null,

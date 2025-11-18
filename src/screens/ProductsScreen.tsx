@@ -24,6 +24,7 @@ import { useCategories } from '@/hooks/useCategories'
 import { useCustomFields } from '@/hooks/useCustomFields'
 import { usePricingTemplates } from '@/hooks/usePricingTemplates'
 import { useUserLocations } from '@/hooks/useUserLocations'
+import { useLocationFilter } from '@/stores/location-filter.store'
 
 type NavSection = 'all' | 'low-stock' | 'out-of-stock' | 'categories'
 
@@ -128,9 +129,9 @@ export function ProductsScreen() {
   const [showPricingModal, setShowPricingModal] = useState(false)
   const [showLocationSelector, setShowLocationSelector] = useState(false)
 
-  // Location filtering
+  // Location filtering - using global store
   const { locations: userLocations } = useUserLocations()
-  const [selectedLocationIds, setSelectedLocationIds] = useState<string[]>([]) // Empty = all locations
+  const { selectedLocationIds, setSelectedLocationIds, initializeFromUserLocations } = useLocationFilter()
 
   // Calculate selected location names for display
   const selectedLocationNames = useMemo(() => {
@@ -139,6 +140,18 @@ export function ProductsScreen() {
       .filter(ul => selectedLocationIds.includes(ul.location.id))
       .map(ul => ul.location.name)
   }, [selectedLocationIds, userLocations])
+
+  // Auto-select location for staff users (users assigned to specific locations)
+  useEffect(() => {
+    if (userLocations.length > 0) {
+      // Check if user is admin/owner (they see all locations, so don't auto-filter)
+      const isAdmin = userLocations.some(ul => ul.role === 'owner')
+      const assignedIds = userLocations.map(ul => ul.location.id)
+
+      // Initialize the global location filter
+      initializeFromUserLocations(assignedIds, isAdmin)
+    }
+  }, [userLocations.length, initializeFromUserLocations]) // Only depend on length to avoid infinite loops
 
   // Sliding animation
   const slideAnim = useRef(new Animated.Value(0)).current // 0 = list view, 1 = detail view

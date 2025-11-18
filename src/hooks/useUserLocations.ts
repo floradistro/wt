@@ -54,8 +54,8 @@ export function useUserLocations() {
 
       logger.info('User data fetched', { role: userData.role, vendorId: userData.vendor_id })
 
-      // Check if user is admin (owner or admin role)
-      const isAdmin = ['vendor_owner', 'vendor_admin'].includes(userData.role)
+      // Check if user is admin (owner, admin, or vendor_admin role)
+      const isAdmin = ['vendor_owner', 'vendor_admin', 'admin'].includes(userData.role)
 
       let formattedLocations: UserLocationAccess[] = []
 
@@ -80,7 +80,9 @@ export function useUserLocations() {
         const { data: userLocationsData, error: locationsError } = await supabase
           .from('user_locations')
           .select(`
-            role,
+            can_manage,
+            can_sell,
+            can_manage_inventory,
             locations!inner (
               id,
               name,
@@ -92,14 +94,28 @@ export function useUserLocations() {
           `)
           .eq('user_id', userData.id)
           .eq('locations.is_active', true)
-          .order('locations.is_primary', { ascending: false })
 
         if (locationsError) throw locationsError
 
-        formattedLocations = (userLocationsData || []).map((ul: any) => ({
-          location: ul.locations,
-          role: ul.role || 'staff',
-        }))
+        formattedLocations = (userLocationsData || []).map((ul: any) => {
+          // Derive role from permissions
+          const role = ul.can_manage ? 'manager' : 'staff'
+
+          // Handle both array and single object from join
+          const location = Array.isArray(ul.locations) ? ul.locations[0] : ul.locations
+
+          return {
+            location,
+            role: role as 'owner' | 'manager' | 'staff',
+          }
+        })
+
+        // Sort client-side: primary locations first
+        formattedLocations.sort((a, b) => {
+          if (a.location.is_primary && !b.location.is_primary) return -1
+          if (!a.location.is_primary && b.location.is_primary) return 1
+          return a.location.name.localeCompare(b.location.name)
+        })
       }
 
       setLocations(formattedLocations)

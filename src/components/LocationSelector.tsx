@@ -18,6 +18,7 @@ interface LocationSelectorProps {
   selectedLocationIds: string[] // Empty array = all locations
   onClose: () => void
   onSelect: (locationIds: string[]) => void
+  context?: 'products' | 'orders' // What items are being filtered
 }
 
 export function LocationSelector({
@@ -26,8 +27,12 @@ export function LocationSelector({
   selectedLocationIds,
   onClose,
   onSelect,
+  context = 'products', // Default to 'products' for backwards compatibility
 }: LocationSelectorProps) {
   const [tempSelection, setTempSelection] = useState<string[]>(selectedLocationIds)
+
+  // Get context-aware item label
+  const itemLabel = context === 'orders' ? 'orders' : 'products'
 
   useEffect(() => {
     if (visible) {
@@ -101,7 +106,7 @@ export function LocationSelector({
                   <View style={styles.locationInfo}>
                     <Text style={styles.locationName}>All Locations</Text>
                     <Text style={styles.locationSubtext}>
-                      Show products from all {userLocations.length} location{userLocations.length !== 1 ? 's' : ''}
+                      Show {itemLabel} from all {userLocations.length} location{userLocations.length !== 1 ? 's' : ''}
                     </Text>
                   </View>
                   <View style={[styles.checkbox, isAllSelected && styles.checkboxActive]}>

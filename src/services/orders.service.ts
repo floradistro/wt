@@ -73,6 +73,7 @@ export async function getOrders(params?: {
   limit?: number
   status?: string
   customerId?: string
+  locationIds?: string[]
 }): Promise<Order[]> {
   let query = supabase
     .from('orders')
@@ -96,6 +97,10 @@ export async function getOrders(params?: {
 
   if (params?.customerId) {
     query = query.eq('customer_id', params.customerId)
+  }
+
+  if (params?.locationIds && params.locationIds.length > 0) {
+    query = query.in('pickup_location_id', params.locationIds)
   }
 
   if (params?.limit) {

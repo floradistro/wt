@@ -3,6 +3,7 @@
  * iPad Settings-style interface with Liquid Glass
  * Apple-quality performance for hundreds of orders per day
  * Uses FlatList virtualization and intelligent date filtering
+ * Client-side location filtering for staff users
  */
 
 import { View, Text, StyleSheet, Pressable, ActivityIndicator, Animated, useWindowDimensions, FlatList, RefreshControl } from 'react-native'
@@ -18,6 +19,7 @@ import { useOrders } from '@/hooks/useOrders'
 import { type Order } from '@/services/orders.service'
 import { useUserLocations } from '@/hooks/useUserLocations'
 import { useAuth } from '@/stores/auth.store'
+import { useLocationFilter } from '@/stores/location-filter.store'
 import { logger } from '@/utils/logger'
 import { supabase } from '@/lib/supabase/client'
 
@@ -232,9 +234,9 @@ export function OrdersScreen() {
   const [dateRange, setDateRange] = useState<DateRange>('today')
   const [showDatePicker, setShowDatePicker] = useState(false)
 
-  // Location filtering
+  // Location filtering - using global store
   const { locations: userLocations } = useUserLocations()
-  const [selectedLocationIds, setSelectedLocationIds] = useState<string[]>([])
+  const { selectedLocationIds, setSelectedLocationIds, initializeFromUserLocations } = useLocationFilter()
   const [showLocationSelector, setShowLocationSelector] = useState(false)
 
   // Calculate selected location names for display
@@ -248,14 +250,26 @@ export function OrdersScreen() {
   // Show location column when viewing multiple/all locations
   const showLocationColumn = selectedLocationIds.length === 0 || selectedLocationIds.length > 1
 
+  // Auto-select location for staff users (users assigned to specific locations)
+  useEffect(() => {
+    if (userLocations.length > 0) {
+      // Check if user is admin/owner (they see all locations, so don't auto-filter)
+      const isAdmin = userLocations.some(ul => ul.role === 'owner')
+      const assignedIds = userLocations.map(ul => ul.location.id)
+
+      // Initialize the global location filter
+      initializeFromUserLocations(assignedIds, isAdmin)
+    }
+  }, [userLocations.length, initializeFromUserLocations])
+
   // Sliding animation
   const slideAnim = useRef(new Animated.Value(0)).current
 
   const { width } = useWindowDimensions()
   const contentWidth = width - layout.sidebarWidth
 
-  // Load orders with intelligent defaults (today only)
-  const { orders, loading: isLoading, refresh } = useOrders({
+  // Load ALL orders (we'll filter client-side)
+  const { orders: allOrders, loading: isLoading, refresh } = useOrders({
     autoLoad: true,
     limit: 500, // Reasonable limit for performance
   })
@@ -310,11 +324,18 @@ export function OrdersScreen() {
     loadVendorInfo()
   }, [user])
 
-  // Filter orders by status, date, search, and location
+  // Filter orders by status, date, search, and location (CLIENT-SIDE)
   const filteredOrders = useMemo(() => {
     const dateFilter = getDateRangeFilter(dateRange)
 
-    return orders.filter((order) => {
+    return allOrders.filter((order) => {
+      // Location filter (FIRST - most important for staff users)
+      if (selectedLocationIds.length > 0) {
+        if (!order.pickup_location_id || !selectedLocationIds.includes(order.pickup_location_id)) {
+          return false
+        }
+      }
+
       // Status filter
       if (activeNav !== 'all') {
         if (order.status !== activeNav) {
@@ -326,13 +347,6 @@ export function OrdersScreen() {
       if (dateFilter) {
         const orderDate = new Date(order.created_at)
         if (orderDate < dateFilter) {
-          return false
-        }
-      }
-
-      // Location filter
-      if (selectedLocationIds.length > 0) {
-        if (!order.pickup_location_id || !selectedLocationIds.includes(order.pickup_location_id)) {
           return false
         }
       }
@@ -349,7 +363,7 @@ export function OrdersScreen() {
 
       return true
     })
-  }, [orders, activeNav, dateRange, navSearchQuery, selectedLocationIds])
+  }, [allOrders, activeNav, dateRange, navSearchQuery, selectedLocationIds])
 
   // Group filtered orders by date
   const groupedOrders = useMemo(() => groupOrdersByDate(filteredOrders), [filteredOrders])
@@ -366,10 +380,17 @@ export function OrdersScreen() {
     return items
   }, [groupedOrders])
 
-  // Calculate counts for badges (from all orders, not filtered)
-  const pendingCount = orders.filter(o => o.status === 'pending').length
-  const processingCount = orders.filter(o => o.status === 'processing').length
-  const completedCount = orders.filter(o => o.status === 'completed').length
+  // Calculate counts for badges (from filtered orders by location, not by status)
+  const locationFilteredOrders = useMemo(() => {
+    if (selectedLocationIds.length === 0) return allOrders
+    return allOrders.filter(o =>
+      o.pickup_location_id && selectedLocationIds.includes(o.pickup_location_id)
+    )
+  }, [allOrders, selectedLocationIds])
+
+  const pendingCount = locationFilteredOrders.filter(o => o.status === 'pending').length
+  const processingCount = locationFilteredOrders.filter(o => o.status === 'processing').length
+  const completedCount = locationFilteredOrders.filter(o => o.status === 'completed').length
 
   // Nav items configuration
   const navItems: NavItem[] = useMemo(() => [
@@ -381,27 +402,27 @@ export function OrdersScreen() {
     },
     {
       id: 'pending',
-      icon: 'clock',
+      icon: 'warning',
       label: 'Pending',
       count: pendingCount,
       badge: pendingCount > 0 ? 'warning' as const : undefined,
     },
     {
       id: 'processing',
-      icon: 'package',
+      icon: 'box',
       label: 'In Progress',
       count: processingCount,
       badge: processingCount > 0 ? 'info' as const : undefined,
     },
     {
       id: 'ready',
-      icon: 'check',
+      icon: 'box',
       label: 'Ready',
       count: 0,
     },
     {
       id: 'completed',
-      icon: 'checkCircle',
+      icon: 'box',
       label: 'Completed',
       count: completedCount,
     },
@@ -460,10 +481,6 @@ export function OrdersScreen() {
     } else {
       return item.order.id
     }
-  }, [])
-
-  const getItemType = useCallback((item: typeof flatListData[0]) => {
-    return item.type
   }, [])
 
   // Date range label
@@ -574,7 +591,6 @@ export function OrdersScreen() {
                 data={flatListData}
                 renderItem={renderItem}
                 keyExtractor={keyExtractor}
-                getItemType={getItemType}
                 contentContainerStyle={styles.flatListContent}
                 showsVerticalScrollIndicator={true}
                 indicatorStyle="white"
@@ -629,6 +645,7 @@ export function OrdersScreen() {
         selectedLocationIds={selectedLocationIds}
         onClose={() => setShowLocationSelector(false)}
         onSelect={setSelectedLocationIds}
+        context="orders"
       />
     </SafeAreaView>
   )
