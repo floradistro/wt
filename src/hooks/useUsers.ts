@@ -148,114 +148,57 @@ export function useUsers() {
         throw new Error('Not authenticated')
       }
 
-      // Call Edge Function to create user (requires service role)
-      const response = await supabase.functions.invoke('create-user', {
-        body: {
+      // Call Edge Function using fetch directly to properly handle error responses
+      const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://uaednwpxursknmwdeejn.supabase.co'
+      const functionUrl = `${SUPABASE_URL}/functions/v1/create-user`
+
+      logger.debug('Calling Edge Function:', functionUrl)
+
+      const response = await fetch(functionUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
           email: userData.email,
           first_name: userData.first_name,
           last_name: userData.last_name,
           phone: userData.phone,
           role: userData.role,
           employee_id: userData.employee_id,
-        },
+        }),
       })
 
-      logger.debug('Edge Function full response:', {
-        data: response.data,
-        error: response.error,
-      })
+      logger.debug('Edge Function response status:', response.status)
 
-      // Handle network/invocation errors
-      if (response.error) {
-        // The actual error response is in the context property
-        const context = (response.error as any).context
+      const responseText = await response.text()
+      logger.debug('Edge Function response body:', responseText)
 
-        logger.error('Edge Function error context:', {
-          context,
-          contextKeys: context ? Object.keys(context) : [],
-        })
-
-        // Log each property of context separately
-        if (context) {
-          Object.keys(context).forEach(key => {
-            logger.error(`Context.${key}:`, (context as any)[key])
-          })
-        }
-
-        // Try to extract the actual error message from the function response
-        let errorMsg = 'Failed to call Edge Function'
-
+      if (!response.ok) {
+        // Try to parse error from response
+        let errorMsg = `Edge Function error (${response.status})`
         try {
-          // Context contains a Response object, try to extract body
-          if (context?._bodyInit) {
-            logger.error('🔍 _bodyInit type:', typeof context._bodyInit)
-            logger.error('🔍 _bodyInit has _data?', !!context._bodyInit._data)
-
-            // Handle React Native's Blob-like structure
-            let bodyText: string
-
-            if (context._bodyInit._data) {
-              // React Native blob structure - convert to string
-              const data = context._bodyInit._data
-
-              logger.error('🔍 _data type:', typeof data)
-              logger.error('🔍 _data keys:', Object.keys(data))
-              logger.error('🔍 _data content:', data)
-
-              if (typeof data === 'string') {
-                bodyText = data
-              } else if (data.blobId || data.offset !== undefined) {
-                // This is a blob reference - try to read it
-                bodyText = JSON.stringify(context._bodyInit)
-              } else {
-                bodyText = JSON.stringify(data)
-              }
-            } else if (typeof context._bodyInit === 'string') {
-              bodyText = context._bodyInit
-            } else {
-              bodyText = JSON.stringify(context._bodyInit)
+          const errorData = JSON.parse(responseText)
+          if (errorData.error) {
+            errorMsg = errorData.error
+            if (errorData.details) {
+              errorMsg += ` (${errorData.details})`
             }
-
-            logger.error('Edge Function response body:', bodyText)
-
-            // Try to parse as JSON
-            try {
-              const errorData = JSON.parse(bodyText)
-              if (errorData.error) {
-                errorMsg = errorData.error
-                if (errorData.details) {
-                  errorMsg += ` (${errorData.details})`
-                }
-              } else if (errorData.message) {
-                errorMsg = errorData.message
-              }
-            } catch (parseErr) {
-              // Not JSON, use text as-is
-              if (bodyText.length < 200) {
-                errorMsg = bodyText
-              }
-            }
-          } else if (context?.error) {
-            errorMsg = context.error
-          } else if (context?.message) {
-            errorMsg = context.message
+          } else if (errorData.message) {
+            errorMsg = errorData.message
           }
-        } catch (err) {
-          logger.error('Failed to extract error from context:', err)
+        } catch (parseErr) {
+          // Response wasn't JSON, use text directly
+          if (responseText && responseText.length < 200) {
+            errorMsg = responseText
+          }
         }
-
-        logger.error('Extracted error message:', errorMsg)
         throw new Error(errorMsg)
       }
 
-      // Handle function response errors
-      const data = response.data
-
-      if (!data) {
-        throw new Error('No response from Edge Function')
-      }
-
-      logger.debug('Edge Function data:', data)
+      // Parse successful response
+      const data = JSON.parse(responseText)
 
       if (!data.success) {
         const errorMsg = data.error || 'Failed to create user'
