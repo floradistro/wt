@@ -24,24 +24,26 @@ ALTER TABLE orders ALTER COLUMN order_type SET NOT NULL;
 ALTER TABLE orders ADD CONSTRAINT orders_order_type_check
   CHECK (order_type IN ('walk_in', 'pickup', 'delivery', 'shipping'));
 
--- Step 4: Auto-complete all existing walk-in orders
+-- Step 4: Add completed_at column if it doesn't exist
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP;
+
+-- Step 4a: Auto-complete all existing walk-in orders
 UPDATE orders
 SET
   status = 'completed',
-  completed_at = COALESCE(completed_at, created_at)
+  completed_at = COALESCE(completed_at, completed_date, created_at)
 WHERE order_type = 'walk_in'
   AND payment_status = 'paid'
   AND status != 'completed'
   AND status != 'cancelled';
 
--- Step 5: Update status values for pickup/delivery orders
+-- Step 5: Update status values for all orders (fix any invalid statuses)
 UPDATE orders
 SET status = CASE
   WHEN status = 'processing' THEN 'preparing'
+  WHEN status NOT IN ('pending', 'preparing', 'ready', 'out_for_delivery', 'ready_to_ship', 'shipped', 'in_transit', 'delivered', 'completed', 'cancelled') THEN 'pending'
   ELSE status
-END
-WHERE order_type IN ('pickup', 'delivery', 'shipping')
-  AND status = 'processing';
+END;
 
 -- Step 6: Add shipping-specific fields
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS shipping_name VARCHAR(255);
