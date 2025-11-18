@@ -725,6 +725,225 @@ export function OrdersScreen() {
   )
 }
 
+// Order Detail Component (same as before)
+function OrderDetail({
+  order,
+  onBack,
+  onOrderUpdated,
+}: {
+  order: Order
+  onBack: () => void
+  onOrderUpdated: () => void
+}) {
+  const [isUpdating, setIsUpdating] = useState(false)
+
+  const handleStatusUpdate = async (newStatus: Order['status']) => {
+    try {
+      setIsUpdating(true)
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+
+      const { error } = await supabase
+        .from('orders')
+        .update({ status: newStatus })
+        .eq('id', order.id)
+
+      if (error) throw error
+
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+      onOrderUpdated()
+    } catch (error) {
+      logger.error('Failed to update order status:', error)
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
+    } finally {
+      setIsUpdating(false)
+    }
+  }
+
+  return (
+    <FlatList
+      style={styles.detail}
+      contentContainerStyle={{ paddingBottom: layout.dockHeight, paddingRight: layout.containerMargin }}
+      showsVerticalScrollIndicator={true}
+      indicatorStyle="white"
+      scrollIndicatorInsets={{ right: 2, bottom: layout.dockHeight }}
+      data={[1]} // Dummy data to use FlatList as ScrollView
+      renderItem={() => (
+        <>
+          {/* Header */}
+          <View style={styles.detailHeader}>
+            <Pressable onPress={onBack} style={styles.backButton}>
+              <Text style={styles.backButtonText}>‹ Orders</Text>
+            </Pressable>
+          </View>
+
+          {/* Order Header Card */}
+          <View style={styles.headerCardContainer}>
+            <View style={styles.headerCardGlass}>
+              <View style={styles.headerCard}>
+                <View style={[styles.headerIconPlaceholder, styles.headerIcon]}>
+                  <Text style={styles.headerIconText}>
+                    {order.customer_name
+                      ? order.customer_name
+                          .split(' ')
+                          .map(n => n.charAt(0))
+                          .join('')
+                          .toUpperCase()
+                          .slice(0, 2)
+                      : 'G'}
+                  </Text>
+                </View>
+                <View style={styles.headerInfo}>
+                  <Text style={styles.headerTitle}>{order.customer_name || 'Guest'}</Text>
+                  <View style={styles.headerMeta}>
+                    <Text style={styles.headerSubtitle}>
+                      {order.order_number}
+                    </Text>
+                    <Text style={styles.headerDot}>•</Text>
+                    <Text style={styles.headerSubtitle}>
+                      {getOrderTypeLabel(order)}
+                    </Text>
+                    <Text style={styles.headerDot}>•</Text>
+                    <Text style={styles.headerSubtitle}>
+                      {new Date(order.created_at).toLocaleDateString('en-US', {
+                        month: 'short',
+                        day: 'numeric',
+                      })} at {new Date(order.created_at).toLocaleTimeString('en-US', {
+                        hour: 'numeric',
+                        minute: '2-digit',
+                      })}
+                    </Text>
+                    <Text style={styles.headerDot}>•</Text>
+                    <Text style={[styles.headerSubtitle, getStatusStyle(order.status)]}>
+                      {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+            </View>
+          </View>
+
+          {/* Customer Info */}
+          {(order.customer_email || order.customer_phone) && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>CUSTOMER</Text>
+              <View style={styles.cardGlass}>
+                {order.customer_email && (
+                  <View style={styles.row}>
+                    <Text style={styles.rowLabel}>Email</Text>
+                    <Text style={styles.rowValue}>{order.customer_email}</Text>
+                  </View>
+                )}
+                {order.customer_phone && (
+                  <View style={styles.row}>
+                    <Text style={styles.rowLabel}>Phone</Text>
+                    <Text style={styles.rowValue}>{order.customer_phone}</Text>
+                  </View>
+                )}
+              </View>
+            </View>
+          )}
+
+          {/* Order Summary */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>SUMMARY</Text>
+            <View style={styles.cardGlass}>
+              <View style={styles.row}>
+                <Text style={styles.rowLabel}>Subtotal</Text>
+                <Text style={styles.rowValue}>${order.subtotal.toFixed(2)}</Text>
+              </View>
+              <View style={styles.row}>
+                <Text style={styles.rowLabel}>Tax</Text>
+                <Text style={styles.rowValue}>${order.tax_amount.toFixed(2)}</Text>
+              </View>
+              {order.discount_amount > 0 && (
+                <View style={styles.row}>
+                  <Text style={styles.rowLabel}>Discount</Text>
+                  <Text style={styles.rowValue}>-${order.discount_amount.toFixed(2)}</Text>
+                </View>
+              )}
+              <View style={styles.inventoryHeader}>
+                <Text style={styles.rowLabel}>Total</Text>
+                <Text style={styles.inventoryTotal}>${order.total_amount.toFixed(2)}</Text>
+              </View>
+            </View>
+          </View>
+
+          {/* Order Details */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>ORDER DETAILS</Text>
+            <View style={styles.cardGlass}>
+              <View style={styles.row}>
+                <Text style={styles.rowLabel}>Order Type</Text>
+                <Text style={styles.rowValue}>{getOrderTypeLabel(order)}</Text>
+              </View>
+              <View style={styles.row}>
+                <Text style={styles.rowLabel}>Order Status</Text>
+                <Text style={[styles.rowValue, getStatusStyle(order.status)]}>
+                  {order.status.toUpperCase()}
+                </Text>
+              </View>
+              <View style={styles.row}>
+                <Text style={styles.rowLabel}>Payment Status</Text>
+                <Text style={styles.rowValue}>{order.payment_status.toUpperCase()}</Text>
+              </View>
+              <View style={styles.row}>
+                <Text style={styles.rowLabel}>Fulfillment</Text>
+                <Text style={styles.rowValue}>{order.fulfillment_status.toUpperCase()}</Text>
+              </View>
+              <View style={styles.row}>
+                <Text style={styles.rowLabel}>Order Date</Text>
+                <Text style={styles.rowValue}>
+                  {new Date(order.created_at).toLocaleDateString('en-US', {
+                    month: 'long',
+                    day: 'numeric',
+                    year: 'numeric',
+                  })}
+                </Text>
+              </View>
+              <View style={styles.row}>
+                <Text style={styles.rowLabel}>Order Time</Text>
+                <Text style={styles.rowValue}>
+                  {new Date(order.created_at).toLocaleTimeString('en-US', {
+                    hour: 'numeric',
+                    minute: '2-digit',
+                  })}
+                </Text>
+              </View>
+            </View>
+          </View>
+
+          {/* Actions */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>ACTIONS</Text>
+            <View style={styles.cardGlass}>
+              {order.status === 'pending' && (
+                <SettingsRow
+                  label="Start Preparing"
+                  onPress={() => handleStatusUpdate('preparing')}
+                />
+              )}
+              {order.status === 'preparing' && (
+                <SettingsRow
+                  label="Mark as Ready"
+                  onPress={() => handleStatusUpdate('ready')}
+                />
+              )}
+              {order.status === 'ready' && (
+                <SettingsRow
+                  label="Complete Order"
+                  onPress={() => handleStatusUpdate('completed')}
+                />
+              )}
+              <SettingsRow label="View Customer" />
+              <SettingsRow label="Print Receipt" />
+            </View>
+          </View>
+        </>
+      )}
+      keyExtractor={() => 'detail'}
+    />
+  )
+}
 
 // Helper functions
 function getStatusStyle(status: Order['status']) {

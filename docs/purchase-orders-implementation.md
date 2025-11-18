@@ -165,7 +165,39 @@ User clicks "Receive Items"
         → Recalculates PO status (received/partially_received)
 ```
 
-## Database Schema
+## Database Schema (Matches Prototype)
+
+### `suppliers` Table
+| Column | Type | Description |
+|--------|------|-------------|
+| id | UUID | Primary key |
+| vendor_id | UUID | Foreign key to vendors |
+| external_name | TEXT | Supplier company name |
+| contact_name | TEXT | Contact person |
+| contact_email | TEXT | Email |
+| contact_phone | TEXT | Phone |
+| address | TEXT | Address |
+| notes | TEXT | Notes |
+| is_active | BOOLEAN | Active status |
+| created_at | TIMESTAMP | Auto |
+| updated_at | TIMESTAMP | Auto-updated |
+
+### `wholesale_customers` Table
+| Column | Type | Description |
+|--------|------|-------------|
+| id | UUID | Primary key |
+| vendor_id | UUID | Foreign key to vendors |
+| external_company_name | TEXT | Customer company name |
+| contact_name | TEXT | Contact person |
+| contact_email | TEXT | Email |
+| contact_phone | TEXT | Phone |
+| shipping_address | TEXT | Shipping address |
+| billing_address | TEXT | Billing address |
+| tax_id | TEXT | Tax ID |
+| notes | TEXT | Notes |
+| is_active | BOOLEAN | Active status |
+| created_at | TIMESTAMP | Auto |
+| updated_at | TIMESTAMP | Auto-updated |
 
 ### `purchase_orders` Table
 | Column | Type | Description |
@@ -173,10 +205,10 @@ User clicks "Receive Items"
 | id | UUID | Primary key |
 | po_number | TEXT | Unique (PO-YYYYMMDD-XXXX) |
 | vendor_id | UUID | Foreign key to vendors |
-| type | TEXT | 'inbound' or 'outbound' |
+| po_type | TEXT | 'inbound' or 'outbound' |
 | status | TEXT | Order status |
-| supplier_name | TEXT | For inbound POs |
-| customer_name | TEXT | For outbound POs |
+| supplier_id | UUID | Foreign key to suppliers (inbound) |
+| wholesale_customer_id | UUID | Foreign key to wholesale_customers (outbound) |
 | location_id | UUID | Fulfillment location |
 | expected_delivery_date | TIMESTAMP | Optional |
 | notes | TEXT | Additional info |

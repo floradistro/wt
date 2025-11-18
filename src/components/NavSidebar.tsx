@@ -64,9 +64,22 @@ function FolderIcon({ color }: { color: string }) {
   )
 }
 
+// Monochrome Document Icon (Purchase Orders)
+function DocIcon({ color }: { color: string }) {
+  return (
+    <View style={styles.iconContainer}>
+      <View style={[styles.docPage, { borderColor: color }]}>
+        <View style={[styles.docLine, { backgroundColor: color }]} />
+        <View style={[styles.docLine, { backgroundColor: color }]} />
+        <View style={[styles.docLine, { backgroundColor: color }]} />
+      </View>
+    </View>
+  )
+}
+
 export interface NavItem {
   id: string
-  icon: 'grid' | 'warning' | 'box' | 'folder' | React.ComponentType<{ color: string }> // Icon type or custom component
+  icon: 'grid' | 'warning' | 'box' | 'folder' | 'doc' | React.ComponentType<{ color: string }> // Icon type or custom component
   label: string
   count?: number
   badge?: 'warning' | 'error' | 'info'
@@ -237,6 +250,9 @@ export function NavSidebar({
                   case 'folder':
                     IconComponent = <FolderIcon color={iconColor} />
                     break
+                  case 'doc':
+                    IconComponent = <DocIcon color={iconColor} />
+                    break
                   default:
                     IconComponent = <GridIcon color={iconColor} />
                 }
@@ -350,7 +366,7 @@ export function NavSidebar({
                   onClearFilters={onClearFilters}
                   activeFilterCount={activeFilterCount}
                   activeFilterPills={activeFilterPills}
-                  onRemovePill={onRemovePill}
+                  onRemovePill={onRemovePill || (() => {})}
                   position="relative"
                 />
               ) : (
@@ -709,5 +725,23 @@ const styles = StyleSheet.create({
     borderRadius: 2,
     position: 'absolute',
     bottom: 0,
+  },
+
+  // Doc Icon
+  docPage: {
+    width: 14,
+    height: 18,
+    borderWidth: 1.5,
+    borderRadius: 2,
+    position: 'absolute',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 2,
+    paddingVertical: 2,
+  },
+  docLine: {
+    width: 8,
+    height: 1.5,
+    borderRadius: 0.5,
   },
 })
