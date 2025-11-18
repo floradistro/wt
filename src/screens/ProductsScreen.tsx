@@ -15,7 +15,7 @@ import { useProducts, type Product, type PricingTier } from '@/hooks/useProducts
 import { supabase } from '@/lib/supabase/client'
 import { useAuth } from '@/stores/auth.store'
 import { logger } from '@/utils/logger'
-import { EditableDescriptionSection, EditablePricingSection, EditableCustomFieldsSection, AdjustInventoryModal, SalesHistoryModal, AuditsView } from '@/components/products'
+import { EditableDescriptionSection, EditablePricingSection, EditableCustomFieldsSection, AdjustInventoryModal, SalesHistoryModal, AuditsView, CreateProductModal, CreateAuditModal } from '@/components/products'
 import { NavSidebar, type NavItem } from '@/components/NavSidebar'
 import { CategoryCard, CategoryDetail, CategoryModal, CustomFieldModal, FieldVisibilityModal, PricingTemplateModal } from '@/components/categories'
 import { LocationSelector } from '@/components/LocationSelector'
@@ -26,7 +26,7 @@ import { usePricingTemplates } from '@/hooks/usePricingTemplates'
 import { useUserLocations } from '@/hooks/useUserLocations'
 import { useLocationFilter } from '@/stores/location-filter.store'
 import { usePurchaseOrders } from '@/hooks/usePurchaseOrders'
-import { PurchaseOrdersList, PurchaseOrderDetail, CreatePOModal } from '@/components/purchase-orders'
+import { PurchaseOrdersList, PurchaseOrderDetail, CreatePOModal, ReceivePOModal } from '@/components/purchase-orders'
 import type { PurchaseOrder } from '@/services/purchase-orders.service'
 import { useDockOffset } from '@/navigation/DashboardNavigator'
 
@@ -112,7 +112,6 @@ ProductItem.displayName = 'ProductItem'
 
 function ProductsScreenComponent() {
   const { user } = useAuth()
-  const { setDockOffset } = useDockOffset()
   const [activeNav, setActiveNav] = useState<NavSection>('all')
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null)
@@ -123,6 +122,9 @@ function ProductsScreenComponent() {
   const [vendorName, setVendorName] = useState<string>('')
   const [vendorId, setVendorId] = useState<string>('')
   const [showCreatePOModal, setShowCreatePOModal] = useState(false)
+  const [showReceivePOModal, setShowReceivePOModal] = useState(false)
+  const [showCreateProductModal, setShowCreateProductModal] = useState(false)
+  const [showCreateAuditModal, setShowCreateAuditModal] = useState(false)
 
   // Filter state
   const [selectedCategories, setSelectedCategories] = useState<string[]>([])
@@ -684,24 +686,6 @@ function ProductsScreenComponent() {
     }).start()
   }, [selectedProduct, selectedCategoryId, selectedPurchaseOrder, activeNav, slideAnim])
 
-  // Automatically update dock position based on detail view visibility
-  useEffect(() => {
-    const isDetailVisible = selectedProduct !== null || selectedCategoryId !== null || selectedPurchaseOrder !== null
-
-    if (isDetailVisible) {
-      // Detail view visible: dock centers on detail panel (right half of content)
-      const detailPanelOffset = layout.sidebarWidth + (contentWidth / 2)
-      setDockOffset(detailPanelOffset)
-    } else {
-      // List view: dock uses default sidebar offset
-      setDockOffset(null)
-    }
-
-    // Cleanup: reset to default when unmounting
-    return () => setDockOffset(null)
-  }, [selectedProduct, selectedCategoryId, selectedPurchaseOrder, contentWidth, setDockOffset])
-
-
   // Filter categories by nav search
   const filteredCategories = useMemo(() => {
     if (!navSearchQuery || activeNav !== 'categories') return categories
@@ -784,7 +768,28 @@ function ProductsScreenComponent() {
         >
           {activeNav === 'audits' ? (
             // AUDITS VIEW
-            <AuditsView />
+            <View style={styles.productsListContent}>
+              {/* Fixed Header with Create Button */}
+              <View style={styles.auditsHeader}>
+                <View style={styles.largeTitleContainer}>
+                  <Text style={styles.largeTitleHeader}>Audits</Text>
+                  <Pressable
+                    style={styles.addButton}
+                    onPress={() => {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                      setShowCreateAuditModal(true)
+                    }}
+                    accessible={true}
+                    accessibilityRole="button"
+                    accessibilityLabel="Create new audit"
+                  >
+                    <Text style={styles.addButtonText}>+</Text>
+                  </Pressable>
+                </View>
+              </View>
+
+              <AuditsView />
+            </View>
           ) : activeNav === 'purchase-orders' ? (
             // PURCHASE ORDERS VIEW
             <PurchaseOrdersList
@@ -949,10 +954,24 @@ function ProductsScreenComponent() {
                     scrollEventThrottle={16}
                   >
                     {/* Large Title - scrolls with content */}
-                    <View style={styles.cardWrapper}>
+                    <View style={[styles.largeTitleContainer, styles.cardWrapper]}>
                       <Text style={styles.largeTitleHeader}>
                         {activeNav === 'all' ? 'All Products' : activeNav === 'low-stock' ? 'Low Stock' : 'Out of Stock'}
                       </Text>
+                      {activeNav === 'all' && (
+                        <Pressable
+                          style={styles.addProductButton}
+                          onPress={() => {
+                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                            setShowCreateProductModal(true)
+                          }}
+                          accessible={true}
+                          accessibilityRole="button"
+                          accessibilityLabel="Add new product"
+                        >
+                          <Text style={styles.addProductButtonText}>Add Product</Text>
+                        </Pressable>
+                      )}
                     </View>
 
                     {/* Empty State - when no products match */}
@@ -1146,8 +1165,8 @@ function ProductsScreenComponent() {
                 onBack={() => setSelectedPurchaseOrder(null)}
                 onUpdated={reloadPurchaseOrders}
                 onReceive={() => {
-                  // TODO: Show receive modal
-                  logger.info('Receive items clicked')
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                  setShowReceivePOModal(true)
                 }}
               />
             ) : (
@@ -1238,6 +1257,45 @@ function ProductsScreenComponent() {
         vendorId={vendorId}
         onClose={() => setShowCreatePOModal(false)}
         onCreated={reloadPurchaseOrders}
+      />
+
+      {/* Receive Purchase Order Modal */}
+      {selectedPurchaseOrder && (
+        <ReceivePOModal
+          visible={showReceivePOModal}
+          purchaseOrder={selectedPurchaseOrder}
+          onClose={() => setShowReceivePOModal(false)}
+          onReceived={() => {
+            setShowReceivePOModal(false)
+            reloadPurchaseOrders()
+          }}
+        />
+      )}
+
+      {/* Create Product Modal */}
+      <CreateProductModal
+        visible={showCreateProductModal}
+        vendorId={vendorId}
+        onClose={() => setShowCreateProductModal(false)}
+        onCreated={(productId) => {
+          reload()
+          setShowCreateProductModal(false)
+          // Optionally auto-select the newly created product
+          const newProduct = allProducts.find(p => p.id === productId)
+          if (newProduct) {
+            setSelectedProduct(newProduct)
+          }
+        }}
+      />
+
+      {/* Create Audit Modal */}
+      <CreateAuditModal
+        visible={showCreateAuditModal}
+        onClose={() => setShowCreateAuditModal(false)}
+        onCreated={() => {
+          setShowCreateAuditModal(false)
+          // Reload adjustments if needed
+        }}
       />
     </SafeAreaView>
   )
@@ -1351,8 +1409,6 @@ function ProductDetail({ product, onBack, onProductUpdated }: { product: Product
         details: JSON.stringify(error, null, 2)
       })
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
-      // Log to console for debugging
-      console.error('Product save error details:', error)
     } finally {
       setSaving(false)
     }
@@ -1672,6 +1728,11 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingTop: 16,
     paddingBottom: 8,
+  },
+  auditsHeader: {
+    paddingHorizontal: layout.containerMargin,
+    paddingTop: spacing.xl,
+    paddingBottom: spacing.md,
   },
 
   // MIDDLE PRODUCTS LIST
@@ -2243,6 +2304,20 @@ const styles = StyleSheet.create({
     fontSize: 24,
     color: '#60A5FA',
     fontWeight: '300',
+  },
+  addProductButton: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.md,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.2)',
+  },
+  addProductButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#fff',
+    letterSpacing: -0.2,
   },
 
   // CATEGORY LIST ITEMS (matching product list style)

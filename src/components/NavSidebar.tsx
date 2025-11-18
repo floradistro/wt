@@ -77,9 +77,32 @@ function DocIcon({ color }: { color: string }) {
   )
 }
 
+// Monochrome List Icon (Audits)
+function ListIcon({ color }: { color: string }) {
+  return (
+    <View style={styles.iconContainer}>
+      <View style={[styles.listLine, { backgroundColor: color }]} />
+      <View style={[styles.listLine, { backgroundColor: color }]} />
+      <View style={[styles.listLine, { backgroundColor: color }]} />
+    </View>
+  )
+}
+
+// Monochrome User Icon (Customers)
+function UserIcon({ color }: { color: string }) {
+  return (
+    <View style={styles.iconContainer}>
+      <View style={[styles.userIconCircle, { borderColor: color }]}>
+        <View style={[styles.userIconHead, { backgroundColor: color }]} />
+      </View>
+      <View style={[styles.userIconBody, { borderColor: color }]} />
+    </View>
+  )
+}
+
 export interface NavItem {
   id: string
-  icon: 'grid' | 'warning' | 'box' | 'folder' | 'doc' | React.ComponentType<{ color: string }> // Icon type or custom component
+  icon: 'grid' | 'warning' | 'box' | 'folder' | 'doc' | 'list' | 'user' | React.ComponentType<{ color: string }> // Icon type or custom component
   label: string
   count?: number
   badge?: 'warning' | 'error' | 'info'
@@ -252,6 +275,12 @@ export function NavSidebar({
                     break
                   case 'doc':
                     IconComponent = <DocIcon color={iconColor} />
+                    break
+                  case 'list':
+                    IconComponent = <ListIcon color={iconColor} />
+                    break
+                  case 'user':
+                    IconComponent = <UserIcon color={iconColor} />
                     break
                   default:
                     IconComponent = <GridIcon color={iconColor} />
@@ -743,5 +772,43 @@ const styles = StyleSheet.create({
     width: 8,
     height: 1.5,
     borderRadius: 0.5,
+  },
+
+  // List Icon
+  listLine: {
+    width: 14,
+    height: 1.5,
+    borderRadius: 0.5,
+    marginVertical: 1.5,
+  },
+
+  // User Icon (customer/person)
+  userIconCircle: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    borderWidth: 1.5,
+    position: 'absolute',
+    top: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  userIconHead: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+    position: 'absolute',
+    top: 3,
+  },
+  userIconBody: {
+    width: 10,
+    height: 8,
+    borderTopWidth: 1.5,
+    borderLeftWidth: 1.5,
+    borderRightWidth: 1.5,
+    borderTopLeftRadius: 10,
+    borderTopRightRadius: 10,
+    position: 'absolute',
+    bottom: 0,
   },
 })

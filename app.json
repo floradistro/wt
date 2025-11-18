@@ -17,14 +17,15 @@
     "primaryColor": "#000000",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.whaletools.app",
+      "bundleIdentifier": "whaletoolsdev",
+      "buildNumber": "1",
       "infoPlist": {
         "NSCameraUsageDescription": "Whaletools needs camera access to scan ID barcodes for age verification and product barcodes.",
         "NSPhotoLibraryUsageDescription": "Whaletools needs photo library access to select product images.",
         "UIViewControllerBasedStatusBarAppearance": false,
         "UIStatusBarStyle": "UIStatusBarStyleLightContent"
       },
-      "requireFullScreen": true,
+      "requireFullScreen": false,
       "userInterfaceStyle": "dark"
     },
     "android": {
@@ -34,6 +35,7 @@
       },
       "userInterfaceStyle": "dark",
       "package": "com.whaletools.app",
+      "versionCode": 1,
       "permissions": [
         "CAMERA",
         "READ_EXTERNAL_STORAGE",

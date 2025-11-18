@@ -91,7 +91,11 @@ export function usePurchaseOrders(params: UsePurchaseOrdersParams = {}): UsePurc
       setStats(statsData)
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to load purchase orders'
-      logger.error('Failed to load purchase orders', { error: err })
+      logger.error('Failed to load purchase orders', {
+        error: err,
+        message: errorMessage,
+        stack: err instanceof Error ? err.stack : undefined
+      })
       setError(errorMessage)
       setPurchaseOrders([])
     } finally {

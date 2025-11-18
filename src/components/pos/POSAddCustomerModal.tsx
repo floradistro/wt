@@ -512,7 +512,21 @@ function POSAddCustomerModal({
                 style={styles.useExistingButton}
                 onPress={() => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
-                  onCustomerCreated(duplicateWarning.matches[0].customer)
+                  const serviceCustomer = duplicateWarning.matches[0].customer
+                  // Map service Customer to POS Customer type
+                  const posCustomer: Customer = {
+                    id: serviceCustomer.id,
+                    first_name: serviceCustomer.first_name || '',
+                    last_name: serviceCustomer.last_name || '',
+                    email: serviceCustomer.email || '',
+                    phone: serviceCustomer.phone || null,
+                    display_name: serviceCustomer.full_name || null,
+                    date_of_birth: null,
+                    loyalty_points: serviceCustomer.loyalty_points || 0,
+                    loyalty_tier: 'standard',
+                    vendor_customer_number: serviceCustomer.id.substring(0, 8).toUpperCase(),
+                  }
+                  onCustomerCreated(posCustomer)
                 }}
                 activeOpacity={0.7}
               >

@@ -13,7 +13,7 @@
  */
 
 import { useState, useEffect, useRef, useCallback, memo } from 'react'
-import { View, StyleSheet, Animated } from 'react-native'
+import { View, StyleSheet, Animated, useWindowDimensions } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useAuth } from '@/stores/auth.store'
 import { startPaymentProcessorMonitoring, stopPaymentProcessorMonitoring } from '@/stores/payment-processor.store'
@@ -36,15 +36,17 @@ import { colors, spacing, device } from '@/theme'
 // Types
 import type { Vendor, Product, SessionInfo, PricingTier } from '@/types/pos'
 
-const isTablet = device.isTablet
-
 /**
  * POSScreen Component (Refactored)
  * Jobs Principle: Simplified orchestrator - delegates to focused child components
  */
 function POSScreenComponent() {
   const { user } = useAuth()
-  const { setDockOffset } = useDockOffset()
+  const { setFullWidth } = useDockOffset()
+  const { width: screenWidth } = useWindowDimensions()
+
+  // Dynamic cart width based on screen size (adapts to orientation changes)
+  const cartWidth = screenWidth > 600 ? 380 : 320
 
   // ========================================
   // TOP-LEVEL STATE (Minimal!)
@@ -80,21 +82,11 @@ function POSScreenComponent() {
     }).start()
   }, [])
 
-  // Update dock offset based on session state
+  // Update dock centering based on session state
   useEffect(() => {
-    if (!sessionInfo) {
-      // Setup mode - center dock on full screen
-      setDockOffset(0)
-    } else {
-      // Main POS mode - use default cart offset
-      setDockOffset(null)
-    }
-
-    // Cleanup: Reset to default when component unmounts
-    return () => {
-      setDockOffset(null)
-    }
-  }, [sessionInfo, setDockOffset])
+    // Setup mode = full width screen, main mode = has cart
+    setFullWidth(!sessionInfo)
+  }, [sessionInfo, setFullWidth])
 
   // Payment processor monitoring
   useEffect(() => {
@@ -159,7 +151,7 @@ function POSScreenComponent() {
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <Animated.View style={[styles.mainLayout, { opacity: fadeAnim }]}>
         {/* Left Column - Checkout */}
-        <View style={styles.leftColumn}>
+        <View style={[styles.leftColumn, { width: cartWidth }]}>
           {vendor && customUserId && (
             <POSCheckout
               sessionInfo={sessionInfo}
@@ -206,7 +198,7 @@ const styles = StyleSheet.create({
     gap: spacing.md,
   },
   leftColumn: {
-    width: isTablet ? 380 : 320,
+    // Width is set dynamically via inline style to adapt to orientation changes
   },
   rightColumn: {
     flex: 1,

@@ -1,78 +1,66 @@
-import { useState, useEffect, createContext, useContext, useCallback } from 'react'
-import { View, StyleSheet } from 'react-native'
+import { useState, createContext, useContext } from 'react'
+import { View, StyleSheet, useWindowDimensions } from 'react-native'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { Dock } from '@/components/Dock'
 import { POSScreen } from '@/screens/POSScreen'
 import { ProductsScreen } from '@/screens/ProductsScreen'
 import { OrdersScreen } from '@/screens/OrdersScreen'
+import { CustomersScreen } from '@/screens/CustomersScreen'
 import { SettingsScreen } from '@/screens/SettingsScreen'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { layout } from '@/theme/layout'
 import { device } from '@/theme'
 
-const screens = [POSScreen, ProductsScreen, OrdersScreen, SettingsScreen]
+const screens = [POSScreen, ProductsScreen, OrdersScreen, CustomersScreen, SettingsScreen]
 
-// POS cart width (matches POSScreen leftColumn)
-const POS_CART_WIDTH = device.isTablet ? 380 : 320
-
-// Map which screens have left content that dock should offset
-const screenSidebarWidths = [
-  POS_CART_WIDTH,       // POS - cart on left, center dock on product grid
-  layout.sidebarWidth,  // Products - has sidebar
-  layout.sidebarWidth,  // Orders - has sidebar
-  layout.sidebarWidth,  // Settings - has sidebar
-]
-
-// Context for screens to override their dock offset
+// Minimal context - only for POS setup override
 const DockOffsetContext = createContext<{
-  setDockOffset: (offset: number | null) => void
+  setFullWidth: (isFullWidth: boolean) => void
 }>({
-  setDockOffset: () => {}
+  setFullWidth: () => {}
 })
 
 export const useDockOffset = () => useContext(DockOffsetContext)
 
 export function DashboardNavigator() {
   const [activeTab, setActiveTab] = useState(0)
-  const [customDockOffsets, setCustomDockOffsets] = useState<Record<number, number | null>>({})
-  const [mountedScreens, setMountedScreens] = useState<Set<number>>(new Set([0])) // Mount first screen immediately
+  const [isFullWidth, setIsFullWidth] = useState(false)
+  const { width: screenWidth } = useWindowDimensions()
 
-  // Use custom offset for this tab if set, otherwise use default for screen type
-  const customOffset = customDockOffsets[activeTab]
-  const sidebarWidth = customOffset !== undefined && customOffset !== null
-    ? customOffset
-    : screenSidebarWidths[activeTab]
+  // Dynamic POS cart width based on current screen size (adapts to orientation)
+  const posCartWidth = screenWidth > 600 ? 380 : 320
 
-  const setDockOffset = useCallback((offset: number | null) => {
-    setCustomDockOffsets(prev => ({
-      ...prev,
-      [activeTab]: offset
-    }))
-  }, [activeTab])
+  // Map which screens have left content that dock should offset
+  const screenSidebarWidths = [
+    posCartWidth,        // POS - cart on left, center dock on product grid
+    layout.sidebarWidth, // Products - has sidebar
+    layout.sidebarWidth, // Orders - has sidebar
+    layout.sidebarWidth, // Customers - has sidebar
+    layout.sidebarWidth, // Settings - has sidebar
+  ]
 
-  // Mount screen when switching to it (lazy mounting)
-  useEffect(() => {
-    setMountedScreens(prev => new Set(prev).add(activeTab))
-  }, [activeTab])
+  // Calculate: if full width override is set, use 0, otherwise use screen default
+  const leftOffset = (activeTab === 0 && isFullWidth) ? 0 : screenSidebarWidths[activeTab]
+  const contentWidth = screenWidth - leftOffset
+  const dockCenterX = leftOffset + (contentWidth / 2)
 
   return (
     <SafeAreaProvider>
-      <DockOffsetContext.Provider value={{ setDockOffset }}>
+      <DockOffsetContext.Provider value={{ setFullWidth: setIsFullWidth }}>
         <View style={styles.container}>
           {screens.map((Screen, index) => {
             const isActive = activeTab === index
-            const isMounted = mountedScreens.has(index)
-
-            if (!isMounted) return null
 
             return (
               <View
                 key={index}
                 style={[
                   styles.screen,
-                  !isActive && styles.screenHidden
+                  { display: isActive ? 'flex' : 'none' }
                 ]}
                 pointerEvents={isActive ? 'auto' : 'none'}
+                removeClippedSubviews={!isActive}
+                collapsable={false}
               >
                 <ErrorBoundary>
                   <Screen />
@@ -80,7 +68,7 @@ export function DashboardNavigator() {
               </View>
             )
           })}
-          <Dock activeTab={activeTab} onTabChange={setActiveTab} sidebarWidth={sidebarWidth} />
+          <Dock activeTab={activeTab} onTabChange={setActiveTab} centerX={dockCenterX} />
         </View>
       </DockOffsetContext.Provider>
     </SafeAreaProvider>
@@ -94,9 +82,5 @@ const styles = StyleSheet.create({
   },
   screen: {
     ...StyleSheet.absoluteFillObject,
-  },
-  screenHidden: {
-    opacity: 0,
-    zIndex: -1,
   },
 })

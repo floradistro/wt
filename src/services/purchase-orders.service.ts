@@ -27,15 +27,19 @@ export interface PurchaseOrder {
   expected_delivery_date?: string
   notes?: string
   subtotal: number
-  tax_amount: number
-  shipping_cost: number
-  total_amount: number
+  tax: number
+  shipping: number
+  total: number
   created_at: string
   updated_at: string
   created_by?: string
   // Computed fields
   items_count?: number
   received_items_count?: number
+  // Aliases for compatibility
+  tax_amount?: number
+  shipping_cost?: number
+  total_amount?: number
 }
 
 export interface PurchaseOrderItem {
@@ -66,8 +70,8 @@ export interface CreatePurchaseOrderParams {
     quantity: number
     unit_price: number
   }[]
-  tax_amount?: number
-  shipping_cost?: number
+  tax?: number
+  shipping?: number
 }
 
 export interface ReceiveItemParams {
@@ -92,15 +96,15 @@ export async function getPurchaseOrders(params?: {
     .from('purchase_orders')
     .select(`
       *,
-      supplier:suppliers!supplier_id (
+      suppliers (
         id,
         external_name
       ),
-      wholesale_customer:wholesale_customers!wholesale_customer_id (
+      wholesale_customers (
         id,
         external_company_name
       ),
-      location:locations!location_id (
+      locations (
         id,
         name
       ),
@@ -131,15 +135,21 @@ export async function getPurchaseOrders(params?: {
   const { data, error } = await query
 
   if (error) {
-    logger.error('Failed to fetch purchase orders', { error })
+    logger.error('Failed to fetch purchase orders', {
+      error,
+      message: error.message,
+      details: error.details,
+      hint: error.hint,
+      code: error.code
+    })
     throw new Error(`Failed to fetch purchase orders: ${error.message}`)
   }
 
   // Flatten joined data and compute counts
   const pos = (data || []).map((po: any) => {
-    const supplier = Array.isArray(po.supplier) ? po.supplier[0] : po.supplier
-    const customer = Array.isArray(po.wholesale_customer) ? po.wholesale_customer[0] : po.wholesale_customer
-    const location = Array.isArray(po.location) ? po.location[0] : po.location
+    const supplier = Array.isArray(po.suppliers) ? po.suppliers[0] : po.suppliers
+    const customer = Array.isArray(po.wholesale_customers) ? po.wholesale_customers[0] : po.wholesale_customers
+    const location = Array.isArray(po.locations) ? po.locations[0] : po.locations
     const items = po.purchase_order_items || []
 
     return {
@@ -148,10 +158,14 @@ export async function getPurchaseOrders(params?: {
       customer_name: customer?.external_company_name || '',
       location_name: location?.name || '',
       items_count: items.length,
-      received_items_count: items.filter((item: any) => item.received_quantity > 0).length,
-      supplier: undefined, // Remove nested object
-      wholesale_customer: undefined, // Remove nested object
-      location: undefined, // Remove nested object
+      received_items_count: items.filter((item: any) => (item.received_quantity || 0) >= (item.quantity || 0)).length,
+      // Aliases for compatibility
+      tax_amount: po.tax,
+      shipping_cost: po.shipping,
+      total_amount: po.total,
+      suppliers: undefined, // Remove nested object
+      wholesale_customers: undefined, // Remove nested object
+      locations: undefined, // Remove nested object
       purchase_order_items: undefined, // Remove nested object
     }
   })
@@ -167,15 +181,15 @@ export async function getPurchaseOrderById(poId: string): Promise<PurchaseOrder 
     .from('purchase_orders')
     .select(`
       *,
-      supplier:suppliers!supplier_id (
+      suppliers (
         id,
         external_name
       ),
-      wholesale_customer:wholesale_customers!wholesale_customer_id (
+      wholesale_customers (
         id,
         external_company_name
       ),
-      location:locations!location_id (
+      locations (
         id,
         name
       ),
@@ -195,9 +209,9 @@ export async function getPurchaseOrderById(poId: string): Promise<PurchaseOrder 
     throw new Error(`Failed to fetch purchase order: ${poError.message}`)
   }
 
-  const supplier = Array.isArray(po.supplier) ? po.supplier[0] : po.supplier
-  const customer = Array.isArray(po.wholesale_customer) ? po.wholesale_customer[0] : po.wholesale_customer
-  const location = Array.isArray(po.location) ? po.location[0] : po.location
+  const supplier = Array.isArray(po.suppliers) ? po.suppliers[0] : po.suppliers
+  const customer = Array.isArray(po.wholesale_customers) ? po.wholesale_customers[0] : po.wholesale_customers
+  const location = Array.isArray(po.locations) ? po.locations[0] : po.locations
 
   // Flatten product data into items
   const items = (po.purchase_order_items || []).map((item: any) => {
@@ -216,9 +230,9 @@ export async function getPurchaseOrderById(poId: string): Promise<PurchaseOrder 
     customer_name: customer?.external_company_name || '',
     location_name: location?.name || '',
     items,
-    supplier: undefined, // Remove nested object
-    wholesale_customer: undefined, // Remove nested object
-    location: undefined, // Remove nested object
+    suppliers: undefined, // Remove nested object
+    wholesale_customers: undefined, // Remove nested object
+    locations: undefined, // Remove nested object
     purchase_order_items: undefined, // Remove nested object
   }
 }
@@ -230,55 +244,87 @@ export async function createPurchaseOrder(
   vendorId: string,
   params: CreatePurchaseOrderParams
 ): Promise<PurchaseOrder> {
-  const { items, ...poData } = params
+  try {
+    const { items, ...poData } = params
 
-  // Calculate totals
-  const subtotal = items.reduce((sum, item) => sum + item.quantity * item.unit_price, 0)
-  const taxAmount = params.tax_amount || 0
-  const shippingCost = params.shipping_cost || 0
-  const totalAmount = subtotal + taxAmount + shippingCost
+    // Calculate totals
+    const subtotal = items.reduce((sum, item) => sum + item.quantity * item.unit_price, 0)
+    const tax = params.tax || 0
+    const shipping = params.shipping || 0
+    const total = subtotal + tax + shipping
 
-  // 1. Create the purchase order
-  const { data: po, error: poError } = await supabase
-    .from('purchase_orders')
-    .insert({
+    const poNumber = await generatePONumber()
+
+    const insertData = {
       ...poData,
       vendor_id: vendorId,
-      po_number: await generatePONumber(),
-      status: 'draft',
+      po_number: poNumber,
+      status: 'draft' as const,
       subtotal,
-      tax_amount: taxAmount,
-      shipping_cost: shippingCost,
-      total_amount: totalAmount,
+      tax,
+      shipping,
+      total,
+    }
+
+    logger.info('Creating purchase order', { insertData })
+
+    // 1. Create the purchase order
+    const { data: po, error: poError } = await supabase
+      .from('purchase_orders')
+      .insert(insertData)
+      .select()
+      .single()
+
+    if (poError) {
+      logger.error('Failed to create purchase order', {
+        error: poError,
+        message: poError.message,
+        details: poError.details,
+        hint: poError.hint,
+        code: poError.code,
+        insertData
+      })
+      throw new Error(`Failed to create purchase order: ${poError.message}`)
+    }
+
+    logger.info('Purchase order created', { poId: po.id })
+
+    // 2. Create purchase order items (only if items exist)
+    if (items.length > 0) {
+      const poItems = items.map((item) => ({
+        purchase_order_id: po.id,
+        product_id: item.product_id,
+        quantity: item.quantity,
+        quantity_received: 0,
+        unit_price: item.unit_price,
+        line_total: item.quantity * item.unit_price,
+      }))
+
+      const { error: itemsError } = await supabase.from('purchase_order_items').insert(poItems)
+
+      if (itemsError) {
+        // Rollback: delete the PO
+        await supabase.from('purchase_orders').delete().eq('id', po.id)
+        logger.error('Failed to create purchase order items', {
+          error: itemsError,
+          message: itemsError.message,
+          details: itemsError.details,
+          hint: itemsError.hint,
+          code: itemsError.code
+        })
+        throw new Error(`Failed to create purchase order items: ${itemsError.message}`)
+      }
+    }
+
+    return po
+  } catch (error) {
+    logger.error('Create purchase order exception', {
+      error,
+      message: error instanceof Error ? error.message : 'Unknown error',
+      stack: error instanceof Error ? error.stack : undefined
     })
-    .select()
-    .single()
-
-  if (poError) {
-    logger.error('Failed to create purchase order', { error: poError })
-    throw new Error(`Failed to create purchase order: ${poError.message}`)
+    throw error
   }
-
-  // 2. Create purchase order items
-  const poItems = items.map((item) => ({
-    purchase_order_id: po.id,
-    product_id: item.product_id,
-    quantity: item.quantity,
-    received_quantity: 0,
-    unit_price: item.unit_price,
-    subtotal: item.quantity * item.unit_price,
-  }))
-
-  const { error: itemsError } = await supabase.from('purchase_order_items').insert(poItems)
-
-  if (itemsError) {
-    // Rollback: delete the PO
-    await supabase.from('purchase_orders').delete().eq('id', po.id)
-    logger.error('Failed to create purchase order items', { error: itemsError })
-    throw new Error(`Failed to create purchase order items: ${itemsError.message}`)
-  }
-
-  return po
 }
 
 /**
@@ -313,19 +359,19 @@ export async function receiveItems(
     for (const item of items) {
       const { data: poItem, error: fetchError } = await supabase
         .from('purchase_order_items')
-        .select('received_quantity, quantity, product_id')
+        .select('quantity_received, quantity, product_id')
         .eq('id', item.item_id)
         .single()
 
       if (fetchError) throw fetchError
 
-      const newReceivedQty = (poItem.received_quantity || 0) + item.quantity
+      const newReceivedQty = (poItem.quantity_received || 0) + item.quantity
 
       // Update received quantity and condition
       const { error: updateError } = await supabase
         .from('purchase_order_items')
         .update({
-          received_quantity: newReceivedQty,
+          quantity_received: newReceivedQty,
           condition: item.condition,
           quality_notes: item.quality_notes,
           updated_at: new Date().toISOString(),
@@ -374,7 +420,7 @@ export async function receiveItems(
       .select(`
         purchase_order_items (
           quantity,
-          received_quantity
+          quantity_received
         )
       `)
       .eq('id', poId)
@@ -383,11 +429,11 @@ export async function receiveItems(
     if (po) {
       const allItems = po.purchase_order_items || []
       const fullyReceived = allItems.every(
-        (item: any) => item.received_quantity >= item.quantity
+        (item: any) => (item.quantity_received || 0) >= item.quantity
       )
 
       const partiallyReceived = allItems.some(
-        (item: any) => item.received_quantity > 0 && item.received_quantity < item.quantity
+        (item: any) => (item.quantity_received || 0) > 0 && (item.quantity_received || 0) < item.quantity
       )
 
       const newStatus = fullyReceived
@@ -467,7 +513,7 @@ export async function getPurchaseOrderStats(params?: {
 }> {
   let query = supabase
     .from('purchase_orders')
-    .select('status, total_amount')
+    .select('status, total')
 
   if (params?.locationIds && params.locationIds.length > 0) {
     query = query.in('location_id', params.locationIds)
@@ -485,7 +531,7 @@ export async function getPurchaseOrderStats(params?: {
     draft: data?.filter(po => po.status === 'draft').length || 0,
     pending: data?.filter(po => po.status === 'pending' || po.status === 'approved' || po.status === 'partially_received').length || 0,
     received: data?.filter(po => po.status === 'received').length || 0,
-    totalValue: data?.reduce((sum, po) => sum + (po.total_amount || 0), 0) || 0,
+    totalValue: data?.reduce((sum, po) => sum + (po.total || 0), 0) || 0,
   }
 
   return stats

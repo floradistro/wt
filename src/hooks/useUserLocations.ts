@@ -9,6 +9,10 @@ export interface Location {
   address_line1: string | null
   city: string | null
   state: string | null
+  postal_code?: string | null
+  phone?: string | null
+  tax_rate?: number | null
+  tax_name?: string | null
   is_primary: boolean
 }
 
@@ -66,7 +70,6 @@ export function useUserLocations() {
           .select('id, name, address_line1, city, state, is_primary')
           .eq('vendor_id', userData.vendor_id)
           .eq('is_active', true)
-          .order('is_primary', { ascending: false })
           .order('name')
 
         if (locationsError) throw locationsError
@@ -75,6 +78,13 @@ export function useUserLocations() {
           location: loc,
           role: 'owner' as const, // Admins have full access
         }))
+
+        // Sort client-side: primary locations first
+        formattedLocations.sort((a, b) => {
+          if (a.location.is_primary && !b.location.is_primary) return -1
+          if (!a.location.is_primary && b.location.is_primary) return 1
+          return a.location.name.localeCompare(b.location.name)
+        })
       } else {
         // Regular users see only their assigned locations
         const { data: userLocationsData, error: locationsError } = await supabase

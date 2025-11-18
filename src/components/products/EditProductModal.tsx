@@ -171,6 +171,7 @@ export function EditProductModal({ visible, product, onClose, onSave }: EditProd
       animationType="slide"
       presentationStyle="pageSheet"
       onRequestClose={handleClose}
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
     >
       <View style={styles.container}>
         {/* Header */}

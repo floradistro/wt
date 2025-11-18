@@ -11,8 +11,7 @@ import { colors, spacing, radius } from '@/theme/tokens'
 import { layout } from '@/theme/layout'
 import { supabase } from '@/lib/supabase/client'
 import { logger } from '@/utils/logger'
-import type { PurchaseOrder, PurchaseOrderItem } from '@/services/purchase-orders.service'
-import { updatePurchaseOrderStatus, deletePurchaseOrder } from '@/services/purchase-orders.service'
+import { updatePurchaseOrderStatus, deletePurchaseOrder, type PurchaseOrder, type PurchaseOrderItem } from '@/services/purchase-orders.service'
 
 interface PurchaseOrderDetailProps {
   purchaseOrder: PurchaseOrder
@@ -107,7 +106,7 @@ export function PurchaseOrderDetail({
 
   const statusColor = getStatusColor(purchaseOrder.status)
   const canReceive = purchaseOrder.po_type === 'inbound' &&
-    (purchaseOrder.status === 'pending' || purchaseOrder.status === 'approved' || purchaseOrder.status === 'partially_received')
+    (purchaseOrder.status === 'draft' || purchaseOrder.status === 'pending' || purchaseOrder.status === 'approved' || purchaseOrder.status === 'partially_received')
   const canDelete = purchaseOrder.status === 'draft' || purchaseOrder.status === 'pending'
 
   return (
@@ -212,12 +211,12 @@ export function PurchaseOrderDetail({
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>TOTALS</Text>
         <View style={styles.cardGlass}>
-          <SettingsRow label="Subtotal" value={`$${purchaseOrder.subtotal.toFixed(2)}`} showChevron={false} />
-          <SettingsRow label="Tax" value={`$${purchaseOrder.tax_amount.toFixed(2)}`} showChevron={false} />
-          <SettingsRow label="Shipping" value={`$${purchaseOrder.shipping_cost.toFixed(2)}`} showChevron={false} />
+          <SettingsRow label="Subtotal" value={`$${(purchaseOrder.subtotal || 0).toFixed(2)}`} showChevron={false} />
+          <SettingsRow label="Tax" value={`$${(purchaseOrder.tax_amount || 0).toFixed(2)}`} showChevron={false} />
+          <SettingsRow label="Shipping" value={`$${(purchaseOrder.shipping_cost || 0).toFixed(2)}`} showChevron={false} />
           <View style={styles.totalRow}>
             <Text style={styles.totalLabel}>Total</Text>
-            <Text style={styles.totalValue}>${purchaseOrder.total_amount.toFixed(2)}</Text>
+            <Text style={styles.totalValue}>${(purchaseOrder.total_amount || 0).toFixed(2)}</Text>
           </View>
         </View>
       </View>
@@ -228,7 +227,7 @@ export function PurchaseOrderDetail({
         <View style={styles.cardGlass}>
           {canReceive && onReceive && (
             <Pressable
-              style={styles.row}
+              style={[styles.row, !purchaseOrder.status.includes('draft') && !canDelete && styles.rowLast]}
               onPress={() => {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
                 onReceive()
@@ -240,7 +239,7 @@ export function PurchaseOrderDetail({
           )}
           {purchaseOrder.status === 'draft' && (
             <Pressable
-              style={styles.row}
+              style={[styles.row, !canDelete && styles.rowLast]}
               onPress={() => handleStatusChange('pending')}
               disabled={isUpdating}
             >

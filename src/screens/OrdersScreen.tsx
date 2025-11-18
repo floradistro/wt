@@ -271,7 +271,6 @@ SectionHeader.displayName = 'SectionHeader'
 
 function OrdersScreenComponent() {
   const { user } = useAuth()
-  const { setDockOffset } = useDockOffset()
   const [activeNav, setActiveNav] = useState<NavSection>('all')
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
   const [navSearchQuery, setNavSearchQuery] = useState('')
@@ -440,9 +439,7 @@ function OrdersScreenComponent() {
 
   // Flatten for FlatList
   const flatListData = useMemo(() => {
-    const items: Array<
-      | { type: 'section'; group: { title: string; data: Order[] }; isFirst: boolean }
-    > = []
+    const items: (| { type: 'section'; group: { title: string; data: Order[] }; isFirst: boolean })[] = []
 
     groupedOrders.forEach((group, groupIndex) => {
       items.push({
@@ -547,21 +544,6 @@ function OrdersScreenComponent() {
       friction: 12,
     }).start()
   }, [selectedOrder, slideAnim])
-
-  // Automatically update dock position based on detail view visibility
-  useEffect(() => {
-    if (selectedOrder) {
-      // Detail view visible: dock centers on detail panel (right half of content)
-      const detailPanelOffset = layout.sidebarWidth + (contentWidth / 2)
-      setDockOffset(detailPanelOffset)
-    } else {
-      // List view: dock uses default sidebar offset
-      setDockOffset(null)
-    }
-
-    // Cleanup: reset to default when unmounting
-    return () => setDockOffset(null)
-  }, [selectedOrder, contentWidth, setDockOffset])
 
   // Calculate translateX for sliding panels
   const listTranslateX = slideAnim.interpolate({

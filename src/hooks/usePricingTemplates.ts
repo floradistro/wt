@@ -27,8 +27,8 @@ export interface PricingTemplate {
   slug: string
   description: string | null
   quality_tier: QualityTier | null
+  category_id: string | null
   default_tiers: PriceBreak[]
-  applicable_to_categories: string[] | null
   is_active: boolean
   created_at: string
   updated_at: string
@@ -75,19 +75,15 @@ export function usePricingTemplates(options: UsePricingTemplatesOptions = {}) {
         query = query.eq('quality_tier', options.qualityTier)
       }
 
+      if (options.categoryId) {
+        query = query.eq('category_id', options.categoryId)
+      }
+
       const { data, error: templatesError } = await query
 
       if (templatesError) throw templatesError
 
-      let processedTemplates = (data || []) as PricingTemplate[]
-
-      // Filter by category if specified
-      if (options.categoryId) {
-        processedTemplates = processedTemplates.filter(template => {
-          if (!template.applicable_to_categories) return false
-          return template.applicable_to_categories.includes(options.categoryId!)
-        })
-      }
+      const processedTemplates = (data || []) as PricingTemplate[]
 
       setTemplates(processedTemplates)
       logger.info('Pricing templates loaded', { count: processedTemplates.length })

@@ -4,8 +4,8 @@
  * With working touch handling and smooth position animations
  */
 
-import { View, Pressable, StyleSheet, Animated } from 'react-native'
-import { memo, useRef, useEffect } from 'react'
+import { View, Pressable, StyleSheet } from 'react-native'
+import { memo } from 'react'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { LiquidGlassView, LiquidGlassContainerView, isLiquidGlassSupported } from '@callstack/liquid-glass'
 import * as Haptics from 'expo-haptics'
@@ -14,7 +14,7 @@ import { colors, radius, spacing, shadows } from '@/theme'
 interface DockProps {
   activeTab: number
   onTabChange: (index: number) => void
-  sidebarWidth?: number // Width of sidebar (if present) to offset dock centering
+  centerX: number // X position for the center of the dock
 }
 
 // Exact iOS dock icons
@@ -43,6 +43,17 @@ function OrdersIcon({ color }: { color: string }) {
   )
 }
 
+function CustomersIcon({ color }: { color: string }) {
+  return (
+    <View style={styles.userIcon}>
+      <View style={[styles.userIconCircle, { borderColor: color }]}>
+        <View style={[styles.userIconHead, { backgroundColor: color }]} />
+      </View>
+      <View style={[styles.userIconBody, { borderColor: color }]} />
+    </View>
+  )
+}
+
 function SettingsIcon({ color }: { color: string }) {
   return (
     <View style={styles.dotsIcon}>
@@ -57,6 +68,7 @@ const tabs = [
   { Icon: POSIcon, name: 'POS' },
   { Icon: ProductsIcon, name: 'Products' },
   { Icon: OrdersIcon, name: 'Orders' },
+  { Icon: CustomersIcon, name: 'Customers' },
   { Icon: SettingsIcon, name: 'Settings' },
 ]
 
@@ -103,29 +115,20 @@ function DockButton({
   )
 }
 
-function Dock({ activeTab, onTabChange, sidebarWidth = 0 }: DockProps) {
+function Dock({ activeTab, onTabChange, centerX }: DockProps) {
   const insets = useSafeAreaInsets()
-  // Ensure sidebarWidth is always a valid number
-  const validSidebarWidth = typeof sidebarWidth === 'number' && !isNaN(sidebarWidth) ? sidebarWidth : 0
-  const leftPosition = useRef(new Animated.Value(validSidebarWidth)).current
 
-  // Animate dock position when sidebarWidth changes
-  useEffect(() => {
-    const targetValue = typeof sidebarWidth === 'number' && !isNaN(sidebarWidth) ? sidebarWidth : 0
-    Animated.spring(leftPosition, {
-      toValue: targetValue,
-      useNativeDriver: false, // Can't use native driver for layout properties
-      tension: 80, // iOS-like spring tension
-      friction: 12, // iOS-like spring friction
-    }).start()
-  }, [sidebarWidth, leftPosition])
+  // Dynamic dock width calculation based on actual number of icons
+  const numIcons = tabs.length
+  const iconWidth = 56
+  const dockWidth = (numIcons * iconWidth) + ((numIcons - 1) * spacing.xs) + (2 * spacing.md)
 
   return (
-    <Animated.View style={[
+    <View style={[
       styles.container,
       {
         bottom: insets.bottom + spacing.xs,
-        left: leftPosition,
+        left: centerX - (dockWidth / 2), // Position so dock is centered at centerX
       }
     ]}>
       <LiquidGlassContainerView spacing={12} style={styles.glassContainer}>
@@ -157,7 +160,7 @@ function Dock({ activeTab, onTabChange, sidebarWidth = 0 }: DockProps) {
           })}
         </LiquidGlassView>
       </LiquidGlassContainerView>
-    </Animated.View>
+    </View>
   )
 }
 
@@ -167,8 +170,6 @@ export { DockMemo as Dock }
 const styles = StyleSheet.create({
   container: {
     position: 'absolute',
-    right: 0,
-    alignItems: 'center',
     pointerEvents: 'box-none',
   },
   glassContainer: {
@@ -245,5 +246,40 @@ const styles = StyleSheet.create({
     width: 28,
     height: 3,
     borderRadius: 1.5,
+  },
+  userIcon: {
+    width: 28,
+    height: 28,
+    position: 'relative',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  userIconCircle: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: 2.5,
+    position: 'absolute',
+    top: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  userIconHead: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    position: 'absolute',
+    top: 5,
+  },
+  userIconBody: {
+    width: 16,
+    height: 12,
+    borderTopWidth: 2.5,
+    borderLeftWidth: 2.5,
+    borderRightWidth: 2.5,
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    position: 'absolute',
+    bottom: 2,
   },
 })

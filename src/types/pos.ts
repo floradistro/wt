@@ -28,6 +28,10 @@ export interface Location {
   address_line1?: string
   city?: string
   state?: string
+  postal_code?: string
+  phone?: string
+  tax_rate?: number
+  tax_name?: string
   is_primary: boolean
 }
 

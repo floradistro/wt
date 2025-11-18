@@ -71,7 +71,7 @@ const POItem = React.memo<{
       <View style={styles.dataColumn}>
         <Text style={styles.dataLabel}>TOTAL</Text>
         <Text style={styles.totalValue}>
-          ${(item.total_amount || 0).toFixed(2)}
+          ${(item.total || 0).toFixed(2)}
         </Text>
       </View>
     </Pressable>
@@ -163,8 +163,11 @@ export function PurchaseOrdersList({
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
               onAddPress()
             }}
+            accessible={true}
+            accessibilityRole="button"
+            accessibilityLabel="Add new purchase order"
           >
-            <Text style={styles.addButtonText}>+</Text>
+            <Text style={styles.addButtonText}>Add Purchase Order</Text>
           </Pressable>
         </View>
 
@@ -182,8 +185,11 @@ export function PurchaseOrdersList({
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
                 onAddPress()
               }}
+              accessible={true}
+              accessibilityRole="button"
+              accessibilityLabel="Create Purchase Order"
             >
-              <Text style={styles.emptyStateButtonText}>+ Create Purchase Order</Text>
+              <Text style={styles.emptyStateButtonText}>Create Purchase Order</Text>
             </Pressable>
           </View>
         ) : (
@@ -290,17 +296,18 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
   },
   addButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.md,
     backgroundColor: 'rgba(255,255,255,0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.2)',
   },
   addButtonText: {
-    fontSize: 24,
-    color: '#60A5FA',
-    fontWeight: '300',
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#fff',
+    letterSpacing: -0.2,
   },
   cardWrapper: {
     marginHorizontal: 6,
@@ -437,14 +444,17 @@ const styles = StyleSheet.create({
   },
   emptyStateButton: {
     marginTop: 20,
-    paddingHorizontal: 20,
-    paddingVertical: 12,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
     backgroundColor: 'rgba(255,255,255,0.1)',
-    borderRadius: 10,
+    borderRadius: radius.lg,
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.2)',
   },
   emptyStateButtonText: {
     fontSize: 15,
-    color: '#60A5FA',
     fontWeight: '600',
+    color: '#fff',
+    letterSpacing: -0.2,
   },
 })

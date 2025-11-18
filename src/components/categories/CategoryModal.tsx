@@ -124,7 +124,12 @@ export function CategoryModal({
   })
 
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
+    <Modal
+      visible={visible}
+      animationType="slide"
+      presentationStyle="pageSheet"
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
+    >
       <View style={styles.container}>
         <LiquidGlassView
           effect="regular"

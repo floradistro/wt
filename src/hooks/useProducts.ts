@@ -3,6 +3,10 @@ import { supabase } from '@/lib/supabase/client'
 import { useAuth } from '@/stores/auth.store'
 import { logger } from '@/utils/logger'
 
+// Simple in-memory cache (30 seconds TTL)
+const productsCache = new Map<string, { data: any[]; timestamp: number }>()
+const CACHE_TTL = 30000 // 30 seconds
+
 export interface PricingTier {
   id: string
   label: string
@@ -82,12 +86,23 @@ export function useProducts(options: UseProductsOptions = {}) {
 
   const loadProducts = useCallback(async () => {
     try {
-      setIsLoading(true)
-      setError(null)
-
       if (!user?.email) {
         throw new Error('User not authenticated')
       }
+
+      // Check cache first
+      const cacheKey = `products-${user.email}-${options.search || ''}-${options.categoryId || ''}`
+      const cached = productsCache.get(cacheKey)
+      const now = Date.now()
+
+      if (cached && (now - cached.timestamp) < CACHE_TTL) {
+        setProducts(cached.data)
+        setIsLoading(false)
+        return
+      }
+
+      setIsLoading(true)
+      setError(null)
 
       // Get user's vendor_id
       const { data: userData, error: userError } = await supabase
@@ -191,6 +206,12 @@ export function useProducts(options: UseProductsOptions = {}) {
         })
       )
 
+      // Cache the results
+      productsCache.set(cacheKey, {
+        data: productsWithInventory,
+        timestamp: Date.now()
+      })
+
       setProducts(productsWithInventory)
       logger.info('Products loaded', { count: productsWithInventory.length })
     } catch (err) {
@@ -205,10 +226,19 @@ export function useProducts(options: UseProductsOptions = {}) {
     loadProducts()
   }, [loadProducts])
 
+  const reload = useCallback(() => {
+    // Clear cache when manually reloading
+    if (user?.email) {
+      const cacheKey = `products-${user.email}-${options.search || ''}-${options.categoryId || ''}`
+      productsCache.delete(cacheKey)
+    }
+    return loadProducts()
+  }, [user?.email, options.search, options.categoryId, loadProducts])
+
   return {
     products,
     isLoading,
     error,
-    reload: loadProducts,
+    reload,
   }
 }

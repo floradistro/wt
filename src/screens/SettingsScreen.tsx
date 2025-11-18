@@ -7,8 +7,8 @@
  * Just like iOS Settings on iPad
  */
 
-import { View, Text, StyleSheet, ScrollView, Pressable, Dimensions, ActivityIndicator, Alert, Animated } from 'react-native'
-import { memo, useState, useMemo, useRef } from 'react'
+import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Alert, Animated, TextInput } from 'react-native'
+import { memo, useState, useMemo, useRef, useEffect } from 'react'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { LiquidGlassView, LiquidGlassContainerView, isLiquidGlassSupported } from '@callstack/liquid-glass'
 import { LinearGradient } from 'expo-linear-gradient'
@@ -17,11 +17,15 @@ import { colors, typography, spacing, radius } from '@/theme/tokens'
 import { layout } from '@/theme/layout'
 import { useAuth, useAuthActions } from '@/stores/auth.store'
 import { useUserLocations, type UserLocationAccess } from '@/hooks/useUserLocations'
+import { useUsers, type UserWithLocations } from '@/hooks/useUsers'
+import { useSuppliers, type Supplier } from '@/hooks/useSuppliers'
+import { useLoyalty, type LoyaltyProgram } from '@/hooks/useLoyalty'
+import { usePaymentProcessors, type PaymentProcessor } from '@/hooks/usePaymentProcessors'
 import { runAllSentryTests, quickSentryTest } from '@/utils/test-sentry'
 import { NavSidebar, type NavItem } from '@/components/NavSidebar'
-
-const { width } = Dimensions.get('window')
-const isTablet = width > 600
+import { UserManagementModals } from '@/components/settings/UserManagementModals'
+import { SupplierManagementModals } from '@/components/settings/SupplierManagementModals'
+import { PaymentProcessorModal } from '@/components/settings/PaymentProcessorModal'
 
 // Monochrome Icons for Settings Categories
 
@@ -53,6 +57,57 @@ function DevToolsIcon({ color }: { color: string }) {
         <View style={[styles.devToolsChevron1, { borderColor: color }]} />
         <View style={[styles.devToolsChevron2, { borderColor: color }]} />
         <View style={[styles.devToolsUnderscore, { backgroundColor: color }]} />
+      </View>
+    </View>
+  )
+}
+
+function TeamIcon({ color }: { color: string }) {
+  return (
+    <View style={styles.iconContainer}>
+      {/* Two small user icons side by side */}
+      <View style={styles.teamIconContainer}>
+        <View style={[styles.teamIconUser, { borderColor: color }]}>
+          <View style={[styles.teamIconHead, { backgroundColor: color }]} />
+          <View style={[styles.teamIconBody, { borderColor: color }]} />
+        </View>
+        <View style={[styles.teamIconUser, { borderColor: color, marginLeft: -2 }]}>
+          <View style={[styles.teamIconHead, { backgroundColor: color }]} />
+          <View style={[styles.teamIconBody, { borderColor: color }]} />
+        </View>
+      </View>
+    </View>
+  )
+}
+
+function SuppliersIcon({ color }: { color: string }) {
+  return (
+    <View style={styles.iconContainer}>
+      {/* Building/warehouse icon */}
+      <View style={[styles.suppliersIconBuilding, { borderColor: color }]}>
+        <View style={[styles.suppliersIconDoor, { borderColor: color }]} />
+      </View>
+    </View>
+  )
+}
+
+function LoyaltyIcon({ color }: { color: string }) {
+  return (
+    <View style={styles.iconContainer}>
+      {/* Star icon - simple five-pointed star */}
+      <View style={[styles.loyaltyIconStar, { borderColor: color }]}>
+        <View style={[styles.loyaltyIconSparkle, { backgroundColor: color }]} />
+      </View>
+    </View>
+  )
+}
+
+function PaymentIcon({ color }: { color: string }) {
+  return (
+    <View style={styles.iconContainer}>
+      {/* Credit card icon */}
+      <View style={[styles.paymentIconCard, { borderColor: color }]}>
+        <View style={[styles.paymentIconStripe, { backgroundColor: color }]} />
       </View>
     </View>
   )
@@ -300,7 +355,514 @@ function DeveloperToolsDetail({ headerOpacity }: { headerOpacity: Animated.Value
   )
 }
 
-function LocationsDetail({ userLocations, headerOpacity }: { userLocations: UserLocationAccess[]; headerOpacity: Animated.Value }) {
+function LocationConfigurationDetail({
+  location,
+  processors,
+  processorsLoading,
+  processorsError,
+  headerOpacity,
+  onBack,
+  onCreateProcessor,
+  onUpdateProcessor,
+  onDeleteProcessor,
+  onTestConnection,
+  onSetAsDefault,
+  onToggleStatus,
+  onReload,
+}: {
+  location: UserLocationAccess
+  processors: PaymentProcessor[]
+  processorsLoading: boolean
+  processorsError: string | null
+  headerOpacity: Animated.Value
+  onBack: () => void
+  onCreateProcessor: any
+  onUpdateProcessor: any
+  onDeleteProcessor: any
+  onTestConnection: any
+  onSetAsDefault: any
+  onToggleStatus: any
+  onReload: () => void
+}) {
+  const [showAddProcessorModal, setShowAddProcessorModal] = useState(false)
+  const [editingProcessor, setEditingProcessor] = useState<PaymentProcessor | null>(null)
+  const [testingProcessorId, setTestingProcessorId] = useState<string | null>(null)
+
+  const handleAddProcessor = () => {
+    setEditingProcessor(null)
+    setShowAddProcessorModal(true)
+  }
+
+  const handleEditProcessor = (processor: PaymentProcessor) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    setEditingProcessor(processor)
+    setShowAddProcessorModal(true)
+  }
+
+  const handleTestConnection = async (processor: PaymentProcessor) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+    setTestingProcessorId(processor.id)
+
+    const result = await onTestConnection(processor.id)
+    setTestingProcessorId(null)
+
+    if (result.success) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+      Alert.alert(
+        'Test Successful ✓',
+        result.message || '$1.00 test transaction approved.\n\nTerminal is online and ready to accept payments.',
+        [{ text: 'OK', style: 'default' }]
+      )
+    } else {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
+      Alert.alert(
+        'Test Failed ✗',
+        result.error || 'Connection test failed. Please check your terminal and configuration.',
+        [{ text: 'OK', style: 'cancel' }]
+      )
+    }
+  }
+
+  const handleSetAsDefault = async (processor: PaymentProcessor) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+    const result = await onSetAsDefault(processor.id)
+    if (!result.success) {
+      Alert.alert('Error', result.error || 'Failed to set as default')
+    }
+  }
+
+  const handleToggleStatus = async (processor: PaymentProcessor) => {
+    const newStatus = !processor.is_active
+    const statusText = newStatus ? 'activate' : 'deactivate'
+
+    Alert.alert(
+      `${statusText.charAt(0).toUpperCase() + statusText.slice(1)} Processor`,
+      `Are you sure you want to ${statusText} ${processor.processor_name}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: statusText.charAt(0).toUpperCase() + statusText.slice(1),
+          onPress: async () => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+            const result = await onToggleStatus(processor.id, newStatus)
+            if (!result.success) {
+              Alert.alert('Error', result.error || 'Failed to update processor status')
+            }
+          },
+        },
+      ]
+    )
+  }
+
+  const handleDeleteProcessor = (processor: PaymentProcessor) => {
+    Alert.alert(
+      'Delete Processor',
+      `Are you sure you want to permanently delete ${processor.processor_name}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning)
+            const result = await onDeleteProcessor(processor.id)
+            if (!result.success) {
+              Alert.alert('Error', result.error || 'Failed to delete processor')
+            }
+          },
+        },
+      ]
+    )
+  }
+
+  const getProcessorTypeLabel = (type: string) => {
+    const types: Record<string, string> = {
+      dejavoo: 'Dejavoo',
+      stripe: 'Stripe',
+      square: 'Square',
+      authorizenet: 'Authorize.Net',
+      clover: 'Clover',
+    }
+    return types[type] || type
+  }
+
+  const getTestStatusColor = (status?: string | null) => {
+    if (status === 'success') return '#10b981'
+    if (status === 'failed') return '#ef4444'
+    return colors.text.quaternary
+  }
+
+  const formatAddress = () => {
+    const parts = [
+      location.location.address_line1,
+      location.location.city,
+      location.location.state,
+      location.location.postal_code,
+    ].filter(Boolean)
+    return parts.join(', ') || 'No address'
+  }
+
+  const activeProcessors = processors.filter(p => p.is_active)
+  const inactiveProcessors = processors.filter(p => !p.is_active)
+
+  return (
+    <View style={styles.detailContainer}>
+      <Animated.View style={[styles.fixedHeader, { opacity: headerOpacity }]}>
+        <Pressable onPress={onBack} style={styles.fixedHeaderButton}>
+          <Text style={styles.fixedHeaderButtonText}>‹ Back</Text>
+        </Pressable>
+        <Text style={styles.fixedHeaderTitle}>{location.location.name}</Text>
+        <View style={{ width: 70 }} />
+      </Animated.View>
+
+      <LinearGradient
+        colors={['rgba(0,0,0,0.95)', 'rgba(0,0,0,0.8)', 'rgba(0,0,0,0)']}
+        style={styles.fadeGradient}
+        pointerEvents="none"
+      />
+
+      <ScrollView
+        style={styles.detailScroll}
+        showsVerticalScrollIndicator={true}
+        indicatorStyle="white"
+        scrollIndicatorInsets={{ right: 2, top: 100, bottom: layout.dockHeight }}
+        contentContainerStyle={{ paddingTop: 100, paddingBottom: layout.dockHeight, paddingRight: layout.containerMargin }}
+        onScroll={(e) => {
+          const offsetY = e.nativeEvent.contentOffset.y
+          const threshold = 40
+          headerOpacity.setValue(offsetY > threshold ? 1 : 0)
+        }}
+        scrollEventThrottle={16}
+      >
+        <View style={[styles.cardWrapper, styles.titleRow]}>
+          <Pressable
+            onPress={onBack}
+            style={[styles.addButton, { backgroundColor: colors.glass.regular }]}
+            accessible={true}
+            accessibilityRole="button"
+            accessibilityLabel="Back to locations"
+          >
+            <Text style={[styles.addButtonText, { color: colors.text.secondary }]}>‹ Locations</Text>
+          </Pressable>
+          <Text style={styles.detailTitle}>{location.location.name}</Text>
+        </View>
+
+        {/* Location Info */}
+        <Text style={[styles.cardSectionTitle, { marginTop: spacing.lg }]}>STORE INFORMATION</Text>
+        <LiquidGlassContainerView spacing={12} style={styles.cardWrapper}>
+          <LiquidGlassView
+            interactive
+            style={[styles.detailCard, !isLiquidGlassSupported && styles.cardFallback]}
+          >
+            <View style={{ padding: spacing.md, gap: spacing.sm }}>
+              <Text style={styles.formLabel}>ADDRESS</Text>
+              <Text style={styles.locationConfigValue}>{formatAddress()}</Text>
+              {location.location.phone && (
+                <>
+                  <Text style={[styles.formLabel, { marginTop: spacing.md }]}>PHONE</Text>
+                  <Text style={styles.locationConfigValue}>{location.location.phone}</Text>
+                </>
+              )}
+              {location.location.tax_rate !== undefined && location.location.tax_rate !== null && (
+                <>
+                  <Text style={[styles.formLabel, { marginTop: spacing.md }]}>TAX RATE</Text>
+                  <Text style={styles.locationConfigValue}>
+                    {(location.location.tax_rate * 100).toFixed(2)}% {location.location.tax_name || 'Sales Tax'}
+                  </Text>
+                </>
+              )}
+            </View>
+          </LiquidGlassView>
+        </LiquidGlassContainerView>
+
+        {/* Payment Processors Section */}
+        <Text style={[styles.cardSectionTitle, { marginTop: spacing.xl }]}>PAYMENT PROCESSORS</Text>
+
+        {processorsLoading ? (
+          <View style={{ paddingVertical: spacing.xl, alignItems: 'center' }}>
+            <ActivityIndicator color={colors.text.tertiary} />
+            <Text style={{ ...typography.footnote, color: colors.text.tertiary, marginTop: spacing.sm }}>
+              Loading processors...
+            </Text>
+          </View>
+        ) : processorsError ? (
+          <View style={styles.cardWrapper}>
+            <LiquidGlassView
+              interactive
+              style={[styles.detailCard, !isLiquidGlassSupported && styles.cardFallback]}
+            >
+              <View style={{ padding: spacing.xl, alignItems: 'center', gap: spacing.sm }}>
+                <Text style={[styles.emptyStateText, { fontSize: 15, color: '#ef4444' }]}>Error loading processors</Text>
+                <Text style={{ ...typography.footnote, color: colors.text.tertiary, textAlign: 'center' }}>
+                  {processorsError}
+                </Text>
+                <Pressable
+                  onPress={onReload}
+                  style={[styles.addButton, { marginTop: spacing.sm }]}
+                >
+                  <Text style={styles.addButtonText}>Retry</Text>
+                </Pressable>
+              </View>
+            </LiquidGlassView>
+          </View>
+        ) : activeProcessors.length === 0 ? (
+          <View style={styles.cardWrapper}>
+            <LiquidGlassView
+              interactive
+              style={[styles.detailCard, !isLiquidGlassSupported && styles.cardFallback]}
+            >
+              <View style={{ padding: spacing.xl, alignItems: 'center', gap: spacing.sm }}>
+                <PaymentIcon color={colors.text.quaternary} />
+                <Text style={[styles.emptyStateText, { fontSize: 15 }]}>No processors configured</Text>
+                <Pressable
+                  onPress={handleAddProcessor}
+                  style={[styles.addButton, { marginTop: spacing.sm }]}
+                >
+                  <Text style={styles.addButtonText}>Add Processor</Text>
+                </Pressable>
+              </View>
+            </LiquidGlassView>
+          </View>
+        ) : (
+          <>
+            <View style={[styles.cardWrapper, styles.titleRow]}>
+              <Text style={{ ...typography.body, color: colors.text.secondary }}>
+                {activeProcessors.length} active
+              </Text>
+              <Pressable onPress={handleAddProcessor} style={styles.addButton}>
+                <Text style={styles.addButtonText}>Add Processor</Text>
+              </Pressable>
+            </View>
+
+            {activeProcessors.map((processor) => {
+              const isTesting = testingProcessorId === processor.id
+              const lastTestDate = processor.last_tested_at ? new Date(processor.last_tested_at) : null
+              const testStatus = processor.last_test_status
+
+              return (
+                <LiquidGlassContainerView key={processor.id} spacing={12} style={styles.cardWrapper}>
+                  <LiquidGlassView
+                    interactive
+                    style={[styles.detailCard, !isLiquidGlassSupported && styles.cardFallback]}
+                  >
+                    <View style={{ padding: spacing.md }}>
+                      {/* Header with name and badges */}
+                      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.sm }}>
+                        <View style={{ flex: 1, gap: spacing.xs }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.xs, flexWrap: 'wrap' }}>
+                            <Text style={styles.supplierCardName}>{processor.processor_name}</Text>
+                            {processor.is_default && (
+                              <View style={{ paddingHorizontal: 6, paddingVertical: 2, backgroundColor: '#60A5FA20', borderRadius: radius.xs }}>
+                                <Text style={{ ...typography.caption2, color: '#60A5FA', fontWeight: '600' }}>DEFAULT</Text>
+                              </View>
+                            )}
+                            {testStatus && (
+                              <View style={{ paddingHorizontal: 6, paddingVertical: 2, backgroundColor: testStatus === 'success' ? '#10b98120' : '#ef444420', borderRadius: radius.xs }}>
+                                <Text style={{ ...typography.caption2, color: testStatus === 'success' ? '#10b981' : '#ef4444', fontWeight: '600' }}>
+                                  {testStatus === 'success' ? '● ONLINE' : '● OFFLINE'}
+                                </Text>
+                              </View>
+                            )}
+                          </View>
+                          <Text style={{ ...typography.footnote, color: colors.text.tertiary }}>
+                            {getProcessorTypeLabel(processor.processor_type)} • {processor.environment === 'production' ? 'Production' : 'Sandbox'}
+                          </Text>
+                        </View>
+                      </View>
+
+                      {/* Test status details */}
+                      {lastTestDate && (
+                        <View style={{
+                          paddingVertical: spacing.sm,
+                          paddingHorizontal: spacing.sm,
+                          backgroundColor: colors.glass.subtle,
+                          borderRadius: radius.md,
+                          marginBottom: spacing.md,
+                          borderLeftWidth: 3,
+                          borderLeftColor: getTestStatusColor(testStatus)
+                        }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <View style={{ flex: 1 }}>
+                              <Text style={{ ...typography.caption2, color: colors.text.tertiary, textTransform: 'uppercase', marginBottom: 2 }}>
+                                Last Test
+                              </Text>
+                              <Text style={{ ...typography.footnote, color: colors.text.secondary }}>
+                                {lastTestDate.toLocaleDateString()} at {lastTestDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              </Text>
+                            </View>
+                            <Text style={{ ...typography.headline, color: getTestStatusColor(testStatus), fontWeight: '600' }}>
+                              {testStatus === 'success' ? '✓' : '✗'}
+                            </Text>
+                          </View>
+                          {processor.last_test_error && testStatus === 'failed' && (
+                            <Text style={{ ...typography.footnote, color: '#ef4444', marginTop: spacing.xs }}>
+                              {processor.last_test_error}
+                            </Text>
+                          )}
+                        </View>
+                      )}
+
+                      {/* Action buttons */}
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs }}>
+                        <Pressable
+                          onPress={() => handleTestConnection(processor)}
+                          disabled={isTesting}
+                          style={[
+                            styles.userActionButton,
+                            {
+                              backgroundColor: isTesting ? colors.glass.subtle : '#60A5FA20',
+                              borderWidth: 1,
+                              borderColor: isTesting ? colors.border.subtle : '#60A5FA40',
+                            }
+                          ]}
+                        >
+                          <Text style={[styles.userActionButtonText, { color: isTesting ? colors.text.tertiary : '#60A5FA', fontWeight: '600' }]}>
+                            {isTesting ? 'Testing...' : 'Send Test $1.00'}
+                          </Text>
+                        </Pressable>
+                        {!processor.is_default && (
+                          <Pressable
+                            onPress={() => handleSetAsDefault(processor)}
+                            style={styles.userActionButton}
+                          >
+                            <Text style={styles.userActionButtonText}>Set Default</Text>
+                          </Pressable>
+                        )}
+                        <Pressable
+                          onPress={() => handleEditProcessor(processor)}
+                          style={styles.userActionButton}
+                        >
+                          <Text style={styles.userActionButtonText}>Edit</Text>
+                        </Pressable>
+                        <Pressable
+                          onPress={() => handleToggleStatus(processor)}
+                          style={styles.userActionButton}
+                        >
+                          <Text style={styles.userActionButtonText}>Deactivate</Text>
+                        </Pressable>
+                        <Pressable
+                          onPress={() => handleDeleteProcessor(processor)}
+                          style={[styles.userActionButton, styles.userActionButtonDanger]}
+                        >
+                          <Text style={styles.userActionButtonDangerText}>Delete</Text>
+                        </Pressable>
+                      </View>
+                    </View>
+                  </LiquidGlassView>
+                </LiquidGlassContainerView>
+              )
+            })}
+
+            {inactiveProcessors.length > 0 && (
+              <>
+                <Text style={[styles.cardSectionTitle, { marginTop: spacing.xl }]}>INACTIVE</Text>
+                {inactiveProcessors.map((processor) => (
+                  <LiquidGlassContainerView key={processor.id} spacing={12} style={styles.cardWrapper}>
+                    <LiquidGlassView
+                      interactive
+                      style={[styles.detailCard, !isLiquidGlassSupported && styles.cardFallback, { opacity: 0.5 }]}
+                    >
+                      <View style={styles.supplierCard}>
+                        <View style={styles.supplierCardHeader}>
+                          <View style={styles.supplierCardInfo}>
+                            <Text style={styles.supplierCardName}>{processor.processor_name}</Text>
+                            <Text style={styles.supplierCardEmail}>
+                              {getProcessorTypeLabel(processor.processor_type)} • {processor.environment}
+                            </Text>
+                          </View>
+                        </View>
+
+                        <View style={styles.supplierCardActions}>
+                          <Pressable
+                            onPress={() => handleToggleStatus(processor)}
+                            style={styles.userActionButton}
+                          >
+                            <Text style={styles.userActionButtonText}>Activate</Text>
+                          </Pressable>
+                          <Pressable
+                            onPress={() => handleDeleteProcessor(processor)}
+                            style={[styles.userActionButton, styles.userActionButtonDanger]}
+                          >
+                            <Text style={styles.userActionButtonDangerText}>Delete</Text>
+                          </Pressable>
+                        </View>
+                      </View>
+                    </LiquidGlassView>
+                  </LiquidGlassContainerView>
+                ))}
+              </>
+            )}
+          </>
+        )}
+      </ScrollView>
+
+      <PaymentProcessorModal
+        visible={showAddProcessorModal}
+        processor={editingProcessor}
+        locationId={location.location.id}
+        onClose={() => {
+          setShowAddProcessorModal(false)
+          setEditingProcessor(null)
+        }}
+        onCreate={onCreateProcessor}
+        onUpdate={onUpdateProcessor}
+      />
+    </View>
+  )
+}
+
+function LocationsDetail({
+  userLocations,
+  headerOpacity,
+  paymentProcessors,
+  processorsLoading,
+  processorsError,
+  createProcessor,
+  updateProcessor,
+  deleteProcessor,
+  testConnection,
+  setAsDefault,
+  toggleProcessorStatus,
+  reloadProcessors,
+}: {
+  userLocations: UserLocationAccess[]
+  headerOpacity: Animated.Value
+  paymentProcessors: PaymentProcessor[]
+  processorsLoading: boolean
+  processorsError: string | null
+  createProcessor: any
+  updateProcessor: any
+  deleteProcessor: any
+  testConnection: any
+  setAsDefault: any
+  toggleProcessorStatus: any
+  reloadProcessors: () => void
+}) {
+  const [selectedLocation, setSelectedLocation] = useState<UserLocationAccess | null>(null)
+
+  // If location selected, show detailed view
+  if (selectedLocation) {
+    const locationProcessors = paymentProcessors.filter(p => p.location_id === selectedLocation.location.id)
+
+    return (
+      <LocationConfigurationDetail
+        location={selectedLocation}
+        processors={locationProcessors}
+        processorsLoading={processorsLoading}
+        processorsError={processorsError}
+        headerOpacity={headerOpacity}
+        onBack={() => setSelectedLocation(null)}
+        onCreateProcessor={createProcessor}
+        onUpdateProcessor={updateProcessor}
+        onDeleteProcessor={deleteProcessor}
+        onTestConnection={testConnection}
+        onSetAsDefault={setAsDefault}
+        onToggleStatus={toggleProcessorStatus}
+        onReload={reloadProcessors}
+      />
+    )
+  }
+
   const getRoleDisplay = (role: string) => {
     const roleMap: Record<string, string> = {
       owner: 'Owner • Full Access',
@@ -383,6 +945,7 @@ function LocationsDetail({ userLocations, headerOpacity }: { userLocations: User
                 <Pressable
                   onPress={() => {
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                    setSelectedLocation(userLocation)
                   }}
                   style={styles.locationCard}
                   accessible={true}
@@ -436,14 +999,1520 @@ function DetailRow({
   )
 }
 
+function UserManagementDetail({
+  users,
+  isLoading,
+  headerOpacity,
+  onCreateUser,
+  onUpdateUser,
+  onDeleteUser,
+  onSetPassword,
+  onAssignLocations,
+  onToggleStatus,
+  onReload,
+  locations,
+}: {
+  users: UserWithLocations[]
+  isLoading: boolean
+  headerOpacity: Animated.Value
+  onCreateUser: any
+  onUpdateUser: any
+  onDeleteUser: any
+  onSetPassword: any
+  onAssignLocations: any
+  onToggleStatus: any
+  onReload: () => void
+  locations: UserLocationAccess[]
+}) {
+  const [showAddModal, setShowAddModal] = useState(false)
+  const [editingUser, setEditingUser] = useState<UserWithLocations | null>(null)
+  const [showPasswordModal, setShowPasswordModal] = useState(false)
+  const [showLocationsModal, setShowLocationsModal] = useState(false)
+  const [selectedUser, setSelectedUser] = useState<UserWithLocations | null>(null)
+
+  const getRoleDisplay = (role: string) => {
+    const roleMap: Record<string, string> = {
+      vendor_owner: 'Owner',
+      vendor_admin: 'Admin',
+      location_manager: 'Location Manager',
+      pos_staff: 'POS Staff',
+      inventory_staff: 'Inventory',
+      readonly: 'Read Only',
+    }
+    return roleMap[role] || role
+  }
+
+  const getRoleBadgeColor = (): string => {
+    // Professional monochrome - no colors
+    return colors.text.quaternary
+  }
+
+  const handleAddUser = () => {
+    setEditingUser(null)
+    setShowAddModal(true)
+  }
+
+  const handleEditUser = (user: UserWithLocations) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    setEditingUser(user)
+    setShowAddModal(true)
+  }
+
+  const handleSetPassword = (user: UserWithLocations) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    setSelectedUser(user)
+    setShowPasswordModal(true)
+  }
+
+  const handleAssignLocations = (user: UserWithLocations) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    setSelectedUser(user)
+    setShowLocationsModal(true)
+  }
+
+  const handleToggleStatus = async (user: UserWithLocations) => {
+    const newStatus = user.status === 'active' ? 'inactive' : 'active'
+    const statusText = newStatus === 'active' ? 'activate' : 'deactivate'
+
+    Alert.alert(
+      `${statusText.charAt(0).toUpperCase() + statusText.slice(1)} User`,
+      `Are you sure you want to ${statusText} ${user.first_name} ${user.last_name}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: statusText.charAt(0).toUpperCase() + statusText.slice(1),
+          onPress: async () => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+            const result = await onToggleStatus(user.id, newStatus)
+            if (!result.success) {
+              Alert.alert('Error', result.error || 'Failed to update user status')
+            }
+          },
+        },
+      ]
+    )
+  }
+
+  const handleDeleteUser = (user: UserWithLocations) => {
+    Alert.alert(
+      'Delete User',
+      `Are you sure you want to delete ${user.first_name} ${user.last_name}? This cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning)
+            const result = await onDeleteUser(user.id)
+            if (!result.success) {
+              Alert.alert('Error', result.error || 'Failed to delete user')
+            }
+          },
+        },
+      ]
+    )
+  }
+
+  if (isLoading) {
+    return (
+      <View style={styles.detailContainer}>
+        <View style={[styles.emptyState, { paddingTop: 100 }]}>
+          <ActivityIndicator color={colors.text.tertiary} />
+          <Text style={[styles.emptyStateText, { marginTop: spacing.md }]}>Loading team...</Text>
+        </View>
+      </View>
+    )
+  }
+
+  if (users.length === 0) {
+    return (
+      <View style={styles.detailContainer}>
+        {/* Fixed Header */}
+        <Animated.View style={[styles.fixedHeader, { opacity: headerOpacity }]}>
+          <Text style={styles.fixedHeaderTitle}>Team</Text>
+        </Animated.View>
+
+        {/* Fade Gradient */}
+        <LinearGradient
+          colors={['rgba(0,0,0,0.95)', 'rgba(0,0,0,0.8)', 'rgba(0,0,0,0)']}
+          style={styles.fadeGradient}
+          pointerEvents="none"
+        />
+
+        <ScrollView
+          style={styles.detailScroll}
+          showsVerticalScrollIndicator={true}
+          indicatorStyle="white"
+          scrollIndicatorInsets={{ right: 2, top: 100, bottom: layout.dockHeight }}
+          contentContainerStyle={{ paddingTop: 100, paddingBottom: layout.dockHeight, paddingRight: layout.containerMargin }}
+        >
+          <View style={styles.cardWrapper}>
+            <Text style={styles.detailTitle}>Team</Text>
+          </View>
+
+          <View style={[styles.emptyState, { paddingTop: spacing.xxxl }]}>
+            <View style={styles.emptyStateIcon}>
+              <TeamIcon color={colors.text.quaternary} />
+            </View>
+            <Text style={styles.emptyStateText}>No team members yet</Text>
+            <Text style={styles.emptyStateSubtext}>Add users to manage your team</Text>
+            <Pressable
+              onPress={handleAddUser}
+              style={styles.addButton}
+              accessible={true}
+              accessibilityRole="button"
+              accessibilityLabel="Add first team member"
+            >
+              <Text style={styles.addButtonText}>Add User</Text>
+            </Pressable>
+          </View>
+        </ScrollView>
+
+        <UserManagementModals
+          showAddModal={showAddModal}
+          showPasswordModal={showPasswordModal}
+          showLocationsModal={showLocationsModal}
+          editingUser={editingUser}
+          selectedUser={selectedUser}
+          locations={locations}
+          onCloseAddModal={() => {
+            setShowAddModal(false)
+            setEditingUser(null)
+          }}
+          onClosePasswordModal={() => {
+            setShowPasswordModal(false)
+            setSelectedUser(null)
+          }}
+          onCloseLocationsModal={() => {
+            setShowLocationsModal(false)
+            setSelectedUser(null)
+          }}
+          onCreateUser={onCreateUser}
+          onUpdateUser={onUpdateUser}
+          onSetPassword={onSetPassword}
+          onAssignLocations={onAssignLocations}
+          onReload={onReload}
+        />
+      </View>
+    )
+  }
+
+  return (
+    <View style={styles.detailContainer}>
+      {/* Fixed Header */}
+      <Animated.View style={[styles.fixedHeader, { opacity: headerOpacity }]}>
+        <Text style={styles.fixedHeaderTitle}>Team</Text>
+        <Pressable
+          onPress={handleAddUser}
+          style={styles.fixedHeaderButton}
+          accessible={true}
+          accessibilityRole="button"
+          accessibilityLabel="Add new team member"
+        >
+          <Text style={styles.fixedHeaderButtonText}>+</Text>
+        </Pressable>
+      </Animated.View>
+
+      {/* Fade Gradient */}
+      <LinearGradient
+        colors={['rgba(0,0,0,0.95)', 'rgba(0,0,0,0.8)', 'rgba(0,0,0,0)']}
+        style={styles.fadeGradient}
+        pointerEvents="none"
+      />
+
+      <ScrollView
+        style={styles.detailScroll}
+        showsVerticalScrollIndicator={true}
+        indicatorStyle="white"
+        scrollIndicatorInsets={{ right: 2, top: 100, bottom: layout.dockHeight }}
+        contentContainerStyle={{ paddingTop: 100, paddingBottom: layout.dockHeight, paddingRight: layout.containerMargin }}
+        onScroll={(e) => {
+          const offsetY = e.nativeEvent.contentOffset.y
+          const threshold = 40
+          headerOpacity.setValue(offsetY > threshold ? 1 : 0)
+        }}
+        scrollEventThrottle={16}
+      >
+        {/* Large Title */}
+        <View style={[styles.cardWrapper, styles.titleRow]}>
+          <Text style={styles.detailTitle}>Team</Text>
+          <Pressable
+            onPress={handleAddUser}
+            style={styles.addButton}
+            accessible={true}
+            accessibilityRole="button"
+            accessibilityLabel="Add new team member"
+          >
+            <Text style={styles.addButtonText}>Add User</Text>
+          </Pressable>
+        </View>
+
+        {/* User Cards */}
+        {users.map((user) => {
+          const roleBadgeColor = getRoleBadgeColor()
+
+          return (
+            <LiquidGlassContainerView key={user.id} spacing={12} style={styles.cardWrapper}>
+              <LiquidGlassView
+                effect="regular"
+                colorScheme="dark"
+                interactive
+                style={[styles.detailCard, !isLiquidGlassSupported && styles.cardFallback]}
+              >
+                <View style={styles.userCard}>
+                  {/* User Info */}
+                  <View style={styles.userCardHeader}>
+                    <View style={styles.userAvatar}>
+                      <Text style={styles.userAvatarText}>
+                        {user.first_name[0]}{user.last_name[0]}
+                      </Text>
+                    </View>
+                    <View style={styles.userCardInfo}>
+                      <View style={styles.userCardTitleRow}>
+                        <Text style={styles.userCardName}>
+                          {user.first_name} {user.last_name}
+                        </Text>
+                        {user.status !== 'active' && (
+                          <View style={styles.inactiveBadge}>
+                            <Text style={styles.inactiveBadgeText}>INACTIVE</Text>
+                          </View>
+                        )}
+                      </View>
+                      <Text style={styles.userCardEmail}>{user.email}</Text>
+                      {user.phone && (
+                        <Text style={styles.userCardPhone}>{user.phone}</Text>
+                      )}
+                    </View>
+                    <View style={[styles.roleBadge, { backgroundColor: roleBadgeColor + '20', borderColor: roleBadgeColor + '40' }]}>
+                      <Text style={[styles.roleBadgeText, { color: roleBadgeColor }]}>
+                        {getRoleDisplay(user.role)}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {/* Location Count */}
+                  {user.location_count > 0 && (
+                    <View style={styles.userCardMeta}>
+                      <Text style={styles.userCardMetaText}>
+                        {user.location_count} {user.location_count === 1 ? 'location' : 'locations'}
+                      </Text>
+                    </View>
+                  )}
+
+                  {/* Actions */}
+                  <View style={styles.userCardActions}>
+                    <Pressable
+                      onPress={() => handleEditUser(user)}
+                      style={styles.userActionButton}
+                      accessible={true}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Edit ${user.first_name} ${user.last_name}`}
+                    >
+                      <Text style={styles.userActionButtonText}>Edit</Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => handleSetPassword(user)}
+                      style={styles.userActionButton}
+                      accessible={true}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Set password for ${user.first_name} ${user.last_name}`}
+                    >
+                      <Text style={styles.userActionButtonText}>Password</Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => handleAssignLocations(user)}
+                      style={styles.userActionButton}
+                      accessible={true}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Assign locations to ${user.first_name} ${user.last_name}`}
+                    >
+                      <Text style={styles.userActionButtonText}>Locations</Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => handleToggleStatus(user)}
+                      style={styles.userActionButton}
+                      accessible={true}
+                      accessibilityRole="button"
+                      accessibilityLabel={user.status === 'active' ? `Deactivate ${user.first_name} ${user.last_name}` : `Activate ${user.first_name} ${user.last_name}`}
+                    >
+                      <Text style={styles.userActionButtonText}>
+                        {user.status === 'active' ? 'Deactivate' : 'Activate'}
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => handleDeleteUser(user)}
+                      style={[styles.userActionButton, styles.userActionButtonDanger]}
+                      accessible={true}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Delete ${user.first_name} ${user.last_name}`}
+                    >
+                      <Text style={styles.userActionButtonDangerText}>Delete</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              </LiquidGlassView>
+            </LiquidGlassContainerView>
+          )
+        })}
+      </ScrollView>
+
+      <UserManagementModals
+        showAddModal={showAddModal}
+        showPasswordModal={showPasswordModal}
+        showLocationsModal={showLocationsModal}
+        editingUser={editingUser}
+        selectedUser={selectedUser}
+        locations={locations}
+        onCloseAddModal={() => {
+          setShowAddModal(false)
+          setEditingUser(null)
+        }}
+        onClosePasswordModal={() => {
+          setShowPasswordModal(false)
+          setSelectedUser(null)
+        }}
+        onCloseLocationsModal={() => {
+          setShowLocationsModal(false)
+          setSelectedUser(null)
+        }}
+        onCreateUser={onCreateUser}
+        onUpdateUser={onUpdateUser}
+        onSetPassword={onSetPassword}
+        onAssignLocations={onAssignLocations}
+        onReload={onReload}
+      />
+    </View>
+  )
+}
+
+function SupplierManagementDetail({
+  suppliers,
+  isLoading,
+  headerOpacity,
+  onCreateSupplier,
+  onUpdateSupplier,
+  onDeleteSupplier,
+  onToggleStatus,
+  onReload,
+}: {
+  suppliers: Supplier[]
+  isLoading: boolean
+  headerOpacity: Animated.Value
+  onCreateSupplier: any
+  onUpdateSupplier: any
+  onDeleteSupplier: any
+  onToggleStatus: any
+  onReload: () => void
+}) {
+  const [showAddModal, setShowAddModal] = useState(false)
+  const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null)
+  const [selectedSupplier, setSelectedSupplier] = useState<Supplier | null>(null)
+
+  const handleAddSupplier = () => {
+    setEditingSupplier(null)
+    setShowAddModal(true)
+  }
+
+  const handleEditSupplier = (supplier: Supplier) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    setEditingSupplier(supplier)
+    setShowAddModal(true)
+  }
+
+  const handleToggleStatus = async (supplier: Supplier) => {
+    const newStatus = !supplier.is_active
+    const statusText = newStatus ? 'activate' : 'deactivate'
+
+    Alert.alert(
+      `${statusText.charAt(0).toUpperCase() + statusText.slice(1)} Supplier`,
+      `Are you sure you want to ${statusText} ${supplier.external_name}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: statusText.charAt(0).toUpperCase() + statusText.slice(1),
+          onPress: async () => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+            const result = await onToggleStatus(supplier.id, newStatus)
+            if (!result.success) {
+              Alert.alert('Error', result.error || 'Failed to update supplier status')
+            }
+          },
+        },
+      ]
+    )
+  }
+
+  const handleDeleteSupplier = (supplier: Supplier) => {
+    Alert.alert(
+      'Delete Supplier',
+      `Are you sure you want to permanently delete ${supplier.external_name}? This action cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning)
+            const result = await onDeleteSupplier(supplier.id)
+            if (!result.success) {
+              Alert.alert('Error', result.error || 'Failed to delete supplier')
+            }
+          },
+        },
+      ]
+    )
+  }
+
+  if (isLoading) {
+    return (
+      <View style={styles.detailContainer}>
+        <View style={[styles.emptyState, { paddingTop: 100 }]}>
+          <ActivityIndicator color={colors.text.tertiary} />
+          <Text style={[styles.emptyStateText, { marginTop: spacing.md }]}>Loading suppliers...</Text>
+        </View>
+      </View>
+    )
+  }
+
+  if (suppliers.length === 0) {
+    return (
+      <View style={styles.detailContainer}>
+        <Animated.View style={[styles.fixedHeader, { opacity: headerOpacity }]}>
+          <Text style={styles.fixedHeaderTitle}>Suppliers</Text>
+        </Animated.View>
+
+        <LinearGradient
+          colors={['rgba(0,0,0,0.95)', 'rgba(0,0,0,0.8)', 'rgba(0,0,0,0)']}
+          style={styles.fadeGradient}
+          pointerEvents="none"
+        />
+
+        <ScrollView
+          style={styles.detailScroll}
+          showsVerticalScrollIndicator={true}
+          indicatorStyle="white"
+          scrollIndicatorInsets={{ right: 2, top: 100, bottom: layout.dockHeight }}
+          contentContainerStyle={{ paddingTop: 100, paddingBottom: layout.dockHeight, paddingRight: layout.containerMargin }}
+        >
+          <View style={styles.cardWrapper}>
+            <Text style={styles.detailTitle}>Suppliers</Text>
+          </View>
+
+          <View style={[styles.emptyState, { paddingTop: spacing.xxxl }]}>
+            <View style={styles.emptyStateIcon}>
+              <SuppliersIcon color={colors.text.quaternary} />
+            </View>
+            <Text style={styles.emptyStateText}>No suppliers yet</Text>
+            <Text style={styles.emptyStateSubtext}>Add suppliers for purchasing inventory</Text>
+            <Pressable
+              onPress={handleAddSupplier}
+              style={styles.addButton}
+              accessible={true}
+              accessibilityRole="button"
+              accessibilityLabel="Add first supplier"
+            >
+              <Text style={styles.addButtonText}>Add Supplier</Text>
+            </Pressable>
+          </View>
+        </ScrollView>
+
+        <SupplierManagementModals
+          showAddModal={showAddModal}
+          editingSupplier={editingSupplier}
+          onCloseAddModal={() => {
+            setShowAddModal(false)
+            setEditingSupplier(null)
+          }}
+          onCreateSupplier={onCreateSupplier}
+          onUpdateSupplier={onUpdateSupplier}
+          onReload={onReload}
+        />
+      </View>
+    )
+  }
+
+  const activeSuppliers = suppliers.filter(s => s.is_active)
+  const inactiveSuppliers = suppliers.filter(s => !s.is_active)
+
+  return (
+    <View style={styles.detailContainer}>
+      <Animated.View style={[styles.fixedHeader, { opacity: headerOpacity }]}>
+        <Text style={styles.fixedHeaderTitle}>Suppliers</Text>
+        <Pressable
+          onPress={handleAddSupplier}
+          style={styles.fixedHeaderButton}
+          accessible={true}
+          accessibilityRole="button"
+          accessibilityLabel="Add new supplier"
+        >
+          <Text style={styles.fixedHeaderButtonText}>+</Text>
+        </Pressable>
+      </Animated.View>
+
+      <LinearGradient
+        colors={['rgba(0,0,0,0.95)', 'rgba(0,0,0,0.8)', 'rgba(0,0,0,0)']}
+        style={styles.fadeGradient}
+        pointerEvents="none"
+      />
+
+      <ScrollView
+        style={styles.detailScroll}
+        showsVerticalScrollIndicator={true}
+        indicatorStyle="white"
+        scrollIndicatorInsets={{ right: 2, top: 100, bottom: layout.dockHeight }}
+        contentContainerStyle={{ paddingTop: 100, paddingBottom: layout.dockHeight, paddingRight: layout.containerMargin }}
+        onScroll={(e) => {
+          const offsetY = e.nativeEvent.contentOffset.y
+          const threshold = 40
+          headerOpacity.setValue(offsetY > threshold ? 1 : 0)
+        }}
+        scrollEventThrottle={16}
+      >
+        <View style={[styles.cardWrapper, styles.titleRow]}>
+          <Text style={styles.detailTitle}>Suppliers</Text>
+          <Pressable
+            onPress={handleAddSupplier}
+            style={styles.addButton}
+            accessible={true}
+            accessibilityRole="button"
+            accessibilityLabel="Add new supplier"
+          >
+            <Text style={styles.addButtonText}>Add Supplier</Text>
+          </Pressable>
+        </View>
+
+        {/* Active Suppliers */}
+        {activeSuppliers.map((supplier) => (
+          <LiquidGlassContainerView key={supplier.id} spacing={12} style={styles.cardWrapper}>
+            <LiquidGlassView
+              effect="regular"
+              colorScheme="dark"
+              interactive
+              style={[styles.detailCard, !isLiquidGlassSupported && styles.cardFallback]}
+            >
+              <View style={styles.supplierCard}>
+                <View style={styles.supplierCardHeader}>
+                  <View style={styles.supplierCardInfo}>
+                    <Text style={styles.supplierCardName}>{supplier.external_name}</Text>
+                    {supplier.contact_name && (
+                      <Text style={styles.supplierCardContact}>{supplier.contact_name}</Text>
+                    )}
+                    {supplier.contact_email && (
+                      <Text style={styles.supplierCardEmail}>{supplier.contact_email}</Text>
+                    )}
+                    {supplier.contact_phone && (
+                      <Text style={styles.supplierCardPhone}>{supplier.contact_phone}</Text>
+                    )}
+                    {supplier.address && (
+                      <Text style={styles.supplierCardAddress}>{supplier.address}</Text>
+                    )}
+                  </View>
+                </View>
+
+                <View style={styles.supplierCardActions}>
+                  <Pressable
+                    onPress={() => handleEditSupplier(supplier)}
+                    style={styles.userActionButton}
+                    accessible={true}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Edit ${supplier.external_name}`}
+                  >
+                    <Text style={styles.userActionButtonText}>Edit</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => handleToggleStatus(supplier)}
+                    style={styles.userActionButton}
+                    accessible={true}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Deactivate ${supplier.external_name}`}
+                  >
+                    <Text style={styles.userActionButtonText}>Deactivate</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => handleDeleteSupplier(supplier)}
+                    style={[styles.userActionButton, styles.userActionButtonDanger]}
+                    accessible={true}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Delete ${supplier.external_name}`}
+                  >
+                    <Text style={styles.userActionButtonDangerText}>Delete</Text>
+                  </Pressable>
+                </View>
+              </View>
+            </LiquidGlassView>
+          </LiquidGlassContainerView>
+        ))}
+
+        {/* Inactive Suppliers */}
+        {inactiveSuppliers.length > 0 && (
+          <>
+            <View style={styles.cardWrapper}>
+              <Text style={styles.sectionLabel}>INACTIVE</Text>
+            </View>
+            {inactiveSuppliers.map((supplier) => (
+              <LiquidGlassContainerView key={supplier.id} spacing={12} style={styles.cardWrapper}>
+                <LiquidGlassView
+                  effect="regular"
+                  colorScheme="dark"
+                  interactive
+                  style={[styles.detailCard, !isLiquidGlassSupported && styles.cardFallback, { opacity: 0.5 }]}
+                >
+                  <View style={styles.supplierCard}>
+                    <View style={styles.supplierCardHeader}>
+                      <View style={styles.supplierCardInfo}>
+                        <Text style={styles.supplierCardName}>{supplier.external_name}</Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.supplierCardActions}>
+                      <Pressable
+                        onPress={() => handleToggleStatus(supplier)}
+                        style={styles.userActionButton}
+                        accessible={true}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Activate ${supplier.external_name}`}
+                      >
+                        <Text style={styles.userActionButtonText}>Activate</Text>
+                      </Pressable>
+                      <Pressable
+                        onPress={() => handleDeleteSupplier(supplier)}
+                        style={[styles.userActionButton, styles.userActionButtonDanger]}
+                        accessible={true}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Delete ${supplier.external_name}`}
+                      >
+                        <Text style={styles.userActionButtonDangerText}>Delete</Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                </LiquidGlassView>
+              </LiquidGlassContainerView>
+            ))}
+          </>
+        )}
+      </ScrollView>
+
+      <SupplierManagementModals
+        showAddModal={showAddModal}
+        editingSupplier={editingSupplier}
+        onCloseAddModal={() => {
+          setShowAddModal(false)
+          setEditingSupplier(null)
+        }}
+        onCreateSupplier={onCreateSupplier}
+        onUpdateSupplier={onUpdateSupplier}
+        onReload={onReload}
+      />
+    </View>
+  )
+}
+
+function LoyaltyManagementDetail({
+  program,
+  isLoading,
+  headerOpacity,
+  onCreateProgram,
+  onUpdateProgram,
+  onToggleStatus,
+}: {
+  program: LoyaltyProgram | null
+  isLoading: boolean
+  headerOpacity: Animated.Value
+  onCreateProgram: any
+  onUpdateProgram: any
+  onToggleStatus: any
+}) {
+  const [isEditing, setIsEditing] = useState(false)
+  const [formData, setFormData] = useState({
+    name: 'Loyalty Rewards',
+    points_per_dollar: '1.00',
+    point_value: '0.01',
+    min_redemption_points: '100',
+    points_expiry_days: '365',
+  })
+
+  // Initialize form when program loads
+  useEffect(() => {
+    if (program) {
+      setFormData({
+        name: program.name || 'Loyalty Rewards',
+        points_per_dollar: program.points_per_dollar.toString(),
+        point_value: program.point_value.toString(),
+        min_redemption_points: program.min_redemption_points.toString(),
+        points_expiry_days: program.points_expiry_days?.toString() || '',
+      })
+    }
+  }, [program])
+
+  const handleSave = async () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+
+    const data = {
+      name: formData.name || 'Loyalty Rewards',
+      points_per_dollar: parseFloat(formData.points_per_dollar) || 1.0,
+      point_value: parseFloat(formData.point_value) || 0.01,
+      min_redemption_points: parseInt(formData.min_redemption_points) || 100,
+      points_expiry_days: formData.points_expiry_days ? parseInt(formData.points_expiry_days) : null,
+    }
+
+    let result
+    if (program) {
+      result = await onUpdateProgram(data)
+    } else {
+      result = await onCreateProgram(data)
+    }
+
+    if (result.success) {
+      setIsEditing(false)
+    } else {
+      Alert.alert('Error', result.error || 'Failed to save loyalty program')
+    }
+  }
+
+  const handleToggleStatus = async () => {
+    if (!program) return
+
+    const newStatus = !program.is_active
+    const statusText = newStatus ? 'activate' : 'deactivate'
+
+    Alert.alert(
+      `${statusText.charAt(0).toUpperCase() + statusText.slice(1)} Loyalty Program`,
+      `Are you sure you want to ${statusText} the loyalty program?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: statusText.charAt(0).toUpperCase() + statusText.slice(1),
+          onPress: async () => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+            const result = await onToggleStatus(newStatus)
+            if (!result.success) {
+              Alert.alert('Error', result.error || 'Failed to update loyalty program status')
+            }
+          },
+        },
+      ]
+    )
+  }
+
+  if (isLoading) {
+    return (
+      <View style={styles.detailContainer}>
+        <View style={[styles.emptyState, { paddingTop: 100 }]}>
+          <ActivityIndicator color={colors.text.tertiary} />
+          <Text style={[styles.emptyStateText, { marginTop: spacing.md }]}>Loading loyalty program...</Text>
+        </View>
+      </View>
+    )
+  }
+
+  // Empty state - no program configured yet
+  if (!program && !isEditing) {
+    return (
+      <View style={styles.detailContainer}>
+        <Animated.View style={[styles.fixedHeader, { opacity: headerOpacity }]}>
+          <Text style={styles.fixedHeaderTitle}>Loyalty & Rewards</Text>
+        </Animated.View>
+
+        <LinearGradient
+          colors={['rgba(0,0,0,0.95)', 'rgba(0,0,0,0.8)', 'rgba(0,0,0,0)']}
+          style={styles.fadeGradient}
+          pointerEvents="none"
+        />
+
+        <ScrollView
+          style={styles.detailScroll}
+          showsVerticalScrollIndicator={true}
+          indicatorStyle="white"
+          scrollIndicatorInsets={{ right: 2, top: 100, bottom: layout.dockHeight }}
+          contentContainerStyle={{ paddingTop: 100, paddingBottom: layout.dockHeight, paddingRight: layout.containerMargin }}
+        >
+          <View style={styles.cardWrapper}>
+            <Text style={styles.detailTitle}>Loyalty & Rewards</Text>
+          </View>
+
+          <View style={[styles.emptyState, { paddingTop: spacing.xxxl }]}>
+            <View style={styles.emptyStateIcon}>
+              <LoyaltyIcon color={colors.text.quaternary} />
+            </View>
+            <Text style={styles.emptyStateText}>No loyalty program configured</Text>
+            <Text style={styles.emptyStateSubtext}>Set up a loyalty program to reward your customers</Text>
+            <Pressable
+              onPress={() => setIsEditing(true)}
+              style={styles.addButton}
+              accessible={true}
+              accessibilityRole="button"
+              accessibilityLabel="Configure loyalty program"
+            >
+              <Text style={styles.addButtonText}>Configure Program</Text>
+            </Pressable>
+          </View>
+        </ScrollView>
+      </View>
+    )
+  }
+
+  // Show form when editing or creating
+  if (isEditing || !program) {
+    return (
+      <View style={styles.detailContainer}>
+        <Animated.View style={[styles.fixedHeader, { opacity: headerOpacity }]}>
+          <Text style={styles.fixedHeaderTitle}>Loyalty & Rewards</Text>
+        </Animated.View>
+
+        <LinearGradient
+          colors={['rgba(0,0,0,0.95)', 'rgba(0,0,0,0.8)', 'rgba(0,0,0,0)']}
+          style={styles.fadeGradient}
+          pointerEvents="none"
+        />
+
+        <ScrollView
+          style={styles.detailScroll}
+          showsVerticalScrollIndicator={true}
+          indicatorStyle="white"
+          scrollIndicatorInsets={{ right: 2, top: 100, bottom: layout.dockHeight }}
+          contentContainerStyle={{ paddingTop: 100, paddingBottom: layout.dockHeight, paddingRight: layout.containerMargin }}
+          onScroll={(e) => {
+            const offsetY = e.nativeEvent.contentOffset.y
+            const threshold = 40
+            headerOpacity.setValue(offsetY > threshold ? 1 : 0)
+          }}
+          scrollEventThrottle={16}
+        >
+          <View style={[styles.cardWrapper, styles.titleRow]}>
+            <Text style={styles.detailTitle}>Configure Loyalty Program</Text>
+            <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+              <Pressable
+                onPress={() => {
+                  // Reset form data to program values when canceling
+                  if (program) {
+                    setFormData({
+                      name: program.name || 'Loyalty Rewards',
+                      points_per_dollar: program.points_per_dollar.toString(),
+                      point_value: program.point_value.toString(),
+                      min_redemption_points: program.min_redemption_points.toString(),
+                      points_expiry_days: program.points_expiry_days?.toString() || '',
+                    })
+                  }
+                  setIsEditing(false)
+                }}
+                style={[styles.addButton, { backgroundColor: colors.glass.regular }]}
+                accessible={true}
+                accessibilityRole="button"
+                accessibilityLabel="Cancel"
+              >
+                <Text style={[styles.addButtonText, { color: colors.text.secondary }]}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                onPress={handleSave}
+                style={styles.addButton}
+                accessible={true}
+                accessibilityRole="button"
+                accessibilityLabel="Save"
+              >
+                <Text style={styles.addButtonText}>Save</Text>
+              </Pressable>
+            </View>
+          </View>
+
+          {/* Configuration Form */}
+          <LiquidGlassContainerView spacing={12} style={styles.cardWrapper}>
+            <LiquidGlassView
+              interactive
+              style={[styles.detailCard, !isLiquidGlassSupported && styles.cardFallback]}
+            >
+              <View style={{ padding: spacing.md, gap: spacing.md }}>
+                {/* Points per Dollar */}
+                <View>
+                  <Text style={styles.formLabel}>Points per Dollar Spent</Text>
+                  <Text style={styles.formHint}>How many points customers earn per dollar</Text>
+                  <View style={styles.formInputWrapper}>
+                    <TextInput
+                      style={styles.formInput}
+                      value={formData.points_per_dollar}
+                      onChangeText={(text) => setFormData({ ...formData, points_per_dollar: text })}
+                      keyboardType="decimal-pad"
+                      placeholder="1.00"
+                      placeholderTextColor={colors.text.quaternary}
+                    />
+                  </View>
+                </View>
+
+                {/* Point Value */}
+                <View>
+                  <Text style={styles.formLabel}>Point Value (USD)</Text>
+                  <Text style={styles.formHint}>Dollar value of each point when redeemed</Text>
+                  <View style={styles.formInputWrapper}>
+                    <TextInput
+                      style={styles.formInput}
+                      value={formData.point_value}
+                      onChangeText={(text) => setFormData({ ...formData, point_value: text })}
+                      keyboardType="decimal-pad"
+                      placeholder="0.01"
+                      placeholderTextColor={colors.text.quaternary}
+                    />
+                  </View>
+                </View>
+
+                {/* Min Redemption */}
+                <View>
+                  <Text style={styles.formLabel}>Minimum Points to Redeem</Text>
+                  <Text style={styles.formHint}>Minimum points required for redemption</Text>
+                  <View style={styles.formInputWrapper}>
+                    <TextInput
+                      style={styles.formInput}
+                      value={formData.min_redemption_points}
+                      onChangeText={(text) => setFormData({ ...formData, min_redemption_points: text })}
+                      keyboardType="number-pad"
+                      placeholder="100"
+                      placeholderTextColor={colors.text.quaternary}
+                    />
+                  </View>
+                </View>
+
+                {/* Expiry */}
+                <View>
+                  <Text style={styles.formLabel}>Points Expiry (Days)</Text>
+                  <Text style={styles.formHint}>Days until points expire (leave empty for never)</Text>
+                  <View style={styles.formInputWrapper}>
+                    <TextInput
+                      style={styles.formInput}
+                      value={formData.points_expiry_days}
+                      onChangeText={(text) => setFormData({ ...formData, points_expiry_days: text })}
+                      keyboardType="number-pad"
+                      placeholder="365 or leave empty"
+                      placeholderTextColor={colors.text.quaternary}
+                    />
+                  </View>
+                </View>
+              </View>
+            </LiquidGlassView>
+          </LiquidGlassContainerView>
+        </ScrollView>
+      </View>
+    )
+  }
+
+  // Display mode - show current configuration
+  return (
+    <View style={styles.detailContainer}>
+      <Animated.View style={[styles.fixedHeader, { opacity: headerOpacity }]}>
+        <Text style={styles.fixedHeaderTitle}>Loyalty & Rewards</Text>
+        <Pressable
+          onPress={() => setIsEditing(true)}
+          style={styles.fixedHeaderButton}
+          accessible={true}
+          accessibilityRole="button"
+          accessibilityLabel="Edit loyalty program"
+        >
+          <Text style={styles.fixedHeaderButtonText}>Edit</Text>
+        </Pressable>
+      </Animated.View>
+
+      <LinearGradient
+        colors={['rgba(0,0,0,0.95)', 'rgba(0,0,0,0.8)', 'rgba(0,0,0,0)']}
+        style={styles.fadeGradient}
+        pointerEvents="none"
+      />
+
+      <ScrollView
+        style={styles.detailScroll}
+        showsVerticalScrollIndicator={true}
+        indicatorStyle="white"
+        scrollIndicatorInsets={{ right: 2, top: 100, bottom: layout.dockHeight }}
+        contentContainerStyle={{ paddingTop: 100, paddingBottom: layout.dockHeight, paddingRight: layout.containerMargin }}
+        onScroll={(e) => {
+          const offsetY = e.nativeEvent.contentOffset.y
+          const threshold = 40
+          headerOpacity.setValue(offsetY > threshold ? 1 : 0)
+        }}
+        scrollEventThrottle={16}
+      >
+        <View style={[styles.cardWrapper, styles.titleRow]}>
+          <Text style={styles.detailTitle}>Loyalty & Rewards</Text>
+          <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+            <Pressable
+              onPress={handleToggleStatus}
+              style={[styles.addButton, !program.is_active && { backgroundColor: colors.glass.regular }]}
+              accessible={true}
+              accessibilityRole="button"
+              accessibilityLabel={program.is_active ? 'Deactivate program' : 'Activate program'}
+            >
+              <Text style={[styles.addButtonText, !program.is_active && { color: colors.text.secondary }]}>
+                {program.is_active ? 'Deactivate' : 'Activate'}
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={() => setIsEditing(true)}
+              style={styles.addButton}
+              accessible={true}
+              accessibilityRole="button"
+              accessibilityLabel="Edit program"
+            >
+              <Text style={styles.addButtonText}>Edit</Text>
+            </Pressable>
+          </View>
+        </View>
+
+        {/* Program Configuration Card */}
+        <LiquidGlassContainerView spacing={12} style={styles.cardWrapper}>
+          <LiquidGlassView
+            interactive
+            style={[styles.detailCard, !isLiquidGlassSupported && styles.cardFallback]}
+          >
+            <View style={{ padding: spacing.md, gap: spacing.lg }}>
+              {/* Status Badge */}
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.xs }}>
+                <View
+                  style={{
+                    width: 8,
+                    height: 8,
+                    borderRadius: 4,
+                    backgroundColor: program.is_active ? '#10b981' : colors.text.quaternary,
+                  }}
+                />
+                <Text style={[styles.formHint, { marginBottom: 0 }]}>
+                  {program.is_active ? 'Active' : 'Inactive'}
+                </Text>
+              </View>
+
+              {/* Configuration Details */}
+              <View style={{ gap: spacing.md }}>
+                <View>
+                  <Text style={styles.formLabel}>Points per Dollar</Text>
+                  <Text style={styles.configValue}>{program.points_per_dollar}× points</Text>
+                </View>
+
+                <View>
+                  <Text style={styles.formLabel}>Point Value</Text>
+                  <Text style={styles.configValue}>${program.point_value.toFixed(4)} per point</Text>
+                </View>
+
+                <View>
+                  <Text style={styles.formLabel}>Minimum Redemption</Text>
+                  <Text style={styles.configValue}>{program.min_redemption_points} points</Text>
+                </View>
+
+                <View>
+                  <Text style={styles.formLabel}>Points Expiry</Text>
+                  <Text style={styles.configValue}>
+                    {program.points_expiry_days ? `${program.points_expiry_days} days` : 'Never expires'}
+                  </Text>
+                </View>
+              </View>
+
+              {/* Example Calculation */}
+              <View style={{ marginTop: spacing.sm, paddingTop: spacing.md, borderTopWidth: 0.5, borderTopColor: colors.border.subtle }}>
+                <Text style={[styles.formHint, { marginBottom: spacing.xs }]}>Example:</Text>
+                <Text style={styles.formHint}>
+                  $100 purchase = {Math.floor(100 * program.points_per_dollar)} points = ${(100 * program.points_per_dollar * program.point_value).toFixed(2)} value
+                </Text>
+              </View>
+            </View>
+          </LiquidGlassView>
+        </LiquidGlassContainerView>
+      </ScrollView>
+    </View>
+  )
+}
+
+function PaymentProcessorsManagementDetail({
+  processors,
+  isLoading,
+  headerOpacity,
+  onCreateProcessor,
+  onUpdateProcessor,
+  onDeleteProcessor,
+  onTestConnection,
+  onSetAsDefault,
+  onToggleStatus,
+  onReload,
+}: {
+  processors: PaymentProcessor[]
+  isLoading: boolean
+  headerOpacity: Animated.Value
+  onCreateProcessor: any
+  onUpdateProcessor: any
+  onDeleteProcessor: any
+  onTestConnection: any
+  onSetAsDefault: any
+  onToggleStatus: any
+  onReload: () => void
+}) {
+  const [showAddModal, setShowAddModal] = useState(false)
+  const [editingProcessor, setEditingProcessor] = useState<PaymentProcessor | null>(null)
+
+  const handleAddProcessor = () => {
+    setEditingProcessor(null)
+    setShowAddModal(true)
+  }
+
+  const handleEditProcessor = (processor: PaymentProcessor) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    setEditingProcessor(processor)
+    setShowAddModal(true)
+  }
+
+  const handleTestConnection = async (processor: PaymentProcessor) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    const result = await onTestConnection(processor.id)
+    if (result.success) {
+      Alert.alert('Success', 'Connection test successful')
+    } else {
+      Alert.alert('Test Failed', result.error || 'Connection test failed')
+    }
+  }
+
+  const handleSetAsDefault = async (processor: PaymentProcessor) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+    const result = await onSetAsDefault(processor.id)
+    if (!result.success) {
+      Alert.alert('Error', result.error || 'Failed to set as default')
+    }
+  }
+
+  const handleToggleStatus = async (processor: PaymentProcessor) => {
+    const newStatus = !processor.is_active
+    const statusText = newStatus ? 'activate' : 'deactivate'
+
+    Alert.alert(
+      `${statusText.charAt(0).toUpperCase() + statusText.slice(1)} Processor`,
+      `Are you sure you want to ${statusText} ${processor.processor_name}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: statusText.charAt(0).toUpperCase() + statusText.slice(1),
+          onPress: async () => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+            const result = await onToggleStatus(processor.id, newStatus)
+            if (!result.success) {
+              Alert.alert('Error', result.error || 'Failed to update processor status')
+            }
+          },
+        },
+      ]
+    )
+  }
+
+  const handleDeleteProcessor = (processor: PaymentProcessor) => {
+    Alert.alert(
+      'Delete Processor',
+      `Are you sure you want to permanently delete ${processor.processor_name}? This action cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning)
+            const result = await onDeleteProcessor(processor.id)
+            if (!result.success) {
+              Alert.alert('Error', result.error || 'Failed to delete processor')
+            }
+          },
+        },
+      ]
+    )
+  }
+
+  const getProcessorTypeLabel = (type: string) => {
+    const types: Record<string, string> = {
+      dejavoo: 'Dejavoo',
+      stripe: 'Stripe',
+      square: 'Square',
+      authorizenet: 'Authorize.Net',
+      clover: 'Clover',
+    }
+    return types[type] || type
+  }
+
+  const getTestStatusColor = (status?: string | null) => {
+    if (status === 'success') return '#10b981'
+    if (status === 'failed') return '#ef4444'
+    return colors.text.quaternary
+  }
+
+  if (isLoading) {
+    return (
+      <View style={styles.detailContainer}>
+        <View style={[styles.emptyState, { paddingTop: 100 }]}>
+          <ActivityIndicator color={colors.text.tertiary} />
+          <Text style={[styles.emptyStateText, { marginTop: spacing.md }]}>Loading processors...</Text>
+        </View>
+      </View>
+    )
+  }
+
+  if (processors.length === 0) {
+    return (
+      <View style={styles.detailContainer}>
+        <Animated.View style={[styles.fixedHeader, { opacity: headerOpacity }]}>
+          <Text style={styles.fixedHeaderTitle}>Payment Processors</Text>
+        </Animated.View>
+
+        <LinearGradient
+          colors={['rgba(0,0,0,0.95)', 'rgba(0,0,0,0.8)', 'rgba(0,0,0,0)']}
+          style={styles.fadeGradient}
+          pointerEvents="none"
+        />
+
+        <ScrollView
+          style={styles.detailScroll}
+          showsVerticalScrollIndicator={true}
+          indicatorStyle="white"
+          scrollIndicatorInsets={{ right: 2, top: 100, bottom: layout.dockHeight }}
+          contentContainerStyle={{ paddingTop: 100, paddingBottom: layout.dockHeight, paddingRight: layout.containerMargin }}
+        >
+          <View style={styles.cardWrapper}>
+            <Text style={styles.detailTitle}>Payment Processors</Text>
+          </View>
+
+          <View style={[styles.emptyState, { paddingTop: spacing.xxxl }]}>
+            <View style={styles.emptyStateIcon}>
+              <PaymentIcon color={colors.text.quaternary} />
+            </View>
+            <Text style={styles.emptyStateText}>No processors configured</Text>
+            <Text style={styles.emptyStateSubtext}>Add a payment processor to accept payments</Text>
+            <Pressable
+              onPress={handleAddProcessor}
+              style={styles.addButton}
+              accessible={true}
+              accessibilityRole="button"
+              accessibilityLabel="Add first processor"
+            >
+              <Text style={styles.addButtonText}>Add Processor</Text>
+            </Pressable>
+          </View>
+        </ScrollView>
+
+        <PaymentProcessorModal
+          visible={showAddModal}
+          processor={editingProcessor}
+          onClose={() => {
+            setShowAddModal(false)
+            setEditingProcessor(null)
+          }}
+          onCreate={onCreateProcessor}
+          onUpdate={onUpdateProcessor}
+        />
+      </View>
+    )
+  }
+
+  const activeProcessors = processors.filter(p => p.is_active)
+  const inactiveProcessors = processors.filter(p => !p.is_active)
+
+  return (
+    <View style={styles.detailContainer}>
+      <Animated.View style={[styles.fixedHeader, { opacity: headerOpacity }]}>
+        <Text style={styles.fixedHeaderTitle}>Payment Processors</Text>
+        <Pressable
+          onPress={handleAddProcessor}
+          style={styles.fixedHeaderButton}
+          accessible={true}
+          accessibilityRole="button"
+          accessibilityLabel="Add new processor"
+        >
+          <Text style={styles.fixedHeaderButtonText}>+</Text>
+        </Pressable>
+      </Animated.View>
+
+      <LinearGradient
+        colors={['rgba(0,0,0,0.95)', 'rgba(0,0,0,0.8)', 'rgba(0,0,0,0)']}
+        style={styles.fadeGradient}
+        pointerEvents="none"
+      />
+
+      <ScrollView
+        style={styles.detailScroll}
+        showsVerticalScrollIndicator={true}
+        indicatorStyle="white"
+        scrollIndicatorInsets={{ right: 2, top: 100, bottom: layout.dockHeight }}
+        contentContainerStyle={{ paddingTop: 100, paddingBottom: layout.dockHeight, paddingRight: layout.containerMargin }}
+        onScroll={(e) => {
+          const offsetY = e.nativeEvent.contentOffset.y
+          const threshold = 40
+          headerOpacity.setValue(offsetY > threshold ? 1 : 0)
+        }}
+        scrollEventThrottle={16}
+      >
+        <View style={[styles.cardWrapper, styles.titleRow]}>
+          <Text style={styles.detailTitle}>Payment Processors</Text>
+          <Pressable
+            onPress={handleAddProcessor}
+            style={styles.addButton}
+            accessible={true}
+            accessibilityRole="button"
+            accessibilityLabel="Add new processor"
+          >
+            <Text style={styles.addButtonText}>Add Processor</Text>
+          </Pressable>
+        </View>
+
+        {/* Active Processors */}
+        {activeProcessors.map((processor) => (
+          <LiquidGlassContainerView key={processor.id} spacing={12} style={styles.cardWrapper}>
+            <LiquidGlassView
+              interactive
+              style={[styles.detailCard, !isLiquidGlassSupported && styles.cardFallback]}
+            >
+              <View style={styles.supplierCard}>
+                <View style={styles.supplierCardHeader}>
+                  <View style={styles.supplierCardInfo}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.xs }}>
+                      <Text style={styles.supplierCardName}>{processor.processor_name}</Text>
+                      {processor.is_default && (
+                        <View style={{ paddingHorizontal: spacing.xs, paddingVertical: 2, backgroundColor: colors.glass.thin, borderRadius: radius.xs }}>
+                          <Text style={{ ...typography.caption2, color: colors.text.tertiary }}>DEFAULT</Text>
+                        </View>
+                      )}
+                    </View>
+                    <Text style={styles.supplierCardEmail}>
+                      {getProcessorTypeLabel(processor.processor_type)} • {processor.environment}
+                    </Text>
+                    {processor.last_tested_at && (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginTop: spacing.xxs }}>
+                        <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: getTestStatusColor(processor.last_test_status) }} />
+                        <Text style={styles.supplierCardEmail}>
+                          Last tested {new Date(processor.last_tested_at).toLocaleDateString()}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                </View>
+
+                <View style={styles.supplierCardActions}>
+                  <Pressable
+                    onPress={() => handleTestConnection(processor)}
+                    style={styles.userActionButton}
+                    accessible={true}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Test ${processor.processor_name}`}
+                  >
+                    <Text style={styles.userActionButtonText}>Test</Text>
+                  </Pressable>
+                  {!processor.is_default && (
+                    <Pressable
+                      onPress={() => handleSetAsDefault(processor)}
+                      style={styles.userActionButton}
+                      accessible={true}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Set ${processor.processor_name} as default`}
+                    >
+                      <Text style={styles.userActionButtonText}>Set Default</Text>
+                    </Pressable>
+                  )}
+                  <Pressable
+                    onPress={() => handleEditProcessor(processor)}
+                    style={styles.userActionButton}
+                    accessible={true}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Edit ${processor.processor_name}`}
+                  >
+                    <Text style={styles.userActionButtonText}>Edit</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => handleToggleStatus(processor)}
+                    style={styles.userActionButton}
+                    accessible={true}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Deactivate ${processor.processor_name}`}
+                  >
+                    <Text style={styles.userActionButtonText}>Deactivate</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => handleDeleteProcessor(processor)}
+                    style={[styles.userActionButton, styles.userActionButtonDanger]}
+                    accessible={true}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Delete ${processor.processor_name}`}
+                  >
+                    <Text style={styles.userActionButtonDangerText}>Delete</Text>
+                  </Pressable>
+                </View>
+              </View>
+            </LiquidGlassView>
+          </LiquidGlassContainerView>
+        ))}
+
+        {/* Inactive Processors */}
+        {inactiveProcessors.length > 0 && (
+          <>
+            <Text style={[styles.cardSectionTitle, { marginTop: spacing.xl }]}>INACTIVE</Text>
+            {inactiveProcessors.map((processor) => (
+              <LiquidGlassContainerView key={processor.id} spacing={12} style={styles.cardWrapper}>
+                <LiquidGlassView
+                  interactive
+                  style={[styles.detailCard, !isLiquidGlassSupported && styles.cardFallback, { opacity: 0.5 }]}
+                >
+                  <View style={styles.supplierCard}>
+                    <View style={styles.supplierCardHeader}>
+                      <View style={styles.supplierCardInfo}>
+                        <Text style={styles.supplierCardName}>{processor.processor_name}</Text>
+                        <Text style={styles.supplierCardEmail}>
+                          {getProcessorTypeLabel(processor.processor_type)} • {processor.environment}
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.supplierCardActions}>
+                      <Pressable
+                        onPress={() => handleToggleStatus(processor)}
+                        style={styles.userActionButton}
+                        accessible={true}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Activate ${processor.processor_name}`}
+                      >
+                        <Text style={styles.userActionButtonText}>Activate</Text>
+                      </Pressable>
+                      <Pressable
+                        onPress={() => handleDeleteProcessor(processor)}
+                        style={[styles.userActionButton, styles.userActionButtonDanger]}
+                        accessible={true}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Delete ${processor.processor_name}`}
+                      >
+                        <Text style={styles.userActionButtonDangerText}>Delete</Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                </LiquidGlassView>
+              </LiquidGlassContainerView>
+            ))}
+          </>
+        )}
+      </ScrollView>
+
+      <PaymentProcessorModal
+        visible={showAddModal}
+        processor={editingProcessor}
+        onClose={() => {
+          setShowAddModal(false)
+          setEditingProcessor(null)
+        }}
+        onCreate={onCreateProcessor}
+        onUpdate={onUpdateProcessor}
+      />
+    </View>
+  )
+}
+
 function SettingsScreen() {
   const { user } = useAuth()
   const { logout } = useAuthActions()
   const { locations: userLocations, isLoading: locationsLoading } = useUserLocations()
+  const { users, isLoading: usersLoading, createUser, updateUser, deleteUser, setUserPassword, assignLocations, toggleUserStatus, reload: reloadUsers } = useUsers()
+  const { suppliers, isLoading: suppliersLoading, createSupplier, updateSupplier, deleteSupplier, toggleSupplierStatus, reload: reloadSuppliers } = useSuppliers()
+  const { program: loyaltyProgram, isLoading: loyaltyLoading, createProgram: createLoyaltyProgram, updateProgram: updateLoyaltyProgram, toggleProgramStatus: toggleLoyaltyStatus } = useLoyalty()
+  const { processors: paymentProcessors, isLoading: processorsLoading, error: processorsError, createProcessor, updateProcessor, deleteProcessor, testConnection, setAsDefault, toggleStatus: toggleProcessorStatus, reload: reloadProcessors } = usePaymentProcessors()
 
   // iOS-style collapsing headers - instant transitions
   const accountHeaderOpacity = useRef(new Animated.Value(0)).current
   const locationsHeaderOpacity = useRef(new Animated.Value(0)).current
+  const teamHeaderOpacity = useRef(new Animated.Value(0)).current
+  const suppliersHeaderOpacity = useRef(new Animated.Value(0)).current
+  const loyaltyHeaderOpacity = useRef(new Animated.Value(0)).current
+  const processorsHeaderOpacity = useRef(new Animated.Value(0)).current
   const devToolsHeaderOpacity = useRef(new Animated.Value(0)).current
 
   // Get user name for account category
@@ -460,7 +2529,27 @@ function SettingsScreen() {
       title: 'Locations & Access',
       icon: LocationIcon,
       badge: userLocations.length > 0 ? userLocations.length : undefined,
-      renderDetail: () => <LocationsDetail userLocations={userLocations} headerOpacity={locationsHeaderOpacity} />
+      renderDetail: () => <LocationsDetail userLocations={userLocations} headerOpacity={locationsHeaderOpacity} paymentProcessors={paymentProcessors} processorsLoading={processorsLoading} processorsError={processorsError} createProcessor={createProcessor} updateProcessor={updateProcessor} deleteProcessor={deleteProcessor} testConnection={testConnection} setAsDefault={setAsDefault} toggleProcessorStatus={toggleProcessorStatus} reloadProcessors={reloadProcessors} />
+    },
+    {
+      id: 'team',
+      title: 'Team',
+      icon: TeamIcon,
+      badge: users.length > 0 ? users.length : undefined,
+      renderDetail: () => <UserManagementDetail users={users} isLoading={usersLoading} headerOpacity={teamHeaderOpacity} onCreateUser={createUser} onUpdateUser={updateUser} onDeleteUser={deleteUser} onSetPassword={setUserPassword} onAssignLocations={assignLocations} onToggleStatus={toggleUserStatus} onReload={reloadUsers} locations={userLocations} />
+    },
+    {
+      id: 'suppliers',
+      title: 'Suppliers',
+      icon: SuppliersIcon,
+      badge: suppliers.length > 0 ? suppliers.length : undefined,
+      renderDetail: () => <SupplierManagementDetail suppliers={suppliers} isLoading={suppliersLoading} headerOpacity={suppliersHeaderOpacity} onCreateSupplier={createSupplier} onUpdateSupplier={updateSupplier} onDeleteSupplier={deleteSupplier} onToggleStatus={toggleSupplierStatus} onReload={reloadSuppliers} />
+    },
+    {
+      id: 'loyalty',
+      title: 'Loyalty & Rewards',
+      icon: LoyaltyIcon,
+      renderDetail: () => <LoyaltyManagementDetail program={loyaltyProgram} isLoading={loyaltyLoading} headerOpacity={loyaltyHeaderOpacity} onCreateProgram={createLoyaltyProgram} onUpdateProgram={updateLoyaltyProgram} onToggleStatus={toggleLoyaltyStatus} />
     },
     {
       id: 'devtools',
@@ -468,7 +2557,7 @@ function SettingsScreen() {
       icon: DevToolsIcon,
       renderDetail: () => <DeveloperToolsDetail headerOpacity={devToolsHeaderOpacity} />
     },
-  ], [user, userName, userLocations, accountHeaderOpacity, locationsHeaderOpacity, devToolsHeaderOpacity])
+  ], [user, userName, userLocations, users, usersLoading, suppliers, suppliersLoading, loyaltyProgram, loyaltyLoading, paymentProcessors, processorsLoading, accountHeaderOpacity, locationsHeaderOpacity, teamHeaderOpacity, suppliersHeaderOpacity, loyaltyHeaderOpacity, devToolsHeaderOpacity, createUser, updateUser, deleteUser, setUserPassword, assignLocations, toggleUserStatus, reloadUsers, createSupplier, updateSupplier, deleteSupplier, toggleSupplierStatus, reloadSuppliers, createLoyaltyProgram, updateLoyaltyProgram, toggleLoyaltyStatus, createProcessor, updateProcessor, deleteProcessor, testConnection, setAsDefault, toggleProcessorStatus, reloadProcessors])
 
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>('account')
   const [searchQuery, setSearchQuery] = useState('')
@@ -937,5 +3026,343 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: '#007AFF',
     letterSpacing: -0.1,
+  },
+
+  // Team Icon
+  teamIconContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  teamIconUser: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  teamIconHead: {
+    width: 3,
+    height: 3,
+    borderRadius: 1.5,
+    marginTop: 1,
+  },
+  teamIconBody: {
+    width: 8,
+    height: 4,
+    borderTopLeftRadius: 4,
+    borderTopRightRadius: 4,
+    borderWidth: 1.5,
+    borderBottomWidth: 0,
+    marginTop: -1,
+  },
+
+  // User Management
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  addButton: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.md,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.2)',
+  },
+  addButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.text.primary,
+    letterSpacing: -0.2,
+  },
+  emptyStateIcon: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: colors.glass.ultraThin,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.md,
+  },
+  fixedHeaderButton: {
+    position: 'absolute',
+    right: layout.cardPadding,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  fixedHeaderButtonText: {
+    fontSize: 20,
+    fontWeight: '300',
+    color: colors.text.primary,
+    marginTop: -2,
+  },
+
+  // User Cards
+  userCard: {
+    padding: spacing.md,
+  },
+  userCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  userAvatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: colors.glass.regular,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  userAvatarText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.text.primary,
+    letterSpacing: 0.5,
+  },
+  userCardInfo: {
+    flex: 1,
+    gap: 2,
+  },
+  userCardTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  userCardName: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: colors.text.primary,
+    letterSpacing: -0.4,
+  },
+  userCardEmail: {
+    fontSize: 13,
+    fontWeight: '400',
+    color: colors.text.tertiary,
+    letterSpacing: -0.1,
+  },
+  userCardPhone: {
+    fontSize: 13,
+    fontWeight: '400',
+    color: colors.text.quaternary,
+    letterSpacing: -0.1,
+  },
+  roleBadge: {
+    paddingHorizontal: spacing.xs,
+    paddingVertical: 4,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+  },
+  roleBadgeText: {
+    fontSize: 11,
+    fontWeight: '600',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+  },
+  inactiveBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: radius.xs,
+    backgroundColor: '#ff3b3020',
+    borderWidth: 1,
+    borderColor: '#ff3b3040',
+  },
+  inactiveBadgeText: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#ff3b30',
+    letterSpacing: 0.8,
+  },
+  userCardMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: spacing.xs,
+  },
+  userCardMetaText: {
+    fontSize: 12,
+    fontWeight: '400',
+    color: colors.text.quaternary,
+    letterSpacing: -0.1,
+  },
+  userCardActions: {
+    flexDirection: 'row',
+    gap: spacing.xs,
+    paddingTop: spacing.xs,
+    borderTopWidth: 0.5,
+    borderTopColor: 'rgba(255,255,255,0.06)',
+  },
+  userActionButton: {
+    flex: 1,
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.xxs,
+    borderRadius: radius.sm,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  userActionButtonText: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: colors.text.secondary,
+    letterSpacing: -0.1,
+  },
+  userActionButtonDanger: {
+    backgroundColor: 'rgba(255, 59, 48, 0.1)',
+    borderColor: 'rgba(255, 59, 48, 0.2)',
+  },
+  userActionButtonDangerText: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: '#ff3b30',
+    letterSpacing: -0.1,
+  },
+
+  // Suppliers Icon
+  suppliersIconBuilding: {
+    width: 14,
+    height: 12,
+    borderWidth: 1.5,
+    borderTopLeftRadius: 1,
+    borderTopRightRadius: 1,
+    position: 'relative',
+  },
+  suppliersIconDoor: {
+    width: 4,
+    height: 6,
+    borderWidth: 1.5,
+    position: 'absolute',
+    bottom: 0,
+    left: 4,
+  },
+
+  // Loyalty Icon
+  loyaltyIconStar: {
+    width: 16,
+    height: 16,
+    borderWidth: 1.5,
+    borderRadius: 8,
+    position: 'relative',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loyaltyIconSparkle: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+
+  // Payment Icon
+  paymentIconCard: {
+    width: 16,
+    height: 12,
+    borderWidth: 1.5,
+    borderRadius: 2,
+    position: 'relative',
+  },
+  paymentIconStripe: {
+    width: 12,
+    height: 2,
+    position: 'absolute',
+    top: 3,
+    left: 1,
+  },
+
+  // Form Styles
+  formLabel: {
+    ...typography.caption1,
+    color: colors.text.tertiary,
+    textTransform: 'uppercase',
+    marginBottom: spacing.xxs,
+  },
+  formHint: {
+    ...typography.footnote,
+    color: colors.text.quaternary,
+    marginBottom: spacing.xs,
+  },
+  formInputWrapper: {
+    backgroundColor: colors.glass.thin,
+    borderRadius: radius.lg,
+    padding: spacing.sm,
+    borderWidth: 0.5,
+    borderColor: colors.border.subtle,
+  },
+  formInput: {
+    ...typography.body,
+    color: colors.text.primary,
+  },
+  configValue: {
+    ...typography.title3,
+    color: colors.text.primary,
+    fontWeight: '600',
+  },
+  locationConfigValue: {
+    ...typography.body,
+    color: colors.text.primary,
+  },
+
+  // Supplier Cards
+  supplierCard: {
+    padding: spacing.md,
+  },
+  supplierCardHeader: {
+    marginBottom: spacing.sm,
+  },
+  supplierCardInfo: {
+    flex: 1,
+    gap: 4,
+  },
+  supplierCardName: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: colors.text.primary,
+    letterSpacing: -0.4,
+  },
+  supplierCardContact: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: colors.text.secondary,
+    letterSpacing: -0.1,
+  },
+  supplierCardEmail: {
+    fontSize: 13,
+    fontWeight: '400',
+    color: colors.text.tertiary,
+    letterSpacing: -0.1,
+  },
+  supplierCardPhone: {
+    fontSize: 13,
+    fontWeight: '400',
+    color: colors.text.tertiary,
+    letterSpacing: -0.1,
+  },
+  supplierCardAddress: {
+    fontSize: 12,
+    fontWeight: '400',
+    color: colors.text.quaternary,
+    letterSpacing: -0.1,
+    marginTop: 2,
+  },
+  supplierCardActions: {
+    flexDirection: 'row',
+    gap: spacing.xs,
+    paddingTop: spacing.xs,
+    borderTopWidth: 0.5,
+    borderTopColor: 'rgba(255,255,255,0.06)',
+  },
+  sectionLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: colors.text.quaternary,
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+    marginBottom: spacing.xs,
   },
 })

@@ -300,13 +300,9 @@ export async function mergeCustomers(
     const mergedData: Partial<Customer> = {
       email: primary.email || secondary.email,
       phone: primary.phone || secondary.phone,
-      middle_name: primary.middle_name || secondary.middle_name,
-      date_of_birth: primary.date_of_birth || secondary.date_of_birth,
-      street_address: primary.street_address || secondary.street_address,
-      city: primary.city || secondary.city,
-      state: primary.state || secondary.state,
-      postal_code: primary.postal_code || secondary.postal_code,
-      drivers_license_number: primary.drivers_license_number || secondary.drivers_license_number,
+      first_name: primary.first_name || secondary.first_name,
+      last_name: primary.last_name || secondary.last_name,
+      full_name: primary.full_name || secondary.full_name,
       // Combine stats
       loyalty_points: primary.loyalty_points + secondary.loyalty_points,
       total_spent: primary.total_spent + secondary.total_spent,
