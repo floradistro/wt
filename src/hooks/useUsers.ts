@@ -149,7 +149,7 @@ export function useUsers() {
       }
 
       // Call Edge Function to create user (requires service role)
-      const { data, error } = await supabase.functions.invoke('create-user', {
+      const response = await supabase.functions.invoke('create-user', {
         body: {
           email: userData.email,
           first_name: userData.first_name,
@@ -160,19 +160,35 @@ export function useUsers() {
         },
       })
 
-      logger.debug('Edge Function response:', { data, error })
+      logger.debug('Edge Function full response:', {
+        data: response.data,
+        error: response.error,
+      })
 
-      if (error) {
-        logger.error('Edge Function error:', error)
-        throw new Error(error.message || 'Failed to call Edge Function')
+      // Handle network/invocation errors
+      if (response.error) {
+        const errorMsg = response.error.message || 'Failed to call Edge Function'
+        logger.error('Edge Function invocation error:', {
+          error: response.error,
+          context: response.error.context,
+        })
+        throw new Error(errorMsg)
       }
+
+      // Handle function response errors
+      const data = response.data
 
       if (!data) {
         throw new Error('No response from Edge Function')
       }
 
+      logger.debug('Edge Function data:', data)
+
       if (!data.success) {
-        throw new Error(data.error || 'Failed to create user')
+        const errorMsg = data.error || 'Failed to create user'
+        const details = data.details || ''
+        logger.error('Edge Function returned error:', { error: errorMsg, details })
+        throw new Error(`${errorMsg}${details ? ` (${details})` : ''}`)
       }
 
       await loadUsers()
