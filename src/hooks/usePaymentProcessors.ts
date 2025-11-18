@@ -131,8 +131,22 @@ export function usePaymentProcessors(locationId?: string) {
 
       const processors = data.processors || []
 
+      logger.debug('[usePaymentProcessors] Raw processors from API:', processors)
+
       // Map API response to PaymentProcessor interface
-      const transformedProcessors: PaymentProcessor[] = processors.map((proc: any) => ({
+      const transformedProcessors: PaymentProcessor[] = processors.map((proc: any) => {
+        logger.debug('[usePaymentProcessors] Mapping processor:', {
+          id: proc.id,
+          name: proc.processor_name,
+          processor_type: proc.processor_type,
+          has_authkey: !!proc.dejavoo_authkey,
+          authkey_length: proc.dejavoo_authkey?.length || 0,
+          has_tpn: !!proc.dejavoo_tpn,
+          tpn_value: proc.dejavoo_tpn,
+          last_tested_at: proc.last_tested_at,
+          last_test_status: proc.last_test_status,
+        })
+        return {
         id: proc.id,
         vendor_id: proc.vendor_id,
         location_id: proc.location_id,
@@ -170,9 +184,17 @@ export function usePaymentProcessors(locationId?: string) {
 
         created_at: proc.created_at,
         updated_at: proc.updated_at,
-      }))
+      }
+      })
 
-      logger.debug('[usePaymentProcessors] Transformed processors:', transformedProcessors)
+      logger.debug('[usePaymentProcessors] Transformed processors count:', transformedProcessors.length)
+      transformedProcessors.forEach(p => {
+        logger.debug(`[usePaymentProcessors] Processor ${p.processor_name}:`, {
+          last_tested_at: p.last_tested_at,
+          last_test_status: p.last_test_status,
+          is_active: p.is_active
+        })
+      })
       setProcessors(transformedProcessors)
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to load payment processors'
@@ -317,20 +339,24 @@ export function usePaymentProcessors(locationId?: string) {
   }
 
   async function testConnection(processorId: string): Promise<{ success: boolean; error?: string; message?: string }> {
+    const startTime = Date.now()
+
     try {
+      const BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://whaletools.dev'
+
       // Get session token
       const { data: { session }, error: sessionError } = await supabase.auth.getSession()
 
       if (sessionError || !session?.access_token) {
-        throw new Error('Not authenticated')
+        return { success: false, error: 'Authentication required' }
       }
 
-      // Call test endpoint - sends actual $1.00 test transaction
-      const BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://whaletools.dev'
+      const TEST_ENDPOINT = `${BASE_URL}/api/pos/payment-processors/test`
 
-      logger.debug('[usePaymentProcessors] Sending test transaction to processor:', processorId)
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 30000) // 30s timeout
 
-      const response = await fetch(`${BASE_URL}/api/pos/payment-processors/test`, {
+      const response = await fetch(TEST_ENDPOINT, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -340,32 +366,43 @@ export function usePaymentProcessors(locationId?: string) {
           processorId,
           amount: 1.00,
         }),
+        signal: controller.signal,
       })
 
-      const data = await response.json()
+      clearTimeout(timeoutId)
+      const duration = Date.now() - startTime
 
-      if (!response.ok) {
-        throw new Error(data.error || `Test failed: ${response.status}`)
-      }
+      if (response.ok) {
+        const data = await response.json()
 
-      if (data.success) {
-        await loadProcessors() // Reload to get updated test status
-        return {
-          success: true,
-          message: data.message || 'Test transaction approved'
+        if (data.success) {
+          await loadProcessors() // Reload to get updated test status
+          return { success: true, message: data.message || 'Test successful' }
+        } else {
+          return { success: false, error: data.message || data.error || 'Test declined' }
         }
       } else {
-        return {
-          success: false,
-          error: data.message || 'Test transaction declined'
+        const errorText = await response.text()
+        logger.error('❌ Test transaction failed:', response.status, errorText)
+
+        // Parse common error messages
+        let errorMessage = `Test failed (${response.status})`
+
+        if (errorText.includes('Authkey or Token field is required')) {
+          errorMessage = 'Missing payment processor credentials. Please configure API key/token.'
+        } else if (errorText.includes('Invalid request data')) {
+          errorMessage = 'Invalid payment processor configuration'
         }
+
+        return { success: false, error: errorMessage }
       }
-    } catch (err) {
-      logger.error('Failed to test payment processor', { error: err })
-      return {
-        success: false,
-        error: err instanceof Error ? err.message : 'Connection test failed',
-      }
+    } catch (error: any) {
+      const duration = Date.now() - startTime
+      const isTimeout = error.name === 'AbortError'
+      const errorMsg = isTimeout ? 'Test timeout (30s)' : (error.message || 'Connection failed')
+
+      logger.error('❌ Test transaction error:', error)
+      return { success: false, error: errorMsg }
     }
   }
 
