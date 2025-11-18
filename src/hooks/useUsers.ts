@@ -132,7 +132,7 @@ export function useUsers() {
     }
   }
 
-  async function createUser(_userData: {
+  async function createUser(userData: {
     email: string
     first_name: string
     last_name: string
@@ -140,59 +140,34 @@ export function useUsers() {
     role: string
     employee_id?: string
   }): Promise<{ success: boolean; error?: string; user?: User }> {
-    // NOTE: User creation requires Supabase Admin API which can only be called from backend
-    // This needs to be implemented as a Supabase Edge Function or backend API endpoint
-    // For now, returning an error to prevent 403 console errors
-
-    return {
-      success: false,
-      error: 'User creation requires backend implementation. Please create a Supabase Edge Function with service role key.',
-    }
-
-    /* TODO: Implement as Edge Function
     try {
-      // Get current user's vendor_id
-      const { data: currentUser, error: userError } = await supabase
-        .from('users')
-        .select('vendor_id')
-        .eq('email', user!.email)
-        .single()
+      // Get auth session
+      const { data: { session } } = await supabase.auth.getSession()
 
-      if (userError) throw userError
+      if (!session) {
+        throw new Error('Not authenticated')
+      }
 
-      // Create user in auth (Supabase Auth) - REQUIRES SERVICE ROLE KEY
-      const { data: authData, error: authError } = await supabase.auth.admin.createUser({
-        email: userData.email,
-        email_confirm: true,
-        user_metadata: {
-          first_name: userData.first_name,
-          last_name: userData.last_name,
-        },
-      })
-
-      if (authError) throw authError
-
-      // Create user record
-      const { data: newUser, error: insertError } = await supabase
-        .from('users')
-        .insert({
+      // Call Edge Function to create user (requires service role)
+      const { data, error } = await supabase.functions.invoke('create-user', {
+        body: {
           email: userData.email,
           first_name: userData.first_name,
           last_name: userData.last_name,
-          phone: userData.phone || null,
+          phone: userData.phone,
           role: userData.role,
-          employee_id: userData.employee_id || null,
-          vendor_id: currentUser.vendor_id,
-          auth_user_id: authData.user.id,
-          status: 'active',
-        })
-        .select()
-        .single()
+          employee_id: userData.employee_id,
+        },
+      })
 
-      if (insertError) throw insertError
+      if (error) throw error
+
+      if (!data.success) {
+        throw new Error(data.error || 'Failed to create user')
+      }
 
       await loadUsers()
-      return { success: true, user: newUser }
+      return { success: true, user: data.user }
     } catch (err) {
       logger.error('Failed to create user', { error: err })
       return {
@@ -200,7 +175,6 @@ export function useUsers() {
         error: err instanceof Error ? err.message : 'Failed to create user',
       }
     }
-    */
   }
 
   async function updateUser(
