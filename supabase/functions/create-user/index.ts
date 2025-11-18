@@ -68,18 +68,52 @@ serve(async (req) => {
       )
     }
 
-    // Create user in Supabase Auth
-    const { data: authData, error: authCreateError } = await supabaseAdmin.auth.admin.createUser({
-      email,
-      email_confirm: true,
-      user_metadata: {
-        first_name,
-        last_name,
-      },
-    })
+    // Check if auth user already exists (e.g., as a customer)
+    let authUserId: string
 
-    if (authCreateError) {
-      throw new Error('Failed to create auth user: ' + authCreateError.message)
+    const { data: existingAuthUsers } = await supabaseAdmin.auth.admin.listUsers()
+    const existingAuthUser = existingAuthUsers?.users?.find(u => u.email === email)
+
+    if (existingAuthUser) {
+      console.log('Auth user already exists, linking to staff record:', email)
+      authUserId = existingAuthUser.id
+
+      // Update user metadata to include staff info
+      await supabaseAdmin.auth.admin.updateUserById(authUserId, {
+        user_metadata: {
+          ...existingAuthUser.user_metadata,
+          first_name,
+          last_name,
+        },
+      })
+    } else {
+      // Create new user in Supabase Auth
+      const { data: authData, error: authCreateError } = await supabaseAdmin.auth.admin.createUser({
+        email,
+        email_confirm: true,
+        user_metadata: {
+          first_name,
+          last_name,
+        },
+      })
+
+      if (authCreateError) {
+        throw new Error('Failed to create auth user: ' + authCreateError.message)
+      }
+
+      authUserId = authData.user.id
+    }
+
+    // Check if staff record already exists for this vendor
+    const { data: existingStaffUser } = await supabaseAdmin
+      .from('users')
+      .select('id')
+      .eq('auth_user_id', authUserId)
+      .eq('vendor_id', currentUser.vendor_id)
+      .single()
+
+    if (existingStaffUser) {
+      throw new Error('This user is already a staff member for your organization')
     }
 
     // Create user record in database
@@ -93,15 +127,17 @@ serve(async (req) => {
         role,
         employee_id: employee_id || null,
         vendor_id: currentUser.vendor_id,
-        auth_user_id: authData.user.id,
+        auth_user_id: authUserId,
         status: 'active',
       })
       .select()
       .single()
 
     if (insertError) {
-      // If database insert fails, delete the auth user we just created
-      await supabaseAdmin.auth.admin.deleteUser(authData.user.id)
+      // If database insert fails and we created a new auth user, delete it
+      if (!existingAuthUser) {
+        await supabaseAdmin.auth.admin.deleteUser(authUserId)
+      }
       throw new Error('Failed to create user record: ' + insertError.message)
     }
 
