@@ -3,7 +3,7 @@
  * iPad Settings-style interface with Liquid Glass
  */
 
-import { View, Text, StyleSheet, Pressable, ScrollView, ActivityIndicator, Image, TextInput, Animated, useWindowDimensions } from 'react-native'
+import { View, Text, StyleSheet, Pressable, ScrollView, ActivityIndicator, Image, TextInput, Animated, useWindowDimensions, PanResponder, LayoutChangeEvent } from 'react-native'
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { LiquidGlassView, LiquidGlassContainerView, isLiquidGlassSupported } from '@callstack/liquid-glass'
@@ -19,6 +19,7 @@ import { EditableDescriptionSection, EditablePricingSection, EditableCustomField
 import { NavSidebar, type NavItem } from '@/components/NavSidebar'
 import { CategoryCard, CategoryDetail, CategoryModal, CustomFieldModal, FieldVisibilityModal, PricingTemplateModal } from '@/components/categories'
 import { LocationSelector } from '@/components/LocationSelector'
+import type { FilterOption, ActiveFilter } from '@/components/shared'
 import { useCategories } from '@/hooks/useCategories'
 import { useCustomFields } from '@/hooks/useCustomFields'
 import { usePricingTemplates } from '@/hooks/usePricingTemplates'
@@ -114,6 +115,12 @@ export function ProductsScreen() {
   const [vendorLogo, setVendorLogo] = useState<string | null>(null)
   const [vendorName, setVendorName] = useState<string>('')
 
+  // Filter state
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([])
+  const [selectedStrainTypes, setSelectedStrainTypes] = useState<string[]>([])
+  const [selectedConsistencies, setSelectedConsistencies] = useState<string[]>([])
+  const [selectedFlavors, setSelectedFlavors] = useState<string[]>([])
+
   // Modal states for categories
   const [showCategoryModal, setShowCategoryModal] = useState(false)
   const [showFieldModal, setShowFieldModal] = useState(false)
@@ -139,6 +146,24 @@ export function ProductsScreen() {
   // Scroll tracking for collapsing headers - using Animated.Value for iOS-style smooth transitions
   const categoriesHeaderOpacity = useRef(new Animated.Value(0)).current
   const productsHeaderOpacity = useRef(new Animated.Value(0)).current
+
+  // Section index state for products
+  const scrollViewRef = useRef<ScrollView>(null)
+  const sectionYPositionsRef = useRef<Record<string, number>>({})
+  const indexHeightRef = useRef(0)
+  const indexTopRef = useRef(0)
+  const lastScrolledLetterRef = useRef<string | null>(null)
+  const currentLetterRef = useRef<string | null>(null)
+  const [showSectionIndex, setShowSectionIndex] = useState(false)
+  const [currentLetter, setCurrentLetter] = useState<string | null>(null)
+
+  // Animated values for buttery smooth animations
+  const indexOpacity = useRef(new Animated.Value(0)).current
+  const previewOpacity = useRef(new Animated.Value(0)).current
+  const previewScale = useRef(new Animated.Value(0)).current
+  const touchIndicatorY = useRef(new Animated.Value(0)).current
+  const previewY = useRef(new Animated.Value(0)).current
+  const scrollProgress = useRef(new Animated.Value(0)).current
 
   const { width } = useWindowDimensions()
   const contentWidth = width - layout.sidebarWidth
@@ -201,9 +226,142 @@ export function ProductsScreen() {
     setSelectedProduct(product)
   }, [])
 
-  // Filter products based on active nav and search query (client-side)
+  // Get all active filter pills for display
+  const activeFilterPills = useMemo((): ActiveFilter[] => {
+    const pills: ActiveFilter[] = []
+
+    selectedCategories.forEach(cat => {
+      pills.push({ id: `cat-${cat}`, label: cat, type: 'category' })
+    })
+    selectedStrainTypes.forEach(strain => {
+      pills.push({ id: `strain-${strain}`, label: strain, type: 'strain' })
+    })
+    selectedConsistencies.forEach(cons => {
+      pills.push({ id: `cons-${cons}`, label: cons, type: 'consistency' })
+    })
+    selectedFlavors.forEach(flavor => {
+      pills.push({ id: `flavor-${flavor}`, label: flavor, type: 'flavor' })
+    })
+
+    return pills
+  }, [selectedCategories, selectedStrainTypes, selectedConsistencies, selectedFlavors])
+
+  // Filter handlers
+  const handleClearFilters = useCallback(() => {
+    setSelectedCategories([])
+    setSelectedStrainTypes([])
+    setSelectedConsistencies([])
+    setSelectedFlavors([])
+  }, [])
+
+  const handleRemovePill = useCallback((pill: ActiveFilter) => {
+    switch (pill.type) {
+      case 'category':
+        setSelectedCategories(prev => prev.filter(c => c !== pill.label))
+        break
+      case 'strain':
+        setSelectedStrainTypes(prev => prev.filter(s => s !== pill.label))
+        break
+      case 'consistency':
+        setSelectedConsistencies(prev => prev.filter(c => c !== pill.label))
+        break
+      case 'flavor':
+        setSelectedFlavors(prev => prev.filter(f => f !== pill.label))
+        break
+    }
+  }, [])
+
+  const toggleCategory = useCallback((categoryName: string) => {
+    setSelectedCategories(prev =>
+      prev.includes(categoryName)
+        ? prev.filter(c => c !== categoryName)
+        : [...prev, categoryName]
+    )
+  }, [])
+
+  const toggleStrainType = useCallback((strainType: string) => {
+    setSelectedStrainTypes(prev =>
+      prev.includes(strainType)
+        ? prev.filter(s => s !== strainType)
+        : [...prev, strainType]
+    )
+  }, [])
+
+  const toggleConsistency = useCallback((consistency: string) => {
+    setSelectedConsistencies(prev =>
+      prev.includes(consistency)
+        ? prev.filter(c => c !== consistency)
+        : [...prev, consistency]
+    )
+  }, [])
+
+  const toggleFlavor = useCallback((flavor: string) => {
+    setSelectedFlavors(prev =>
+      prev.includes(flavor)
+        ? prev.filter(f => f !== flavor)
+        : [...prev, flavor]
+    )
+  }, [])
+
+  // Extract available custom field values for filters
+  // Using same logic as POS - extract values from custom_fields JSONB
+  const availableStrainTypes = useMemo((): FilterOption[] => {
+    const strainTypes = new Set<string>()
+    allProducts.forEach(product => {
+      if (product.custom_fields && typeof product.custom_fields === 'object') {
+        const strainType = (product.custom_fields as any).strain_type
+        if (strainType && typeof strainType === 'string' && strainType.trim()) {
+          strainTypes.add(strainType.trim())
+        }
+      }
+    })
+    return Array.from(strainTypes).sort().map(name => ({ id: name, name }))
+  }, [allProducts])
+
+  const availableConsistencies = useMemo((): FilterOption[] => {
+    const consistencies = new Set<string>()
+    allProducts.forEach(product => {
+      if (product.custom_fields && typeof product.custom_fields === 'object') {
+        const consistency = (product.custom_fields as any).consistency
+        if (consistency && typeof consistency === 'string' && consistency.trim()) {
+          consistencies.add(consistency.trim())
+        }
+      }
+    })
+    return Array.from(consistencies).sort().map(name => ({ id: name, name }))
+  }, [allProducts])
+
+  const availableFlavors = useMemo((): FilterOption[] => {
+    const flavors = new Set<string>()
+    allProducts.forEach(product => {
+      if (product.custom_fields && typeof product.custom_fields === 'object') {
+        const flavor = (product.custom_fields as any).flavor
+        if (flavor && typeof flavor === 'string' && flavor.trim()) {
+          flavors.add(flavor.trim())
+        }
+      }
+    })
+    return Array.from(flavors).sort().map(name => ({ id: name, name }))
+  }, [allProducts])
+
+  // Convert categories to FilterOption[]
+  const categoriesAsFilterOptions = useMemo((): FilterOption[] => {
+    return categories.map(cat => ({ id: cat.id, name: cat.name }))
+  }, [categories])
+
+  // Calculate active filter count
+  const activeFilterCount = useMemo(() => {
+    let count = 0
+    if (selectedCategories.length > 0) count += selectedCategories.length
+    if (selectedStrainTypes.length > 0) count += selectedStrainTypes.length
+    if (selectedConsistencies.length > 0) count += selectedConsistencies.length
+    if (selectedFlavors.length > 0) count += selectedFlavors.length
+    return count
+  }, [selectedCategories, selectedStrainTypes, selectedConsistencies, selectedFlavors])
+
+  // Filter and sort products alphabetically, grouped by first letter
   const products = useMemo(() => {
-    return allProducts.filter(product => {
+    const filtered = allProducts.filter(product => {
       // First filter by location (if specific locations selected)
       if (selectedLocationIds.length > 0) {
         // Only show products that have inventory in at least one of the selected locations
@@ -221,6 +379,40 @@ export function ProductsScreen() {
         if ((product.total_stock ?? 0) !== 0) return false
       }
 
+      // Filter by categories
+      if (selectedCategories.length > 0) {
+        const productCategoryName = product.primary_category_id
+          ? categoryMap.get(product.primary_category_id)
+          : null
+        if (!productCategoryName || !selectedCategories.includes(productCategoryName)) {
+          return false
+        }
+      }
+
+      // Filter by strain types
+      if (selectedStrainTypes.length > 0) {
+        const productStrainType = product.custom_fields?.strain_type
+        if (!productStrainType || !selectedStrainTypes.includes(productStrainType as string)) {
+          return false
+        }
+      }
+
+      // Filter by consistencies
+      if (selectedConsistencies.length > 0) {
+        const productConsistency = product.custom_fields?.consistency
+        if (!productConsistency || !selectedConsistencies.includes(productConsistency as string)) {
+          return false
+        }
+      }
+
+      // Filter by flavors
+      if (selectedFlavors.length > 0) {
+        const productFlavor = product.custom_fields?.flavor
+        if (!productFlavor || !selectedFlavors.includes(productFlavor as string)) {
+          return false
+        }
+      }
+
       // Finally filter by search query
       if (productSearchQuery) {
         const searchLower = productSearchQuery.toLowerCase()
@@ -235,7 +427,172 @@ export function ProductsScreen() {
 
       return true
     })
-  }, [allProducts, activeNav, productSearchQuery, categoryMap, selectedLocationIds])
+
+    // Sort alphabetically by name
+    return filtered.sort((a, b) => a.name.localeCompare(b.name))
+  }, [allProducts, activeNav, productSearchQuery, categoryMap, selectedLocationIds, selectedCategories, selectedStrainTypes, selectedConsistencies, selectedFlavors])
+
+  // Group products by first letter for section headers
+  const productSections = useMemo(() => {
+    const sections = new Map<string, Product[]>()
+
+    products.forEach(product => {
+      const firstLetter = product.name.charAt(0).toUpperCase()
+      const letter = /[A-Z]/.test(firstLetter) ? firstLetter : '#'
+
+      if (!sections.has(letter)) {
+        sections.set(letter, [])
+      }
+      sections.get(letter)!.push(product)
+    })
+
+    // Convert to sorted array
+    const sortedSections = Array.from(sections.entries())
+      .sort(([a], [b]) => {
+        if (a === '#') return 1
+        if (b === '#') return -1
+        return a.localeCompare(b)
+      })
+
+    return sortedSections
+  }, [products])
+
+  // Get all available section letters for the index
+  const sectionIndex = useMemo(() => {
+    return productSections.map(([letter]) => letter)
+  }, [productSections])
+
+  // Buttery smooth index touch handler with interpolation
+  const handleIndexTouch = useCallback((absoluteY: number) => {
+    if (sectionIndex.length === 0 || indexHeightRef.current === 0) return
+
+    // Calculate relative position within the index
+    const relativeY = absoluteY - indexTopRef.current
+    const clampedY = Math.max(0, Math.min(relativeY, indexHeightRef.current))
+
+    // Update scroll progress for smooth interpolation (0 to 1)
+    const progress = clampedY / indexHeightRef.current
+    scrollProgress.setValue(progress)
+
+    // Smoothly animate touch indicator and preview to exact finger position with spring
+    Animated.spring(touchIndicatorY, {
+      toValue: absoluteY,
+      friction: 20,
+      tension: 300,
+      useNativeDriver: true,
+    }).start()
+
+    Animated.spring(previewY, {
+      toValue: absoluteY,
+      friction: 20,
+      tension: 300,
+      useNativeDriver: true,
+    }).start()
+
+    // Calculate which letter was touched based on Y position
+    const index = Math.floor(progress * sectionIndex.length)
+    const clampedIndex = Math.max(0, Math.min(index, sectionIndex.length - 1))
+    const letter = sectionIndex[clampedIndex]
+
+    // Update current letter ref for instant access
+    currentLetterRef.current = letter
+
+    // Update state for preview (throttled to prevent jumps)
+    requestAnimationFrame(() => {
+      setCurrentLetter(letter)
+    })
+
+    // Only scroll if we've moved to a different letter (prevents glitchy repeated scrolls)
+    if (letter === lastScrolledLetterRef.current) return
+    lastScrolledLetterRef.current = letter
+
+    // Scroll to that section with slight haptic feedback
+    const yPosition = sectionYPositionsRef.current[letter]
+    if (yPosition !== undefined && scrollViewRef.current) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+      scrollViewRef.current.scrollTo({ y: yPosition - 80, animated: false })
+    }
+  }, [sectionIndex, touchIndicatorY, previewY, scrollProgress])
+
+  // Show/hide index with buttery smooth spring animations (Apple-style)
+  const showIndex = useCallback(() => {
+    setShowSectionIndex(true)
+    Animated.parallel([
+      Animated.spring(indexOpacity, {
+        toValue: 1,
+        friction: 10,
+        tension: 150,
+        useNativeDriver: true,
+      }),
+      Animated.spring(previewOpacity, {
+        toValue: 1,
+        friction: 9,
+        tension: 140,
+        useNativeDriver: true,
+      }),
+      Animated.spring(previewScale, {
+        toValue: 1,
+        friction: 8,
+        tension: 130,
+        useNativeDriver: true,
+      }),
+    ]).start()
+  }, [indexOpacity, previewOpacity, previewScale])
+
+  const hideIndex = useCallback(() => {
+    Animated.parallel([
+      Animated.spring(indexOpacity, {
+        toValue: 0,
+        friction: 12,
+        tension: 140,
+        useNativeDriver: true,
+      }),
+      Animated.spring(previewOpacity, {
+        toValue: 0,
+        friction: 12,
+        tension: 140,
+        useNativeDriver: true,
+      }),
+      Animated.spring(previewScale, {
+        toValue: 0.85,
+        friction: 11,
+        tension: 130,
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      setShowSectionIndex(false)
+      setCurrentLetter(null)
+      currentLetterRef.current = null
+    })
+  }, [indexOpacity, previewOpacity, previewScale])
+
+  // Create pan responder for draggable index with precise touch tracking
+  const indexPanResponder = useMemo(() =>
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: (evt) => {
+        showIndex()
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+        // Use pageY for absolute screen position
+        handleIndexTouch(evt.nativeEvent.pageY)
+      },
+      onPanResponderMove: (evt) => {
+        // Use pageY for absolute screen position - buttery smooth tracking
+        handleIndexTouch(evt.nativeEvent.pageY)
+      },
+      onPanResponderRelease: () => {
+        lastScrolledLetterRef.current = null
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+        hideIndex()
+      },
+      onPanResponderTerminate: () => {
+        lastScrolledLetterRef.current = null
+        hideIndex()
+      },
+    }),
+    [handleIndexTouch, showIndex, hideIndex]
+  )
 
   // Calculate counts for badges
   const lowStockCount = allProducts.filter(p => {
@@ -285,6 +642,7 @@ export function ProductsScreen() {
     }).start()
   }, [selectedProduct, selectedCategoryId, activeNav, slideAnim])
 
+
   // Filter categories by nav search
   const filteredCategories = useMemo(() => {
     if (!navSearchQuery || activeNav !== 'categories') return categories
@@ -324,8 +682,8 @@ export function ProductsScreen() {
         {/* LEFT NAV SIDEBAR */}
         <NavSidebar
           width={layout.sidebarWidth}
-          searchValue={navSearchQuery}
-          onSearchChange={setNavSearchQuery}
+          searchValue={activeNav === 'categories' ? navSearchQuery : productSearchQuery}
+          onSearchChange={activeNav === 'categories' ? setNavSearchQuery : setProductSearchQuery}
           items={navItems}
           activeItemId={activeNav}
           onItemPress={(id) => setActiveNav(id as NavSection)}
@@ -334,6 +692,24 @@ export function ProductsScreen() {
           vendorLogo={vendorLogo}
           onUserProfilePress={() => setShowLocationSelector(true)}
           selectedLocationNames={selectedLocationNames}
+          // Filter props - only for product views
+          showFilters={activeNav !== 'categories'}
+          categories={categoriesAsFilterOptions}
+          selectedCategories={selectedCategories}
+          onCategoryToggle={toggleCategory}
+          strainTypes={availableStrainTypes}
+          selectedStrainTypes={selectedStrainTypes}
+          onStrainTypeToggle={toggleStrainType}
+          consistencies={availableConsistencies}
+          selectedConsistencies={selectedConsistencies}
+          onConsistencyToggle={toggleConsistency}
+          flavors={availableFlavors}
+          selectedFlavors={selectedFlavors}
+          onFlavorToggle={toggleFlavor}
+          onClearFilters={handleClearFilters}
+          activeFilterCount={activeFilterCount}
+          activeFilterPills={activeFilterPills}
+          onRemovePill={handleRemovePill}
         />
 
         {/* SLIDING CONTENT AREA */}
@@ -389,8 +765,8 @@ export function ProductsScreen() {
                 <ScrollView
                   showsVerticalScrollIndicator={true}
                   indicatorStyle="white"
-                  scrollIndicatorInsets={{ right: 2, top: 80, bottom: layout.dockHeight }}
-                  contentContainerStyle={{ paddingTop: 80, paddingBottom: layout.dockHeight, paddingRight: layout.containerMargin }}
+                  scrollIndicatorInsets={{ right: 2, top: 100, bottom: layout.dockHeight }}
+                  contentContainerStyle={{ paddingTop: 100, paddingBottom: layout.dockHeight, paddingRight: layout.containerMargin }}
                   onScroll={(e) => {
                     const offsetY = e.nativeEvent.contentOffset.y
                     const threshold = 40
@@ -469,20 +845,6 @@ export function ProductsScreen() {
               <View style={styles.loadingContainer}>
                 <ActivityIndicator color={colors.text.secondary} />
               </View>
-            ) : products.length === 0 ? (
-              <View style={styles.emptyState}>
-                <Text style={styles.emptyStateIcon}>􀈄</Text>
-                <Text style={styles.emptyStateTitle}>No Products Found</Text>
-                <Text style={styles.emptyStateText}>
-                  {activeNav === 'low-stock'
-                    ? 'No products with low stock levels'
-                    : activeNav === 'out-of-stock'
-                    ? 'No products are out of stock'
-                    : productSearchQuery
-                    ? 'Try adjusting your search'
-                    : 'No products available'}
-                </Text>
-              </View>
             ) : (
               <View style={styles.productsListContent}>
                 {/* Fixed Header - appears on scroll */}
@@ -499,73 +861,197 @@ export function ProductsScreen() {
                   pointerEvents="none"
                 />
 
-                {/* Sticky Search Bar - Top Right - Above Fade */}
-                <View style={styles.stickySearchContainer}>
-                  <LiquidGlassView
-                    effect="regular"
-                    colorScheme="dark"
-                    style={[styles.stickySearchBar, !isLiquidGlassSupported && styles.stickySearchBarFallback]}
-                    accessible={false}
+                <View style={styles.sectionListContainer}>
+                  <ScrollView
+                    ref={scrollViewRef}
+                    showsVerticalScrollIndicator={!showSectionIndex}
+                    indicatorStyle="white"
+                    scrollIndicatorInsets={{ right: 2, top: 100, bottom: layout.dockHeight }}
+                    contentContainerStyle={{ paddingTop: 100, paddingBottom: layout.dockHeight, paddingRight: layout.containerMargin }}
+                    onScroll={(e) => {
+                      const offsetY = e.nativeEvent.contentOffset.y
+                      const threshold = 40
+                      // Instant transition like iOS
+                      productsHeaderOpacity.setValue(offsetY > threshold ? 1 : 0)
+                    }}
+                    scrollEventThrottle={16}
                   >
-                    <View style={styles.stickySearchInner} accessible={false}>
-                      <View style={styles.searchIconContainer}>
-                        <View style={styles.searchIconCircle} />
-                        <View style={styles.searchIconHandle} />
-                      </View>
-                      <TextInput
-                        style={styles.stickySearchInput}
-                        placeholder="Search"
-                        placeholderTextColor="rgba(235,235,245,0.6)"
-                        value={productSearchQuery}
-                        onChangeText={setProductSearchQuery}
-                        accessible={true}
-                        accessibilityLabel="Search products"
-                        accessibilityHint="Type to filter the products list"
-                      />
+                    {/* Large Title - scrolls with content */}
+                    <View style={styles.cardWrapper}>
+                      <Text style={styles.largeTitleHeader}>
+                        {activeNav === 'all' ? 'All Products' : activeNav === 'low-stock' ? 'Low Stock' : 'Out of Stock'}
+                      </Text>
                     </View>
-                  </LiquidGlassView>
-                </View>
 
-                <ScrollView
-                  showsVerticalScrollIndicator={true}
-                  indicatorStyle="white"
-                  scrollIndicatorInsets={{ right: 2, top: 80, bottom: layout.dockHeight }}
-                  contentContainerStyle={{ paddingTop: 80, paddingBottom: layout.dockHeight, paddingRight: layout.containerMargin }}
-                  onScroll={(e) => {
-                    const offsetY = e.nativeEvent.contentOffset.y
-                    const threshold = 40
-                    // Instant transition like iOS
-                    productsHeaderOpacity.setValue(offsetY > threshold ? 1 : 0)
-                  }}
-                  scrollEventThrottle={16}
-                >
-                  {/* Large Title - scrolls with content */}
-                  <View style={styles.cardWrapper}>
-                    <Text style={styles.largeTitleHeader}>
-                      {activeNav === 'all' ? 'All Products' : activeNav === 'low-stock' ? 'Low Stock' : 'Out of Stock'}
-                    </Text>
-                  </View>
+                    {/* Empty State - when no products match */}
+                    {products.length === 0 ? (
+                      <View style={styles.emptyState}>
+                        <View style={styles.emptyStateIconContainer}>
+                          <Text style={styles.emptyStateIcon}>􀈂</Text>
+                        </View>
+                        <Text style={styles.emptyStateTitle}>No Products Found</Text>
+                        <Text style={styles.emptyStateText}>
+                          {activeNav === 'low-stock'
+                            ? 'No products with low stock levels'
+                            : activeNav === 'out-of-stock'
+                            ? 'No products are out of stock'
+                            : productSearchQuery
+                            ? `No results for "${productSearchQuery}"`
+                            : 'No products available'}
+                        </Text>
+                        {productSearchQuery && (
+                          <LiquidGlassView
+                            effect="regular"
+                            colorScheme="dark"
+                            interactive
+                            style={[
+                              styles.clearSearchButton,
+                              !isLiquidGlassSupported && styles.clearSearchButtonFallback,
+                            ]}
+                            accessible={false}
+                          >
+                            <Pressable
+                              onPress={() => {
+                                setProductSearchQuery('')
+                                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                              }}
+                              style={styles.clearSearchButtonInner}
+                            >
+                              <Text style={styles.clearSearchButtonText}>CLEAR SEARCH</Text>
+                            </Pressable>
+                          </LiquidGlassView>
+                        )}
+                      </View>
+                    ) : (
+                      <>
+                        {/* Render sections with headers */}
+                        {productSections.map(([letter, items], sectionIdx) => (
+                      <View
+                        key={letter}
+                        style={styles.alphabetSection}
+                        onLayout={(event) => {
+                          const layout = event.nativeEvent.layout
+                          sectionYPositionsRef.current[letter] = layout.y
+                        }}
+                      >
+                        {/* Section Header */}
+                        <View style={styles.sectionHeader}>
+                          <Text style={styles.sectionHeaderText}>{letter}</Text>
+                        </View>
 
-                  <View style={styles.cardWrapper}>
-                  <View style={styles.productsCardGlass}>
-                    {products.map((item, index) => {
-                    const isLast = index === products.length - 1
-                    const categoryName = item.primary_category_id ? (categoryMap.get(item.primary_category_id) ?? null) : null
+                        {/* Products in this section */}
+                        <View style={styles.cardWrapper}>
+                          <View style={styles.productsCardGlass}>
+                            {items.map((item, index) => {
+                              const isLast = index === items.length - 1
+                              const categoryName = item.primary_category_id ? (categoryMap.get(item.primary_category_id) ?? null) : null
 
-                    return (
-                      <ProductItem
-                        key={item.id}
-                        item={item}
-                        isLast={isLast}
-                        isSelected={selectedProduct?.id === item.id}
-                        categoryName={categoryName}
-                        onPress={() => handleProductSelect(item)}
+                              return (
+                                <ProductItem
+                                  key={item.id}
+                                  item={item}
+                                  isLast={isLast}
+                                  isSelected={selectedProduct?.id === item.id}
+                                  categoryName={categoryName}
+                                  onPress={() => handleProductSelect(item)}
+                                />
+                              )
+                            })}
+                          </View>
+                        </View>
+                      </View>
+                        ))}
+                      </>
+                    )}
+                  </ScrollView>
+
+                  {/* iOS-style Section Index (A-Z fast scroller) - Shows on touch */}
+                  {sectionIndex.length > 0 && (
+                    <>
+                      {/* Invisible touch area - always present */}
+                      <View
+                        style={styles.sectionIndexTouchArea}
+                        onLayout={(event) => {
+                          const { height, y } = event.nativeEvent.layout
+                          indexHeightRef.current = height
+                          // Measure absolute position on screen
+                          event.target.measure((x, y, width, height, pageX, pageY) => {
+                            indexTopRef.current = pageY
+                          })
+                        }}
+                        {...indexPanResponder.panHandlers}
                       />
-                    )
-                  })}
-                  </View>
+
+                      {/* Visible index - only when touching */}
+                      {showSectionIndex && (
+                        <>
+                          {/* Letter Preview (iOS-style magnified bubble) - buttery smooth */}
+                          {currentLetter && (
+                            <Animated.View
+                              style={[
+                                styles.letterPreviewContainer,
+                                {
+                                  opacity: previewOpacity,
+                                  transform: [
+                                    { translateY: previewY },
+                                    { scale: previewScale },
+                                  ],
+                                }
+                              ]}
+                              pointerEvents="none"
+                            >
+                              <View style={styles.letterPreviewBubble}>
+                                <Text style={styles.letterPreviewText}>{currentLetter}</Text>
+                              </View>
+                            </Animated.View>
+                          )}
+
+                          {/* Touch indicator (replaces scroll indicator) - follows finger exactly */}
+                          <Animated.View
+                            style={[
+                              styles.touchIndicator,
+                              {
+                                opacity: indexOpacity,
+                                transform: [{ translateY: touchIndicatorY }],
+                              }
+                            ]}
+                            pointerEvents="none"
+                          />
+
+                          {/* Index bar */}
+                          <Animated.View
+                            style={[
+                              styles.sectionIndexContainer,
+                              { opacity: indexOpacity }
+                            ]}
+                            pointerEvents="none"
+                          >
+                            {sectionIndex.map((letter, idx) => {
+                              const itemHeight = indexHeightRef.current / sectionIndex.length
+                              const itemY = idx * itemHeight
+                              const isActive = letter === currentLetter
+
+                              return (
+                                <View
+                                  key={letter}
+                                  style={[
+                                    styles.sectionIndexItem,
+                                    isActive && styles.sectionIndexItemActive,
+                                  ]}
+                                >
+                                  <Text style={[
+                                    styles.sectionIndexText,
+                                    isActive && styles.sectionIndexTextActive,
+                                  ]}>{letter}</Text>
+                                </View>
+                              )
+                            })}
+                          </Animated.View>
+                        </>
+                      )}
+                    </>
+                  )}
                 </View>
-                </ScrollView>
               </View>
             )
           )}
@@ -731,8 +1217,7 @@ function ProductDetail({ product, onBack, onProductUpdated }: { product: Product
           name: editedName,
           sku: editedSKU,
           description: editedDescription,
-          price: parseFloat(editedPrice) || null,
-          regular_price: parseFloat(editedPrice) || null,
+          // Don't update price or regular_price - they are generated columns
           cost_price: parseFloat(editedCostPrice) || null,
           pricing_data: pricingData,
           custom_fields: editedCustomFields,
@@ -748,8 +1233,14 @@ function ProductDetail({ product, onBack, onProductUpdated }: { product: Product
       // Trigger parent reload
       onProductUpdated()
     } catch (error) {
-      logger.error('Failed to save product:', error)
+      logger.error('Failed to save product:', {
+        error,
+        message: error instanceof Error ? error.message : 'Unknown error',
+        details: JSON.stringify(error, null, 2)
+      })
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
+      // Log to console for debugging
+      console.error('Product save error details:', error)
     } finally {
       setSaving(false)
     }
@@ -999,61 +1490,6 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
 
-  // Sticky Search Bar - Top Right (matches nav bar size)
-  stickySearchContainer: {
-    position: 'absolute',
-    top: layout.cardPadding,
-    right: layout.cardPadding,
-    zIndex: 30, // Above fade gradient (10) and fixed header (20)
-    elevation: 30,
-    width: 260,
-  },
-  stickySearchBar: {
-    borderRadius: layout.pillRadius,
-    borderCurve: 'continuous',
-    overflow: 'hidden',
-    minHeight: layout.minTouchTarget,
-  },
-  stickySearchBarFallback: {
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.12)',
-  },
-  stickySearchInner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    gap: 12,
-  },
-  searchIconContainer: {
-    width: 16,
-    height: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  searchIconCircle: {
-    width: 11,
-    height: 11,
-    borderRadius: 5.5,
-    borderWidth: 1.5,
-    borderColor: 'rgba(235,235,245,0.6)',
-  },
-  searchIconHandle: {
-    width: 5,
-    height: 1.5,
-    backgroundColor: 'rgba(235,235,245,0.6)',
-    position: 'absolute',
-    bottom: 0.5,
-    right: 0.5,
-    transform: [{ rotate: '45deg' }],
-  },
-  stickySearchInput: {
-    flex: 1,
-    fontSize: 17,
-    color: '#fff',
-    letterSpacing: -0.4,
-  },
 
   // iOS Collapsing Headers
   fixedHeader: {
@@ -1077,7 +1513,7 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
-    height: 120,
+    height: 80,
     zIndex: 10,
   },
   largeTitleHeader: {
@@ -1107,6 +1543,11 @@ const styles = StyleSheet.create({
   },
   productsListContent: {
     flex: 1,
+    position: 'relative', // Positioning context for search bar
+  },
+  sectionListContainer: {
+    flex: 1,
+    position: 'relative',
   },
   cardWrapper: {
     marginHorizontal: 6, // Ultra-minimal iOS-style spacing (6px)
@@ -1222,22 +1663,51 @@ const styles = StyleSheet.create({
     paddingHorizontal: 40,
     paddingVertical: 80,
   },
+  emptyStateIconContainer: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 20,
+  },
   emptyStateIcon: {
-    fontSize: 64,
-    color: 'rgba(235,235,245,0.2)',
-    marginBottom: 16,
+    fontSize: 40,
+    color: 'rgba(235,235,245,0.3)',
   },
   emptyStateTitle: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: 'rgba(235,235,245,0.8)',
+    fontSize: 20,
+    fontWeight: '600',
+    color: 'rgba(235,235,245,0.9)',
     marginBottom: 8,
+    letterSpacing: -0.4,
   },
   emptyStateText: {
-    fontSize: 15,
+    fontSize: 14,
     color: 'rgba(235,235,245,0.5)',
     textAlign: 'center',
     lineHeight: 20,
+    letterSpacing: -0.2,
+  },
+  clearSearchButton: {
+    borderRadius: 100,
+    overflow: 'hidden',
+    marginTop: 24,
+  },
+  clearSearchButtonFallback: {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  clearSearchButtonInner: {
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    alignItems: 'center',
+  },
+  clearSearchButtonText: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: '#fff',
+    letterSpacing: 2,
   },
 
   // RIGHT DETAIL PANEL
@@ -1706,4 +2176,116 @@ const styles = StyleSheet.create({
     color: '#60A5FA',
     fontWeight: '600',
   },
+
+  // Section Headers (A-Z)
+  alphabetSection: {
+    marginBottom: 0,
+  },
+  sectionHeader: {
+    paddingVertical: 4,
+    paddingHorizontal: 20,
+    backgroundColor: '#000',
+    marginTop: 12,
+  },
+  sectionHeaderText: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#fff',
+    letterSpacing: -0.3,
+  },
+
+  // iOS-style Section Index - Touch area (invisible, always present)
+  sectionIndexTouchArea: {
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    bottom: 0,
+    width: 40,
+    zIndex: 100,
+    paddingVertical: 80,
+  },
+
+  // iOS-style Section Index - Visible letters (only when touching)
+  sectionIndexContainer: {
+    position: 'absolute',
+    right: 4,
+    top: 0,
+    bottom: 0,
+    justifyContent: 'space-evenly',
+    alignItems: 'center',
+    paddingVertical: 80,
+    paddingHorizontal: 6,
+    zIndex: 101,
+    width: 20,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    borderRadius: 10,
+    marginVertical: 80,
+    marginRight: 2,
+  },
+  sectionIndexItem: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    minHeight: 10,
+    maxHeight: 18,
+  },
+  sectionIndexItemActive: {
+    transform: [{ scale: 1.2 }],
+  },
+  sectionIndexText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: 'rgba(235,235,245,0.7)',
+    letterSpacing: 0,
+  },
+  sectionIndexTextActive: {
+    color: '#fff',
+    fontWeight: '700',
+  },
+
+  // Touch indicator (replaces scroll indicator when active)
+  touchIndicator: {
+    position: 'absolute',
+    top: -20,
+    right: 8,
+    width: 3,
+    height: 40,
+    backgroundColor: 'rgba(255,255,255,0.9)',
+    borderRadius: 1.5,
+    zIndex: 102,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.3,
+    shadowRadius: 2,
+  },
+
+  // Letter Preview (iOS-style magnified bubble)
+  letterPreviewContainer: {
+    position: 'absolute',
+    top: -30,
+    right: 50,
+    zIndex: 103,
+  },
+  letterPreviewBubble: {
+    width: 70,
+    height: 70,
+    borderRadius: 35,
+    backgroundColor: 'rgba(255,255,255,0.98)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 12,
+    elevation: 12,
+    borderWidth: 0.5,
+    borderColor: 'rgba(0,0,0,0.1)',
+  },
+  letterPreviewText: {
+    fontSize: 38,
+    fontWeight: '700',
+    color: '#000',
+    letterSpacing: -1,
+  },
+
 })

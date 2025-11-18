@@ -22,6 +22,15 @@ export interface Order {
   payment_method?: string
   created_at: string
   updated_at: string
+  // Order type info
+  delivery_type?: 'pickup' | 'delivery' | 'instore'
+  order_type?: string
+  pickup_location_id?: string
+  pickup_location_name?: string
+  // Customer info (joined from customers table)
+  customer_name?: string
+  customer_email?: string
+  customer_phone?: string
 }
 
 export interface OrderItem {
@@ -67,7 +76,18 @@ export async function getOrders(params?: {
 }): Promise<Order[]> {
   let query = supabase
     .from('orders')
-    .select('*')
+    .select(`
+      *,
+      customers (
+        first_name,
+        last_name,
+        email,
+        phone
+      ),
+      locations:pickup_location_id (
+        name
+      )
+    `)
     .order('created_at', { ascending: false })
 
   if (params?.status) {
@@ -88,7 +108,28 @@ export async function getOrders(params?: {
     throw new Error(`Failed to fetch orders: ${error.message}`)
   }
 
-  return data || []
+  // Flatten customer and location data
+  const orders = (data || []).map((order: any) => {
+    const customer = Array.isArray(order.customers) ? order.customers[0] : order.customers
+    const customerName = customer
+      ? `${customer.first_name || ''} ${customer.last_name || ''}`.trim() || 'Guest'
+      : 'Guest'
+
+    const location = Array.isArray(order.locations) ? order.locations[0] : order.locations
+    const locationName = location?.name || 'Online'
+
+    return {
+      ...order,
+      customer_name: customerName,
+      customer_email: customer?.email || '',
+      customer_phone: customer?.phone || '',
+      pickup_location_name: locationName,
+      customers: undefined, // Remove nested object
+      locations: undefined, // Remove nested object
+    }
+  })
+
+  return orders
 }
 
 /**
@@ -99,7 +140,13 @@ export async function getOrderById(orderId: string): Promise<Order & { items: Or
     .from('orders')
     .select(`
       *,
-      order_items (*)
+      order_items (*),
+      customers (
+        first_name,
+        last_name,
+        email,
+        phone
+      )
     `)
     .eq('id', orderId)
     .single()
@@ -108,9 +155,18 @@ export async function getOrderById(orderId: string): Promise<Order & { items: Or
     throw new Error(`Failed to fetch order: ${orderError.message}`)
   }
 
+  const customer = Array.isArray(order.customers) ? order.customers[0] : order.customers
+  const customerName = customer
+    ? `${customer.first_name || ''} ${customer.last_name || ''}`.trim() || 'Guest'
+    : 'Guest'
+
   return {
     ...order,
+    customer_name: customerName,
+    customer_email: customer?.email || '',
+    customer_phone: customer?.phone || '',
     items: order.order_items || [],
+    customers: undefined, // Remove nested object
   }
 }
 
@@ -230,7 +286,18 @@ export async function getTodaysOrders(): Promise<Order[]> {
 
   const { data, error } = await supabase
     .from('orders')
-    .select('*')
+    .select(`
+      *,
+      customers (
+        first_name,
+        last_name,
+        email,
+        phone
+      ),
+      locations:pickup_location_id (
+        name
+      )
+    `)
     .gte('created_at', today.toISOString())
     .order('created_at', { ascending: false })
 
@@ -238,7 +305,28 @@ export async function getTodaysOrders(): Promise<Order[]> {
     throw new Error(`Failed to fetch today's orders: ${error.message}`)
   }
 
-  return data || []
+  // Flatten customer and location data
+  const orders = (data || []).map((order: any) => {
+    const customer = Array.isArray(order.customers) ? order.customers[0] : order.customers
+    const customerName = customer
+      ? `${customer.first_name || ''} ${customer.last_name || ''}`.trim() || 'Guest'
+      : 'Guest'
+
+    const location = Array.isArray(order.locations) ? order.locations[0] : order.locations
+    const locationName = location?.name || 'Online'
+
+    return {
+      ...order,
+      customer_name: customerName,
+      customer_email: customer?.email || '',
+      customer_phone: customer?.phone || '',
+      pickup_location_name: locationName,
+      customers: undefined, // Remove nested object
+      locations: undefined, // Remove nested object
+    }
+  })
+
+  return orders
 }
 
 /**
@@ -247,7 +335,18 @@ export async function getTodaysOrders(): Promise<Order[]> {
 export async function searchOrders(searchTerm: string): Promise<Order[]> {
   const { data, error } = await supabase
     .from('orders')
-    .select('*')
+    .select(`
+      *,
+      customers (
+        first_name,
+        last_name,
+        email,
+        phone
+      ),
+      locations:pickup_location_id (
+        name
+      )
+    `)
     .or(`order_number.ilike.%${searchTerm}%,transaction_id.ilike.%${searchTerm}%`)
     .order('created_at', { ascending: false })
     .limit(20)
@@ -256,7 +355,28 @@ export async function searchOrders(searchTerm: string): Promise<Order[]> {
     throw new Error(`Failed to search orders: ${error.message}`)
   }
 
-  return data || []
+  // Flatten customer and location data
+  const orders = (data || []).map((order: any) => {
+    const customer = Array.isArray(order.customers) ? order.customers[0] : order.customers
+    const customerName = customer
+      ? `${customer.first_name || ''} ${customer.last_name || ''}`.trim() || 'Guest'
+      : 'Guest'
+
+    const location = Array.isArray(order.locations) ? order.locations[0] : order.locations
+    const locationName = location?.name || 'Online'
+
+    return {
+      ...order,
+      customer_name: customerName,
+      customer_email: customer?.email || '',
+      customer_phone: customer?.phone || '',
+      pickup_location_name: locationName,
+      customers: undefined, // Remove nested object
+      locations: undefined, // Remove nested object
+    }
+  })
+
+  return orders
 }
 
 /**

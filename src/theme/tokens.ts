@@ -97,147 +97,147 @@ export const colors = {
  * Following iOS Human Interface Guidelines
  */
 export const typography = {
-  // Display Text (Hero sections)
-  display: {
+  // Display Text (Large Titles - iOS 34pt) - Used for main screen headers
+  largeTitle: {
     fontSize: 34,
-    fontWeight: '300' as const,
+    fontWeight: '700' as const,
     letterSpacing: -0.5,
-    lineHeight: 40,
+    lineHeight: 41,
   },
 
   // Titles
-  title: {
-    large: {
-      fontSize: 28,
-      fontWeight: '600' as const,
-      letterSpacing: -0.4,
-      lineHeight: 34,
-    },
-    medium: {
-      fontSize: 24,
-      fontWeight: '200' as const,
-      letterSpacing: -0.4,
-      lineHeight: 30,
-    },
-    small: {
-      fontSize: 18,
-      fontWeight: '300' as const,
-      letterSpacing: 0.5,
-      lineHeight: 24,
-    },
+  title1: {
+    fontSize: 28,
+    fontWeight: '700' as const,
+    letterSpacing: -0.5,
+    lineHeight: 34,
+  },
+  title2: {
+    fontSize: 22,
+    fontWeight: '700' as const,
+    letterSpacing: -0.4,
+    lineHeight: 28,
+  },
+  title3: {
+    fontSize: 20,
+    fontWeight: '600' as const,
+    letterSpacing: -0.4,
+    lineHeight: 25,
   },
 
-  // Body Text
+  // Headlines & Body
+  headline: {
+    fontSize: 17,
+    fontWeight: '600' as const,
+    letterSpacing: -0.4,
+    lineHeight: 22,
+  },
   body: {
-    large: {
-      fontSize: 17,
-      fontWeight: '500' as const,
-      letterSpacing: -0.4,
-      lineHeight: 22,
-    },
-    regular: {
-      fontSize: 15,
-      fontWeight: '500' as const,
-      letterSpacing: -0.3,
-      lineHeight: 20,
-    },
-    small: {
-      fontSize: 13,
-      fontWeight: '500' as const,
-      letterSpacing: -0.2,
-      lineHeight: 18,
-    },
+    fontSize: 17,
+    fontWeight: '400' as const,
+    letterSpacing: -0.4,
+    lineHeight: 22,
+  },
+  callout: {
+    fontSize: 16,
+    fontWeight: '400' as const,
+    letterSpacing: -0.2,
+    lineHeight: 21,
+  },
+  subhead: {
+    fontSize: 15,
+    fontWeight: '600' as const,
+    letterSpacing: -0.2,
+    lineHeight: 20,
   },
 
-  // Captions (Secondary text)
-  caption: {
-    large: {
-      fontSize: 13,
-      fontWeight: '400' as const,
-      letterSpacing: -0.2,
-      lineHeight: 18,
-    },
-    regular: {
-      fontSize: 11,
-      fontWeight: '500' as const,
-      letterSpacing: 0.3,
-      lineHeight: 16,
-    },
-    small: {
-      fontSize: 10,
-      fontWeight: '400' as const,
-      letterSpacing: 0.3,
-      lineHeight: 14,
-    },
+  // Captions
+  footnote: {
+    fontSize: 13,
+    fontWeight: '400' as const,
+    letterSpacing: -0.1,
+    lineHeight: 18,
+  },
+  caption1: {
+    fontSize: 12,
+    fontWeight: '400' as const,
+    letterSpacing: 0,
+    lineHeight: 16,
+  },
+  caption2: {
+    fontSize: 11,
+    fontWeight: '600' as const,
+    letterSpacing: 0.6,
+    lineHeight: 13,
   },
 
-  // Labels (UI elements)
-  label: {
-    large: {
-      fontSize: 16,
-      fontWeight: '600' as const,
-      letterSpacing: -0.4,
-      lineHeight: 21,
-    },
-    regular: {
-      fontSize: 13,
-      fontWeight: '500' as const,
-      letterSpacing: -0.2,
-      lineHeight: 18,
-    },
-    small: {
-      fontSize: 11,
-      fontWeight: '500' as const,
-      letterSpacing: 1,
-      lineHeight: 16,
-    },
-    tiny: {
-      fontSize: 9,
-      fontWeight: '200' as const,
-      letterSpacing: 0.8,
-      lineHeight: 12,
-    },
-  },
-
-  // Price/Financial (Special formatting for money)
-  price: {
-    hero: {
-      fontSize: 36,
-      fontWeight: '300' as const,
-      letterSpacing: -0.5,
-    },
-    large: {
-      fontSize: 28,
-      fontWeight: '600' as const,
-      letterSpacing: 0,
-    },
-    regular: {
-      fontSize: 14,
-      fontWeight: '500' as const,
-      letterSpacing: 0,
-    },
-  },
-
-  // Input Fields
-  input: {
-    large: {
-      fontSize: 32,
-      fontWeight: '200' as const,
-      letterSpacing: -0.5,
-    },
-    regular: {
-      fontSize: 16,
-      fontWeight: '300' as const,
-      letterSpacing: -0.3,
-    },
-  },
-
-  // Uppercase Labels
-  uppercase: {
-    fontSize: 10,
-    fontWeight: '500' as const,
-    letterSpacing: 1.5,
+  // Specialized Labels
+  uppercaseLabel: {
+    fontSize: 11,
+    fontWeight: '600' as const,
+    letterSpacing: 0.6,
     textTransform: 'uppercase' as const,
+    lineHeight: 13,
+  },
+  tinyLabel: {
+    fontSize: 9,
+    fontWeight: '600' as const,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase' as const,
+    lineHeight: 11,
+  },
+
+  // Fixed Header (appears on scroll)
+  fixedHeader: {
+    fontSize: 17,
+    fontWeight: '600' as const,
+    letterSpacing: -0.2,
+    lineHeight: 22,
+  },
+
+  // Section Headers (A-Z lists)
+  sectionHeader: {
+    fontSize: 22,
+    fontWeight: '700' as const,
+    letterSpacing: -0.3,
+    lineHeight: 28,
+  },
+
+  // Interactive Elements
+  button: {
+    fontSize: 15,
+    fontWeight: '600' as const,
+    letterSpacing: -0.2,
+  },
+  buttonLarge: {
+    fontSize: 17,
+    fontWeight: '600' as const,
+    letterSpacing: -0.4,
+  },
+  input: {
+    fontSize: 17,
+    fontWeight: '400' as const,
+    letterSpacing: -0.4,
+  },
+
+  // Financial/Price Display
+  priceHero: {
+    fontSize: 36,
+    fontWeight: '700' as const,
+    letterSpacing: -1,
+    lineHeight: 43,
+  },
+  priceLarge: {
+    fontSize: 20,
+    fontWeight: '700' as const,
+    letterSpacing: -0.3,
+    lineHeight: 25,
+  },
+  priceRegular: {
+    fontSize: 15,
+    fontWeight: '600' as const,
+    letterSpacing: -0.2,
+    lineHeight: 20,
   },
 } as const
 

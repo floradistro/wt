@@ -98,8 +98,8 @@ function AccountDetail({ user, headerOpacity }: { user: any; headerOpacity: Anim
         style={styles.detailScroll}
         showsVerticalScrollIndicator={true}
         indicatorStyle="white"
-        scrollIndicatorInsets={{ right: 2, top: 80, bottom: layout.dockHeight }}
-        contentContainerStyle={{ paddingTop: 80, paddingBottom: layout.dockHeight, paddingRight: layout.containerMargin }}
+        scrollIndicatorInsets={{ right: 2, top: 100, bottom: layout.dockHeight }}
+        contentContainerStyle={{ paddingTop: 100, paddingBottom: layout.dockHeight, paddingRight: layout.containerMargin }}
         onScroll={(e) => {
           const offsetY = e.nativeEvent.contentOffset.y
           const threshold = 40
@@ -205,8 +205,8 @@ function DeveloperToolsDetail({ headerOpacity }: { headerOpacity: Animated.Value
         style={styles.detailScroll}
         showsVerticalScrollIndicator={true}
         indicatorStyle="white"
-        scrollIndicatorInsets={{ right: 2, top: 80, bottom: layout.dockHeight }}
-        contentContainerStyle={{ paddingTop: 80, paddingBottom: layout.dockHeight, paddingRight: layout.containerMargin }}
+        scrollIndicatorInsets={{ right: 2, top: 100, bottom: layout.dockHeight }}
+        contentContainerStyle={{ paddingTop: 100, paddingBottom: layout.dockHeight, paddingRight: layout.containerMargin }}
         onScroll={(e) => {
           const offsetY = e.nativeEvent.contentOffset.y
           const threshold = 40
@@ -354,8 +354,8 @@ function LocationsDetail({ userLocations, headerOpacity }: { userLocations: User
         style={styles.detailScroll}
         showsVerticalScrollIndicator={true}
         indicatorStyle="white"
-        scrollIndicatorInsets={{ right: 2, top: 80, bottom: layout.dockHeight }}
-        contentContainerStyle={{ paddingTop: 80, paddingBottom: layout.dockHeight, paddingRight: layout.containerMargin }}
+        scrollIndicatorInsets={{ right: 2, top: 100, bottom: layout.dockHeight }}
+        contentContainerStyle={{ paddingTop: 100, paddingBottom: layout.dockHeight, paddingRight: layout.containerMargin }}
         onScroll={(e) => {
           const offsetY = e.nativeEvent.contentOffset.y
           const threshold = 40
@@ -676,7 +676,7 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
-    height: 120,
+    height: 80,
     zIndex: 10,
   },
 

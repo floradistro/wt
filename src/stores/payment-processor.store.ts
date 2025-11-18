@@ -34,6 +34,8 @@ interface ProcessorState {
   onlineCount: number
   totalCount: number
   activityLog: ActivityLog[]
+  consecutiveFailures: number
+  lastSuccessTime: number | null
 }
 
 interface ProcessorActions {
@@ -63,6 +65,8 @@ export const usePaymentProcessor = create<ProcessorStore>((set, get) => ({
   onlineCount: 0,
   totalCount: 0,
   activityLog: [],
+  consecutiveFailures: 0,
+  lastSuccessTime: null,
 
   // Actions
   checkStatus: async (locationId?: string, registerId?: string) => {
@@ -152,8 +156,8 @@ export const usePaymentProcessor = create<ProcessorStore>((set, get) => ({
       logger.debug('🔍 Calling health endpoint:', HEALTH_ENDPOINT)
 
       const controller = new AbortController()
-      // 10 second timeout for health check
-      const timeoutId = setTimeout(() => controller.abort(), 10000)
+      // 30 second timeout for health check (increased from 10s to handle backend + Dejavoo API latency)
+      const timeoutId = setTimeout(() => controller.abort(), 30000)
 
       // Get auth token from store
       const session = useAuthStore.getState().session
@@ -265,6 +269,8 @@ export const usePaymentProcessor = create<ProcessorStore>((set, get) => ({
           currentProcessor,
           onlineCount,
           totalCount,
+          consecutiveFailures: 0,
+          lastSuccessTime: Date.now(),
         })
       } else {
         const errorMsg = currentProcessor?.error || 'Terminal offline'
@@ -350,11 +356,12 @@ export const usePaymentProcessor = create<ProcessorStore>((set, get) => ({
 
       // transaction.finish()
 
-      set({
+      set((state) => ({
         status: 'error',
         lastCheck: Date.now(),
         errorMessage: errorMsg,
-      })
+        consecutiveFailures: state.consecutiveFailures + 1,
+      }))
     }
   },
 
@@ -595,15 +602,28 @@ export const usePaymentProcessor = create<ProcessorStore>((set, get) => ({
   },
 }))
 
-// JOBS PRINCIPLE: Auto-retry mechanism for bulletproof reliability
-// Check status every 30 seconds when enabled
+// JOBS PRINCIPLE: Auto-retry mechanism with exponential backoff
+// Check status with adaptive intervals based on connection stability
 let statusCheckInterval: NodeJS.Timeout | null = null
+
+// Calculate backoff interval based on consecutive failures
+// 30s → 60s → 2m → 5m (caps at 5 minutes)
+function getCheckInterval(consecutiveFailures: number): number {
+  const baseInterval = 30000 // 30 seconds
+  const maxInterval = 300000 // 5 minutes
+
+  if (consecutiveFailures === 0) return baseInterval
+  if (consecutiveFailures === 1) return 60000 // 1 minute
+  if (consecutiveFailures === 2) return 120000 // 2 minutes
+
+  return Math.min(maxInterval, baseInterval * Math.pow(2, consecutiveFailures))
+}
 
 export function startPaymentProcessorMonitoring(locationId?: string, registerId?: string) {
   logger.debug('🔌 Starting payment processor monitoring', { locationId, registerId })
   if (statusCheckInterval) {
     logger.debug('🔌 Monitoring already running, stopping existing')
-    clearInterval(statusCheckInterval)
+    clearTimeout(statusCheckInterval)
     statusCheckInterval = null
   }
 
@@ -629,19 +649,35 @@ export function startPaymentProcessorMonitoring(locationId?: string, registerId?
     logger.debug('🔌 No location ID - skipping check')
   }
 
-  // Periodic checks every 30 seconds
-  statusCheckInterval = setInterval(() => {
-    const { isEnabled, locationId: currentLocationId, registerId: currentRegisterId } = usePaymentProcessor.getState()
-    logger.debug('🔌 Periodic check:', { isEnabled, currentLocationId, currentRegisterId })
-    if (isEnabled && currentLocationId) {
-      usePaymentProcessor.getState().checkStatus(currentLocationId, currentRegisterId || undefined)
-    }
-  }, 30000)
+  // Schedule next check with adaptive interval
+  const scheduleNextCheck = () => {
+    const { isEnabled, locationId: currentLocationId, registerId: currentRegisterId, consecutiveFailures } = usePaymentProcessor.getState()
+    const interval = getCheckInterval(consecutiveFailures)
+
+    logger.debug('🔌 Scheduling next check:', {
+      interval: `${interval/1000}s`,
+      consecutiveFailures,
+      isEnabled,
+      currentLocationId
+    })
+
+    statusCheckInterval = setTimeout(async () => {
+      if (isEnabled && currentLocationId) {
+        logger.debug('🔌 Executing periodic check')
+        await usePaymentProcessor.getState().checkStatus(currentLocationId, currentRegisterId || undefined)
+        // Schedule next check after this one completes
+        scheduleNextCheck()
+      }
+    }, interval)
+  }
+
+  // Start the adaptive checking cycle
+  scheduleNextCheck()
 }
 
 export function stopPaymentProcessorMonitoring() {
   if (statusCheckInterval) {
-    clearInterval(statusCheckInterval)
+    clearTimeout(statusCheckInterval)
     statusCheckInterval = null
   }
 }

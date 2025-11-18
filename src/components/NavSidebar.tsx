@@ -9,6 +9,7 @@ import React, { ReactNode } from 'react'
 import { LiquidGlassView, LiquidGlassContainerView, isLiquidGlassSupported } from '@callstack/liquid-glass'
 import * as Haptics from 'expo-haptics'
 import { layout } from '@/theme/layout'
+import { ProductFilterSearchBar, type FilterOption, type ActiveFilter } from './shared'
 
 // Monochrome Search Icon (like Settings)
 function SearchIcon({ color }: { color: string }) {
@@ -84,6 +85,25 @@ interface NavSidebarProps {
   vendorLogo?: string | null
   onUserProfilePress?: () => void
   selectedLocationNames?: string[] // Names of selected locations to display
+
+  // Filter props (optional - only for product views)
+  showFilters?: boolean
+  categories?: FilterOption[]
+  selectedCategories?: string[]
+  onCategoryToggle?: (category: string) => void
+  strainTypes?: FilterOption[]
+  selectedStrainTypes?: string[]
+  onStrainTypeToggle?: (strainType: string) => void
+  consistencies?: FilterOption[]
+  selectedConsistencies?: string[]
+  onConsistencyToggle?: (consistency: string) => void
+  flavors?: FilterOption[]
+  selectedFlavors?: string[]
+  onFlavorToggle?: (flavor: string) => void
+  onClearFilters?: () => void
+  activeFilterCount?: number
+  activeFilterPills?: ActiveFilter[]
+  onRemovePill?: (pill: ActiveFilter) => void
 }
 
 export function NavSidebar({
@@ -99,6 +119,24 @@ export function NavSidebar({
   vendorLogo,
   onUserProfilePress,
   selectedLocationNames = [],
+  // Filter props
+  showFilters = false,
+  categories = [],
+  selectedCategories = [],
+  onCategoryToggle,
+  strainTypes = [],
+  selectedStrainTypes = [],
+  onStrainTypeToggle,
+  consistencies = [],
+  selectedConsistencies = [],
+  onConsistencyToggle,
+  flavors = [],
+  selectedFlavors = [],
+  onFlavorToggle,
+  onClearFilters,
+  activeFilterCount = 0,
+  activeFilterPills = [],
+  onRemovePill,
 }: NavSidebarProps) {
   return (
     <View style={[styles.sidebar, { width }]}>
@@ -113,8 +151,13 @@ export function NavSidebar({
             showsVerticalScrollIndicator={false}
             contentContainerStyle={styles.sidebarScrollContent}
           >
-            {/* Spacer for fixed search bar */}
-            {onSearchChange && <View style={styles.searchSpacer} />}
+            {/* Spacer for fixed search bar - taller when showing filter pills */}
+            {onSearchChange && (
+              <View style={[
+                styles.searchSpacer,
+                showFilters && activeFilterPills.length > 0 && styles.searchSpacerWithPills
+              ]} />
+            )}
 
             {/* User Profile Section */}
             {userName && (
@@ -162,15 +205,6 @@ export function NavSidebar({
                     </Pressable>
                   </LiquidGlassView>
                 </LiquidGlassContainerView>
-              </View>
-            )}
-
-            {/* Location Filter Indicator (when locations selected) */}
-            {selectedLocationNames.length > 0 && (
-              <View style={styles.locationFilterBadge}>
-                <Text style={styles.locationFilterText}>
-                  Filtering: {selectedLocationNames.length} location{selectedLocationNames.length !== 1 ? 's' : ''}
-                </Text>
               </View>
             )}
 
@@ -296,26 +330,47 @@ export function NavSidebar({
           {/* Fixed Search Bar - Floating overlay on top */}
           {onSearchChange && (
             <View style={styles.searchContainer}>
-              <LiquidGlassView
-                effect="regular"
-                colorScheme="dark"
-                style={[styles.searchBar, !isLiquidGlassSupported && styles.searchBarFallback]}
-                accessible={false}
-              >
-                <View style={styles.searchInner} accessible={false}>
-                  <SearchIcon color="rgba(235,235,245,0.6)" />
+              {showFilters ? (
+                <ProductFilterSearchBar
+                  searchQuery={searchValue}
+                  onSearchChange={onSearchChange}
+                  searchPlaceholder="Search"
+                  categories={categories}
+                  selectedCategories={selectedCategories}
+                  onCategoryToggle={onCategoryToggle}
+                  strainTypes={strainTypes}
+                  selectedStrainTypes={selectedStrainTypes}
+                  onStrainTypeToggle={onStrainTypeToggle}
+                  consistencies={consistencies}
+                  selectedConsistencies={selectedConsistencies}
+                  onConsistencyToggle={onConsistencyToggle}
+                  flavors={flavors}
+                  selectedFlavors={selectedFlavors}
+                  onFlavorToggle={onFlavorToggle}
+                  onClearFilters={onClearFilters}
+                  activeFilterCount={activeFilterCount}
+                  activeFilterPills={activeFilterPills}
+                  onRemovePill={onRemovePill}
+                  position="relative"
+                />
+              ) : (
+                <LiquidGlassView
+                  effect="clear"
+                  colorScheme="dark"
+                  style={[styles.unifiedSearchBar, !isLiquidGlassSupported && styles.unifiedSearchBarFallback]}
+                >
                   <TextInput
-                    style={styles.searchInput}
+                    style={styles.unifiedSearchInput}
                     placeholder="Search"
-                    placeholderTextColor="rgba(235,235,245,0.6)"
+                    placeholderTextColor="rgba(255,255,255,0.3)"
                     value={searchValue}
                     onChangeText={onSearchChange}
                     accessible={true}
                     accessibilityLabel="Search navigation items"
                     accessibilityHint="Type to filter the navigation list"
                   />
-                </View>
-              </LiquidGlassView>
+                </LiquidGlassView>
+              )}
             </View>
           )}
         </View>
@@ -354,7 +409,10 @@ const styles = StyleSheet.create({
     paddingBottom: 24,
   },
   searchSpacer: {
-    height: 72, // Height of fixed search bar
+    height: 76, // Height of fixed search bar (48px + padding)
+  },
+  searchSpacerWithPills: {
+    height: 132, // Extra height when filter pills are shown
   },
 
   // User Profile Section
@@ -418,28 +476,9 @@ const styles = StyleSheet.create({
   },
   selectedLocations: {
     fontSize: 12,
-    color: '#60A5FA',
+    color: 'rgba(235,235,245,0.6)',
     marginTop: 2,
-    fontWeight: '500',
-  },
-  locationFilterBadge: {
-    marginHorizontal: 8,
-    marginTop: 12,
-    marginBottom: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    backgroundColor: 'rgba(96,165,250,0.15)',
-    borderRadius: 6,
-    borderWidth: 0.5,
-    borderColor: 'rgba(96,165,250,0.3)',
-  },
-  locationFilterText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#60A5FA',
-    textAlign: 'center',
-    letterSpacing: 0.3,
-    textTransform: 'uppercase',
+    fontWeight: '400',
   },
 
   // Fixed Search Bar - Floating overlay
@@ -454,6 +493,29 @@ const styles = StyleSheet.create({
     zIndex: 999,
     elevation: 999, // Android elevation
   },
+  // Unified Search Bar - matches ProductFilterSearchBar style
+  unifiedSearchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    height: 48,
+    borderRadius: 24,
+    borderCurve: 'continuous',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
+    overflow: 'hidden',
+  },
+  unifiedSearchBarFallback: {
+    backgroundColor: 'rgba(0,0,0,0.3)',
+  },
+  unifiedSearchInput: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: '400',
+    color: '#fff',
+    letterSpacing: -0.2,
+    paddingHorizontal: 20,
+  },
+  // Old search bar styles (deprecated, keeping for reference)
   searchBar: {
     borderRadius: layout.pillRadius,
     borderCurve: 'continuous',
