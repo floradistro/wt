@@ -167,11 +167,23 @@ export function useUsers() {
 
       // Handle network/invocation errors
       if (response.error) {
-        const errorMsg = response.error.message || 'Failed to call Edge Function'
-        logger.error('Edge Function invocation error:', {
+        // Log the complete error structure
+        logger.error('Edge Function invocation error - Full error object:', {
           error: response.error,
-          context: response.error.context,
+          errorKeys: Object.keys(response.error),
+          context: (response.error as any).context,
+          name: response.error.name,
+          message: response.error.message,
+          stack: response.error.stack,
+          // @ts-ignore - Try to access additional properties
+          details: (response.error as any).details,
+          // @ts-ignore
+          body: (response.error as any).body,
+          // @ts-ignore
+          response: (response.error as any).response,
         })
+
+        const errorMsg = response.error.message || 'Failed to call Edge Function'
         throw new Error(errorMsg)
       }
 
