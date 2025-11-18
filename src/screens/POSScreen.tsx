@@ -12,11 +12,12 @@
  * - POSSessionActions: End session, close drawer
  */
 
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, memo } from 'react'
 import { View, StyleSheet, Animated } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useAuth } from '@/stores/auth.store'
 import { startPaymentProcessorMonitoring, stopPaymentProcessorMonitoring } from '@/stores/payment-processor.store'
+import { useDockOffset } from '@/navigation/DashboardNavigator'
 
 // New Refactored Components
 import {
@@ -41,8 +42,9 @@ const isTablet = device.isTablet
  * POSScreen Component (Refactored)
  * Jobs Principle: Simplified orchestrator - delegates to focused child components
  */
-export function POSScreen() {
+function POSScreenComponent() {
   const { user } = useAuth()
+  const { setDockOffset } = useDockOffset()
 
   // ========================================
   // TOP-LEVEL STATE (Minimal!)
@@ -77,6 +79,22 @@ export function POSScreen() {
       useNativeDriver: true,
     }).start()
   }, [])
+
+  // Update dock offset based on session state
+  useEffect(() => {
+    if (!sessionInfo) {
+      // Setup mode - center dock on full screen
+      setDockOffset(0)
+    } else {
+      // Main POS mode - use default cart offset
+      setDockOffset(null)
+    }
+
+    // Cleanup: Reset to default when component unmounts
+    return () => {
+      setDockOffset(null)
+    }
+  }, [sessionInfo, setDockOffset])
 
   // Payment processor monitoring
   useEffect(() => {
@@ -140,17 +158,8 @@ export function POSScreen() {
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <Animated.View style={[styles.mainLayout, { opacity: fadeAnim }]}>
-        {/* Left Column - Products */}
+        {/* Left Column - Checkout */}
         <View style={styles.leftColumn}>
-          <POSProductBrowser
-            sessionInfo={sessionInfo}
-            onAddToCart={handleAddToCart}
-            onProductsLoaded={handleProductsLoaded}
-          />
-        </View>
-
-        {/* Right Column - Checkout */}
-        <View style={styles.rightColumn}>
           {vendor && customUserId && (
             <POSCheckout
               sessionInfo={sessionInfo}
@@ -165,10 +174,23 @@ export function POSScreen() {
             />
           )}
         </View>
+
+        {/* Right Column - Products */}
+        <View style={styles.rightColumn}>
+          <POSProductBrowser
+            sessionInfo={sessionInfo}
+            onAddToCart={handleAddToCart}
+            onProductsLoaded={handleProductsLoaded}
+          />
+        </View>
       </Animated.View>
     </SafeAreaView>
   )
 }
+
+// Export memoized version for performance
+export const POSScreen = memo(POSScreenComponent)
+POSScreen.displayName = 'POSScreen'
 
 // ========================================
 // STYLES - Minimal layout styles
@@ -184,10 +206,10 @@ const styles = StyleSheet.create({
     gap: spacing.md,
   },
   leftColumn: {
-    flex: 1,
-    position: 'relative',
+    width: isTablet ? 380 : 320,
   },
   rightColumn: {
-    width: isTablet ? 380 : 320,
+    flex: 1,
+    position: 'relative',
   },
 })

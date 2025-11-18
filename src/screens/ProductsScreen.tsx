@@ -4,7 +4,7 @@
  */
 
 import { View, Text, StyleSheet, Pressable, ScrollView, ActivityIndicator, Image, TextInput, Animated, useWindowDimensions, PanResponder, LayoutChangeEvent } from 'react-native'
-import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react'
+import React, { useState, useRef, useEffect, useMemo, useCallback, memo } from 'react'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { LiquidGlassView, LiquidGlassContainerView, isLiquidGlassSupported } from '@callstack/liquid-glass'
 import { LinearGradient } from 'expo-linear-gradient'
@@ -15,7 +15,7 @@ import { useProducts, type Product, type PricingTier } from '@/hooks/useProducts
 import { supabase } from '@/lib/supabase/client'
 import { useAuth } from '@/stores/auth.store'
 import { logger } from '@/utils/logger'
-import { EditableDescriptionSection, EditablePricingSection, EditableCustomFieldsSection } from '@/components/products'
+import { EditableDescriptionSection, EditablePricingSection, EditableCustomFieldsSection, AdjustInventoryModal, SalesHistoryModal, AuditsView } from '@/components/products'
 import { NavSidebar, type NavItem } from '@/components/NavSidebar'
 import { CategoryCard, CategoryDetail, CategoryModal, CustomFieldModal, FieldVisibilityModal, PricingTemplateModal } from '@/components/categories'
 import { LocationSelector } from '@/components/LocationSelector'
@@ -26,10 +26,11 @@ import { usePricingTemplates } from '@/hooks/usePricingTemplates'
 import { useUserLocations } from '@/hooks/useUserLocations'
 import { useLocationFilter } from '@/stores/location-filter.store'
 import { usePurchaseOrders } from '@/hooks/usePurchaseOrders'
-import { PurchaseOrdersList, PurchaseOrderDetail } from '@/components/purchase-orders'
+import { PurchaseOrdersList, PurchaseOrderDetail, CreatePOModal } from '@/components/purchase-orders'
 import type { PurchaseOrder } from '@/services/purchase-orders.service'
+import { useDockOffset } from '@/navigation/DashboardNavigator'
 
-type NavSection = 'all' | 'low-stock' | 'out-of-stock' | 'categories' | 'purchase-orders'
+type NavSection = 'all' | 'low-stock' | 'out-of-stock' | 'categories' | 'purchase-orders' | 'audits'
 
 // Memoized Product Item to prevent flickering
 const ProductItem = React.memo<{
@@ -109,8 +110,9 @@ const ProductItem = React.memo<{
 
 ProductItem.displayName = 'ProductItem'
 
-export function ProductsScreen() {
+function ProductsScreenComponent() {
   const { user } = useAuth()
+  const { setDockOffset } = useDockOffset()
   const [activeNav, setActiveNav] = useState<NavSection>('all')
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null)
@@ -119,6 +121,8 @@ export function ProductsScreen() {
   const [productSearchQuery, setProductSearchQuery] = useState('')
   const [vendorLogo, setVendorLogo] = useState<string | null>(null)
   const [vendorName, setVendorName] = useState<string>('')
+  const [vendorId, setVendorId] = useState<string>('')
+  const [showCreatePOModal, setShowCreatePOModal] = useState(false)
 
   // Filter state
   const [selectedCategories, setSelectedCategories] = useState<string[]>([])
@@ -220,6 +224,7 @@ export function ProductsScreen() {
 
         if (userData?.vendors) {
           const vendor = userData.vendors as any
+          setVendorId(vendor.id || '')
           setVendorName(vendor.store_name || '')
           setVendorLogo(vendor.logo_url || null)
         }
@@ -655,6 +660,11 @@ export function ProductsScreen() {
       count: poStats.pending,
       badge: poStats.pending > 0 ? 'info' as const : undefined,
     },
+    {
+      id: 'audits',
+      icon: 'list',
+      label: 'Audits',
+    },
   ], [allProducts.length, lowStockCount, outOfStockCount, poStats.pending])
 
   // Animate when product/category/PO is selected/deselected
@@ -663,6 +673,8 @@ export function ProductsScreen() {
       ? selectedCategoryId !== null
       : activeNav === 'purchase-orders'
       ? selectedPurchaseOrder !== null
+      : activeNav === 'audits'
+      ? false // Audits view doesn't have detail panel
       : selectedProduct !== null
     Animated.spring(slideAnim, {
       toValue: shouldSlide ? 1 : 0,
@@ -671,6 +683,23 @@ export function ProductsScreen() {
       friction: 12,
     }).start()
   }, [selectedProduct, selectedCategoryId, selectedPurchaseOrder, activeNav, slideAnim])
+
+  // Automatically update dock position based on detail view visibility
+  useEffect(() => {
+    const isDetailVisible = selectedProduct !== null || selectedCategoryId !== null || selectedPurchaseOrder !== null
+
+    if (isDetailVisible) {
+      // Detail view visible: dock centers on detail panel (right half of content)
+      const detailPanelOffset = layout.sidebarWidth + (contentWidth / 2)
+      setDockOffset(detailPanelOffset)
+    } else {
+      // List view: dock uses default sidebar offset
+      setDockOffset(null)
+    }
+
+    // Cleanup: reset to default when unmounting
+    return () => setDockOffset(null)
+  }, [selectedProduct, selectedCategoryId, selectedPurchaseOrder, contentWidth, setDockOffset])
 
 
   // Filter categories by nav search
@@ -753,7 +782,10 @@ export function ProductsScreen() {
             },
           ]}
         >
-          {activeNav === 'purchase-orders' ? (
+          {activeNav === 'audits' ? (
+            // AUDITS VIEW
+            <AuditsView />
+          ) : activeNav === 'purchase-orders' ? (
             // PURCHASE ORDERS VIEW
             <PurchaseOrdersList
               purchaseOrders={purchaseOrders}
@@ -761,10 +793,7 @@ export function ProductsScreen() {
               onSelect={setSelectedPurchaseOrder}
               isLoading={purchaseOrdersLoading}
               headerOpacity={purchaseOrdersHeaderOpacity}
-              onAddPress={() => {
-                // TODO: Show create PO modal
-                logger.info('Create PO clicked')
-              }}
+              onAddPress={() => setShowCreatePOModal(true)}
             />
           ) : activeNav === 'categories' ? (
             // CATEGORIES VIEW
@@ -1202,6 +1231,14 @@ export function ProductsScreen() {
           />
         </>
       )}
+
+      {/* Create Purchase Order Modal */}
+      <CreatePOModal
+        visible={showCreatePOModal}
+        vendorId={vendorId}
+        onClose={() => setShowCreatePOModal(false)}
+        onCreated={reloadPurchaseOrders}
+      />
     </SafeAreaView>
   )
 }
@@ -1210,6 +1247,12 @@ function ProductDetail({ product, onBack, onProductUpdated }: { product: Product
   const [isEditing, setIsEditing] = useState(false)
   const [saving, setSaving] = useState(false)
   const { user } = useAuth()
+
+  // Modal state
+  const [showAdjustInventoryModal, setShowAdjustInventoryModal] = useState(false)
+  const [showSalesHistoryModal, setShowSalesHistoryModal] = useState(false)
+  const [selectedLocationId, setSelectedLocationId] = useState<string | undefined>()
+  const [selectedLocationName, setSelectedLocationName] = useState<string | undefined>()
 
   // Edit state
   const [editedName, setEditedName] = useState(product.name)
@@ -1225,6 +1268,14 @@ function ProductDetail({ product, onBack, onProductUpdated }: { product: Product
 
   const displayPrice = product.price || product.regular_price || 0
   const hasMultipleLocations = (product.inventory?.length || 0) > 1
+
+  // Set default location to first inventory location
+  useEffect(() => {
+    if (product.inventory && product.inventory.length > 0 && !selectedLocationId) {
+      setSelectedLocationId(product.inventory[0].location_id)
+      setSelectedLocationName(product.inventory[0].location_name)
+    }
+  }, [product.id])
 
   // Load pricing templates when entering edit mode
   useEffect(() => {
@@ -1323,13 +1374,14 @@ function ProductDetail({ product, onBack, onProductUpdated }: { product: Product
   }
 
   return (
-    <ScrollView
-      style={styles.detail}
-      contentContainerStyle={{ paddingBottom: layout.dockHeight, paddingRight: layout.containerMargin }}
-      showsVerticalScrollIndicator={true}
-      indicatorStyle="white"
-      scrollIndicatorInsets={{ right: 2, bottom: layout.dockHeight }}
-    >
+    <>
+      <ScrollView
+        style={styles.detail}
+        contentContainerStyle={{ paddingBottom: layout.dockHeight, paddingRight: layout.containerMargin }}
+        showsVerticalScrollIndicator={true}
+        indicatorStyle="white"
+        scrollIndicatorInsets={{ right: 2, bottom: layout.dockHeight }}
+      >
       {/* Header with Edit/Save toggle */}
       <View style={styles.detailHeader}>
         <Pressable onPress={onBack} style={styles.backButton}>
@@ -1497,12 +1549,37 @@ function ProductDetail({ product, onBack, onProductUpdated }: { product: Product
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>ACTIONS</Text>
         <View style={styles.cardGlass}>
-          <SettingsRow label="Adjust Inventory" />
-          <SettingsRow label="View Sales History" />
+          <SettingsRow
+            label="Adjust Inventory"
+            onPress={() => setShowAdjustInventoryModal(true)}
+          />
+          <SettingsRow
+            label="View Sales History"
+            onPress={() => setShowSalesHistoryModal(true)}
+          />
           {hasMultipleLocations && <SettingsRow label="Transfer Stock" />}
         </View>
       </View>
-    </ScrollView>
+      </ScrollView>
+
+      {/* Modals */}
+      <AdjustInventoryModal
+        visible={showAdjustInventoryModal}
+        product={product}
+        locationId={selectedLocationId}
+        locationName={selectedLocationName}
+        onClose={() => setShowAdjustInventoryModal(false)}
+        onAdjusted={() => {
+          onProductUpdated()
+          setShowAdjustInventoryModal(false)
+        }}
+      />
+      <SalesHistoryModal
+        visible={showSalesHistoryModal}
+        product={product}
+        onClose={() => setShowSalesHistoryModal(false)}
+      />
+    </>
   )
 }
 
@@ -1534,6 +1611,10 @@ function SettingsRow({
     </Pressable>
   )
 }
+
+// Export memoized version for performance
+export const ProductsScreen = memo(ProductsScreenComponent)
+ProductsScreen.displayName = 'ProductsScreen'
 
 const styles = StyleSheet.create({
   container: {

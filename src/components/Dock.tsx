@@ -1,11 +1,11 @@
 /**
  * Dock Component - Apple Liquid Glass Effect
  * Using @callstack/liquid-glass for real iOS 26+ liquid glass
- * With working touch handling
+ * With working touch handling and smooth position animations
  */
 
-import { View, Pressable, StyleSheet } from 'react-native'
-import { memo } from 'react'
+import { View, Pressable, StyleSheet, Animated } from 'react-native'
+import { memo, useRef, useEffect } from 'react'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { LiquidGlassView, LiquidGlassContainerView, isLiquidGlassSupported } from '@callstack/liquid-glass'
 import * as Haptics from 'expo-haptics'
@@ -14,6 +14,7 @@ import { colors, radius, spacing, shadows } from '@/theme'
 interface DockProps {
   activeTab: number
   onTabChange: (index: number) => void
+  sidebarWidth?: number // Width of sidebar (if present) to offset dock centering
 }
 
 // Exact iOS dock icons
@@ -102,11 +103,31 @@ function DockButton({
   )
 }
 
-function Dock({ activeTab, onTabChange }: DockProps) {
+function Dock({ activeTab, onTabChange, sidebarWidth = 0 }: DockProps) {
   const insets = useSafeAreaInsets()
+  // Ensure sidebarWidth is always a valid number
+  const validSidebarWidth = typeof sidebarWidth === 'number' && !isNaN(sidebarWidth) ? sidebarWidth : 0
+  const leftPosition = useRef(new Animated.Value(validSidebarWidth)).current
+
+  // Animate dock position when sidebarWidth changes
+  useEffect(() => {
+    const targetValue = typeof sidebarWidth === 'number' && !isNaN(sidebarWidth) ? sidebarWidth : 0
+    Animated.spring(leftPosition, {
+      toValue: targetValue,
+      useNativeDriver: false, // Can't use native driver for layout properties
+      tension: 80, // iOS-like spring tension
+      friction: 12, // iOS-like spring friction
+    }).start()
+  }, [sidebarWidth, leftPosition])
 
   return (
-    <View style={[styles.container, { bottom: insets.bottom + spacing.xs }]}>
+    <Animated.View style={[
+      styles.container,
+      {
+        bottom: insets.bottom + spacing.xs,
+        left: leftPosition,
+      }
+    ]}>
       <LiquidGlassContainerView spacing={12} style={styles.glassContainer}>
         <LiquidGlassView
           style={[
@@ -136,7 +157,7 @@ function Dock({ activeTab, onTabChange }: DockProps) {
           })}
         </LiquidGlassView>
       </LiquidGlassContainerView>
-    </View>
+    </Animated.View>
   )
 }
 
@@ -146,7 +167,6 @@ export { DockMemo as Dock }
 const styles = StyleSheet.create({
   container: {
     position: 'absolute',
-    left: 0,
     right: 0,
     alignItems: 'center',
     pointerEvents: 'box-none',

@@ -7,7 +7,7 @@
  */
 
 import { View, Text, StyleSheet, Pressable, ActivityIndicator, Animated, useWindowDimensions, FlatList, RefreshControl } from 'react-native'
-import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react'
+import React, { useState, useRef, useEffect, useMemo, useCallback, memo } from 'react'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { LinearGradient } from 'expo-linear-gradient'
 import * as Haptics from 'expo-haptics'
@@ -23,8 +23,9 @@ import { useAuth } from '@/stores/auth.store'
 import { useLocationFilter } from '@/stores/location-filter.store'
 import { logger } from '@/utils/logger'
 import { supabase } from '@/lib/supabase/client'
+import { useDockOffset } from '@/navigation/DashboardNavigator'
 
-type NavSection = 'all' | 'pending' | 'preparing' | 'ready' | 'completed' | 'needs_action'
+type NavSection = 'all' | 'needs_action' | 'in_progress' | 'completed' | 'cancelled'
 type DateRange = 'today' | 'week' | 'month' | 'all'
 
 // Date range helper
@@ -98,33 +99,34 @@ const OrderItem = React.memo<{
   order: Order
   showLocation: boolean
   isSelected: boolean
+  isLast: boolean
   onPress: () => void
-}>(({ order, showLocation, isSelected, onPress }) => {
+}>(({ order, showLocation, isSelected, isLast, onPress }) => {
   // Format time
   const timeStr = new Date(order.created_at).toLocaleTimeString('en-US', {
     hour: 'numeric',
     minute: '2-digit',
   })
 
-  // Get status color - The Apple Way
+  // Get status color - Clean color coding like stock colors
   const getStatusColor = (status: Order['status']) => {
     switch (status) {
       case 'completed':
-        return '#34c759' // Green - Done
+        return '#34c759' // Green
+      case 'cancelled':
+        return '#ff3b30' // Red
+      case 'pending':
+      case 'ready_to_ship':
+        return '#ff9500' // Orange
       case 'preparing':
-        return '#0a84ff' // Blue - Staff working on it
       case 'ready':
       case 'out_for_delivery':
       case 'shipped':
       case 'in_transit':
-        return '#bf5af2' // Purple - Ready for customer/in transit
-      case 'cancelled':
-        return '#ff3b30' // Red - Cancelled
-      case 'pending':
-      case 'ready_to_ship':
-        return '#ff9500' // Orange - Needs attention
+      case 'delivered':
+        return '#fff' // White for in-progress
       default:
-        return '#8e8e93' // Gray - Unknown
+        return '#8e8e93' // Gray
     }
   }
 
@@ -154,22 +156,22 @@ const OrderItem = React.memo<{
     }
   }
 
-  // Get order type - The Apple Way: Clear, visual labels
+  // Get order type - Clean, no emojis
   const getOrderType = () => {
     // Prefer new order_type field, fallback to legacy delivery_type
     const type = order.order_type || order.delivery_type || 'walk_in'
     switch (type.toLowerCase()) {
       case 'walk_in':
       case 'instore':
-        return { label: 'Walk-in', icon: '🏪', color: '#34c759' }
+        return 'Walk-in'
       case 'pickup':
-        return { label: 'Pickup', icon: '📦', color: '#0a84ff' }
+        return 'Pickup'
       case 'delivery':
-        return { label: 'Delivery', icon: '🚗', color: '#ff9500' }
+        return 'Delivery'
       case 'shipping':
-        return { label: 'Shipping', icon: '📮', color: '#bf5af2' }
+        return 'Shipping'
       default:
-        return { label: 'Store', icon: '🏪', color: '#8e8e93' }
+        return 'Store'
     }
   }
 
@@ -190,6 +192,7 @@ const OrderItem = React.memo<{
       style={[
         styles.orderItem,
         isSelected && styles.orderItemActive,
+        isLast && styles.orderItemLast,
       ]}
       onPress={onPress}
       accessibilityRole="none"
@@ -223,15 +226,12 @@ const OrderItem = React.memo<{
         </View>
       )}
 
-      {/* Type Column - Apple-style badge */}
+      {/* Type Column */}
       <View style={styles.dataColumn}>
         <Text style={styles.dataLabel}>TYPE</Text>
-        <View style={styles.orderTypeBadge}>
-          <Text style={styles.orderTypeIcon}>{orderType.icon}</Text>
-          <Text style={[styles.dataValue, { color: orderType.color }]}>
-            {orderType.label}
-          </Text>
-        </View>
+        <Text style={styles.dataValue}>
+          {orderType}
+        </Text>
       </View>
 
       {/* Status Column - Apple-style badge */}
@@ -261,16 +261,17 @@ const OrderItem = React.memo<{
 OrderItem.displayName = 'OrderItem'
 
 // Section Header Component
-const SectionHeader = React.memo<{ title: string }>(({ title }) => (
-  <View style={styles.sectionHeader}>
+const SectionHeader = React.memo<{ title: string; isFirst: boolean }>(({ title, isFirst }) => (
+  <View style={[styles.sectionHeader, isFirst && styles.sectionHeaderFirst]}>
     <Text style={styles.sectionHeaderText}>{title}</Text>
   </View>
 ))
 
 SectionHeader.displayName = 'SectionHeader'
 
-export function OrdersScreen() {
+function OrdersScreenComponent() {
   const { user } = useAuth()
+  const { setDockOffset } = useDockOffset()
   const [activeNav, setActiveNav] = useState<NavSection>('all')
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
   const [navSearchQuery, setNavSearchQuery] = useState('')
@@ -309,6 +310,9 @@ export function OrdersScreen() {
 
   // Sliding animation
   const slideAnim = useRef(new Animated.Value(0)).current
+
+  // iOS-style collapsing header
+  const ordersHeaderOpacity = useRef(new Animated.Value(0)).current
 
   const { width } = useWindowDimensions()
   const contentWidth = width - layout.sidebarWidth
@@ -381,23 +385,29 @@ export function OrdersScreen() {
         }
       }
 
-      // Status filter - Handle smart filters
+      // Status filter - Smart groupings (The Apple Way)
       if (activeNav !== 'all') {
         if (activeNav === 'needs_action') {
-          // "Needs Action" = pending, ready, out_for_delivery, ready_to_ship
+          // "Needs Action" = Orders requiring immediate attention
           const needsAction = ['pending', 'ready', 'out_for_delivery', 'ready_to_ship']
           if (!needsAction.includes(order.status)) {
             return false
           }
-        } else if (activeNav === 'ready') {
-          // "Ready" = ready, out_for_delivery, ready_to_ship (all ready states)
-          const readyStatuses = ['ready', 'out_for_delivery', 'ready_to_ship']
-          if (!readyStatuses.includes(order.status)) {
+        } else if (activeNav === 'in_progress') {
+          // "In Progress" = Orders actively being worked on
+          const inProgress = ['preparing', 'shipped', 'in_transit']
+          if (!inProgress.includes(order.status)) {
             return false
           }
-        } else {
-          // Exact status match
-          if (order.status !== activeNav) {
+        } else if (activeNav === 'completed') {
+          // "Completed" = Finished orders
+          const completed = ['completed', 'delivered']
+          if (!completed.includes(order.status)) {
+            return false
+          }
+        } else if (activeNav === 'cancelled') {
+          // "Cancelled" = Cancelled orders
+          if (order.status !== 'cancelled') {
             return false
           }
         }
@@ -430,11 +440,15 @@ export function OrdersScreen() {
 
   // Flatten for FlatList
   const flatListData = useMemo(() => {
-    const items: Array<{ type: 'header'; title: string } | { type: 'order'; order: Order }> = []
-    groupedOrders.forEach(group => {
-      items.push({ type: 'header', title: group.title })
-      group.data.forEach(order => {
-        items.push({ type: 'order', order })
+    const items: Array<
+      | { type: 'section'; group: { title: string; data: Order[] }; isFirst: boolean }
+    > = []
+
+    groupedOrders.forEach((group, groupIndex) => {
+      items.push({
+        type: 'section',
+        group,
+        isFirst: groupIndex === 0
       })
     })
     return items
@@ -448,16 +462,8 @@ export function OrdersScreen() {
     )
   }, [allOrders, selectedLocationIds])
 
-  // Calculate counts - The Apple Way: Smart, actionable filters
-  const pendingCount = locationFilteredOrders.filter(o => o.status === 'pending').length
-  const preparingCount = locationFilteredOrders.filter(o => o.status === 'preparing').length
-  const readyCount = locationFilteredOrders.filter(o => o.status === 'ready' || o.status === 'out_for_delivery' || o.status === 'ready_to_ship').length
-  const completedCount = locationFilteredOrders.filter(o => o.status === 'completed').length
-
-  // "Needs Action" = Orders that need staff to do something
-  // - Pending: Need to start preparing
-  // - Ready: Customer needs to pick up / driver needs to deliver
-  // - Ready to Ship: Need label printed
+  // Calculate counts - The Apple Way: Smart groupings
+  // "Needs Action" = Orders requiring immediate staff attention
   const needsActionCount = locationFilteredOrders.filter(o =>
     o.status === 'pending' ||
     o.status === 'ready' ||
@@ -465,7 +471,23 @@ export function OrdersScreen() {
     o.status === 'ready_to_ship'
   ).length
 
-  // Nav items configuration - The Apple Way
+  // "In Progress" = Orders actively being worked on
+  const inProgressCount = locationFilteredOrders.filter(o =>
+    o.status === 'preparing' ||
+    o.status === 'shipped' ||
+    o.status === 'in_transit'
+  ).length
+
+  // "Completed" = Finished orders (completed or delivered)
+  const completedCount = locationFilteredOrders.filter(o =>
+    o.status === 'completed' ||
+    o.status === 'delivered'
+  ).length
+
+  // "Cancelled" = Cancelled orders
+  const cancelledCount = locationFilteredOrders.filter(o => o.status === 'cancelled').length
+
+  // Nav items configuration - The Apple Way: Simple & Clear
   const navItems: NavItem[] = useMemo(() => [
     {
       id: 'all',
@@ -481,18 +503,10 @@ export function OrdersScreen() {
       badge: needsActionCount > 0 ? 'warning' as const : undefined,
     },
     {
-      id: 'preparing',
+      id: 'in_progress',
       icon: 'box',
-      label: 'Being Prepared',
-      count: preparingCount,
-      badge: preparingCount > 0 ? 'info' as const : undefined,
-    },
-    {
-      id: 'ready',
-      icon: 'box',
-      label: 'Ready',
-      count: readyCount,
-      badge: readyCount > 0 ? 'info' as const : undefined,
+      label: 'In Progress',
+      count: inProgressCount,
     },
     {
       id: 'completed',
@@ -500,7 +514,19 @@ export function OrdersScreen() {
       label: 'Completed',
       count: completedCount,
     },
-  ], [locationFilteredOrders.length, needsActionCount, preparingCount, readyCount, completedCount])
+    {
+      id: 'cancelled',
+      icon: 'box',
+      label: 'Cancelled',
+      count: cancelledCount,
+    },
+  ], [
+    locationFilteredOrders.length,
+    needsActionCount,
+    inProgressCount,
+    completedCount,
+    cancelledCount,
+  ])
 
   // Handle order selection
   const handleOrderSelect = useCallback((order: Order) => {
@@ -522,6 +548,21 @@ export function OrdersScreen() {
     }).start()
   }, [selectedOrder, slideAnim])
 
+  // Automatically update dock position based on detail view visibility
+  useEffect(() => {
+    if (selectedOrder) {
+      // Detail view visible: dock centers on detail panel (right half of content)
+      const detailPanelOffset = layout.sidebarWidth + (contentWidth / 2)
+      setDockOffset(detailPanelOffset)
+    } else {
+      // List view: dock uses default sidebar offset
+      setDockOffset(null)
+    }
+
+    // Cleanup: reset to default when unmounting
+    return () => setDockOffset(null)
+  }, [selectedOrder, contentWidth, setDockOffset])
+
   // Calculate translateX for sliding panels
   const listTranslateX = slideAnim.interpolate({
     inputRange: [0, 1],
@@ -535,26 +576,30 @@ export function OrdersScreen() {
 
   // FlatList render functions
   const renderItem = useCallback(({ item }: { item: typeof flatListData[0] }) => {
-    if (item.type === 'header') {
-      return <SectionHeader title={item.title} />
-    } else {
-      return (
-        <OrderItem
-          order={item.order}
-          showLocation={showLocationColumn}
-          isSelected={selectedOrder?.id === item.order.id}
-          onPress={() => handleOrderSelect(item.order)}
-        />
-      )
-    }
+    const { group, isFirst } = item
+    return (
+      <>
+        <SectionHeader title={group.title} isFirst={isFirst} />
+        <View style={styles.cardWrapper}>
+          <View style={styles.ordersCardGlass}>
+            {group.data.map((order, index) => (
+              <OrderItem
+                key={order.id}
+                order={order}
+                showLocation={showLocationColumn}
+                isSelected={selectedOrder?.id === order.id}
+                isLast={index === group.data.length - 1}
+                onPress={() => handleOrderSelect(order)}
+              />
+            ))}
+          </View>
+        </View>
+      </>
+    )
   }, [showLocationColumn, selectedOrder, handleOrderSelect])
 
   const keyExtractor = useCallback((item: typeof flatListData[0], index: number) => {
-    if (item.type === 'header') {
-      return `header-${item.title}`
-    } else {
-      return item.order.id
-    }
+    return `section-${item.group.title}-${index}`
   }, [])
 
   // Date range label
@@ -600,48 +645,60 @@ export function OrdersScreen() {
               },
             ]}
           >
-            {/* Header with Date Filter */}
-            <View style={styles.listHeader}>
-              <Text style={styles.listHeaderTitle}>
-                {activeNav === 'all' ? 'All Orders' : activeNav.charAt(0).toUpperCase() + activeNav.slice(1)}
+            {/* Fixed Header Title - appears on scroll */}
+            <Animated.View style={[styles.fixedHeader, { opacity: ordersHeaderOpacity }]}>
+              <Text style={styles.fixedHeaderTitle}>
+                {activeNav === 'all' ? 'All Orders' :
+                 activeNav === 'needs_action' ? 'Needs Action' :
+                 activeNav === 'in_progress' ? 'In Progress' :
+                 activeNav === 'completed' ? 'Completed' :
+                 activeNav === 'cancelled' ? 'Cancelled' :
+                 'Orders'}
               </Text>
+            </Animated.View>
 
-              {/* Date Range Selector */}
-              <View style={styles.dateRangeSelector}>
-                <Pressable
-                  style={[styles.dateRangeButton, dateRange === 'today' && styles.dateRangeButtonActive]}
-                  onPress={() => setDateRange('today')}
-                >
-                  <Text style={[styles.dateRangeButtonText, dateRange === 'today' && styles.dateRangeButtonTextActive]}>
-                    Today
-                  </Text>
-                </Pressable>
-                <Pressable
-                  style={[styles.dateRangeButton, dateRange === 'week' && styles.dateRangeButtonActive]}
-                  onPress={() => setDateRange('week')}
-                >
-                  <Text style={[styles.dateRangeButtonText, dateRange === 'week' && styles.dateRangeButtonTextActive]}>
-                    Week
-                  </Text>
-                </Pressable>
-                <Pressable
-                  style={[styles.dateRangeButton, dateRange === 'month' && styles.dateRangeButtonActive]}
-                  onPress={() => setDateRange('month')}
-                >
-                  <Text style={[styles.dateRangeButtonText, dateRange === 'month' && styles.dateRangeButtonTextActive]}>
-                    Month
-                  </Text>
-                </Pressable>
-                <Pressable
-                  style={[styles.dateRangeButton, dateRange === 'all' && styles.dateRangeButtonActive]}
-                  onPress={() => setDateRange('all')}
-                >
-                  <Text style={[styles.dateRangeButtonText, dateRange === 'all' && styles.dateRangeButtonTextActive]}>
-                    All
-                  </Text>
-                </Pressable>
-              </View>
+            {/* Date Range Selector - Always visible, fixed position */}
+            <View style={styles.fixedDateRangeSelector}>
+              <Pressable
+                style={[styles.dateRangeButton, dateRange === 'today' && styles.dateRangeButtonActive]}
+                onPress={() => setDateRange('today')}
+              >
+                <Text style={[styles.dateRangeButtonText, dateRange === 'today' && styles.dateRangeButtonTextActive]}>
+                  Today
+                </Text>
+              </Pressable>
+              <Pressable
+                style={[styles.dateRangeButton, dateRange === 'week' && styles.dateRangeButtonActive]}
+                onPress={() => setDateRange('week')}
+              >
+                <Text style={[styles.dateRangeButtonText, dateRange === 'week' && styles.dateRangeButtonTextActive]}>
+                  Week
+                </Text>
+              </Pressable>
+              <Pressable
+                style={[styles.dateRangeButton, dateRange === 'month' && styles.dateRangeButtonActive]}
+                onPress={() => setDateRange('month')}
+              >
+                <Text style={[styles.dateRangeButtonText, dateRange === 'month' && styles.dateRangeButtonTextActive]}>
+                  Month
+                </Text>
+              </Pressable>
+              <Pressable
+                style={[styles.dateRangeButton, dateRange === 'all' && styles.dateRangeButtonActive]}
+                onPress={() => setDateRange('all')}
+              >
+                <Text style={[styles.dateRangeButtonText, dateRange === 'all' && styles.dateRangeButtonTextActive]}>
+                  All
+                </Text>
+              </Pressable>
             </View>
+
+            {/* Fade Gradient */}
+            <LinearGradient
+              colors={['rgba(0,0,0,0.95)', 'rgba(0,0,0,0.8)', 'rgba(0,0,0,0)']}
+              style={styles.fadeGradient}
+              pointerEvents="none"
+            />
 
             {/* Orders List - Virtualized FlatList */}
             {isLoading ? (
@@ -665,10 +722,29 @@ export function OrdersScreen() {
                 data={flatListData}
                 renderItem={renderItem}
                 keyExtractor={keyExtractor}
+                ListHeaderComponent={() => (
+                  <View style={styles.cardWrapper}>
+                    <Text style={styles.largeTitleHeader}>
+                      {activeNav === 'all' ? 'All Orders' :
+                       activeNav === 'needs_action' ? 'Needs Action' :
+                       activeNav === 'in_progress' ? 'In Progress' :
+                       activeNav === 'completed' ? 'Completed' :
+                       activeNav === 'cancelled' ? 'Cancelled' :
+                       'Orders'}
+                    </Text>
+                  </View>
+                )}
                 contentContainerStyle={styles.flatListContent}
                 showsVerticalScrollIndicator={true}
                 indicatorStyle="white"
-                scrollIndicatorInsets={{ right: 2, bottom: layout.dockHeight }}
+                scrollIndicatorInsets={{ right: 2, top: 100, bottom: layout.dockHeight }}
+                onScroll={(e) => {
+                  const offsetY = e.nativeEvent.contentOffset.y
+                  const threshold = 40
+                  // Instant transition like iOS
+                  ordersHeaderOpacity.setValue(offsetY > threshold ? 1 : 0)
+                }}
+                scrollEventThrottle={16}
                 refreshControl={
                   <RefreshControl
                     refreshing={isLoading}
@@ -786,6 +862,10 @@ function SettingsRow({
   )
 }
 
+// Export memoized version for performance
+export const OrdersScreen = memo(OrdersScreenComponent)
+OrdersScreen.displayName = 'OrdersScreen'
+
 // STYLES
 const styles = StyleSheet.create({
   container: {
@@ -811,29 +891,50 @@ const styles = StyleSheet.create({
     backgroundColor: '#000',
   },
 
-  // List Header with Date Filter
-  listHeader: {
-    paddingHorizontal: 6,
-    paddingTop: layout.cardPadding,
-    paddingBottom: 12,
-    borderBottomWidth: 0.5,
-    borderBottomColor: 'rgba(255,255,255,0.1)',
+  // iOS Collapsing Headers
+  fixedHeader: {
+    position: 'absolute',
+    top: layout.cardPadding,
+    left: 6,
+    minHeight: layout.minTouchTarget,
+    zIndex: 20, // Above fade gradient
   },
-  listHeaderTitle: {
+  fixedDateRangeSelector: {
+    position: 'absolute',
+    top: layout.cardPadding,
+    right: 6,
+    flexDirection: 'row',
+    gap: 8,
+    zIndex: 20, // Above fade gradient
+  },
+  fixedHeaderTitle: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: '#fff',
+    letterSpacing: -0.2,
+  },
+  fadeGradient: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 80,
+    zIndex: 10,
+  },
+  largeTitleHeader: {
     fontSize: 34,
     fontWeight: '700',
     color: '#fff',
     letterSpacing: -0.5,
-    marginBottom: 16,
+    paddingTop: 100,
+    paddingBottom: 8,
   },
-  dateRangeSelector: {
-    flexDirection: 'row',
-    gap: 8,
-  },
+
+  // Date Range Selector
   dateRangeButton: {
     paddingVertical: 8,
     paddingHorizontal: 16,
-    borderRadius: 8,
+    borderRadius: 20,
     backgroundColor: 'rgba(255,255,255,0.05)',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.1)',
@@ -857,11 +958,26 @@ const styles = StyleSheet.create({
     paddingBottom: layout.dockHeight,
   },
 
+  // Card Wrapper - iOS-style spacing
+  cardWrapper: {
+    marginHorizontal: 6, // Ultra-minimal iOS-style spacing (6px)
+    marginBottom: 8,
+  },
+  ordersCardGlass: {
+    borderRadius: radius.xxl,
+    borderCurve: 'continuous',
+    overflow: 'hidden',
+    backgroundColor: 'rgba(255,255,255,0.05)', // Solid glass effect
+  },
+
   // Section Headers
   sectionHeader: {
     paddingHorizontal: 22,
     paddingVertical: 12,
     backgroundColor: '#000',
+  },
+  sectionHeaderFirst: {
+    paddingTop: 4, // Less padding for first section
   },
   sectionHeaderText: {
     fontSize: 13,
@@ -885,6 +1001,9 @@ const styles = StyleSheet.create({
   },
   orderItemActive: {
     backgroundColor: 'rgba(99,99,102,0.2)',
+  },
+  orderItemLast: {
+    borderBottomWidth: 0,
   },
   orderIcon: {
     width: 44,
@@ -922,7 +1041,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.2,
   },
   dataColumn: {
-    minWidth: 100,
+    minWidth: 80,
     alignItems: 'flex-end',
     gap: 2,
   },
@@ -938,15 +1057,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#fff',
     letterSpacing: -0.2,
-  },
-  // Order Type Badge - Apple-style
-  orderTypeBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  orderTypeIcon: {
-    fontSize: 14,
   },
 
   loadingContainer: {
