@@ -23,7 +23,7 @@ import { useLocationFilter } from '@/stores/location-filter.store'
 import { logger } from '@/utils/logger'
 import { supabase } from '@/lib/supabase/client'
 
-type NavSection = 'all' | 'pending' | 'processing' | 'ready' | 'completed'
+type NavSection = 'all' | 'pending' | 'preparing' | 'ready' | 'completed' | 'needs_action'
 type DateRange = 'today' | 'week' | 'month' | 'all'
 
 // Date range helper
@@ -105,35 +105,74 @@ const OrderItem = React.memo<{
     minute: '2-digit',
   })
 
-  // Get status color
+  // Get status color - The Apple Way
   const getStatusColor = (status: Order['status']) => {
     switch (status) {
       case 'completed':
-        return '#34c759' // Green
-      case 'processing':
-        return '#0a84ff' // Blue
+        return '#34c759' // Green - Done
+      case 'preparing':
+        return '#0a84ff' // Blue - Staff working on it
+      case 'ready':
+      case 'out_for_delivery':
+      case 'shipped':
+      case 'in_transit':
+        return '#bf5af2' // Purple - Ready for customer/in transit
       case 'cancelled':
-        return '#ff3b30' // Red
+        return '#ff3b30' // Red - Cancelled
+      case 'pending':
+      case 'ready_to_ship':
+        return '#ff9500' // Orange - Needs attention
       default:
-        return '#ff9500' // Orange
+        return '#8e8e93' // Gray - Unknown
     }
   }
 
-  // Get order type label
-  const getOrderTypeLabel = () => {
-    const type = order.delivery_type || order.order_type || 'instore'
+  // Get status label - Human-friendly
+  const getStatusLabel = (status: Order['status']) => {
+    switch (status) {
+      case 'pending':
+        return 'Pending'
+      case 'preparing':
+        return 'Preparing'
+      case 'ready':
+        return 'Ready'
+      case 'out_for_delivery':
+        return 'Out for Delivery'
+      case 'ready_to_ship':
+        return 'Ready to Ship'
+      case 'shipped':
+        return 'Shipped'
+      case 'in_transit':
+        return 'In Transit'
+      case 'delivered':
+        return 'Delivered'
+      case 'completed':
+        return 'Completed'
+      case 'cancelled':
+        return 'Cancelled'
+    }
+  }
+
+  // Get order type - The Apple Way: Clear, visual labels
+  const getOrderType = () => {
+    // Prefer new order_type field, fallback to legacy delivery_type
+    const type = order.order_type || order.delivery_type || 'walk_in'
     switch (type.toLowerCase()) {
+      case 'walk_in':
+      case 'instore':
+        return { label: 'Walk-in', icon: '🏪', color: '#34c759' }
       case 'pickup':
-        return 'Pickup'
+        return { label: 'Pickup', icon: '📦', color: '#0a84ff' }
       case 'delivery':
+        return { label: 'Delivery', icon: '🚗', color: '#ff9500' }
       case 'shipping':
-        return 'Delivery'
+        return { label: 'Shipping', icon: '📮', color: '#bf5af2' }
       default:
-        return 'Store'
+        return { label: 'Store', icon: '🏪', color: '#8e8e93' }
     }
   }
 
-  const orderTypeLabel = getOrderTypeLabel()
+  const orderType = getOrderType()
 
   // Get customer initials for icon
   const customerInitials = order.customer_name
@@ -183,13 +222,18 @@ const OrderItem = React.memo<{
         </View>
       )}
 
-      {/* Type Column */}
+      {/* Type Column - Apple-style badge */}
       <View style={styles.dataColumn}>
         <Text style={styles.dataLabel}>TYPE</Text>
-        <Text style={styles.dataValue}>{orderTypeLabel}</Text>
+        <View style={styles.orderTypeBadge}>
+          <Text style={styles.orderTypeIcon}>{orderType.icon}</Text>
+          <Text style={[styles.dataValue, { color: orderType.color }]}>
+            {orderType.label}
+          </Text>
+        </View>
       </View>
 
-      {/* Status Column */}
+      {/* Status Column - Apple-style badge */}
       <View style={styles.dataColumn}>
         <Text style={styles.dataLabel}>STATUS</Text>
         <Text
@@ -198,7 +242,7 @@ const OrderItem = React.memo<{
             { color: getStatusColor(order.status) }
           ]}
         >
-          {order.status.toUpperCase()}
+          {getStatusLabel(order.status)}
         </Text>
       </View>
 
@@ -336,10 +380,25 @@ export function OrdersScreen() {
         }
       }
 
-      // Status filter
+      // Status filter - Handle smart filters
       if (activeNav !== 'all') {
-        if (order.status !== activeNav) {
-          return false
+        if (activeNav === 'needs_action') {
+          // "Needs Action" = pending, ready, out_for_delivery, ready_to_ship
+          const needsAction = ['pending', 'ready', 'out_for_delivery', 'ready_to_ship']
+          if (!needsAction.includes(order.status)) {
+            return false
+          }
+        } else if (activeNav === 'ready') {
+          // "Ready" = ready, out_for_delivery, ready_to_ship (all ready states)
+          const readyStatuses = ['ready', 'out_for_delivery', 'ready_to_ship']
+          if (!readyStatuses.includes(order.status)) {
+            return false
+          }
+        } else {
+          // Exact status match
+          if (order.status !== activeNav) {
+            return false
+          }
         }
       }
 
@@ -388,37 +447,51 @@ export function OrdersScreen() {
     )
   }, [allOrders, selectedLocationIds])
 
+  // Calculate counts - The Apple Way: Smart, actionable filters
   const pendingCount = locationFilteredOrders.filter(o => o.status === 'pending').length
-  const processingCount = locationFilteredOrders.filter(o => o.status === 'processing').length
+  const preparingCount = locationFilteredOrders.filter(o => o.status === 'preparing').length
+  const readyCount = locationFilteredOrders.filter(o => o.status === 'ready' || o.status === 'out_for_delivery' || o.status === 'ready_to_ship').length
   const completedCount = locationFilteredOrders.filter(o => o.status === 'completed').length
 
-  // Nav items configuration
+  // "Needs Action" = Orders that need staff to do something
+  // - Pending: Need to start preparing
+  // - Ready: Customer needs to pick up / driver needs to deliver
+  // - Ready to Ship: Need label printed
+  const needsActionCount = locationFilteredOrders.filter(o =>
+    o.status === 'pending' ||
+    o.status === 'ready' ||
+    o.status === 'out_for_delivery' ||
+    o.status === 'ready_to_ship'
+  ).length
+
+  // Nav items configuration - The Apple Way
   const navItems: NavItem[] = useMemo(() => [
     {
       id: 'all',
       icon: 'grid',
       label: 'All Orders',
-      count: filteredOrders.length,
+      count: locationFilteredOrders.length,
     },
     {
-      id: 'pending',
+      id: 'needs_action',
       icon: 'warning',
-      label: 'Pending',
-      count: pendingCount,
-      badge: pendingCount > 0 ? 'warning' as const : undefined,
+      label: 'Needs Action',
+      count: needsActionCount,
+      badge: needsActionCount > 0 ? 'warning' as const : undefined,
     },
     {
-      id: 'processing',
+      id: 'preparing',
       icon: 'box',
-      label: 'In Progress',
-      count: processingCount,
-      badge: processingCount > 0 ? 'info' as const : undefined,
+      label: 'Being Prepared',
+      count: preparingCount,
+      badge: preparingCount > 0 ? 'info' as const : undefined,
     },
     {
       id: 'ready',
       icon: 'box',
       label: 'Ready',
-      count: 0,
+      count: readyCount,
+      badge: readyCount > 0 ? 'info' as const : undefined,
     },
     {
       id: 'completed',
@@ -426,7 +499,7 @@ export function OrdersScreen() {
       label: 'Completed',
       count: completedCount,
     },
-  ], [filteredOrders.length, pendingCount, processingCount, completedCount])
+  ], [locationFilteredOrders.length, needsActionCount, preparingCount, readyCount, completedCount])
 
   // Handle order selection
   const handleOrderSelect = useCallback((order: Order) => {
@@ -844,13 +917,19 @@ function OrderDetail({
             <View style={styles.cardGlass}>
               {order.status === 'pending' && (
                 <SettingsRow
-                  label="Mark as Processing"
-                  onPress={() => handleStatusUpdate('processing')}
+                  label="Start Preparing"
+                  onPress={() => handleStatusUpdate('preparing')}
                 />
               )}
-              {order.status === 'processing' && (
+              {order.status === 'preparing' && (
                 <SettingsRow
-                  label="Mark as Completed"
+                  label="Mark as Ready"
+                  onPress={() => handleStatusUpdate('ready')}
+                />
+              )}
+              {order.status === 'ready' && (
+                <SettingsRow
+                  label="Complete Order"
                   onPress={() => handleStatusUpdate('completed')}
                 />
               )}
@@ -870,12 +949,15 @@ function getStatusStyle(status: Order['status']) {
   switch (status) {
     case 'completed':
       return { color: '#34c759' }
-    case 'processing':
+    case 'preparing':
       return { color: '#0a84ff' }
+    case 'ready':
+    case 'out_for_delivery':
+      return { color: '#bf5af2' }
     case 'cancelled':
       return { color: '#ff3b30' }
     default:
-      return {}
+      return { color: '#ff9500' }
   }
 }
 
@@ -1074,6 +1156,15 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#fff',
     letterSpacing: -0.2,
+  },
+  // Order Type Badge - Apple-style
+  orderTypeBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  orderTypeIcon: {
+    fontSize: 14,
   },
 
   loadingContainer: {

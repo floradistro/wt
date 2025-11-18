@@ -12,21 +12,72 @@ export interface Order {
   order_number: string
   customer_id?: string
   vendor_id?: string
-  status: 'pending' | 'processing' | 'completed' | 'cancelled'
+
+  // Order Type - The Apple Way: walk_in (POS) | pickup (online→store) | delivery (local) | shipping (USPS)
+  order_type: 'walk_in' | 'pickup' | 'delivery' | 'shipping'
+
+  // Status - Context-aware workflow based on order_type
+  status: 'pending' | 'preparing' | 'ready' | 'out_for_delivery' | 'ready_to_ship' | 'shipped' | 'in_transit' | 'delivered' | 'completed' | 'cancelled'
   payment_status: 'pending' | 'paid' | 'failed' | 'refunded' | 'partially_refunded'
   fulfillment_status: 'unfulfilled' | 'partial' | 'fulfilled' | 'cancelled'
+
+  // Pricing
   subtotal: number
   tax_amount: number
   discount_amount: number
   total_amount: number
   payment_method?: string
+
+  // Timestamps
   created_at: string
   updated_at: string
-  // Order type info
-  delivery_type?: 'pickup' | 'delivery' | 'instore'
-  order_type?: string
+  completed_at?: string
+
+  // Pickup/Delivery Location
   pickup_location_id?: string
   pickup_location_name?: string
+
+  // Shipping Address (for shipping orders)
+  shipping_name?: string
+  shipping_address_line1?: string
+  shipping_address_line2?: string
+  shipping_city?: string
+  shipping_state?: string
+  shipping_zip?: string
+  shipping_country?: string
+  shipping_phone?: string
+
+  // Shipping Tracking (for shipping orders)
+  tracking_number?: string
+  tracking_url?: string
+  shipping_label_url?: string
+  shipping_carrier?: string
+  shipping_service?: string
+  postage_paid?: number
+  shipping_cost?: number
+
+  // Package Details (for shipping orders)
+  package_weight?: number
+  package_length?: number
+  package_width?: number
+  package_height?: number
+
+  // Fulfillment Tracking
+  prepared_by_user_id?: string
+  prepared_at?: string
+  ready_at?: string
+  notified_at?: string
+  picked_up_at?: string
+  shipped_at?: string
+  shipped_by_user_id?: string
+  estimated_delivery_date?: string
+  delivered_at?: string
+  delivered_by_user_id?: string
+  staff_notes?: string
+
+  // Legacy field (will be migrated to order_type)
+  delivery_type?: 'pickup' | 'delivery' | 'instore'
+
   // Customer info (joined from customers table)
   customer_name?: string
   customer_email?: string

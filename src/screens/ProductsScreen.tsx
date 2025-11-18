@@ -25,8 +25,11 @@ import { useCustomFields } from '@/hooks/useCustomFields'
 import { usePricingTemplates } from '@/hooks/usePricingTemplates'
 import { useUserLocations } from '@/hooks/useUserLocations'
 import { useLocationFilter } from '@/stores/location-filter.store'
+import { usePurchaseOrders } from '@/hooks/usePurchaseOrders'
+import { PurchaseOrdersList, PurchaseOrderDetail } from '@/components/purchase-orders'
+import type { PurchaseOrder } from '@/services/purchase-orders.service'
 
-type NavSection = 'all' | 'low-stock' | 'out-of-stock' | 'categories'
+type NavSection = 'all' | 'low-stock' | 'out-of-stock' | 'categories' | 'purchase-orders'
 
 // Memoized Product Item to prevent flickering
 const ProductItem = React.memo<{
@@ -111,6 +114,7 @@ export function ProductsScreen() {
   const [activeNav, setActiveNav] = useState<NavSection>('all')
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null)
+  const [selectedPurchaseOrder, setSelectedPurchaseOrder] = useState<PurchaseOrder | null>(null)
   const [navSearchQuery, setNavSearchQuery] = useState('')
   const [productSearchQuery, setProductSearchQuery] = useState('')
   const [vendorLogo, setVendorLogo] = useState<string | null>(null)
@@ -159,6 +163,7 @@ export function ProductsScreen() {
   // Scroll tracking for collapsing headers - using Animated.Value for iOS-style smooth transitions
   const categoriesHeaderOpacity = useRef(new Animated.Value(0)).current
   const productsHeaderOpacity = useRef(new Animated.Value(0)).current
+  const purchaseOrdersHeaderOpacity = useRef(new Animated.Value(0)).current
 
   // Section index state for products
   const scrollViewRef = useRef<ScrollView>(null)
@@ -184,6 +189,7 @@ export function ProductsScreen() {
   // Load all products without search - we'll filter client-side
   const { products: allProducts, isLoading, reload } = useProducts({ search: '' })
   const { categories, isLoading: categoriesLoading, reload: reloadCategories } = useCategories({ includeGlobal: true, parentId: null })
+  const { purchaseOrders, isLoading: purchaseOrdersLoading, reload: reloadPurchaseOrders, stats: poStats } = usePurchaseOrders({ locationIds: selectedLocationIds })
 
   // Create a category lookup map for fast access
   const categoryMap = useMemo(() => {
@@ -642,18 +648,29 @@ export function ProductsScreen() {
       icon: 'folder',
       label: 'Categories',
     },
-  ], [allProducts.length, lowStockCount, outOfStockCount])
+    {
+      id: 'purchase-orders',
+      icon: 'doc',
+      label: 'Purchase Orders',
+      count: poStats.pending,
+      badge: poStats.pending > 0 ? 'info' as const : undefined,
+    },
+  ], [allProducts.length, lowStockCount, outOfStockCount, poStats.pending])
 
-  // Animate when product/category is selected/deselected
+  // Animate when product/category/PO is selected/deselected
   useEffect(() => {
-    const shouldSlide = activeNav === 'categories' ? selectedCategoryId !== null : selectedProduct !== null
+    const shouldSlide = activeNav === 'categories'
+      ? selectedCategoryId !== null
+      : activeNav === 'purchase-orders'
+      ? selectedPurchaseOrder !== null
+      : selectedProduct !== null
     Animated.spring(slideAnim, {
       toValue: shouldSlide ? 1 : 0,
       useNativeDriver: true,
       tension: 80,
       friction: 12,
     }).start()
-  }, [selectedProduct, selectedCategoryId, activeNav, slideAnim])
+  }, [selectedProduct, selectedCategoryId, selectedPurchaseOrder, activeNav, slideAnim])
 
 
   // Filter categories by nav search
@@ -706,7 +723,7 @@ export function ProductsScreen() {
           onUserProfilePress={() => setShowLocationSelector(true)}
           selectedLocationNames={selectedLocationNames}
           // Filter props - only for product views
-          showFilters={activeNav !== 'categories'}
+          showFilters={activeNav !== 'categories' && activeNav !== 'purchase-orders'}
           categories={categoriesAsFilterOptions}
           selectedCategories={selectedCategories}
           onCategoryToggle={toggleCategory}
@@ -736,7 +753,20 @@ export function ProductsScreen() {
             },
           ]}
         >
-          {activeNav === 'categories' ? (
+          {activeNav === 'purchase-orders' ? (
+            // PURCHASE ORDERS VIEW
+            <PurchaseOrdersList
+              purchaseOrders={purchaseOrders}
+              selectedPO={selectedPurchaseOrder}
+              onSelect={setSelectedPurchaseOrder}
+              isLoading={purchaseOrdersLoading}
+              headerOpacity={purchaseOrdersHeaderOpacity}
+              onAddPress={() => {
+                // TODO: Show create PO modal
+                logger.info('Create PO clicked')
+              }}
+            />
+          ) : activeNav === 'categories' ? (
             // CATEGORIES VIEW
             categoriesLoading ? (
               <View style={styles.loadingContainer}>
@@ -1079,7 +1109,25 @@ export function ProductsScreen() {
             },
           ]}
         >
-          {activeNav === 'categories' ? (
+          {activeNav === 'purchase-orders' ? (
+            // Purchase Order Detail
+            selectedPurchaseOrder ? (
+              <PurchaseOrderDetail
+                purchaseOrder={selectedPurchaseOrder}
+                onBack={() => setSelectedPurchaseOrder(null)}
+                onUpdated={reloadPurchaseOrders}
+                onReceive={() => {
+                  // TODO: Show receive modal
+                  logger.info('Receive items clicked')
+                }}
+              />
+            ) : (
+              <View style={styles.emptyDetail}>
+                <Text style={styles.emptyTitle}>Select a purchase order</Text>
+                <Text style={styles.emptyText}>Choose a purchase order from the list to view details</Text>
+              </View>
+            )
+          ) : activeNav === 'categories' ? (
             // Category Detail
             selectedCategory ? (
               <CategoryDetail
