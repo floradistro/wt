@@ -4,7 +4,7 @@
  * Steve Jobs: "Design is not just what it looks like. Design is how it works."
  */
 
-import { View, Text, StyleSheet, Pressable, ScrollView, ActivityIndicator, Animated, TextInput, Alert } from 'react-native'
+import { View, Text, StyleSheet, Pressable, ScrollView, ActivityIndicator, Animated, TextInput, Alert, Image } from 'react-native'
 import React, { useState, useRef, useEffect, useMemo, useCallback, memo } from 'react'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { LiquidGlassView, LiquidGlassContainerView, isLiquidGlassSupported } from '@callstack/liquid-glass'
@@ -17,6 +17,8 @@ import { NavSidebar, type NavItem } from '@/components/NavSidebar'
 import { useDockOffset } from '@/navigation/DashboardNavigator'
 import { customersService } from '@/services/customers.service'
 import { logger } from '@/utils/logger'
+import { useAuth } from '@/stores/auth.store'
+import { supabase } from '@/lib/supabase/client'
 
 type NavSection = 'all' | 'top-customers' | 'recent'
 
@@ -95,6 +97,7 @@ SectionHeader.displayName = 'SectionHeader'
 
 function CustomersScreenComponent() {
   const dockOffset = useDockOffset()
+  const { user } = useAuth()
 
   // Navigation State
   const [activeNav, setActiveNav] = useState<NavSection>('all')
@@ -102,6 +105,9 @@ function CustomersScreenComponent() {
 
   // Selection State
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null)
+
+  // Vendor Logo
+  const [vendorLogo, setVendorLogo] = useState<string | null>(null)
 
   // Animation State
   const slideAnim = useRef(new Animated.Value(0)).current
@@ -114,6 +120,40 @@ function CustomersScreenComponent() {
     autoLoad: true,
     searchTerm: searchQuery
   })
+
+  // Load vendor info
+  useEffect(() => {
+    async function loadVendorInfo() {
+      if (!user?.email) return
+      try {
+        const { data: userData, error: userError } = await supabase
+          .from('users')
+          .select('vendor_id, vendors(id, store_name, logo_url)')
+          .eq('email', user.email)
+          .single()
+
+        if (userError) {
+          logger.error('User query error', { error: userError })
+          return
+        }
+
+        logger.debug('[CustomersScreen] Vendor data loaded:', {
+          hasVendor: !!userData?.vendors,
+          vendorData: userData?.vendors,
+          logoUrl: (userData?.vendors as any)?.logo_url
+        })
+
+        if (userData?.vendors) {
+          const vendor = userData.vendors as any
+          setVendorLogo(vendor.logo_url || null)
+          logger.debug('[CustomersScreen] Set vendor logo to:', vendor.logo_url)
+        }
+      } catch (error) {
+        logger.error('Failed to load vendor info', { error })
+      }
+    }
+    loadVendorInfo()
+  }, [user])
 
   // Search Effect
   useEffect(() => {
@@ -160,7 +200,7 @@ function CustomersScreenComponent() {
 
   // Filter customers based on active nav
   const filteredCustomers = useMemo(() => {
-    let filtered = [...customers]
+    const filtered = [...customers]
 
     switch (activeNav) {
       case 'top-customers':
@@ -406,13 +446,31 @@ function CustomersScreenComponent() {
               }}
               scrollEventThrottle={16}
             >
-              {/* Large Title - scrolls with content */}
-              <View style={[styles.largeTitleContainer, styles.cardWrapper]}>
-                <Text style={styles.largeTitleHeader}>
-                  {activeNav === 'all' && 'All Customers'}
-                  {activeNav === 'top-customers' && 'Top Customers'}
-                  {activeNav === 'recent' && 'Recent Customers'}
-                </Text>
+              {/* Large Title with Vendor Logo - scrolls with content */}
+              <View style={styles.cardWrapper}>
+                <View style={styles.titleSectionContainer}>
+                  <View style={styles.titleWithLogo}>
+                    {vendorLogo ? (
+                      <Image
+                        source={{ uri: vendorLogo }}
+                        style={styles.vendorLogoInline}
+                        resizeMode="contain"
+                        fadeDuration={0}
+                        onError={(e) => logger.debug('[CustomersScreen] Image load error:', e.nativeEvent.error)}
+                        onLoad={() => logger.debug('[CustomersScreen] Image loaded successfully')}
+                      />
+                    ) : (
+                      <View style={[styles.vendorLogoInline, { backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' }]}>
+                        <Text style={{ color: 'rgba(255,255,255,0.3)', fontSize: 12 }}>No Logo</Text>
+                      </View>
+                    )}
+                    <Text style={styles.largeTitleHeader}>
+                      {activeNav === 'all' && 'All Customers'}
+                      {activeNav === 'top-customers' && 'Top Customers'}
+                      {activeNav === 'recent' && 'Recent Customers'}
+                    </Text>
+                  </View>
+                </View>
               </View>
 
               {renderListContent()}
@@ -854,6 +912,30 @@ const styles = StyleSheet.create({
     right: 0,
     height: 80,
     zIndex: 10,
+  },
+  titleSectionContainer: {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: radius.xxl,
+    borderCurve: 'continuous',
+    padding: spacing.lg,
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  titleWithLogo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.lg,
+  },
+  vendorLogoInline: {
+    width: 80,
+    height: 80,
+    borderRadius: radius.xxl,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.25)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
   },
   largeTitleContainer: {
     flexDirection: 'row',

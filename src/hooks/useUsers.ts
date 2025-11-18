@@ -256,27 +256,76 @@ export function useUsers() {
 
   async function deleteUser(userId: string): Promise<{ success: boolean; error?: string }> {
     try {
-      // Get auth_user_id before deleting
-      const { data: userData } = await supabase
-        .from('users')
-        .select('auth_user_id')
-        .eq('id', userId)
-        .single()
+      // Get session token
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession()
 
-      // Delete from users table (cascade will handle user_locations)
-      const { error: deleteError } = await supabase.from('users').delete().eq('id', userId)
+      if (sessionError || !session?.access_token) {
+        throw new Error('Not authenticated')
+      }
 
-      if (deleteError) throw deleteError
+      // Call Edge Function to delete user (requires service role for auth deletion)
+      const response = await supabase.functions.invoke('manage-user', {
+        body: {
+          action: 'delete-user',
+          userId,
+        },
+      })
 
-      // Delete from auth if auth_user_id exists
-      if (userData?.auth_user_id) {
-        await supabase.auth.admin.deleteUser(userData.auth_user_id)
+      logger.debug('Delete user Edge Function response:', {
+        data: response.data,
+        error: response.error,
+      })
+
+      // Handle network/invocation errors
+      if (response.error) {
+        const context = (response.error as any).context
+
+        logger.error('Edge Function error context:', {
+          context,
+          contextKeys: context ? Object.keys(context) : [],
+        })
+
+        // Try to extract the actual error message from the function response
+        let errorMsg = 'Failed to call Edge Function'
+
+        if (context) {
+          if (context.error) {
+            errorMsg = context.error
+          } else if (context.message) {
+            errorMsg = context.message
+          } else if (typeof context === 'string') {
+            errorMsg = context
+          }
+        }
+
+        logger.error('Extracted error message:', errorMsg)
+        throw new Error(errorMsg)
+      }
+
+      // Handle function response errors
+      const data = response.data
+
+      if (!data) {
+        throw new Error('No response from Edge Function')
+      }
+
+      logger.debug('Edge Function data:', data)
+
+      if (!data.success) {
+        const errorMsg = data.error || 'Failed to delete user'
+        const details = data.details || ''
+        logger.error('Edge Function returned error:', { error: errorMsg, details })
+        throw new Error(`${errorMsg}${details ? ` (${details})` : ''}`)
       }
 
       await loadUsers()
       return { success: true }
     } catch (err) {
-      logger.error('Failed to delete user', { error: err })
+      logger.error('Failed to delete user', {
+        error: err,
+        message: err instanceof Error ? err.message : 'Unknown error',
+        stack: err instanceof Error ? err.stack : undefined,
+      })
       return {
         success: false,
         error: err instanceof Error ? err.message : 'Failed to delete user',
@@ -289,28 +338,76 @@ export function useUsers() {
     password: string
   ): Promise<{ success: boolean; error?: string }> {
     try {
-      // Get auth_user_id
-      const { data: userData } = await supabase
-        .from('users')
-        .select('auth_user_id')
-        .eq('id', userId)
-        .single()
+      // Get session token
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession()
 
-      if (!userData?.auth_user_id) {
-        throw new Error('User has no auth account')
+      if (sessionError || !session?.access_token) {
+        throw new Error('Not authenticated')
       }
 
-      // Update password via Supabase Auth Admin API
-      const { error: updateError } = await supabase.auth.admin.updateUserById(
-        userData.auth_user_id,
-        { password }
-      )
+      // Call Edge Function to set password (requires service role)
+      const response = await supabase.functions.invoke('manage-user', {
+        body: {
+          action: 'set-password',
+          userId,
+          password,
+        },
+      })
 
-      if (updateError) throw updateError
+      logger.debug('Set password Edge Function response:', {
+        data: response.data,
+        error: response.error,
+      })
+
+      // Handle network/invocation errors
+      if (response.error) {
+        const context = (response.error as any).context
+
+        logger.error('Edge Function error context:', {
+          context,
+          contextKeys: context ? Object.keys(context) : [],
+        })
+
+        // Try to extract the actual error message from the function response
+        let errorMsg = 'Failed to call Edge Function'
+
+        if (context) {
+          if (context.error) {
+            errorMsg = context.error
+          } else if (context.message) {
+            errorMsg = context.message
+          } else if (typeof context === 'string') {
+            errorMsg = context
+          }
+        }
+
+        logger.error('Extracted error message:', errorMsg)
+        throw new Error(errorMsg)
+      }
+
+      // Handle function response errors
+      const data = response.data
+
+      if (!data) {
+        throw new Error('No response from Edge Function')
+      }
+
+      logger.debug('Edge Function data:', data)
+
+      if (!data.success) {
+        const errorMsg = data.error || 'Failed to set password'
+        const details = data.details || ''
+        logger.error('Edge Function returned error:', { error: errorMsg, details })
+        throw new Error(`${errorMsg}${details ? ` (${details})` : ''}`)
+      }
 
       return { success: true }
     } catch (err) {
-      logger.error('Failed to set password', { error: err })
+      logger.error('Failed to set password', {
+        error: err,
+        message: err instanceof Error ? err.message : 'Unknown error',
+        stack: err instanceof Error ? err.stack : undefined,
+      })
       return {
         success: false,
         error: err instanceof Error ? err.message : 'Failed to set password',

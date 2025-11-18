@@ -18,5 +18,8 @@ babel.config.js
 *.generated.*
 coverage/
 
+# Supabase Edge Functions (Deno)
+supabase/functions/
+
 # OS files
 .DS_Store

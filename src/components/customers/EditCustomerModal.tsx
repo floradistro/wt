@@ -6,8 +6,7 @@
 
 import { View, Text, StyleSheet, TextInput, Pressable, ScrollView, Alert } from 'react-native'
 import React, { useState, useCallback } from 'react'
-import { colors, typography, spacing, radius } from '@/theme/tokens'
-import { device } from '@/theme/tokens'
+import { colors, typography, spacing, radius, device } from '@/theme/tokens'
 import { POSModal } from '@/components/pos/POSModal'
 import { customersService, type Customer } from '@/services/customers.service'
 import { logger } from '@/utils/logger'
@@ -72,14 +71,13 @@ export function EditCustomerModal({
     if (!email && !phone) return true
 
     try {
-      // Get all customers to check for duplicates
-      const allCustomers = await customersService.getCustomers()
-
       // Find potential duplicates
-      const duplicates = findPotentialDuplicates(
-        { email, phone, first_name: firstName, last_name: lastName },
-        allCustomers
-      )
+      const duplicates = await findPotentialDuplicates({
+        email,
+        phone,
+        firstName,
+        lastName
+      })
 
       // Filter out current customer if editing
       const relevantDuplicates = isEditing
@@ -88,12 +86,12 @@ export function EditCustomerModal({
 
       if (relevantDuplicates.length > 0) {
         const duplicate = relevantDuplicates[0]
-        const matchTypes = duplicate.matchTypes.join(', ')
+        const matchedFields = duplicate.matchedFields.join(', ')
 
         return new Promise((resolve) => {
           Alert.alert(
             'Potential Duplicate Found',
-            `A customer with matching ${matchTypes} already exists:\n\n${duplicate.customer.full_name || 'Unknown'}\n${duplicate.customer.email || ''}\n${duplicate.customer.phone || ''}\n\nDo you want to continue anyway?`,
+            `A customer with matching ${matchedFields} already exists:\n\n${duplicate.customer.full_name || 'Unknown'}\n${duplicate.customer.email || ''}\n${duplicate.customer.phone || ''}\n\nDo you want to continue anyway?`,
             [
               {
                 text: 'Cancel',

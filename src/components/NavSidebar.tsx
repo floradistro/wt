@@ -12,7 +12,7 @@ import { layout } from '@/theme/layout'
 import { ProductFilterSearchBar, type FilterOption, type ActiveFilter } from './shared'
 
 // Monochrome Search Icon (like Settings)
-function SearchIcon({ color }: { color: string }) {
+function _SearchIcon({ color }: { color: string }) {
   return (
     <View style={styles.searchIconContainer}>
       <View style={[styles.searchIconCircle, { borderColor: color }]} />
@@ -112,6 +112,7 @@ interface NavSidebarProps {
   width?: number
   searchValue?: string
   onSearchChange?: (value: string) => void
+  searchPlaceholder?: string
   items: NavItem[]
   activeItemId: string
   onItemPress: (itemId: string) => void
@@ -246,9 +247,8 @@ export function NavSidebar({
 
             {/* Nav Items */}
             <View style={styles.navItems}>
-            {items.map((item, index) => {
+            {items.map((item) => {
               const isActive = activeItemId === item.id
-              const isLast = index === items.length - 1
 
               // Get icon component
               const iconColor = isActive ? '#fff' : 'rgba(235,235,245,0.6)'

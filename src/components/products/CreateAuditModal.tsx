@@ -48,7 +48,7 @@ export function CreateAuditModal({ visible, onClose, onCreated }: CreateAuditMod
   const [auditReason, setAuditReason] = useState('')
 
   const modalStyle = useMemo(() => ({
-    width: isLandscape ? '95%' : '95%',
+    width: '95%' as const,
     maxWidth: isLandscape ? 1200 : 800,
     maxHeight: isLandscape ? height * 0.88 : height * 0.92,
   }), [isLandscape, height])
@@ -225,6 +225,7 @@ export function CreateAuditModal({ visible, onClose, onCreated }: CreateAuditMod
       transparent
       animationType="fade"
       onRequestClose={handleClose}
+      supportedOrientations={['portrait', 'landscape']}
     >
       <BlurView intensity={80} style={styles.modalOverlay} tint="dark">
         <Pressable style={styles.modalBackdrop} onPress={handleClose} />

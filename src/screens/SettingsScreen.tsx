@@ -7,7 +7,7 @@
  * Just like iOS Settings on iPad
  */
 
-import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Alert, Animated, TextInput } from 'react-native'
+import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Alert, Animated, TextInput, Image } from 'react-native'
 import { memo, useState, useMemo, useRef, useEffect } from 'react'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { LiquidGlassView, LiquidGlassContainerView, isLiquidGlassSupported } from '@callstack/liquid-glass'
@@ -26,6 +26,8 @@ import { NavSidebar, type NavItem } from '@/components/NavSidebar'
 import { UserManagementModals } from '@/components/settings/UserManagementModals'
 import { SupplierManagementModals } from '@/components/settings/SupplierManagementModals'
 import { PaymentProcessorModal } from '@/components/settings/PaymentProcessorModal'
+import { supabase } from '@/lib/supabase/client'
+import { logger } from '@/utils/logger'
 
 // Monochrome Icons for Settings Categories
 
@@ -124,7 +126,7 @@ interface SettingsCategory {
 }
 
 // Category detail views
-function AccountDetail({ user, headerOpacity }: { user: any; headerOpacity: Animated.Value }) {
+function AccountDetail({ user, headerOpacity, vendorLogo }: { user: any; headerOpacity: Animated.Value; vendorLogo?: string | null }) {
   // Get user initials from email or metadata
   const userEmail = user?.email || 'user@example.com'
   const userName = user?.user_metadata?.full_name || userEmail.split('@')[0]
@@ -162,18 +164,30 @@ function AccountDetail({ user, headerOpacity }: { user: any; headerOpacity: Anim
         }}
         scrollEventThrottle={16}
       >
-        {/* Header with avatar - INSIDE ScrollView */}
-        <View style={styles.detailHeader} accessible={false}>
-          <View
-            style={styles.avatarLarge}
-            accessible={true}
-            accessibilityRole="image"
-            accessibilityLabel={`Profile picture, ${initials}`}
-          >
-            <Text style={styles.avatarLargeText} accessible={false}>{initials}</Text>
+        {/* Title Section with Vendor Logo */}
+        <View style={styles.cardWrapper}>
+          <View style={styles.titleSectionContainer}>
+            <View style={styles.titleWithLogo}>
+              {vendorLogo ? (
+                <Image
+                  source={{ uri: vendorLogo }}
+                  style={styles.vendorLogoInline}
+                  resizeMode="contain"
+                        fadeDuration={0}
+                  onError={(e) => logger.debug('[SettingsScreen] Image load error:', e.nativeEvent.error)}
+                  onLoad={() => logger.debug('[SettingsScreen] Image loaded successfully')}
+                />
+              ) : (
+                <View style={[styles.vendorLogoInline, { backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' }]}>
+                  <Text style={{ color: 'rgba(255,255,255,0.3)', fontSize: 12 }}>No Logo</Text>
+                </View>
+              )}
+              <View style={{ flex: 1 }}>
+                <Text style={styles.detailTitleLarge}>{userName}</Text>
+                <Text style={styles.detailEmail}>{userEmail}</Text>
+              </View>
+            </View>
           </View>
-          <Text style={styles.detailName} accessibilityRole="header">{userName}</Text>
-          <Text style={styles.detailEmail}>{userEmail}</Text>
         </View>
 
         {/* Cards */}
@@ -200,7 +214,7 @@ function AccountDetail({ user, headerOpacity }: { user: any; headerOpacity: Anim
   )
 }
 
-function DeveloperToolsDetail({ headerOpacity }: { headerOpacity: Animated.Value }) {
+function DeveloperToolsDetail({ headerOpacity, vendorLogo }: { headerOpacity: Animated.Value; vendorLogo?: string | null }) {
   const [isRunning, setIsRunning] = useState(false)
 
   const handleQuickTest = () => {
@@ -269,9 +283,25 @@ function DeveloperToolsDetail({ headerOpacity }: { headerOpacity: Animated.Value
         }}
         scrollEventThrottle={16}
       >
-        {/* Large Title - INSIDE ScrollView */}
+        {/* Title Section with Vendor Logo */}
         <View style={styles.cardWrapper}>
-          <Text style={styles.detailTitle} accessibilityRole="header">Developer Tools</Text>
+          <View style={styles.titleSectionContainer}>
+            <View style={styles.titleWithLogo}>
+              {vendorLogo ? (
+                <Image
+                  source={{ uri: vendorLogo }}
+                  style={styles.vendorLogoInline}
+                  resizeMode="contain"
+                        fadeDuration={0}
+                />
+              ) : (
+                <View style={[styles.vendorLogoInline, { backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' }]}>
+                  <Text style={{ color: 'rgba(255,255,255,0.3)', fontSize: 12 }}>No Logo</Text>
+                </View>
+              )}
+              <Text style={styles.detailTitleLarge}>Developer Tools</Text>
+            </View>
+          </View>
         </View>
         <LiquidGlassContainerView spacing={12} style={styles.cardWrapper}>
           <LiquidGlassView
@@ -675,7 +705,7 @@ function LocationConfigurationDetail({
                         <View style={{
                           paddingVertical: spacing.sm,
                           paddingHorizontal: spacing.sm,
-                          backgroundColor: colors.glass.subtle,
+                          backgroundColor: colors.glass.thin,
                           borderRadius: radius.md,
                           marginBottom: spacing.md,
                           borderLeftWidth: 3,
@@ -710,7 +740,7 @@ function LocationConfigurationDetail({
                           style={[
                             styles.userActionButton,
                             {
-                              backgroundColor: isTesting ? colors.glass.subtle : '#60A5FA20',
+                              backgroundColor: isTesting ? colors.glass.thin : '#60A5FA20',
                               borderWidth: 1,
                               borderColor: isTesting ? colors.border.subtle : '#60A5FA40',
                             }
@@ -824,6 +854,7 @@ function LocationsDetail({
   setAsDefault,
   toggleProcessorStatus,
   reloadProcessors,
+  vendorLogo,
 }: {
   userLocations: UserLocationAccess[]
   headerOpacity: Animated.Value
@@ -837,6 +868,7 @@ function LocationsDetail({
   setAsDefault: any
   toggleProcessorStatus: any
   reloadProcessors: () => void
+  vendorLogo?: string | null
 }) {
   const [selectedLocation, setSelectedLocation] = useState<UserLocationAccess | null>(null)
 
@@ -925,9 +957,25 @@ function LocationsDetail({
         }}
         scrollEventThrottle={16}
       >
-        {/* Large Title - INSIDE ScrollView */}
+        {/* Title Section with Vendor Logo */}
         <View style={styles.cardWrapper}>
-          <Text style={styles.detailTitle} accessibilityRole="header">Locations & Access</Text>
+          <View style={styles.titleSectionContainer}>
+            <View style={styles.titleWithLogo}>
+              {vendorLogo ? (
+                <Image
+                  source={{ uri: vendorLogo }}
+                  style={styles.vendorLogoInline}
+                  resizeMode="contain"
+                        fadeDuration={0}
+                />
+              ) : (
+                <View style={[styles.vendorLogoInline, { backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' }]}>
+                  <Text style={{ color: 'rgba(255,255,255,0.3)', fontSize: 12 }}>No Logo</Text>
+                </View>
+              )}
+              <Text style={styles.detailTitleLarge}>Locations & Access</Text>
+            </View>
+          </View>
         </View>
         {userLocations.map((userLocation) => {
           const locationAddress = formatAddress(userLocation.location)
@@ -1011,6 +1059,7 @@ function UserManagementDetail({
   onToggleStatus,
   onReload,
   locations,
+  vendorLogo,
 }: {
   users: UserWithLocations[]
   isLoading: boolean
@@ -1023,6 +1072,7 @@ function UserManagementDetail({
   onToggleStatus: any
   onReload: () => void
   locations: UserLocationAccess[]
+  vendorLogo?: string | null
 }) {
   const [showAddModal, setShowAddModal] = useState(false)
   const [editingUser, setEditingUser] = useState<UserWithLocations | null>(null)
@@ -1234,18 +1284,36 @@ function UserManagementDetail({
         }}
         scrollEventThrottle={16}
       >
-        {/* Large Title */}
-        <View style={[styles.cardWrapper, styles.titleRow]}>
-          <Text style={styles.detailTitle}>Team</Text>
-          <Pressable
-            onPress={handleAddUser}
-            style={styles.addButton}
-            accessible={true}
-            accessibilityRole="button"
-            accessibilityLabel="Add new team member"
-          >
-            <Text style={styles.addButtonText}>Add User</Text>
-          </Pressable>
+        {/* Title Section with Vendor Logo */}
+        <View style={styles.cardWrapper}>
+          <View style={styles.titleSectionContainer}>
+            <View style={styles.titleWithLogo}>
+              {vendorLogo ? (
+                <Image
+                  source={{ uri: vendorLogo }}
+                  style={styles.vendorLogoInline}
+                  resizeMode="contain"
+                        fadeDuration={0}
+                />
+              ) : (
+                <View style={[styles.vendorLogoInline, { backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' }]}>
+                  <Text style={{ color: 'rgba(255,255,255,0.3)', fontSize: 12 }}>No Logo</Text>
+                </View>
+              )}
+              <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                <Text style={styles.detailTitleLarge}>Team</Text>
+                <Pressable
+                  onPress={handleAddUser}
+                  style={styles.addButton}
+                  accessible={true}
+                  accessibilityRole="button"
+                  accessibilityLabel="Add new team member"
+                >
+                  <Text style={styles.addButtonText}>Add User</Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
         </View>
 
         {/* User Cards */}
@@ -1395,6 +1463,7 @@ function SupplierManagementDetail({
   onDeleteSupplier,
   onToggleStatus,
   onReload,
+  vendorLogo,
 }: {
   suppliers: Supplier[]
   isLoading: boolean
@@ -1404,6 +1473,7 @@ function SupplierManagementDetail({
   onDeleteSupplier: any
   onToggleStatus: any
   onReload: () => void
+  vendorLogo?: string | null
 }) {
   const [showAddModal, setShowAddModal] = useState(false)
   const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null)
@@ -1569,17 +1639,36 @@ function SupplierManagementDetail({
         }}
         scrollEventThrottle={16}
       >
-        <View style={[styles.cardWrapper, styles.titleRow]}>
-          <Text style={styles.detailTitle}>Suppliers</Text>
-          <Pressable
-            onPress={handleAddSupplier}
-            style={styles.addButton}
-            accessible={true}
-            accessibilityRole="button"
-            accessibilityLabel="Add new supplier"
-          >
-            <Text style={styles.addButtonText}>Add Supplier</Text>
-          </Pressable>
+        {/* Title Section with Vendor Logo */}
+        <View style={styles.cardWrapper}>
+          <View style={styles.titleSectionContainer}>
+            <View style={styles.titleWithLogo}>
+              {vendorLogo ? (
+                <Image
+                  source={{ uri: vendorLogo }}
+                  style={styles.vendorLogoInline}
+                  resizeMode="contain"
+                        fadeDuration={0}
+                />
+              ) : (
+                <View style={[styles.vendorLogoInline, { backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' }]}>
+                  <Text style={{ color: 'rgba(255,255,255,0.3)', fontSize: 12 }}>No Logo</Text>
+                </View>
+              )}
+              <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                <Text style={styles.detailTitleLarge}>Suppliers</Text>
+                <Pressable
+                  onPress={handleAddSupplier}
+                  style={styles.addButton}
+                  accessible={true}
+                  accessibilityRole="button"
+                  accessibilityLabel="Add new supplier"
+                >
+                  <Text style={styles.addButtonText}>Add Supplier</Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
         </View>
 
         {/* Active Suppliers */}
@@ -1715,6 +1804,7 @@ function LoyaltyManagementDetail({
   onCreateProgram,
   onUpdateProgram,
   onToggleStatus,
+  vendorLogo,
 }: {
   program: LoyaltyProgram | null
   isLoading: boolean
@@ -1722,6 +1812,7 @@ function LoyaltyManagementDetail({
   onCreateProgram: any
   onUpdateProgram: any
   onToggleStatus: any
+  vendorLogo?: string | null
 }) {
   const [isEditing, setIsEditing] = useState(false)
   const [formData, setFormData] = useState({
@@ -1827,8 +1918,25 @@ function LoyaltyManagementDetail({
           scrollIndicatorInsets={{ right: 2, top: 100, bottom: layout.dockHeight }}
           contentContainerStyle={{ paddingTop: 100, paddingBottom: layout.dockHeight, paddingRight: layout.containerMargin }}
         >
+          {/* Title Section with Vendor Logo */}
           <View style={styles.cardWrapper}>
-            <Text style={styles.detailTitle}>Loyalty & Rewards</Text>
+            <View style={styles.titleSectionContainer}>
+              <View style={styles.titleWithLogo}>
+                {vendorLogo ? (
+                  <Image
+                    source={{ uri: vendorLogo }}
+                    style={styles.vendorLogoInline}
+                    resizeMode="contain"
+                        fadeDuration={0}
+                  />
+                ) : (
+                  <View style={[styles.vendorLogoInline, { backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' }]}>
+                    <Text style={{ color: 'rgba(255,255,255,0.3)', fontSize: 12 }}>No Logo</Text>
+                  </View>
+                )}
+                <Text style={styles.detailTitleLarge}>Loyalty & Rewards</Text>
+              </View>
+            </View>
           </View>
 
           <View style={[styles.emptyState, { paddingTop: spacing.xxxl }]}>
@@ -1879,23 +1987,39 @@ function LoyaltyManagementDetail({
           }}
           scrollEventThrottle={16}
         >
-          <View style={[styles.cardWrapper, styles.titleRow]}>
-            <Text style={styles.detailTitle}>Configure Loyalty Program</Text>
-            <View style={{ flexDirection: 'row', gap: spacing.sm }}>
-              <Pressable
-                onPress={() => {
-                  // Reset form data to program values when canceling
-                  if (program) {
-                    setFormData({
-                      name: program.name || 'Loyalty Rewards',
-                      points_per_dollar: program.points_per_dollar.toString(),
-                      point_value: program.point_value.toString(),
-                      min_redemption_points: program.min_redemption_points.toString(),
-                      points_expiry_days: program.points_expiry_days?.toString() || '',
-                    })
-                  }
-                  setIsEditing(false)
-                }}
+          {/* Title Section with Vendor Logo */}
+          <View style={styles.cardWrapper}>
+            <View style={styles.titleSectionContainer}>
+              <View style={styles.titleWithLogo}>
+                {vendorLogo ? (
+                  <Image
+                    source={{ uri: vendorLogo }}
+                    style={styles.vendorLogoInline}
+                    resizeMode="contain"
+                        fadeDuration={0}
+                  />
+                ) : (
+                  <View style={[styles.vendorLogoInline, { backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' }]}>
+                    <Text style={{ color: 'rgba(255,255,255,0.3)', fontSize: 12 }}>No Logo</Text>
+                  </View>
+                )}
+                <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <Text style={styles.detailTitleLarge}>Configure Loyalty Program</Text>
+                  <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+                    <Pressable
+                      onPress={() => {
+                        // Reset form data to program values when canceling
+                        if (program) {
+                          setFormData({
+                            name: program.name || 'Loyalty Rewards',
+                            points_per_dollar: program.points_per_dollar.toString(),
+                            point_value: program.point_value.toString(),
+                            min_redemption_points: program.min_redemption_points.toString(),
+                            points_expiry_days: program.points_expiry_days?.toString() || '',
+                          })
+                        }
+                        setIsEditing(false)
+                      }}
                 style={[styles.addButton, { backgroundColor: colors.glass.regular }]}
                 accessible={true}
                 accessibilityRole="button"
@@ -1912,6 +2036,9 @@ function LoyaltyManagementDetail({
               >
                 <Text style={styles.addButtonText}>Save</Text>
               </Pressable>
+            </View>
+                </View>
+              </View>
             </View>
           </View>
 
@@ -2028,29 +2155,48 @@ function LoyaltyManagementDetail({
         }}
         scrollEventThrottle={16}
       >
-        <View style={[styles.cardWrapper, styles.titleRow]}>
-          <Text style={styles.detailTitle}>Loyalty & Rewards</Text>
-          <View style={{ flexDirection: 'row', gap: spacing.sm }}>
-            <Pressable
-              onPress={handleToggleStatus}
-              style={[styles.addButton, !program.is_active && { backgroundColor: colors.glass.regular }]}
-              accessible={true}
-              accessibilityRole="button"
-              accessibilityLabel={program.is_active ? 'Deactivate program' : 'Activate program'}
-            >
-              <Text style={[styles.addButtonText, !program.is_active && { color: colors.text.secondary }]}>
-                {program.is_active ? 'Deactivate' : 'Activate'}
-              </Text>
-            </Pressable>
-            <Pressable
-              onPress={() => setIsEditing(true)}
-              style={styles.addButton}
-              accessible={true}
-              accessibilityRole="button"
-              accessibilityLabel="Edit program"
-            >
-              <Text style={styles.addButtonText}>Edit</Text>
-            </Pressable>
+        {/* Title Section with Vendor Logo */}
+        <View style={styles.cardWrapper}>
+          <View style={styles.titleSectionContainer}>
+            <View style={styles.titleWithLogo}>
+              {vendorLogo ? (
+                <Image
+                  source={{ uri: vendorLogo }}
+                  style={styles.vendorLogoInline}
+                  resizeMode="contain"
+                        fadeDuration={0}
+                />
+              ) : (
+                <View style={[styles.vendorLogoInline, { backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' }]}>
+                  <Text style={{ color: 'rgba(255,255,255,0.3)', fontSize: 12 }}>No Logo</Text>
+                </View>
+              )}
+              <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                <Text style={styles.detailTitleLarge}>Loyalty & Rewards</Text>
+                <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+                  <Pressable
+                    onPress={handleToggleStatus}
+                    style={[styles.addButton, !program.is_active && { backgroundColor: colors.glass.regular }]}
+                    accessible={true}
+                    accessibilityRole="button"
+                    accessibilityLabel={program.is_active ? 'Deactivate program' : 'Activate program'}
+                  >
+                    <Text style={[styles.addButtonText, !program.is_active && { color: colors.text.secondary }]}>
+                      {program.is_active ? 'Deactivate' : 'Activate'}
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => setIsEditing(true)}
+                    style={styles.addButton}
+                    accessible={true}
+                    accessibilityRole="button"
+                    accessibilityLabel="Edit program"
+                  >
+                    <Text style={styles.addButtonText}>Edit</Text>
+                  </Pressable>
+                </View>
+              </View>
+            </View>
           </View>
         </View>
 
@@ -2127,6 +2273,7 @@ function PaymentProcessorsManagementDetail({
   onSetAsDefault,
   onToggleStatus,
   onReload,
+  vendorLogo,
 }: {
   processors: PaymentProcessor[]
   isLoading: boolean
@@ -2138,6 +2285,7 @@ function PaymentProcessorsManagementDetail({
   onSetAsDefault: any
   onToggleStatus: any
   onReload: () => void
+  vendorLogo?: string | null
 }) {
   const [showAddModal, setShowAddModal] = useState(false)
   const [editingProcessor, setEditingProcessor] = useState<PaymentProcessor | null>(null)
@@ -2336,17 +2484,36 @@ function PaymentProcessorsManagementDetail({
         }}
         scrollEventThrottle={16}
       >
-        <View style={[styles.cardWrapper, styles.titleRow]}>
-          <Text style={styles.detailTitle}>Payment Processors</Text>
-          <Pressable
-            onPress={handleAddProcessor}
-            style={styles.addButton}
-            accessible={true}
-            accessibilityRole="button"
-            accessibilityLabel="Add new processor"
-          >
-            <Text style={styles.addButtonText}>Add Processor</Text>
-          </Pressable>
+        {/* Title Section with Vendor Logo */}
+        <View style={styles.cardWrapper}>
+          <View style={styles.titleSectionContainer}>
+            <View style={styles.titleWithLogo}>
+              {vendorLogo ? (
+                <Image
+                  source={{ uri: vendorLogo }}
+                  style={styles.vendorLogoInline}
+                  resizeMode="contain"
+                        fadeDuration={0}
+                />
+              ) : (
+                <View style={[styles.vendorLogoInline, { backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'space-between' }]}>
+                  <Text style={{ color: 'rgba(255,255,255,0.3)', fontSize: 12 }}>No Logo</Text>
+                </View>
+              )}
+              <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                <Text style={styles.detailTitleLarge}>Payment Processors</Text>
+                <Pressable
+                  onPress={handleAddProcessor}
+                  style={styles.addButton}
+                  accessible={true}
+                  accessibilityRole="button"
+                  accessibilityLabel="Add new processor"
+                >
+                  <Text style={styles.addButtonText}>Add Processor</Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
         </View>
 
         {/* Active Processors */}
@@ -2506,6 +2673,8 @@ function SettingsScreen() {
   const { program: loyaltyProgram, isLoading: loyaltyLoading, createProgram: createLoyaltyProgram, updateProgram: updateLoyaltyProgram, toggleProgramStatus: toggleLoyaltyStatus } = useLoyalty()
   const { processors: paymentProcessors, isLoading: processorsLoading, error: processorsError, createProcessor, updateProcessor, deleteProcessor, testConnection, setAsDefault, toggleStatus: toggleProcessorStatus, reload: reloadProcessors } = usePaymentProcessors()
 
+  const [vendorLogo, setVendorLogo] = useState<string | null>(null)
+
   // iOS-style collapsing headers - instant transitions
   const accountHeaderOpacity = useRef(new Animated.Value(0)).current
   const locationsHeaderOpacity = useRef(new Animated.Value(0)).current
@@ -2515,6 +2684,40 @@ function SettingsScreen() {
   const processorsHeaderOpacity = useRef(new Animated.Value(0)).current
   const devToolsHeaderOpacity = useRef(new Animated.Value(0)).current
 
+  // Load vendor info
+  useEffect(() => {
+    async function loadVendorInfo() {
+      if (!user?.email) return
+      try {
+        const { data: userData, error: userError } = await supabase
+          .from('users')
+          .select('vendor_id, vendors(id, store_name, logo_url)')
+          .eq('email', user.email)
+          .single()
+
+        if (userError) {
+          logger.error('User query error', { error: userError })
+          return
+        }
+
+        logger.debug('[SettingsScreen] Vendor data loaded:', {
+          hasVendor: !!userData?.vendors,
+          vendorData: userData?.vendors,
+          logoUrl: (userData?.vendors as any)?.logo_url
+        })
+
+        if (userData?.vendors) {
+          const vendor = userData.vendors as any
+          setVendorLogo(vendor.logo_url || null)
+          logger.debug('[SettingsScreen] Set vendor logo to:', vendor.logo_url)
+        }
+      } catch (error) {
+        logger.error('Failed to load vendor info', { error })
+      }
+    }
+    loadVendorInfo()
+  }, [user])
+
   // Get user name for account category
   const userName = useMemo(() => {
     if (!user) return 'Account'
@@ -2523,39 +2726,39 @@ function SettingsScreen() {
 
   // Categories configuration - only show what we have real data for
   const categories: SettingsCategory[] = useMemo(() => [
-    { id: 'account', title: userName, icon: UserIcon, renderDetail: () => <AccountDetail user={user} headerOpacity={accountHeaderOpacity} /> },
+    { id: 'account', title: userName, icon: UserIcon, renderDetail: () => <AccountDetail user={user} headerOpacity={accountHeaderOpacity} vendorLogo={vendorLogo} /> },
     {
       id: 'locations',
       title: 'Locations & Access',
       icon: LocationIcon,
       badge: userLocations.length > 0 ? userLocations.length : undefined,
-      renderDetail: () => <LocationsDetail userLocations={userLocations} headerOpacity={locationsHeaderOpacity} paymentProcessors={paymentProcessors} processorsLoading={processorsLoading} processorsError={processorsError} createProcessor={createProcessor} updateProcessor={updateProcessor} deleteProcessor={deleteProcessor} testConnection={testConnection} setAsDefault={setAsDefault} toggleProcessorStatus={toggleProcessorStatus} reloadProcessors={reloadProcessors} />
+      renderDetail: () => <LocationsDetail userLocations={userLocations} headerOpacity={locationsHeaderOpacity} paymentProcessors={paymentProcessors} processorsLoading={processorsLoading} processorsError={processorsError} createProcessor={createProcessor} updateProcessor={updateProcessor} deleteProcessor={deleteProcessor} testConnection={testConnection} setAsDefault={setAsDefault} toggleProcessorStatus={toggleProcessorStatus} reloadProcessors={reloadProcessors} vendorLogo={vendorLogo} />
     },
     {
       id: 'team',
       title: 'Team',
       icon: TeamIcon,
       badge: users.length > 0 ? users.length : undefined,
-      renderDetail: () => <UserManagementDetail users={users} isLoading={usersLoading} headerOpacity={teamHeaderOpacity} onCreateUser={createUser} onUpdateUser={updateUser} onDeleteUser={deleteUser} onSetPassword={setUserPassword} onAssignLocations={assignLocations} onToggleStatus={toggleUserStatus} onReload={reloadUsers} locations={userLocations} />
+      renderDetail: () => <UserManagementDetail users={users} isLoading={usersLoading} headerOpacity={teamHeaderOpacity} onCreateUser={createUser} onUpdateUser={updateUser} onDeleteUser={deleteUser} onSetPassword={setUserPassword} onAssignLocations={assignLocations} onToggleStatus={toggleUserStatus} onReload={reloadUsers} locations={userLocations} vendorLogo={vendorLogo} />
     },
     {
       id: 'suppliers',
       title: 'Suppliers',
       icon: SuppliersIcon,
       badge: suppliers.length > 0 ? suppliers.length : undefined,
-      renderDetail: () => <SupplierManagementDetail suppliers={suppliers} isLoading={suppliersLoading} headerOpacity={suppliersHeaderOpacity} onCreateSupplier={createSupplier} onUpdateSupplier={updateSupplier} onDeleteSupplier={deleteSupplier} onToggleStatus={toggleSupplierStatus} onReload={reloadSuppliers} />
+      renderDetail: () => <SupplierManagementDetail suppliers={suppliers} isLoading={suppliersLoading} headerOpacity={suppliersHeaderOpacity} onCreateSupplier={createSupplier} onUpdateSupplier={updateSupplier} onDeleteSupplier={deleteSupplier} onToggleStatus={toggleSupplierStatus} onReload={reloadSuppliers} vendorLogo={vendorLogo} />
     },
     {
       id: 'loyalty',
       title: 'Loyalty & Rewards',
       icon: LoyaltyIcon,
-      renderDetail: () => <LoyaltyManagementDetail program={loyaltyProgram} isLoading={loyaltyLoading} headerOpacity={loyaltyHeaderOpacity} onCreateProgram={createLoyaltyProgram} onUpdateProgram={updateLoyaltyProgram} onToggleStatus={toggleLoyaltyStatus} />
+      renderDetail: () => <LoyaltyManagementDetail program={loyaltyProgram} isLoading={loyaltyLoading} headerOpacity={loyaltyHeaderOpacity} onCreateProgram={createLoyaltyProgram} onUpdateProgram={updateLoyaltyProgram} onToggleStatus={toggleLoyaltyStatus} vendorLogo={vendorLogo} />
     },
     {
       id: 'devtools',
       title: 'Developer Tools',
       icon: DevToolsIcon,
-      renderDetail: () => <DeveloperToolsDetail headerOpacity={devToolsHeaderOpacity} />
+      renderDetail: () => <DeveloperToolsDetail headerOpacity={devToolsHeaderOpacity} vendorLogo={vendorLogo} />
     },
   ], [user, userName, userLocations, users, usersLoading, suppliers, suppliersLoading, loyaltyProgram, loyaltyLoading, paymentProcessors, processorsLoading, accountHeaderOpacity, locationsHeaderOpacity, teamHeaderOpacity, suppliersHeaderOpacity, loyaltyHeaderOpacity, devToolsHeaderOpacity, createUser, updateUser, deleteUser, setUserPassword, assignLocations, toggleUserStatus, reloadUsers, createSupplier, updateSupplier, deleteSupplier, toggleSupplierStatus, reloadSuppliers, createLoyaltyProgram, updateLoyaltyProgram, toggleLoyaltyStatus, createProcessor, updateProcessor, deleteProcessor, testConnection, setAsDefault, toggleProcessorStatus, reloadProcessors])
 
@@ -2791,6 +2994,36 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: colors.text.primary,
     letterSpacing: 1,
+  },
+  titleSectionContainer: {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: radius.xxl,
+    borderCurve: 'continuous',
+    padding: spacing.lg,
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  titleWithLogo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.lg,
+  },
+  vendorLogoInline: {
+    width: 80,
+    height: 80,
+    borderRadius: radius.xxl,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.25)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+  },
+  detailTitleLarge: {
+    fontSize: 34,
+    fontWeight: '700',
+    color: colors.text.primary,
+    letterSpacing: -0.5,
   },
   detailName: {
     fontSize: 28,

@@ -196,6 +196,7 @@ const POSProductCard = forwardRef<any, POSProductCardProps>(({ product, onAddToC
                   source={{ uri: product.vendor_logo_url }}
                   style={styles.vendorLogo}
                   resizeMode="contain"
+                        fadeDuration={0}
                   accessible={true}
                   accessibilityLabel="Vendor logo"
                   accessibilityRole="image"

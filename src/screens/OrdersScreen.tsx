@@ -6,7 +6,7 @@
  * Client-side location filtering for staff users
  */
 
-import { View, Text, StyleSheet, Pressable, ActivityIndicator, Animated, useWindowDimensions, FlatList, RefreshControl } from 'react-native'
+import { View, Text, StyleSheet, Pressable, ActivityIndicator, Animated, useWindowDimensions, FlatList, RefreshControl, Image } from 'react-native'
 import React, { useState, useRef, useEffect, useMemo, useCallback, memo } from 'react'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { LinearGradient } from 'expo-linear-gradient'
@@ -360,10 +360,17 @@ function OrdersScreenComponent() {
           return
         }
 
+        logger.debug('[OrdersScreen] Vendor data loaded:', {
+          hasVendor: !!userData?.vendors,
+          vendorData: userData?.vendors,
+          logoUrl: (userData?.vendors as any)?.logo_url
+        })
+
         if (userData?.vendors) {
           const vendor = userData.vendors as any
           setVendorName(vendor.store_name || '')
           setVendorLogo(vendor.logo_url || null)
+          logger.debug('[OrdersScreen] Set vendor logo to:', vendor.logo_url)
         }
       } catch (error) {
         logger.error('Failed to load vendor info', { error })
@@ -706,14 +713,32 @@ function OrdersScreenComponent() {
                 keyExtractor={keyExtractor}
                 ListHeaderComponent={() => (
                   <View style={styles.cardWrapper}>
-                    <Text style={styles.largeTitleHeader}>
-                      {activeNav === 'all' ? 'All Orders' :
-                       activeNav === 'needs_action' ? 'Needs Action' :
-                       activeNav === 'in_progress' ? 'In Progress' :
-                       activeNav === 'completed' ? 'Completed' :
-                       activeNav === 'cancelled' ? 'Cancelled' :
-                       'Orders'}
-                    </Text>
+                    <View style={styles.titleSectionContainer}>
+                      <View style={styles.titleWithLogo}>
+                        {vendorLogo ? (
+                          <Image
+                            source={{ uri: vendorLogo }}
+                            style={styles.vendorLogoInline}
+                            resizeMode="contain"
+                        fadeDuration={0}
+                            onError={(e) => logger.debug('[OrdersScreen] Image load error:', e.nativeEvent.error)}
+                            onLoad={() => logger.debug('[OrdersScreen] Image loaded successfully')}
+                          />
+                        ) : (
+                          <View style={[styles.vendorLogoInline, { backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' }]}>
+                            <Text style={{ color: 'rgba(255,255,255,0.3)', fontSize: 12 }}>No Logo</Text>
+                          </View>
+                        )}
+                        <Text style={styles.largeTitleHeader}>
+                          {activeNav === 'all' ? 'All Orders' :
+                           activeNav === 'needs_action' ? 'Needs Action' :
+                           activeNav === 'in_progress' ? 'In Progress' :
+                           activeNav === 'completed' ? 'Completed' :
+                           activeNav === 'cancelled' ? 'Cancelled' :
+                           'Orders'}
+                        </Text>
+                      </View>
+                    </View>
                   </View>
                 )}
                 contentContainerStyle={styles.flatListContent}
@@ -903,13 +928,35 @@ const styles = StyleSheet.create({
     height: 80,
     zIndex: 10,
   },
+  titleSectionContainer: {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: radius.xxl,
+    borderCurve: 'continuous',
+    padding: spacing.lg,
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  titleWithLogo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.lg,
+  },
+  vendorLogoInline: {
+    width: 80,
+    height: 80,
+    borderRadius: radius.xxl,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.25)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+  },
   largeTitleHeader: {
     fontSize: 34,
     fontWeight: '700',
     color: '#fff',
     letterSpacing: -0.5,
-    paddingTop: 100,
-    paddingBottom: 8,
   },
 
   // Date Range Selector
@@ -937,7 +984,9 @@ const styles = StyleSheet.create({
 
   // FlatList
   flatListContent: {
+    paddingTop: 100,
     paddingBottom: layout.dockHeight,
+    paddingRight: layout.containerMargin,
   },
 
   // Card Wrapper - iOS-style spacing

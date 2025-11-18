@@ -50,26 +50,35 @@ function POSSessionSetup({ user, onSessionReady }: POSSessionSetupProps) {
   }, [])
 
   const loadVendorAndLocations = async () => {
+    const startTime = Date.now()
+    logger.debug('[POSSessionSetup] 🕐 Starting load...')
+
     try {
       setLoading(true)
 
+      // User query
+      const userStart = Date.now()
       const { data: userData, error: userError } = await supabase
         .from('users')
-        .select('id, role, vendor_id, vendors(id, store_name, logo_url)')
+        .select('id, role, vendor_id, vendors(id, store_name)')
         .eq('email', user?.email)
         .single()
+      logger.debug(`[POSSessionSetup] ✅ User query took ${Date.now() - userStart}ms`)
 
       if (userError) throw userError
 
       const vendorData = userData.vendors as any
-      setVendor(vendorData)
+      // Set vendor without logo first for faster initial render
+      setVendor({ ...vendorData, logo_url: null })
       setCustomUserId(userData.id)
 
       const isAdmin = ['vendor_owner', 'vendor_admin'].includes(userData.role)
 
+      // Load locations immediately
       let locs: Location[] = []
 
       if (isAdmin) {
+        const locStart = Date.now()
         const { data: allLocations, error: allLocationsError } = await supabase
           .from('locations')
           .select('id, name, address_line1, city, state, is_primary')
@@ -78,10 +87,12 @@ function POSSessionSetup({ user, onSessionReady }: POSSessionSetupProps) {
           .eq('pos_enabled', true)
           .order('is_primary', { ascending: false })
           .order('name')
+        logger.debug(`[POSSessionSetup] ✅ Locations query took ${Date.now() - locStart}ms`)
 
         if (allLocationsError) throw allLocationsError
         locs = allLocations || []
       } else {
+        const locStart = Date.now()
         const { data: locationsData, error: locationsError } = await supabase
           .from('user_locations')
           .select(`
@@ -96,6 +107,7 @@ function POSSessionSetup({ user, onSessionReady }: POSSessionSetupProps) {
             )
           `)
           .eq('user_id', userData.id)
+        logger.debug(`[POSSessionSetup] ✅ User locations query took ${Date.now() - locStart}ms`)
 
         if (locationsError) throw locationsError
 
@@ -103,10 +115,26 @@ function POSSessionSetup({ user, onSessionReady }: POSSessionSetupProps) {
       }
 
       setLocations(locs)
+      setLoading(false)
+      logger.debug(`[POSSessionSetup] 🎉 SCREEN READY - Total time: ${Date.now() - startTime}ms`)
+
+      // Load logo asynchronously after locations are displayed
+      const logoStart = Date.now()
+      const { data: logoData } = await supabase
+        .from('vendors')
+        .select('logo_url')
+        .eq('id', vendorData.id)
+        .single()
+      logger.debug(`[POSSessionSetup] 🖼️ Logo query took ${Date.now() - logoStart}ms`)
+
+      if (logoData?.logo_url) {
+        setVendor({ ...vendorData, logo_url: logoData.logo_url })
+        logger.debug(`[POSSessionSetup] ✅ Logo loaded - Grand total: ${Date.now() - startTime}ms`)
+      }
     } catch (error) {
       logger.error('Error loading vendor/locations:', error)
-    } finally {
       setLoading(false)
+      logger.debug(`[POSSessionSetup] ❌ Error after ${Date.now() - startTime}ms`)
     }
   }
 

@@ -86,7 +86,7 @@ export async function fetchSalesHistory(
     }
 
     // Transform the data into SalesRecord format
-    let salesRecords: SalesRecord[] = (data || [])
+    const mappedRecords = (data || [])
       .map((item: any) => {
         const order = orderMap.get(item.order_id);
         if (!order) return null;
@@ -110,9 +110,11 @@ export async function fetchSalesHistory(
           location_id: order.pickup_location_id,
           location_name: undefined,
           created_at: order.created_at,
-        };
+        } as SalesRecord;
       })
-      .filter((record): record is SalesRecord => record !== null);
+      .filter((record) => record !== null) as SalesRecord[];
+
+    let salesRecords = mappedRecords;
 
     // Apply location filter in memory
     if (filters.location_id) {

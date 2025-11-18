@@ -769,26 +769,23 @@ function ProductsScreenComponent() {
           {activeNav === 'audits' ? (
             // AUDITS VIEW
             <View style={styles.productsListContent}>
-              {/* Fixed Header with Create Button */}
-              <View style={styles.auditsHeader}>
-                <View style={styles.largeTitleContainer}>
-                  <Text style={styles.largeTitleHeader}>Audits</Text>
-                  <Pressable
-                    style={styles.addButton}
-                    onPress={() => {
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                      setShowCreateAuditModal(true)
-                    }}
-                    accessible={true}
-                    accessibilityRole="button"
-                    accessibilityLabel="Create new audit"
-                  >
-                    <Text style={styles.addButtonText}>+</Text>
-                  </Pressable>
-                </View>
-              </View>
+              {/* Fixed Header - appears on scroll */}
+              <Animated.View style={[styles.fixedHeader, { opacity: productsHeaderOpacity }]}>
+                <Text style={styles.fixedHeaderTitle}>Audits</Text>
+              </Animated.View>
 
-              <AuditsView />
+              {/* Fade Gradient */}
+              <LinearGradient
+                colors={['rgba(0,0,0,0.95)', 'rgba(0,0,0,0.8)', 'rgba(0,0,0,0)']}
+                style={styles.fadeGradient}
+                pointerEvents="none"
+              />
+
+              <AuditsView
+                onCreatePress={() => setShowCreateAuditModal(true)}
+                headerOpacity={productsHeaderOpacity}
+                vendorLogo={vendorLogo}
+              />
             </View>
           ) : activeNav === 'purchase-orders' ? (
             // PURCHASE ORDERS VIEW
@@ -799,6 +796,7 @@ function ProductsScreenComponent() {
               isLoading={purchaseOrdersLoading}
               headerOpacity={purchaseOrdersHeaderOpacity}
               onAddPress={() => setShowCreatePOModal(true)}
+              vendorLogo={vendorLogo}
             />
           ) : activeNav === 'categories' ? (
             // CATEGORIES VIEW
@@ -852,18 +850,32 @@ function ProductsScreenComponent() {
                   }}
                   scrollEventThrottle={16}
                 >
-                  {/* Large Title - scrolls with content */}
-                  <View style={[styles.largeTitleContainer, styles.cardWrapper]}>
-                    <Text style={styles.largeTitleHeader}>Categories</Text>
-                    <Pressable
-                      style={styles.addButton}
-                      onPress={() => {
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                        setShowCategoryModal(true)
-                      }}
-                    >
-                      <Text style={styles.addButtonText}>+</Text>
-                    </Pressable>
+                  {/* Large Title with Vendor Logo - scrolls with content */}
+                  <View style={styles.cardWrapper}>
+                    <View style={styles.titleSectionContainer}>
+                      <View style={styles.largeTitleContainer}>
+                        <View style={styles.titleWithLogo}>
+                          {vendorLogo && (
+                            <Image
+                              source={{ uri: vendorLogo }}
+                              style={styles.vendorLogoInline}
+                              resizeMode="contain"
+                        fadeDuration={0}
+                            />
+                          )}
+                          <Text style={styles.largeTitleHeader}>Categories</Text>
+                        </View>
+                        <Pressable
+                          style={styles.addButton}
+                          onPress={() => {
+                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                            setShowCategoryModal(true)
+                          }}
+                        >
+                          <Text style={styles.addButtonText}>+</Text>
+                        </Pressable>
+                      </View>
+                    </View>
                   </View>
 
                   <View style={styles.cardWrapper}>
@@ -953,25 +965,39 @@ function ProductsScreenComponent() {
                     }}
                     scrollEventThrottle={16}
                   >
-                    {/* Large Title - scrolls with content */}
-                    <View style={[styles.largeTitleContainer, styles.cardWrapper]}>
-                      <Text style={styles.largeTitleHeader}>
-                        {activeNav === 'all' ? 'All Products' : activeNav === 'low-stock' ? 'Low Stock' : 'Out of Stock'}
-                      </Text>
-                      {activeNav === 'all' && (
-                        <Pressable
-                          style={styles.addProductButton}
-                          onPress={() => {
-                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                            setShowCreateProductModal(true)
-                          }}
-                          accessible={true}
-                          accessibilityRole="button"
-                          accessibilityLabel="Add new product"
-                        >
-                          <Text style={styles.addProductButtonText}>Add Product</Text>
-                        </Pressable>
-                      )}
+                    {/* Large Title with Vendor Logo - scrolls with content */}
+                    <View style={styles.cardWrapper}>
+                      <View style={styles.titleSectionContainer}>
+                        <View style={styles.largeTitleContainer}>
+                          <View style={styles.titleWithLogo}>
+                            {vendorLogo && (
+                              <Image
+                                source={{ uri: vendorLogo }}
+                                style={styles.vendorLogoInline}
+                                resizeMode="contain"
+                        fadeDuration={0}
+                              />
+                            )}
+                            <Text style={styles.largeTitleHeader}>
+                              {activeNav === 'all' ? 'All Products' : activeNav === 'low-stock' ? 'Low Stock' : 'Out of Stock'}
+                            </Text>
+                          </View>
+                          {activeNav === 'all' && (
+                            <Pressable
+                              style={styles.addProductButton}
+                              onPress={() => {
+                                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                                setShowCreateProductModal(true)
+                              }}
+                              accessible={true}
+                              accessibilityRole="button"
+                              accessibilityLabel="Add new product"
+                            >
+                              <Text style={styles.addProductButtonText}>Add Product</Text>
+                            </Pressable>
+                          )}
+                        </View>
+                      </View>
                     </View>
 
                     {/* Empty State - when no products match */}
@@ -1714,6 +1740,30 @@ const styles = StyleSheet.create({
     height: 80,
     zIndex: 10,
   },
+  titleSectionContainer: {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: radius.xxl,
+    borderCurve: 'continuous',
+    padding: spacing.lg,
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  titleWithLogo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.lg,
+  },
+  vendorLogoInline: {
+    width: 80,
+    height: 80,
+    borderRadius: radius.xxl,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.25)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+  },
   largeTitleHeader: {
     fontSize: 34,
     fontWeight: '700',
@@ -1728,11 +1778,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingTop: 16,
     paddingBottom: 8,
-  },
-  auditsHeader: {
-    paddingHorizontal: layout.containerMargin,
-    paddingTop: spacing.xl,
-    paddingBottom: spacing.md,
   },
 
   // MIDDLE PRODUCTS LIST

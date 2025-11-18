@@ -7,7 +7,6 @@
 import { View, Text, StyleSheet, Modal, Pressable } from 'react-native'
 import { LiquidGlassView, isLiquidGlassSupported } from '@callstack/liquid-glass'
 import * as Haptics from 'expo-haptics'
-import { layout } from '@/theme/layout'
 import { spacing, radius } from '@/theme/tokens'
 
 export interface ErrorModalProps {

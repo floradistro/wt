@@ -45,8 +45,8 @@ function LocationCard({
   useEffect(() => {
     Animated.timing(fadeAnim, {
       toValue: 1,
-      duration: 400,
-      delay: index * 60,
+      duration: 200,
+      delay: Math.min(index * 20, 100), // Max 100ms delay, faster animation
       useNativeDriver: true,
     }).start()
   }, [])
@@ -109,6 +109,7 @@ function LocationCard({
                 source={{ uri: vendorLogo }}
                 style={styles.logo}
                 resizeMode="contain"
+                fadeDuration={0}
               />
             </View>
           ) : (
@@ -261,8 +262,8 @@ const styles = StyleSheet.create({
   },
   // Logo
   logoContainer: {
-    width: isTablet ? 72 : 64,
-    height: isTablet ? 72 : 64,
+    width: 80,
+    height: 80,
     borderRadius: isTablet ? 20 : 18,
     marginBottom: isTablet ? 16 : 14,
     overflow: 'hidden',
@@ -273,8 +274,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   logo: {
-    width: isTablet ? 48 : 42,
-    height: isTablet ? 48 : 42,
+    width: 80,
+    height: 80,
   },
   logoPlaceholder: {
     backgroundColor: 'transparent',

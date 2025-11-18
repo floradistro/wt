@@ -8,7 +8,7 @@ import { View, Text, StyleSheet, Modal, Pressable, ScrollView } from 'react-nati
 import { useState, useEffect } from 'react'
 import { LiquidGlassView, isLiquidGlassSupported } from '@callstack/liquid-glass'
 import * as Haptics from 'expo-haptics'
-import { colors, spacing, radius } from '@/theme/tokens'
+import { spacing, radius } from '@/theme/tokens'
 import { layout } from '@/theme/layout'
 import type { UserLocationAccess } from '@/hooks/useUserLocations'
 

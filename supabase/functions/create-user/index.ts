@@ -60,10 +60,10 @@ serve(async (req) => {
       throw new Error('Failed to get current user: ' + userError.message)
     }
 
-    // Check if current user has permission to create users (admin role)
-    if (currentUser.role !== 'admin' && currentUser.role !== 'owner') {
+    // Check if current user has permission to create users (vendor_owner or vendor_admin)
+    if (currentUser.role !== 'vendor_owner' && currentUser.role !== 'vendor_admin') {
       return new Response(
-        JSON.stringify({ error: 'Insufficient permissions' }),
+        JSON.stringify({ success: false, error: 'Insufficient permissions' }),
         { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }

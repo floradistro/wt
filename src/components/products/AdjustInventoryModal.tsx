@@ -720,7 +720,7 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   quickReasonTextSelected: {
-    color: colors.text.inverted,
+    color: colors.text.primary,
     fontWeight: '600',
   },
   customReasonButton: {

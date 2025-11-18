@@ -9,6 +9,9 @@ import { useState, useEffect, useCallback } from 'react'
 import { customersService, type Customer, type CustomerWithOrders } from '@/services'
 import { logger } from '@/utils/logger'
 
+// Re-export types for convenience
+export type { Customer, CustomerWithOrders }
+
 export interface UseCustomersOptions {
   limit?: number
   searchTerm?: string

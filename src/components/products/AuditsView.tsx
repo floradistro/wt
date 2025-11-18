@@ -4,40 +4,131 @@
  * Apple Engineering: Clean data presentation, powerful filtering
  */
 
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator, Pressable } from 'react-native'
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator, Pressable, Animated, Image } from 'react-native'
 import { useState, useMemo } from 'react'
 import * as Haptics from 'expo-haptics'
 import { colors, spacing, radius, typography } from '@/theme/tokens'
 import { layout } from '@/theme/layout'
 import { useInventoryAdjustments } from '@/hooks/useInventoryAdjustments'
-import type { AdjustmentType } from '@/services/inventory-adjustments.service'
+import type { AdjustmentType, InventoryAdjustment } from '@/services/inventory-adjustments.service'
 
-export function AuditsView() {
+type AuditBatch = {
+  id: string
+  type: 'batch'
+  reason: string
+  created_at: string
+  location_name: string | null
+  adjustments: InventoryAdjustment[]
+  total_quantity_change: number
+}
+
+type AdjustmentOrBatch = InventoryAdjustment | AuditBatch
+
+interface AuditsViewProps {
+  onCreatePress: () => void
+  headerOpacity: Animated.Value
+  vendorLogo?: string | null
+}
+
+export function AuditsView({ onCreatePress, headerOpacity, vendorLogo }: AuditsViewProps) {
   const { adjustments, loading } = useInventoryAdjustments()
   const [filterType, setFilterType] = useState<AdjustmentType | 'all'>('all')
+  const [expandedBatches, setExpandedBatches] = useState<Set<string>>(new Set())
 
-  // Filter adjustments
+  // Group audit batches - adjustments with same reason starting with "Audit:" created within 60 seconds
+  const groupedAdjustments = useMemo(() => {
+    const sorted = [...adjustments].sort((a, b) =>
+      new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    )
+
+    const processed = new Set<string>()
+    const result: AdjustmentOrBatch[] = []
+
+    sorted.forEach(adj => {
+      if (processed.has(adj.id)) return
+
+      // Check if this is part of an audit batch
+      if (adj.reason.startsWith('Audit:') && adj.adjustment_type === 'count_correction') {
+        const adjTime = new Date(adj.created_at).getTime()
+
+        // Find all related adjustments (same reason, within 60 seconds)
+        const batchAdjustments = sorted.filter(other => {
+          if (processed.has(other.id)) return false
+          if (other.reason !== adj.reason) return false
+          if (other.adjustment_type !== 'count_correction') return false
+
+          const otherTime = new Date(other.created_at).getTime()
+          return Math.abs(adjTime - otherTime) < 60000 // Within 60 seconds
+        })
+
+        if (batchAdjustments.length > 1) {
+          // Create batch
+          batchAdjustments.forEach(a => processed.add(a.id))
+
+          const batch: AuditBatch = {
+            id: `batch-${adj.id}`,
+            type: 'batch',
+            reason: adj.reason,
+            created_at: adj.created_at,
+            location_name: batchAdjustments.every(a => a.location?.name === batchAdjustments[0].location?.name)
+              ? batchAdjustments[0].location?.name || null
+              : null,
+            adjustments: batchAdjustments,
+            total_quantity_change: batchAdjustments.reduce((sum, a) => sum + a.quantity_change, 0),
+          }
+          result.push(batch)
+          return
+        }
+      }
+
+      // Add as individual adjustment
+      processed.add(adj.id)
+      result.push(adj)
+    })
+
+    return result
+  }, [adjustments])
+
+  // Filter adjustments and batches
   const filteredAdjustments = useMemo(() => {
-    if (filterType === 'all') return adjustments
-    return adjustments.filter(adj => adj.adjustment_type === filterType)
-  }, [adjustments, filterType])
+    if (filterType === 'all') return groupedAdjustments
+    return groupedAdjustments.filter(item => {
+      if ('type' in item && item.type === 'batch') {
+        // For batches, check if all adjustments match the filter
+        return item.adjustments.every(adj => adj.adjustment_type === filterType)
+      }
+      // Type guard: item is InventoryAdjustment
+      return 'adjustment_type' in item && item.adjustment_type === filterType
+    })
+  }, [groupedAdjustments, filterType])
 
   // Group by date
   const groupedByDate = useMemo(() => {
-    const groups: Record<string, typeof adjustments> = {}
-    filteredAdjustments.forEach(adj => {
-      const date = new Date(adj.created_at).toLocaleDateString('en-US', {
+    const groups: Record<string, AdjustmentOrBatch[]> = {}
+    filteredAdjustments.forEach(item => {
+      const date = new Date(item.created_at).toLocaleDateString('en-US', {
         year: 'numeric',
         month: 'long',
         day: 'numeric'
       })
       if (!groups[date]) groups[date] = []
-      groups[date].push(adj)
+      groups[date].push(item)
     })
     return Object.entries(groups).sort((a, b) =>
       new Date(b[1][0].created_at).getTime() - new Date(a[1][0].created_at).getTime()
     )
   }, [filteredAdjustments])
+
+  const toggleBatch = (batchId: string) => {
+    const newExpanded = new Set(expandedBatches)
+    if (newExpanded.has(batchId)) {
+      newExpanded.delete(batchId)
+    } else {
+      newExpanded.add(batchId)
+    }
+    setExpandedBatches(newExpanded)
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+  }
 
   const formatTime = (dateStr: string) => {
     const date = new Date(dateStr)
@@ -58,20 +149,6 @@ export function AuditsView() {
     return labels[type]
   }
 
-  const getTypeBadgeColor = (type: AdjustmentType) => {
-    const colors: Record<AdjustmentType, string> = {
-      count_correction: '#60A5FA',
-      damage: '#EF4444',
-      shrinkage: '#F59E0B',
-      theft: '#DC2626',
-      expired: '#F97316',
-      received: '#10B981',
-      return: '#3B82F6',
-      other: '#6B7280',
-    }
-    return colors[type]
-  }
-
   const FILTER_OPTIONS: { value: AdjustmentType | 'all'; label: string }[] = [
     { value: 'all', label: 'All' },
     { value: 'count_correction', label: 'Corrections' },
@@ -83,14 +160,78 @@ export function AuditsView() {
     { value: 'return', label: 'Returns' },
   ]
 
-  return (
-    <View style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Audit Trail</Text>
-        <Text style={styles.headerSubtitle}>
-          {filteredAdjustments.length} {filteredAdjustments.length === 1 ? 'record' : 'records'}
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="rgba(235,235,245,0.6)" />
+        <Text style={styles.loadingText}>Loading audit records...</Text>
+      </View>
+    )
+  }
+
+  if (filteredAdjustments.length === 0) {
+    return (
+      <View style={styles.emptyContainer}>
+        <Text style={styles.emptyTitle}>No audit records</Text>
+        <Text style={styles.emptySubtitle}>
+          {filterType === 'all'
+            ? 'Inventory adjustments will appear here'
+            : `No ${getTypeLabel(filterType as AdjustmentType).toLowerCase()} records found`
+          }
         </Text>
+      </View>
+    )
+  }
+
+  return (
+    <ScrollView
+      style={styles.content}
+      contentContainerStyle={{ paddingTop: 100, paddingBottom: layout.dockHeight, paddingRight: layout.containerMargin }}
+      showsVerticalScrollIndicator={true}
+      indicatorStyle="white"
+      scrollIndicatorInsets={{ right: 2, top: 100, bottom: layout.dockHeight }}
+      onScroll={(e) => {
+        const offsetY = e.nativeEvent.contentOffset.y
+        const threshold = 40
+        // Instant transition like iOS
+        headerOpacity.setValue(offsetY > threshold ? 1 : 0)
+      }}
+      scrollEventThrottle={16}
+    >
+      {/* Large Title with Vendor Logo - scrolls with content */}
+      <View style={styles.cardWrapper}>
+        <View style={styles.titleSectionContainer}>
+          <View style={styles.largeTitleContainer}>
+            <View>
+              <View style={styles.titleWithLogo}>
+                {vendorLogo && (
+                  <Image
+                    source={{ uri: vendorLogo }}
+                    style={styles.vendorLogoInline}
+                    resizeMode="contain"
+                        fadeDuration={0}
+                  />
+                )}
+                <Text style={styles.largeTitleHeader}>Audits</Text>
+              </View>
+              <Text style={styles.headerSubtitle}>
+                {filteredAdjustments.length} {filteredAdjustments.length === 1 ? 'record' : 'records'}
+              </Text>
+            </View>
+            <Pressable
+              style={styles.addButton}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                onCreatePress()
+              }}
+              accessible={true}
+              accessibilityRole="button"
+              accessibilityLabel="Create new audit"
+            >
+              <Text style={styles.addButtonText}>Create Audit</Text>
+            </Pressable>
+          </View>
+        </View>
       </View>
 
       {/* Filter Pills */}
@@ -124,131 +265,222 @@ export function AuditsView() {
         ))}
       </ScrollView>
 
-      {/* Content */}
-      {loading ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="rgba(235,235,245,0.6)" />
-          <Text style={styles.loadingText}>Loading audit records...</Text>
-        </View>
-      ) : filteredAdjustments.length === 0 ? (
-        <View style={styles.emptyContainer}>
-          <Text style={styles.emptyTitle}>No audit records</Text>
-          <Text style={styles.emptySubtitle}>
-            {filterType === 'all'
-              ? 'Inventory adjustments will appear here'
-              : `No ${getTypeLabel(filterType as AdjustmentType).toLowerCase()} records found`
-            }
-          </Text>
-        </View>
-      ) : (
-        <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-          {groupedByDate.map(([date, dayAdjustments]) => (
+      {/* Grouped Adjustments */}
+      {groupedByDate.map(([date, dayItems]) => (
             <View key={date} style={styles.dateGroup}>
               <Text style={styles.dateHeader}>{date}</Text>
               <View style={styles.card}>
-                {dayAdjustments.map((adj, index) => (
-                  <View key={adj.id}>
-                    <View style={styles.adjustmentRow}>
-                      <View style={styles.adjustmentLeft}>
-                        {/* Time */}
-                        <Text style={styles.adjustmentTime}>{formatTime(adj.created_at)}</Text>
+                {dayItems.map((item, index) => {
+                  // Check if this is a batch or single adjustment
+                  if ('type' in item && item.type === 'batch') {
+                    const batch = item as AuditBatch
+                    const isExpanded = expandedBatches.has(batch.id)
 
-                        {/* Product Info */}
-                        <View style={styles.adjustmentInfo}>
-                          <Text style={styles.adjustmentProduct}>{adj.product?.name || 'Unknown'}</Text>
-                          {adj.product?.sku && (
-                            <Text style={styles.adjustmentSKU}>SKU: {adj.product.sku}</Text>
-                          )}
-                          {adj.location?.name && (
-                            <Text style={styles.adjustmentLocation}>{adj.location.name}</Text>
+                    return (
+                      <View key={batch.id}>
+                        {/* Batch Summary Row */}
+                        <Pressable
+                          style={styles.batchRow}
+                          onPress={() => toggleBatch(batch.id)}
+                        >
+                          <View style={styles.adjustmentLeft}>
+                            {/* Time */}
+                            <Text style={styles.adjustmentTime}>{formatTime(batch.created_at)}</Text>
+
+                            {/* Batch Info */}
+                            <View style={styles.adjustmentInfo}>
+                              <View style={styles.batchHeader}>
+                                <Text style={styles.batchTitle}>Bulk Audit</Text>
+                                <Text style={styles.batchCount}>
+                                  {batch.adjustments.length} {batch.adjustments.length === 1 ? 'product' : 'products'}
+                                </Text>
+                              </View>
+                              {batch.location_name && (
+                                <Text style={styles.adjustmentLocation}>{batch.location_name}</Text>
+                              )}
+                            </View>
+
+                            {/* Reason */}
+                            <Text style={styles.adjustmentReason}>{batch.reason}</Text>
+                          </View>
+
+                          {/* Total Quantity Change */}
+                          <View style={styles.batchRight}>
+                            <Text style={styles.expandIndicator}>{isExpanded ? '▼' : '▶'}</Text>
+                            <Text
+                              style={[
+                                styles.quantityChange,
+                                batch.total_quantity_change > 0 && styles.quantityPositive,
+                                batch.total_quantity_change < 0 && styles.quantityNegative,
+                              ]}
+                            >
+                              {batch.total_quantity_change > 0 ? '+' : ''}{batch.total_quantity_change}g
+                            </Text>
+                          </View>
+                        </Pressable>
+
+                        {/* Expanded Product Details */}
+                        {isExpanded && (
+                          <View style={styles.batchExpanded}>
+                            {batch.adjustments.map((adj, adjIndex) => (
+                              <View key={adj.id} style={styles.batchItem}>
+                                <View style={styles.batchItemLeft}>
+                                  <Text style={styles.adjustmentProduct}>{adj.product?.name || 'Unknown'}</Text>
+                                  {adj.product?.sku && (
+                                    <Text style={styles.adjustmentSKU}>SKU: {adj.product.sku}</Text>
+                                  )}
+                                </View>
+                                <View style={styles.batchItemRight}>
+                                  <Text
+                                    style={[
+                                      styles.batchItemChange,
+                                      adj.quantity_change > 0 && styles.quantityPositive,
+                                      adj.quantity_change < 0 && styles.quantityNegative,
+                                    ]}
+                                  >
+                                    {adj.quantity_change > 0 ? '+' : ''}{adj.quantity_change}g
+                                  </Text>
+                                  <Text style={styles.batchItemBefore}>{adj.quantity_before}g → {adj.quantity_after}g</Text>
+                                </View>
+                                {adjIndex < batch.adjustments.length - 1 && (
+                                  <View style={styles.batchItemDivider} />
+                                )}
+                              </View>
+                            ))}
+                          </View>
+                        )}
+
+                        {index < dayItems.length - 1 && <View style={styles.divider} />}
+                      </View>
+                    )
+                  }
+
+                  // Regular adjustment
+                  const adj = item as InventoryAdjustment
+                  return (
+                    <View key={adj.id}>
+                      <View style={styles.adjustmentRow}>
+                        <View style={styles.adjustmentLeft}>
+                          {/* Time */}
+                          <Text style={styles.adjustmentTime}>{formatTime(adj.created_at)}</Text>
+
+                          {/* Product Info */}
+                          <View style={styles.adjustmentInfo}>
+                            <Text style={styles.adjustmentProduct}>{adj.product?.name || 'Unknown'}</Text>
+                            {adj.product?.sku && (
+                              <Text style={styles.adjustmentSKU}>SKU: {adj.product.sku}</Text>
+                            )}
+                            {adj.location?.name && (
+                              <Text style={styles.adjustmentLocation}>{adj.location.name}</Text>
+                            )}
+                          </View>
+
+                          {/* Reason */}
+                          <Text style={styles.adjustmentReason}>{adj.reason}</Text>
+                          {adj.notes && (
+                            <Text style={styles.adjustmentNotes}>Note: {adj.notes}</Text>
                           )}
                         </View>
 
-                        {/* Type Badge */}
-                        <View
-                          style={[
-                            styles.typeBadge,
-                            {
-                              backgroundColor: `${getTypeBadgeColor(adj.adjustment_type)}10`,
-                              borderColor: `${getTypeBadgeColor(adj.adjustment_type)}30`,
-                            },
-                          ]}
-                        >
+                        {/* Quantity Change */}
+                        <View style={styles.adjustmentRight}>
                           <Text
                             style={[
-                              styles.typeBadgeText,
-                              { color: getTypeBadgeColor(adj.adjustment_type) },
+                              styles.quantityChange,
+                              adj.quantity_change > 0 && styles.quantityPositive,
+                              adj.quantity_change < 0 && styles.quantityNegative,
                             ]}
                           >
-                            {getTypeLabel(adj.adjustment_type)}
+                            {adj.quantity_change > 0 ? '+' : ''}{adj.quantity_change}g
                           </Text>
+                          <Text style={styles.quantityBefore}>{adj.quantity_before}g</Text>
+                          <Text style={styles.quantityArrow}>↓</Text>
+                          <Text style={styles.quantityAfter}>{adj.quantity_after}g</Text>
                         </View>
-
-                        {/* Reason */}
-                        <Text style={styles.adjustmentReason}>{adj.reason}</Text>
-                        {adj.notes && (
-                          <Text style={styles.adjustmentNotes}>Note: {adj.notes}</Text>
-                        )}
                       </View>
 
-                      {/* Quantity Change */}
-                      <View style={styles.adjustmentRight}>
-                        <Text
-                          style={[
-                            styles.quantityChange,
-                            adj.quantity_change > 0 && styles.quantityPositive,
-                            adj.quantity_change < 0 && styles.quantityNegative,
-                          ]}
-                        >
-                          {adj.quantity_change > 0 ? '+' : ''}{adj.quantity_change}g
-                        </Text>
-                        <Text style={styles.quantityBefore}>{adj.quantity_before}g</Text>
-                        <Text style={styles.quantityArrow}>↓</Text>
-                        <Text style={styles.quantityAfter}>{adj.quantity_after}g</Text>
-                      </View>
+                      {index < dayItems.length - 1 && <View style={styles.divider} />}
                     </View>
-
-                    {index < dayAdjustments.length - 1 && <View style={styles.divider} />}
-                  </View>
-                ))}
+                  )
+                })}
               </View>
             </View>
-          ))}
-          <View style={{ height: 40 }} />
-        </ScrollView>
-      )}
-    </View>
+      ))}
+    </ScrollView>
   )
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
+  titleSectionContainer: {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: radius.xxl,
+    borderCurve: 'continuous',
+    padding: spacing.lg,
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.12)',
   },
-  header: {
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.xl,
-    paddingBottom: spacing.md,
+  titleWithLogo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.lg,
   },
-  headerTitle: {
+  vendorLogoInline: {
+    width: 80,
+    height: 80,
+    borderRadius: radius.xxl,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.25)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+  },
+  // Large Title
+  largeTitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingTop: 16,
+    paddingBottom: 8,
+  },
+  largeTitleHeader: {
     fontSize: 34,
     fontWeight: '700',
+    color: '#fff',
+    letterSpacing: -0.5,
+  },
+  cardWrapper: {
+    marginHorizontal: 6, // Ultra-minimal iOS-style spacing (6px)
+    marginVertical: layout.contentVertical,
+  },
+  addButton: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.md,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.2)',
+  },
+  addButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
     color: colors.text.primary,
-    letterSpacing: -0.8,
-    marginBottom: spacing.xxs,
+    letterSpacing: -0.2,
   },
   headerSubtitle: {
     fontSize: 13,
     fontWeight: '400',
     color: colors.text.tertiary,
     letterSpacing: -0.1,
+    marginTop: spacing.xxs,
   },
   filtersContainer: {
     maxHeight: 60,
+    marginBottom: spacing.md,
   },
   filtersContent: {
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.md,
+    paddingHorizontal: 6, // Match cardWrapper margin
+    paddingBottom: spacing.sm,
     gap: spacing.xs,
   },
   filterPill: {
@@ -309,10 +541,10 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
-    paddingHorizontal: spacing.lg,
   },
   dateGroup: {
     marginBottom: spacing.lg,
+    marginHorizontal: 6, // Ultra-minimal iOS-style spacing matching Products
   },
   dateHeader: {
     fontSize: 11,
@@ -321,7 +553,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.6,
     textTransform: 'uppercase',
     marginBottom: spacing.xs,
-    marginLeft: spacing.xs,
+    paddingHorizontal: layout.cardPadding,
   },
   card: {
     backgroundColor: 'rgba(255,255,255,0.05)',
@@ -368,22 +600,6 @@ const styles = StyleSheet.create({
     color: colors.text.quaternary,
     letterSpacing: -0.1,
     marginTop: spacing.xxs,
-  },
-  typeBadge: {
-    alignSelf: 'flex-start',
-    paddingVertical: 4,
-    paddingHorizontal: spacing.sm,
-    borderRadius: radius.md,
-    borderCurve: 'continuous',
-    marginTop: spacing.xs,
-    marginBottom: spacing.xs,
-    borderWidth: 0.5,
-  },
-  typeBadgeText: {
-    fontSize: 11,
-    fontWeight: '600',
-    letterSpacing: 0.2,
-    textTransform: 'uppercase',
   },
   adjustmentReason: {
     fontSize: 13,
@@ -439,5 +655,81 @@ const styles = StyleSheet.create({
     height: 0.5,
     backgroundColor: 'rgba(255,255,255,0.06)',
     marginVertical: spacing.md,
+  },
+  // Batch styles
+  batchRow: {
+    flexDirection: 'row',
+    paddingVertical: spacing.sm,
+    gap: spacing.md,
+  },
+  batchHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginBottom: spacing.xxs,
+  },
+  batchTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.text.primary,
+    letterSpacing: -0.2,
+  },
+  batchCount: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.text.tertiary,
+    letterSpacing: -0.1,
+  },
+  batchRight: {
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+    gap: spacing.xs,
+  },
+  expandIndicator: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.text.tertiary,
+    marginBottom: spacing.xxs,
+  },
+  batchExpanded: {
+    marginTop: spacing.sm,
+    marginLeft: spacing.xl,
+    paddingTop: spacing.md,
+    borderTopWidth: 0.5,
+    borderTopColor: 'rgba(255,255,255,0.1)',
+  },
+  batchItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    paddingVertical: spacing.sm,
+    gap: spacing.md,
+  },
+  batchItemLeft: {
+    flex: 1,
+  },
+  batchItemRight: {
+    alignItems: 'flex-end',
+    gap: spacing.xxxs,
+  },
+  batchItemChange: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.text.primary,
+    letterSpacing: -0.2,
+  },
+  batchItemBefore: {
+    fontSize: 11,
+    fontWeight: '400',
+    color: colors.text.quaternary,
+    letterSpacing: -0.1,
+  },
+  batchItemDivider: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 0.5,
+    backgroundColor: 'rgba(255,255,255,0.04)',
   },
 })

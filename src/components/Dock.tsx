@@ -9,7 +9,7 @@ import { memo } from 'react'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { LiquidGlassView, LiquidGlassContainerView, isLiquidGlassSupported } from '@callstack/liquid-glass'
 import * as Haptics from 'expo-haptics'
-import { colors, radius, spacing, shadows } from '@/theme'
+import { colors, spacing, shadows } from '@/theme'
 
 interface DockProps {
   activeTab: number

@@ -5,7 +5,7 @@
  */
 
 import React, { useMemo } from 'react'
-import { View, Text, StyleSheet, Pressable, ScrollView, ActivityIndicator, Animated } from 'react-native'
+import { View, Text, StyleSheet, Pressable, ScrollView, ActivityIndicator, Animated, Image } from 'react-native'
 import { LinearGradient } from 'expo-linear-gradient'
 import * as Haptics from 'expo-haptics'
 import { colors, spacing, radius } from '@/theme/tokens'
@@ -87,6 +87,7 @@ interface PurchaseOrdersListProps {
   isLoading: boolean
   headerOpacity: Animated.Value
   onAddPress: () => void
+  vendorLogo?: string | null
   emptyMessage?: string
 }
 
@@ -97,6 +98,7 @@ export function PurchaseOrdersList({
   isLoading,
   headerOpacity,
   onAddPress,
+  vendorLogo,
   emptyMessage = 'No purchase orders found',
 }: PurchaseOrdersListProps) {
   // Group POs by date
@@ -154,21 +156,35 @@ export function PurchaseOrdersList({
         }}
         scrollEventThrottle={16}
       >
-        {/* Large Title - scrolls with content */}
-        <View style={[styles.largeTitleContainer, styles.cardWrapper]}>
-          <Text style={styles.largeTitleHeader}>Purchase Orders</Text>
-          <Pressable
-            style={styles.addButton}
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-              onAddPress()
-            }}
-            accessible={true}
-            accessibilityRole="button"
-            accessibilityLabel="Add new purchase order"
-          >
-            <Text style={styles.addButtonText}>Add Purchase Order</Text>
-          </Pressable>
+        {/* Large Title with Vendor Logo - scrolls with content */}
+        <View style={styles.cardWrapper}>
+          <View style={styles.titleSectionContainer}>
+            <View style={styles.largeTitleContainer}>
+              <View style={styles.titleWithLogo}>
+                {vendorLogo && (
+                  <Image
+                    source={{ uri: vendorLogo }}
+                    style={styles.vendorLogoInline}
+                    resizeMode="contain"
+                        fadeDuration={0}
+                  />
+                )}
+                <Text style={styles.largeTitleHeader}>Purchase Orders</Text>
+              </View>
+              <Pressable
+                style={styles.addButton}
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                  onAddPress()
+                }}
+                accessible={true}
+                accessibilityRole="button"
+                accessibilityLabel="Add new purchase order"
+              >
+                <Text style={styles.addButtonText}>Add Purchase Order</Text>
+              </Pressable>
+            </View>
+          </View>
         </View>
 
         {/* Empty State */}
@@ -279,6 +295,30 @@ const styles = StyleSheet.create({
     right: 0,
     height: 80,
     zIndex: 10,
+  },
+  titleSectionContainer: {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: radius.xxl,
+    borderCurve: 'continuous',
+    padding: spacing.lg,
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  titleWithLogo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.lg,
+  },
+  vendorLogoInline: {
+    width: 80,
+    height: 80,
+    borderRadius: radius.xxl,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.25)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
   },
   largeTitleContainer: {
     flexDirection: 'row',

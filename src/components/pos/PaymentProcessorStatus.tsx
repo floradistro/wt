@@ -64,8 +64,8 @@ function PaymentProcessorStatus({ compact = false }: PaymentProcessorStatusProps
         // Stagger animations for smooth streaming effect
         Animated.timing(anim, {
           toValue: 1,
-          duration: 300,
-          delay: index * 50,
+          duration: 200,
+          delay: Math.min(index * 30, 100), // Max 100ms delay, faster animation
           useNativeDriver: true,
         }).start()
       }

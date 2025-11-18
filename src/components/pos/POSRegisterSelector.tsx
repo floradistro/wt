@@ -54,8 +54,8 @@ function RegisterCard({
   useEffect(() => {
     Animated.timing(fadeAnim, {
       toValue: 1,
-      duration: 400,
-      delay: index * 60,
+      duration: 200,
+      delay: Math.min(index * 20, 100), // Max 100ms delay, faster animation
       useNativeDriver: true,
     }).start()
   }, [])
@@ -312,6 +312,7 @@ function POSRegisterSelector({
                 source={{ uri: vendorLogo }}
                 style={styles.headerLogo}
                 resizeMode="contain"
+                fadeDuration={0}
               />
             </View>
           )}
@@ -356,8 +357,8 @@ const styles = StyleSheet.create({
     paddingTop: isTablet ? 60 : 50,
   },
   headerLogoContainer: {
-    width: isTablet ? 72 : 56,
-    height: isTablet ? 72 : 56,
+    width: 80,
+    height: 80,
     borderRadius: isTablet ? 20 : 16,
     marginBottom: isTablet ? 16 : 12,
     overflow: 'hidden',
@@ -368,8 +369,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   headerLogo: {
-    width: isTablet ? 48 : 38,
-    height: isTablet ? 48 : 38,
+    width: 80,
+    height: 80,
   },
   headerTitle: {
     fontSize: isTablet ? 28 : 24,

@@ -95,7 +95,7 @@ export function PaymentProcessorModal({
 
   const modalStyle = useMemo(
     () => ({
-      width: isLandscape ? '70%' : '85%',
+      width: (isLandscape ? '70%' : '85%') as '70%' | '85%',
       maxWidth: isLandscape ? 800 : 600,
       height: isLandscape ? height * 0.75 : height * 0.7,
       maxHeight: isLandscape ? height * 0.85 : height * 0.8,
@@ -488,7 +488,7 @@ const styles = StyleSheet.create({
   input: {
     ...typography.body,
     color: colors.text.primary,
-    backgroundColor: colors.glass.subtle,
+    backgroundColor: colors.glass.thin,
     borderRadius: radius.lg,
     padding: spacing.sm,
     borderWidth: 0.5,
@@ -497,7 +497,7 @@ const styles = StyleSheet.create({
   },
   segmentedControl: {
     flexDirection: 'row',
-    backgroundColor: colors.glass.subtle,
+    backgroundColor: colors.glass.thin,
     borderRadius: radius.lg,
     padding: 2,
   },
