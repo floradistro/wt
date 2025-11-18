@@ -106,7 +106,7 @@ export function PurchaseOrderDetail({
   }
 
   const statusColor = getStatusColor(purchaseOrder.status)
-  const canReceive = purchaseOrder.type === 'inbound' &&
+  const canReceive = purchaseOrder.po_type === 'inbound' &&
     (purchaseOrder.status === 'pending' || purchaseOrder.status === 'approved' || purchaseOrder.status === 'partially_received')
   const canDelete = purchaseOrder.status === 'draft' || purchaseOrder.status === 'pending'
 
@@ -135,7 +135,7 @@ export function PurchaseOrderDetail({
               <View style={styles.headerMeta}>
                 <Text style={styles.statusBadge}>{purchaseOrder.status.toUpperCase()}</Text>
                 <Text style={styles.metaDot}>•</Text>
-                <Text style={styles.metaText}>{purchaseOrder.type.toUpperCase()}</Text>
+                <Text style={styles.metaText}>{purchaseOrder.po_type.toUpperCase()}</Text>
               </View>
             </View>
           </View>
@@ -146,10 +146,10 @@ export function PurchaseOrderDetail({
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>DETAILS</Text>
         <View style={styles.cardGlass}>
-          {purchaseOrder.type === 'inbound' && purchaseOrder.supplier_name && (
+          {purchaseOrder.po_type === 'inbound' && purchaseOrder.supplier_name && (
             <SettingsRow label="Supplier" value={purchaseOrder.supplier_name} showChevron={false} />
           )}
-          {purchaseOrder.type === 'outbound' && purchaseOrder.customer_name && (
+          {purchaseOrder.po_type === 'outbound' && purchaseOrder.customer_name && (
             <SettingsRow label="Customer" value={purchaseOrder.customer_name} showChevron={false} />
           )}
           {purchaseOrder.location_name && (

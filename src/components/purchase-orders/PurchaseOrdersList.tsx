@@ -20,8 +20,8 @@ const POItem = React.memo<{
   onPress: () => void
 }>(({ item, isLast, isSelected, onPress }) => {
   const statusColor = getStatusColor(item.status)
-  const typeLabel = item.type === 'inbound' ? 'FROM' : 'TO'
-  const partnerName = item.type === 'inbound' ? item.supplier_name : item.customer_name
+  const typeLabel = item.po_type === 'inbound' ? 'FROM' : 'TO'
+  const partnerName = item.po_type === 'inbound' ? item.supplier_name : item.customer_name
 
   return (
     <Pressable

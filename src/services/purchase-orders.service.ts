@@ -16,12 +16,14 @@ export interface PurchaseOrder {
   id: string
   po_number: string
   vendor_id: string
-  type: PurchaseOrderType
+  po_type: PurchaseOrderType
   status: PurchaseOrderStatus
-  supplier_name?: string
-  customer_name?: string
+  supplier_id?: string
+  supplier_name?: string // From join
+  wholesale_customer_id?: string
+  customer_name?: string // From join
   location_id?: string
-  location_name?: string
+  location_name?: string // From join
   expected_delivery_date?: string
   notes?: string
   subtotal: number
@@ -53,9 +55,9 @@ export interface PurchaseOrderItem {
 }
 
 export interface CreatePurchaseOrderParams {
-  type: PurchaseOrderType
-  supplier_name?: string
-  customer_name?: string
+  po_type: PurchaseOrderType
+  supplier_id?: string
+  wholesale_customer_id?: string
   location_id?: string
   expected_delivery_date?: string
   notes?: string
@@ -90,7 +92,16 @@ export async function getPurchaseOrders(params?: {
     .from('purchase_orders')
     .select(`
       *,
-      locations:location_id (
+      supplier:suppliers!supplier_id (
+        id,
+        external_name
+      ),
+      wholesale_customer:wholesale_customers!wholesale_customer_id (
+        id,
+        external_company_name
+      ),
+      location:locations!location_id (
+        id,
         name
       ),
       purchase_order_items (
@@ -102,7 +113,7 @@ export async function getPurchaseOrders(params?: {
     .order('created_at', { ascending: false })
 
   if (params?.type) {
-    query = query.eq('type', params.type)
+    query = query.eq('po_type', params.type)
   }
 
   if (params?.status) {
@@ -114,9 +125,7 @@ export async function getPurchaseOrders(params?: {
   }
 
   if (params?.search) {
-    query = query.or(
-      `po_number.ilike.%${params.search}%,supplier_name.ilike.%${params.search}%,customer_name.ilike.%${params.search}%`
-    )
+    query = query.ilike('po_number', `%${params.search}%`)
   }
 
   const { data, error } = await query
@@ -126,17 +135,23 @@ export async function getPurchaseOrders(params?: {
     throw new Error(`Failed to fetch purchase orders: ${error.message}`)
   }
 
-  // Flatten location data and compute counts
+  // Flatten joined data and compute counts
   const pos = (data || []).map((po: any) => {
-    const location = Array.isArray(po.locations) ? po.locations[0] : po.locations
+    const supplier = Array.isArray(po.supplier) ? po.supplier[0] : po.supplier
+    const customer = Array.isArray(po.wholesale_customer) ? po.wholesale_customer[0] : po.wholesale_customer
+    const location = Array.isArray(po.location) ? po.location[0] : po.location
     const items = po.purchase_order_items || []
 
     return {
       ...po,
+      supplier_name: supplier?.external_name || '',
+      customer_name: customer?.external_company_name || '',
       location_name: location?.name || '',
       items_count: items.length,
       received_items_count: items.filter((item: any) => item.received_quantity > 0).length,
-      locations: undefined, // Remove nested object
+      supplier: undefined, // Remove nested object
+      wholesale_customer: undefined, // Remove nested object
+      location: undefined, // Remove nested object
       purchase_order_items: undefined, // Remove nested object
     }
   })
@@ -152,7 +167,16 @@ export async function getPurchaseOrderById(poId: string): Promise<PurchaseOrder 
     .from('purchase_orders')
     .select(`
       *,
-      locations:location_id (
+      supplier:suppliers!supplier_id (
+        id,
+        external_name
+      ),
+      wholesale_customer:wholesale_customers!wholesale_customer_id (
+        id,
+        external_company_name
+      ),
+      location:locations!location_id (
+        id,
         name
       ),
       purchase_order_items (
@@ -171,7 +195,9 @@ export async function getPurchaseOrderById(poId: string): Promise<PurchaseOrder 
     throw new Error(`Failed to fetch purchase order: ${poError.message}`)
   }
 
-  const location = Array.isArray(po.locations) ? po.locations[0] : po.locations
+  const supplier = Array.isArray(po.supplier) ? po.supplier[0] : po.supplier
+  const customer = Array.isArray(po.wholesale_customer) ? po.wholesale_customer[0] : po.wholesale_customer
+  const location = Array.isArray(po.location) ? po.location[0] : po.location
 
   // Flatten product data into items
   const items = (po.purchase_order_items || []).map((item: any) => {
@@ -186,9 +212,13 @@ export async function getPurchaseOrderById(poId: string): Promise<PurchaseOrder 
 
   return {
     ...po,
+    supplier_name: supplier?.external_name || '',
+    customer_name: customer?.external_company_name || '',
     location_name: location?.name || '',
     items,
-    locations: undefined, // Remove nested object
+    supplier: undefined, // Remove nested object
+    wholesale_customer: undefined, // Remove nested object
+    location: undefined, // Remove nested object
     purchase_order_items: undefined, // Remove nested object
   }
 }

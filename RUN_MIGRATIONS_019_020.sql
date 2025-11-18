@@ -6,6 +6,9 @@
 -- Migration 019: Add Order Types Workflow
 -- ====================================================================
 
+-- Step 0: Drop old delivery_type constraint (if it exists)
+ALTER TABLE orders DROP CONSTRAINT IF EXISTS orders_delivery_type_check;
+
 -- Step 1: Add order_type column
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS order_type VARCHAR(20);
 
