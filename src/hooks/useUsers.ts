@@ -188,9 +188,25 @@ export function useUsers() {
         try {
           // Context contains a Response object, try to extract body
           if (context?._bodyInit) {
-            const bodyText = typeof context._bodyInit === 'string'
-              ? context._bodyInit
-              : JSON.stringify(context._bodyInit)
+            // Handle React Native's Blob-like structure
+            let bodyText: string
+
+            if (context._bodyInit._data) {
+              // React Native blob structure - convert to string
+              const data = context._bodyInit._data
+              if (typeof data === 'string') {
+                bodyText = data
+              } else if (data.blobId || data.offset !== undefined) {
+                // This is a blob reference - try to read it
+                bodyText = JSON.stringify(context._bodyInit)
+              } else {
+                bodyText = JSON.stringify(data)
+              }
+            } else if (typeof context._bodyInit === 'string') {
+              bodyText = context._bodyInit
+            } else {
+              bodyText = JSON.stringify(context._bodyInit)
+            }
 
             logger.error('Edge Function response body:', bodyText)
 
