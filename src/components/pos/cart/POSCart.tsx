@@ -76,15 +76,7 @@ function POSCart({
     : null
 
   return (
-    <LiquidGlassView
-      effect="clear"
-      colorScheme="dark"
-      tintColor="rgba(0,0,0,0.05)"
-      style={[
-        styles.cartCard,
-        !isLiquidGlassSupported && styles.cartCardFallback
-      ]}
-    >
+    <View style={styles.cartCard}>
       {/* iOS 26 Perfectly Simple Cart Header */}
       <View style={styles.cartHeader}>
         {/* Customer Section - iOS 26 Rounded Container or Pill Button */}
@@ -376,7 +368,7 @@ function POSCart({
           />
         </View>
       )}
-    </LiquidGlassView>
+    </View>
   )
 }
 
@@ -384,23 +376,15 @@ const POSCartMemo = memo(POSCart)
 export { POSCartMemo as POSCart }
 
 const styles = StyleSheet.create({
-  // Liquid Glass Cart Container - iOS 26 Best Practice
+  // Cart container - glass effect provided by parent
   cartCard: {
     flex: 1,
-    borderRadius: 24,
-    borderCurve: 'continuous',
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
-  },
-  cartCardFallback: {
-    backgroundColor: 'rgba(20,20,20,0.85)',
   },
 
   // Perfectly Simple Cart Header
   cartHeader: {
-    paddingHorizontal: 16,
-    paddingTop: 16,
+    paddingHorizontal: layout.cardPadding,
+    paddingTop: layout.cardPadding,
     paddingBottom: 12,
     gap: 12,
   },
@@ -462,7 +446,7 @@ const styles = StyleSheet.create({
   customerPillPoints: {
     fontSize: 13,
     fontWeight: '400',
-    color: 'rgba(100,200,255,0.95)',
+    color: 'rgba(255,255,255,0.6)',
     letterSpacing: 0,
   },
   customerPillClearButton: {
@@ -531,8 +515,8 @@ const styles = StyleSheet.create({
     letterSpacing: 0,
   },
   loyaltySection: {
-    paddingHorizontal: 20,
-    paddingVertical: 16,
+    paddingHorizontal: layout.containerMargin,
+    paddingVertical: layout.cardPadding,
     gap: 12,
   },
   loyaltySectionHeader: {
@@ -550,7 +534,7 @@ const styles = StyleSheet.create({
   loyaltySectionAvailable: {
     fontSize: 11,
     fontWeight: '400',
-    color: 'rgba(100,200,255,0.9)',
+    color: 'rgba(255,255,255,0.5)',
     letterSpacing: 0,
   },
   loyaltyValueDisplay: {
@@ -598,22 +582,22 @@ const styles = StyleSheet.create({
   loyaltyButtonMax: {
     flex: 1,
     paddingVertical: 10,
-    backgroundColor: 'rgba(100,200,255,0.15)',
+    backgroundColor: 'rgba(255,255,255,0.08)',
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: 'rgba(100,200,255,0.3)',
+    borderColor: 'rgba(255,255,255,0.15)',
     alignItems: 'center',
   },
   loyaltyButtonMaxText: {
     fontSize: 11,
     fontWeight: '600',
-    color: 'rgba(100,200,255,0.95)',
+    color: 'rgba(255,255,255,0.9)',
     textTransform: 'uppercase',
     letterSpacing: 0.6,
   },
   endSessionFooter: {
-    marginTop: 16,
-    marginHorizontal: 16,
+    marginTop: layout.cardPadding,
+    marginHorizontal: layout.cardPadding,
     marginBottom: 8,
     height: 48,
     alignItems: 'center',
@@ -633,6 +617,6 @@ const styles = StyleSheet.create({
   cartDivider: {
     height: 0.33,
     backgroundColor: 'rgba(255,255,255,0.1)',
-    marginHorizontal: 20,
+    marginHorizontal: layout.containerMargin,
   },
 })

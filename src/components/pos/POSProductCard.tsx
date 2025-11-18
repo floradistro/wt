@@ -5,13 +5,15 @@ import * as Haptics from 'expo-haptics'
 import { useState, useRef, memo, forwardRef, useImperativeHandle } from 'react'
 
 const { width } = Dimensions.get('window')
-const isTablet = width > 600
 // Jobs Principle: 3-column grid accounting for cart sidebar
-// Cart width: 380px on tablet, 320px on phone
-// Left padding: 16px, gap between columns: 16px = 32px total
-const cartWidth = isTablet ? 380 : 320
-const availableWidth = width - cartWidth - 32 // 16px left padding + 16px gap
-const cardWidth = availableWidth / 3 - 12
+// Layout matches Products/Settings: 375px cart + product area (spacing from cart's marginRight only)
+// Product area: 0px left padding (cart provides spacing) + cards + 20px right padding
+// Cards: 3 columns with 16px gaps between them
+const cartWidth = 375 // Match nav sidebar width exactly
+const productGridPadding = 20 // Only right padding (layout.containerMargin)
+const gapsBetweenCards = 16 * 2 // 2 gaps for 3 columns
+const totalUsedWidth = cartWidth + productGridPadding + gapsBetweenCards
+const cardWidth = (width - totalUsedWidth) / 3
 
 interface PricingTier {
   qty: number

@@ -13,16 +13,17 @@
  */
 
 import { useState, useEffect, useRef, useCallback, memo } from 'react'
-import { View, StyleSheet, Animated, useWindowDimensions } from 'react-native'
+import { View, StyleSheet, Animated } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
+import { LiquidGlassView, isLiquidGlassSupported } from '@callstack/liquid-glass'
 import { useAuth } from '@/stores/auth.store'
 import { startPaymentProcessorMonitoring, stopPaymentProcessorMonitoring } from '@/stores/payment-processor.store'
 import { useDockOffset } from '@/navigation/DashboardNavigator'
+import { layout } from '@/theme/layout'
 
 // New Refactored Components
 import {
   POSSessionSetup,
-  POSSessionActions,
   POSProductBrowser,
   POSCheckout,
 } from '@/components/pos'
@@ -31,7 +32,7 @@ import {
 import { useCart } from '@/hooks/pos'
 
 // Design System
-import { colors, spacing, device } from '@/theme'
+import { colors } from '@/theme'
 
 // Types
 import type { Vendor, Product, SessionInfo, PricingTier } from '@/types/pos'
@@ -43,10 +44,6 @@ import type { Vendor, Product, SessionInfo, PricingTier } from '@/types/pos'
 function POSScreenComponent() {
   const { user } = useAuth()
   const { setFullWidth } = useDockOffset()
-  const { width: screenWidth } = useWindowDimensions()
-
-  // Dynamic cart width based on screen size (adapts to orientation changes)
-  const cartWidth = screenWidth > 600 ? 380 : 320
 
   // ========================================
   // TOP-LEVEL STATE (Minimal!)
@@ -54,7 +51,7 @@ function POSScreenComponent() {
   const [sessionInfo, setSessionInfo] = useState<SessionInfo | null>(null)
   const [vendor, setVendor] = useState<Vendor | null>(null)
   const [customUserId, setCustomUserId] = useState<string | null>(null)
-  const [sessionData, setSessionData] = useState<{
+  const [_sessionData, _setSessionData] = useState<{
     sessionNumber: string
     totalSales: number
     totalCash: number
@@ -111,14 +108,14 @@ function POSScreenComponent() {
   ) => {
     setSessionInfo(newSessionInfo)
     setVendor(newVendor)
-    setSessionData(newSessionData)
+    _setSessionData(newSessionData)
     setCustomUserId(newCustomUserId)
   }, [])
 
   const handleSessionEnd = useCallback(() => {
     setSessionInfo(null)
     setVendor(null)
-    setSessionData(null)
+    _setSessionData(null)
     setCustomUserId(null)
     setProducts([])
   }, [])
@@ -150,21 +147,27 @@ function POSScreenComponent() {
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <Animated.View style={[styles.mainLayout, { opacity: fadeAnim }]}>
-        {/* Left Column - Checkout */}
-        <View style={[styles.leftColumn, { width: cartWidth }]}>
-          {vendor && customUserId && (
-            <POSCheckout
-              sessionInfo={sessionInfo}
-              vendor={vendor}
-              products={products}
-              customUserId={customUserId}
-              cartHook={cartHook}
-              onEndSession={handleSessionEnd}
-              onCheckoutComplete={() => {
-                // Optional: Reload products after checkout
-              }}
-            />
-          )}
+        {/* Left Column - Checkout (same container as NavSidebar) */}
+        <View style={styles.leftColumn}>
+          <LiquidGlassView
+            effect="regular"
+            colorScheme="dark"
+            style={[styles.cartContainer, !isLiquidGlassSupported && styles.cartContainerFallback]}
+          >
+            {vendor && customUserId && (
+              <POSCheckout
+                sessionInfo={sessionInfo}
+                vendor={vendor}
+                products={products}
+                customUserId={customUserId}
+                cartHook={cartHook}
+                onEndSession={handleSessionEnd}
+                onCheckoutComplete={() => {
+                  // Optional: Reload products after checkout
+                }}
+              />
+            )}
+          </LiquidGlassView>
         </View>
 
         {/* Right Column - Products */}
@@ -195,10 +198,23 @@ const styles = StyleSheet.create({
   mainLayout: {
     flex: 1,
     flexDirection: 'row',
-    gap: spacing.md,
   },
   leftColumn: {
-    // Width is set dynamically via inline style to adapt to orientation changes
+    width: layout.sidebarWidth, // Match nav sidebar exactly (375px)
+    backgroundColor: '#000',
+  },
+  cartContainer: {
+    flex: 1,
+    marginLeft: 8, // Ultra-minimal iOS-style left padding (same as NavSidebar)
+    marginRight: layout.containerMargin,
+    marginTop: layout.containerMargin,
+    marginBottom: layout.containerMargin,
+    borderRadius: layout.containerRadius,
+    borderCurve: 'continuous',
+    overflow: 'hidden',
+  },
+  cartContainerFallback: {
+    backgroundColor: 'rgba(118,118,128,0.12)',
   },
   rightColumn: {
     flex: 1,

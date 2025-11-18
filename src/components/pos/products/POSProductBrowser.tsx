@@ -15,6 +15,7 @@ import { View, Text, StyleSheet, ScrollView, Pressable, Animated } from 'react-n
 import * as Haptics from 'expo-haptics'
 import { supabase } from '@/lib/supabase/client'
 import { LiquidGlassView, isLiquidGlassSupported } from '@callstack/liquid-glass'
+import { layout } from '@/theme/layout'
 
 // POS Components
 import { POSSearchBar } from '../search/POSSearchBar'
@@ -463,8 +464,8 @@ const styles = StyleSheet.create({
   filterDropdownWrapper: {
     position: 'absolute',
     top: 72,
-    left: 16,
-    right: 16,
+    left: 0, // No left padding - spacing comes from cart's marginRight
+    right: layout.containerMargin,
     zIndex: 1000,
   },
   filterDropdownContainer: {
@@ -487,8 +488,8 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
   },
   filterScrollContent: {
-    paddingVertical: 16,
-    paddingHorizontal: 16,
+    paddingVertical: layout.cardPadding,
+    paddingHorizontal: layout.cardPadding,
   },
   filterSection: {
     marginBottom: 20,

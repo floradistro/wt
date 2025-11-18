@@ -2,6 +2,7 @@ import { View, Text, StyleSheet, TextInput, TouchableOpacity } from 'react-nativ
 import { memo, type ReactNode } from 'react'
 import { LiquidGlassView, isLiquidGlassSupported } from '@callstack/liquid-glass'
 import * as Haptics from 'expo-haptics'
+import { layout } from '@/theme/layout'
 
 interface POSSearchBarProps {
   searchQuery: string
@@ -118,9 +119,9 @@ export { POSSearchBarMemo as POSSearchBar }
 const styles = StyleSheet.create({
   searchHeaderFloating: {
     position: 'absolute',
-    top: 16,
-    left: 16,
-    right: 0,
+    top: layout.cardPadding,
+    left: 0, // No left padding - spacing comes from cart's marginRight
+    right: layout.containerMargin,
     zIndex: 10,
   },
   unifiedSearchBar: {

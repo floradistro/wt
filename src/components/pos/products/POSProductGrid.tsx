@@ -139,10 +139,10 @@ const styles = StyleSheet.create({
   productsGridWithHeader: {
     paddingTop: 80, // Space for floating search bar
     paddingBottom: layout.dockHeight,
-    paddingLeft: 16,
-    paddingRight: 0,
+    paddingLeft: 0, // No left padding - spacing comes from cart's marginRight
+    paddingRight: layout.containerMargin,
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 16,
+    gap: layout.cardPadding,
   },
 })
