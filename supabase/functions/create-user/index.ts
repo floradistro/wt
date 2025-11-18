@@ -68,39 +68,51 @@ serve(async (req) => {
       )
     }
 
-    // Check if auth user already exists (e.g., as a customer)
+    // Try to create auth user, or find existing one if email already registered
     let authUserId: string
+    let existingAuthUser = false
 
-    const { data: existingAuthUsers } = await supabaseAdmin.auth.admin.listUsers()
-    const existingAuthUser = existingAuthUsers?.users?.find(u => u.email === email)
+    // First, try to create a new auth user
+    const { data: authData, error: authCreateError } = await supabaseAdmin.auth.admin.createUser({
+      email,
+      email_confirm: true,
+      user_metadata: {
+        first_name,
+        last_name,
+      },
+    })
 
-    if (existingAuthUser) {
-      console.log('Auth user already exists, linking to staff record:', email)
-      authUserId = existingAuthUser.id
+    if (authCreateError) {
+      // Check if error is because user already exists
+      if (authCreateError.message.includes('already been registered') ||
+          authCreateError.message.includes('User already registered')) {
+        console.log('Auth user already exists, looking up and linking:', email)
 
-      // Update user metadata to include staff info
-      await supabaseAdmin.auth.admin.updateUserById(authUserId, {
-        user_metadata: {
-          ...existingAuthUser.user_metadata,
-          first_name,
-          last_name,
-        },
-      })
-    } else {
-      // Create new user in Supabase Auth
-      const { data: authData, error: authCreateError } = await supabaseAdmin.auth.admin.createUser({
-        email,
-        email_confirm: true,
-        user_metadata: {
-          first_name,
-          last_name,
-        },
-      })
+        // Find existing auth user by email
+        const { data: existingUsers } = await supabaseAdmin.auth.admin.listUsers()
+        const foundUser = existingUsers?.users?.find(u => u.email?.toLowerCase() === email.toLowerCase())
 
-      if (authCreateError) {
+        if (!foundUser) {
+          throw new Error('User email exists but could not be found in auth system')
+        }
+
+        authUserId = foundUser.id
+        existingAuthUser = true
+
+        // Update user metadata to include staff info
+        await supabaseAdmin.auth.admin.updateUserById(authUserId, {
+          user_metadata: {
+            ...foundUser.user_metadata,
+            first_name,
+            last_name,
+          },
+        })
+      } else {
+        // Some other auth error
         throw new Error('Failed to create auth user: ' + authCreateError.message)
       }
-
+    } else {
+      // Successfully created new auth user
       authUserId = authData.user.id
     }
 
