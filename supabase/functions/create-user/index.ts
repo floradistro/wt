@@ -86,27 +86,68 @@ serve(async (req) => {
       // Check if error is because user already exists
       if (authCreateError.message.includes('already been registered') ||
           authCreateError.message.includes('User already registered')) {
-        console.log('Auth user already exists, looking up and linking:', email)
+        console.log('Auth user already exists, looking up in customers table:', email)
 
-        // Find existing auth user by email
-        const { data: existingUsers } = await supabaseAdmin.auth.admin.listUsers()
-        const foundUser = existingUsers?.users?.find(u => u.email?.toLowerCase() === email.toLowerCase())
+        // Try to find auth_user_id from customers table (most likely place)
+        const { data: customerData } = await supabaseAdmin
+          .from('customers')
+          .select('auth_user_id')
+          .eq('email', email)
+          .single()
 
-        if (!foundUser) {
-          throw new Error('User email exists but could not be found in auth system')
+        if (customerData?.auth_user_id) {
+          authUserId = customerData.auth_user_id
+          existingAuthUser = true
+
+          console.log('Found existing customer auth_user_id:', authUserId)
+
+          // Update user metadata to include staff info
+          await supabaseAdmin.auth.admin.updateUserById(authUserId, {
+            user_metadata: {
+              first_name,
+              last_name,
+            },
+          })
+        } else {
+          // If not in customers, search through all auth users with pagination
+          console.log('Not found in customers, searching auth users...')
+
+          let page = 0
+          const perPage = 100
+          let foundUser = null
+
+          while (!foundUser && page < 20) { // Max 2000 users search
+            const { data: usersPage } = await supabaseAdmin.auth.admin.listUsers({
+              page,
+              perPage,
+            })
+
+            foundUser = usersPage?.users?.find(u => u.email?.toLowerCase() === email.toLowerCase())
+
+            if (!foundUser && (!usersPage?.users || usersPage.users.length < perPage)) {
+              // Reached end of users
+              break
+            }
+
+            page++
+          }
+
+          if (!foundUser) {
+            throw new Error('User email exists in auth but could not be found. Please contact support.')
+          }
+
+          authUserId = foundUser.id
+          existingAuthUser = true
+
+          // Update user metadata
+          await supabaseAdmin.auth.admin.updateUserById(authUserId, {
+            user_metadata: {
+              ...foundUser.user_metadata,
+              first_name,
+              last_name,
+            },
+          })
         }
-
-        authUserId = foundUser.id
-        existingAuthUser = true
-
-        // Update user metadata to include staff info
-        await supabaseAdmin.auth.admin.updateUserById(authUserId, {
-          user_metadata: {
-            ...foundUser.user_metadata,
-            first_name,
-            last_name,
-          },
-        })
       } else {
         // Some other auth error
         throw new Error('Failed to create auth user: ' + authCreateError.message)
