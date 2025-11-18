@@ -185,15 +185,39 @@ export function useUsers() {
         // Try to extract the actual error message from the function response
         let errorMsg = 'Failed to call Edge Function'
 
-        if (context) {
-          // Context might have the response body with error details
-          if (context.error) {
+        try {
+          // Context contains a Response object, try to extract body
+          if (context?._bodyInit) {
+            const bodyText = typeof context._bodyInit === 'string'
+              ? context._bodyInit
+              : JSON.stringify(context._bodyInit)
+
+            logger.error('Edge Function response body:', bodyText)
+
+            // Try to parse as JSON
+            try {
+              const errorData = JSON.parse(bodyText)
+              if (errorData.error) {
+                errorMsg = errorData.error
+                if (errorData.details) {
+                  errorMsg += ` (${errorData.details})`
+                }
+              } else if (errorData.message) {
+                errorMsg = errorData.message
+              }
+            } catch (parseErr) {
+              // Not JSON, use text as-is
+              if (bodyText.length < 200) {
+                errorMsg = bodyText
+              }
+            }
+          } else if (context?.error) {
             errorMsg = context.error
-          } else if (context.message) {
+          } else if (context?.message) {
             errorMsg = context.message
-          } else if (typeof context === 'string') {
-            errorMsg = context
           }
+        } catch (err) {
+          logger.error('Failed to extract error from context:', err)
         }
 
         logger.error('Extracted error message:', errorMsg)
