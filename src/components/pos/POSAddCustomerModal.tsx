@@ -28,6 +28,16 @@ import type { Customer } from '@/types/pos'
 import type { AAMVAData } from '@/lib/id-scanner/aamva-parser'
 import { POSModal } from './POSModal'
 import { logger } from '@/utils/logger'
+import {
+  normalizeName,
+  normalizeEmail,
+  normalizePhone,
+  normalizeCity,
+  normalizeState,
+  normalizePostalCode,
+  normalizeAddress,
+} from '@/utils/data-normalization'
+import { findPotentialDuplicates, type CustomerMatch } from '@/utils/customer-deduplication'
 
 const { width } = Dimensions.get('window')
 const isTablet = width > 600
@@ -42,13 +52,18 @@ interface POSAddCustomerModalProps {
 
 function POSAddCustomerModal({
   visible,
-  vendorId: _vendorId,
+  vendorId,
   prefilledData,
   onCustomerCreated,
   onClose,
 }: POSAddCustomerModalProps) {
   const [creating, setCreating] = useState(false)
+  const [checking, setChecking] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [duplicateWarning, setDuplicateWarning] = useState<{
+    matches: CustomerMatch[]
+    message: string
+  } | null>(null)
 
   // Form state
   const [firstName, setFirstName] = useState('')
@@ -145,32 +160,76 @@ function POSAddCustomerModal({
       return
     }
 
-    setCreating(true)
+    // Normalize all data first
+    const normalizedFirstName = normalizeName(firstName) || ''
+    const normalizedMiddleName = normalizeName(middleName)
+    const normalizedLastName = normalizeName(lastName) || ''
+    const normalizedPhone = normalizePhone(phone)
+    const normalizedEmail = normalizeEmail(email)
+
+    // CHECK FOR DUPLICATES FIRST
+    setChecking(true)
     setError(null)
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+    setDuplicateWarning(null)
 
     try {
-      const uniqueEmail = email.trim() ||
-        `${firstName.toLowerCase()}.${lastName.toLowerCase()}.${Date.now()}@walk-in.local`
+      const duplicates = await findPotentialDuplicates({
+        firstName: normalizedFirstName,
+        lastName: normalizedLastName,
+        phone: normalizedPhone || undefined,
+        email: normalizedEmail || undefined,
+        dateOfBirth: dobTrimmed || undefined,
+        vendorId,
+      })
 
-      // Insert directly into Supabase
-      const { data: newCustomer, error: insertError } = await supabase
+      // EXACT or HIGH confidence match - BLOCK creation
+      if (duplicates.length > 0 && (duplicates[0].confidence === 'exact' || duplicates[0].confidence === 'high')) {
+        setChecking(false)
+        setDuplicateWarning({
+          matches: duplicates,
+          message: `${duplicates[0].reason}. This customer already exists!`,
+        })
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
+        return
+      }
+
+      // MEDIUM confidence - show warning but allow creation
+      if (duplicates.length > 0 && duplicates[0].confidence === 'medium' && !duplicateWarning) {
+        setChecking(false)
+        setDuplicateWarning({
+          matches: duplicates,
+          message: `Warning: Found ${duplicates.length} similar customer(s). Click CREATE again to proceed anyway.`,
+        })
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning)
+        return
+      }
+
+      setChecking(false)
+      setCreating(true)
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+
+      const uniqueEmail = normalizedEmail ||
+        `${normalizedFirstName.toLowerCase()}.${normalizedLastName.toLowerCase()}.${Date.now()}@walk-in.local`
+
+      // Insert directly into Supabase with NORMALIZED data
+      const { data: newCustomer, error: insertError} = await supabase
         .from('customers')
         .insert({
-          first_name: firstName.trim(),
-          middle_name: middleName.trim() || null,
-          last_name: lastName.trim(),
+          first_name: normalizedFirstName,
+          middle_name: normalizedMiddleName,
+          last_name: normalizedLastName,
           email: uniqueEmail,
-          phone: phone.trim() || null,
+          phone: normalizedPhone,
           date_of_birth: dobTrimmed || null,
-          street_address: address.trim() || null,
-          city: city.trim() || null,
-          state: state.trim() || null,
-          postal_code: postalCode.trim() || null,
+          street_address: normalizeAddress(address),
+          city: normalizeCity(city),
+          state: normalizeState(state),
+          postal_code: normalizePostalCode(postalCode),
           loyalty_points: 0,
           total_spent: 0,
           total_orders: 0,
           is_active: true,
+          vendor_id: vendorId,
         })
         .select()
         .single()
@@ -421,6 +480,49 @@ function POSAddCustomerModal({
         </View>
       </View>
 
+      {/* Duplicate Warning */}
+      {duplicateWarning && (
+        <LiquidGlassView
+          effect="regular"
+          colorScheme="dark"
+          tintColor="rgba(245,158,11,0.1)"
+          style={[
+            styles.warningAlert,
+            !isLiquidGlassSupported && styles.warningAlertFallback,
+          ]}
+          accessible={true}
+          accessibilityRole="alert"
+          accessibilityLabel={`Warning: ${duplicateWarning.message}`}
+          accessibilityLiveRegion="assertive"
+        >
+          <Text style={styles.warningAlertTitle} accessible={false}>⚠️ DUPLICATE FOUND</Text>
+          <Text style={styles.warningAlertText}>{duplicateWarning.message}</Text>
+          {duplicateWarning.matches[0] && (
+            <View style={styles.duplicateCustomerCard}>
+              <Text style={styles.duplicateCustomerName}>
+                {duplicateWarning.matches[0].customer.first_name} {duplicateWarning.matches[0].customer.last_name}
+              </Text>
+              {duplicateWarning.matches[0].customer.phone && (
+                <Text style={styles.duplicateCustomerDetail}>📱 {duplicateWarning.matches[0].customer.phone}</Text>
+              )}
+              {duplicateWarning.matches[0].customer.email && !duplicateWarning.matches[0].customer.email.includes('@walk-in.local') && (
+                <Text style={styles.duplicateCustomerDetail}>✉️ {duplicateWarning.matches[0].customer.email}</Text>
+              )}
+              <TouchableOpacity
+                style={styles.useExistingButton}
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+                  onCustomerCreated(duplicateWarning.matches[0].customer)
+                }}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.useExistingButtonText}>USE THIS CUSTOMER</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </LiquidGlassView>
+      )}
+
       {/* Error Display */}
       {error && (
         <LiquidGlassView
@@ -480,14 +582,14 @@ function POSAddCustomerModal({
             style={styles.submitButtonInner}
             onPress={handleCreate}
             activeOpacity={0.7}
-            disabled={creating}
+            disabled={creating || checking}
             accessibilityRole="button"
-            accessibilityLabel={creating ? 'Creating customer' : 'Create customer'}
+            accessibilityLabel={creating ? 'Creating customer' : checking ? 'Checking for duplicates' : 'Create customer'}
             accessibilityHint="Save the new customer profile"
-            accessibilityState={{ disabled: creating, busy: creating }}
+            accessibilityState={{ disabled: creating || checking, busy: creating || checking }}
           >
             <Text style={styles.submitButtonText}>
-              {creating ? 'CREATING...' : 'CREATE CUSTOMER'}
+              {checking ? 'CHECKING...' : creating ? 'CREATING...' : 'CREATE CUSTOMER'}
             </Text>
           </TouchableOpacity>
         </LiquidGlassView>
@@ -498,6 +600,7 @@ function POSAddCustomerModal({
         visible={showDatePicker}
         transparent={true}
         animationType="slide"
+        supportedOrientations={['portrait', 'landscape', 'landscape-left', 'landscape-right']}
         onRequestClose={() => {
           setShowDatePicker(false)
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
@@ -675,9 +778,9 @@ const styles = StyleSheet.create({
   },
   datePlaceholder: {
     fontSize: 13,
-    fontWeight: '300',
+    fontWeight: '400',
     color: 'rgba(255,255,255,0.3)',
-    letterSpacing: 0.3,
+    letterSpacing: -0.1,
   },
   // Date Picker Modal Styles
   dateModalOverlay: {
@@ -710,7 +813,8 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     color: colors.text.secondary,
-    letterSpacing: 2,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
   },
   datePickerCloseButton: {
     width: 32,
@@ -721,9 +825,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   datePickerCloseText: {
-    fontSize: 18,
-    fontWeight: '300',
+    fontSize: 20,
+    fontWeight: '600',
     color: colors.text.secondary,
+    letterSpacing: -0.4,
   },
   datePickerWrapper: {
     marginVertical: spacing.lg,
@@ -751,7 +856,8 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     color: colors.text.primary,
-    letterSpacing: 2,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
   },
   helperText: {
     fontSize: 11,
@@ -777,14 +883,15 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
     color: colors.semantic.error,
-    letterSpacing: 1,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
     marginBottom: spacing.xs,
   },
   errorAlertText: {
     fontSize: 11,
-    fontWeight: '300',
+    fontWeight: '400',
     color: colors.text.tertiary,
-    letterSpacing: 0.3,
+    letterSpacing: -0.1,
   },
   actions: {
     flexDirection: 'row',
@@ -834,5 +941,68 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: colors.text.primary,
     letterSpacing: -0.2,
+  },
+  warningAlert: {
+    marginHorizontal: spacing.xl,
+    marginBottom: spacing.sm,
+    borderRadius: radius.lg,
+    borderCurve: 'continuous' as any,
+    padding: spacing.md,
+    overflow: 'hidden',
+    borderWidth: borderWidth.regular,
+    borderColor: 'rgba(245,158,11,0.5)',
+  },
+  warningAlertFallback: {
+    backgroundColor: 'rgba(245,158,11,0.1)',
+  },
+  warningAlertTitle: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: 'rgba(245,158,11,1)',
+    letterSpacing: 1,
+    marginBottom: spacing.xs,
+  },
+  warningAlertText: {
+    fontSize: 11,
+    fontWeight: '300',
+    color: colors.text.tertiary,
+    letterSpacing: 0.3,
+    marginBottom: spacing.sm,
+  },
+  duplicateCustomerCard: {
+    marginTop: spacing.sm,
+    padding: spacing.sm,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: radius.md,
+    borderWidth: borderWidth.thin,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  duplicateCustomerName: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.text.primary,
+    marginBottom: spacing.xs,
+  },
+  duplicateCustomerDetail: {
+    fontSize: 11,
+    fontWeight: '400',
+    color: colors.text.secondary,
+    marginBottom: spacing.xs / 2,
+  },
+  useExistingButton: {
+    marginTop: spacing.sm,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    backgroundColor: 'rgba(59,130,246,0.2)',
+    borderRadius: radius.md,
+    borderWidth: borderWidth.thin,
+    borderColor: 'rgba(59,130,246,0.5)',
+    alignItems: 'center',
+  },
+  useExistingButtonText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: 'rgba(96,165,250,1)',
+    letterSpacing: 0.6,
   },
 })

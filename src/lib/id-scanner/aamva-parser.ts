@@ -20,6 +20,13 @@
  */
 
 import { logger } from '@/utils/logger'
+import {
+  normalizeName,
+  normalizeCity,
+  normalizeState,
+  normalizePostalCode,
+  normalizeAddress,
+} from '@/utils/data-normalization'
 
 export interface AAMVAData {
   // Name fields
@@ -105,11 +112,16 @@ export function parseAAMVABarcode(barcodeData: string): AAMVAData {
     raw: barcodeData,
   };
 
-  // Parse name fields
-  result.fullName = getField(barcodeData, "DAA");
-  result.firstName = getField(barcodeData, "DAC") || getField(barcodeData, "DCT");
-  result.middleName = getField(barcodeData, "DAD");
-  result.lastName = getField(barcodeData, "DCS") || getField(barcodeData, "DDE");
+  // Parse name fields - NORMALIZED to title case for consistency
+  const fullNameRaw = getField(barcodeData, "DAA");
+  const firstNameRaw = getField(barcodeData, "DAC") || getField(barcodeData, "DCT");
+  const middleNameRaw = getField(barcodeData, "DAD");
+  const lastNameRaw = getField(barcodeData, "DCS") || getField(barcodeData, "DDE");
+
+  result.fullName = fullNameRaw ? normalizeName(fullNameRaw) || undefined : undefined;
+  result.firstName = firstNameRaw ? normalizeName(firstNameRaw) || undefined : undefined;
+  result.middleName = middleNameRaw ? normalizeName(middleNameRaw) || undefined : undefined;
+  result.lastName = lastNameRaw ? normalizeName(lastNameRaw) || undefined : undefined;
 
   // Parse date of birth
   const dobRaw = getField(barcodeData, "DBB");
@@ -120,11 +132,16 @@ export function parseAAMVABarcode(barcodeData: string): AAMVAData {
   // Parse license number
   result.licenseNumber = getField(barcodeData, "DAQ");
 
-  // Parse address
-  result.streetAddress = getField(barcodeData, "DAG");
-  result.city = getField(barcodeData, "DAI");
-  result.state = getField(barcodeData, "DAJ");
-  result.zipCode = getField(barcodeData, "DAK");
+  // Parse address - NORMALIZED for consistency
+  const streetAddressRaw = getField(barcodeData, "DAG");
+  const cityRaw = getField(barcodeData, "DAI");
+  const stateRaw = getField(barcodeData, "DAJ");
+  const zipCodeRaw = getField(barcodeData, "DAK");
+
+  result.streetAddress = streetAddressRaw ? normalizeAddress(streetAddressRaw) || undefined : undefined;
+  result.city = cityRaw ? normalizeCity(cityRaw) || undefined : undefined;
+  result.state = stateRaw ? normalizeState(stateRaw) || undefined : undefined;
+  result.zipCode = zipCodeRaw ? normalizePostalCode(zipCodeRaw) || undefined : undefined;
 
   // Parse physical characteristics
   result.height = getField(barcodeData, "DAU");

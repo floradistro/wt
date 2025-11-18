@@ -6,6 +6,7 @@
  */
 
 import { supabase } from '@/lib/supabase/client'
+import { normalizePhone, normalizeEmail } from '@/utils/data-normalization'
 
 export interface Customer {
   id: string
@@ -33,25 +34,32 @@ export interface CustomerWithOrders extends Customer {
 
 /**
  * Get all customers
+ * Smart search across ALL fields with NO LIMITS
+ * Searches: first_name, last_name, middle_name, display_name, email, phone
  */
 export async function getCustomers(params?: {
   limit?: number
   searchTerm?: string
+  vendorId?: string
 }): Promise<Customer[]> {
   let query = supabase
     .from('customers')
     .select('*')
     .order('created_at', { ascending: false })
 
+  if (params?.vendorId) {
+    query = query.eq('vendor_id', params.vendorId)
+  }
+
   if (params?.searchTerm) {
+    const term = params.searchTerm.trim()
     query = query.or(
-      `email.ilike.%${params.searchTerm}%,phone.ilike.%${params.searchTerm}%,first_name.ilike.%${params.searchTerm}%,last_name.ilike.%${params.searchTerm}%`
+      `first_name.ilike.%${term}%,last_name.ilike.%${term}%,middle_name.ilike.%${term}%,display_name.ilike.%${term}%,email.ilike.%${term}%,phone.ilike.%${term}%`
     )
   }
 
-  if (params?.limit) {
-    query = query.limit(params.limit)
-  }
+  // Override Supabase default limit (1000) to get ALL customers from vendor
+  query = query.limit(100000)
 
   const { data, error } = await query
 
@@ -82,15 +90,21 @@ export async function getCustomerById(customerId: string): Promise<Customer> {
 /**
  * Get customer by phone number (for POS lookup)
  */
-export async function getCustomerByPhone(phone: string): Promise<Customer | null> {
-  // Normalize phone number (remove spaces, dashes, parentheses)
-  const normalizedPhone = phone.replace(/[\s\-\(\)]/g, '')
+export async function getCustomerByPhone(phone: string, vendorId?: string): Promise<Customer | null> {
+  // Normalize phone number using centralized utility
+  const normalized = normalizePhone(phone)
+  if (!normalized) return null
 
-  const { data, error } = await supabase
+  let query = supabase
     .from('customers')
     .select('*')
-    .eq('phone', normalizedPhone)
-    .single()
+    .eq('phone', normalized)
+
+  if (vendorId) {
+    query = query.eq('vendor_id', vendorId)
+  }
+
+  const { data, error } = await query.single()
 
   if (error) {
     if (error.code === 'PGRST116') {
@@ -106,12 +120,17 @@ export async function getCustomerByPhone(phone: string): Promise<Customer | null
 /**
  * Get customer by email
  */
-export async function getCustomerByEmail(email: string): Promise<Customer | null> {
-  const { data, error } = await supabase
+export async function getCustomerByEmail(email: string, vendorId?: string): Promise<Customer | null> {
+  let query = supabase
     .from('customers')
     .select('*')
     .eq('email', email.toLowerCase())
-    .single()
+
+  if (vendorId) {
+    query = query.eq('vendor_id', vendorId)
+  }
+
+  const { data, error } = await query.single()
 
   if (error) {
     if (error.code === 'PGRST116') {
@@ -125,16 +144,44 @@ export async function getCustomerByEmail(email: string): Promise<Customer | null
 
 /**
  * Search customers (for POS)
+ * Smart search across ALL fields with NO LIMITS
+ * Searches: first_name, last_name, middle_name, display_name, email, phone
+ * Phone numbers are normalized (formatting removed) for better matching
  */
-export async function searchCustomers(searchTerm: string, limit = 20): Promise<Customer[]> {
-  const { data, error } = await supabase
+export async function searchCustomers(
+  searchTerm: string,
+  _limit?: number,
+  vendorId?: string
+): Promise<Customer[]> {
+  const term = searchTerm.trim()
+
+  // Normalize phone numbers using centralized utility
+  const normalizedPhone = normalizePhone(term) || term
+  const isPhoneSearch = /^\d+$/.test(normalizedPhone) && normalizedPhone.length >= 3
+
+  let searchConditions = `first_name.ilike.%${term}%,last_name.ilike.%${term}%,middle_name.ilike.%${term}%,display_name.ilike.%${term}%,email.ilike.%${term}%`
+
+  // Add phone search with normalized number for better matching
+  if (isPhoneSearch) {
+    searchConditions += `,phone.ilike.%${normalizedPhone}%`
+  } else {
+    searchConditions += `,phone.ilike.%${term}%`
+  }
+
+  let query = supabase
     .from('customers')
     .select('*')
-    .or(
-      `email.ilike.%${searchTerm}%,phone.ilike.%${searchTerm}%,first_name.ilike.%${searchTerm}%,last_name.ilike.%${searchTerm}%`
-    )
+
+  if (vendorId) {
+    query = query.eq('vendor_id', vendorId)
+  }
+
+  query = query
+    .or(searchConditions)
     .order('created_at', { ascending: false })
-    .limit(limit)
+    .limit(100000) // Very high limit to ensure we get ALL customers (Supabase default is only 1000)
+
+  const { data, error } = await query
 
   if (error) {
     throw new Error(`Failed to search customers: ${error.message}`)
@@ -162,11 +209,12 @@ export async function createCustomer(params: {
   }
 
   if (params.email) {
-    customerData.email = params.email.toLowerCase()
+    customerData.email = normalizeEmail(params.email) || undefined
   }
 
   if (params.phone) {
-    customerData.phone = params.phone.replace(/[\s\-\(\)]/g, '')
+    // Normalize phone using centralized utility
+    customerData.phone = normalizePhone(params.phone) || undefined
   }
 
   // Generate full_name if not provided
