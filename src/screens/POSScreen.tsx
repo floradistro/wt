@@ -149,12 +149,12 @@ function POSScreenComponent() {
       <Animated.View style={[styles.mainLayout, { opacity: fadeAnim }]}>
         {/* Left Column - Checkout (same container as NavSidebar) */}
         <View style={styles.leftColumn}>
-          <LiquidGlassView
-            effect="regular"
-            colorScheme="dark"
-            style={[styles.cartContainer, !isLiquidGlassSupported && styles.cartContainerFallback]}
-          >
-            {vendor && customUserId && (
+          {vendor && customUserId && (
+            <LiquidGlassView
+              effect="regular"
+              colorScheme="dark"
+              style={[styles.cartContainer, !isLiquidGlassSupported && styles.cartContainerFallback]}
+            >
               <POSCheckout
                 sessionInfo={sessionInfo}
                 vendor={vendor}
@@ -166,8 +166,8 @@ function POSScreenComponent() {
                   // Optional: Reload products after checkout
                 }}
               />
-            )}
-          </LiquidGlassView>
+            </LiquidGlassView>
+          )}
         </View>
 
         {/* Right Column - Products */}
