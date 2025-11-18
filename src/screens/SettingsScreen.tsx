@@ -1092,9 +1092,16 @@ function UserManagementDetail({
     return roleMap[role] || role
   }
 
-  const getRoleBadgeColor = (): string => {
-    // Professional monochrome - no colors
-    return colors.text.quaternary
+  const getRoleBadgeColor = (role: string): string => {
+    const roleColors: Record<string, string> = {
+      vendor_owner: '#FF3B30',    // Red for Owner
+      vendor_admin: '#FF3B30',    // Red for Admin
+      location_manager: '#FF9500', // Orange for Location Manager
+      pos_staff: '#34C759',       // Green for POS Staff
+      inventory_staff: '#007AFF',  // Blue for Inventory
+      readonly: colors.text.quaternary, // Gray for Read Only
+    }
+    return roleColors[role] || colors.text.quaternary
   }
 
   const handleAddUser = () => {
@@ -1318,7 +1325,7 @@ function UserManagementDetail({
 
         {/* User Cards */}
         {users.map((user) => {
-          const roleBadgeColor = getRoleBadgeColor()
+          const roleBadgeColor = getRoleBadgeColor(user.role)
 
           return (
             <LiquidGlassContainerView key={user.id} spacing={12} style={styles.cardWrapper}>
