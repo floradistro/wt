@@ -132,7 +132,7 @@ export function useUsers() {
     }
   }
 
-  async function createUser(userData: {
+  async function createUser(_userData: {
     email: string
     first_name: string
     last_name: string
@@ -140,6 +140,16 @@ export function useUsers() {
     role: string
     employee_id?: string
   }): Promise<{ success: boolean; error?: string; user?: User }> {
+    // NOTE: User creation requires Supabase Admin API which can only be called from backend
+    // This needs to be implemented as a Supabase Edge Function or backend API endpoint
+    // For now, returning an error to prevent 403 console errors
+
+    return {
+      success: false,
+      error: 'User creation requires backend implementation. Please create a Supabase Edge Function with service role key.',
+    }
+
+    /* TODO: Implement as Edge Function
     try {
       // Get current user's vendor_id
       const { data: currentUser, error: userError } = await supabase
@@ -150,7 +160,7 @@ export function useUsers() {
 
       if (userError) throw userError
 
-      // Create user in auth (Supabase Auth)
+      // Create user in auth (Supabase Auth) - REQUIRES SERVICE ROLE KEY
       const { data: authData, error: authError } = await supabase.auth.admin.createUser({
         email: userData.email,
         email_confirm: true,
@@ -190,6 +200,7 @@ export function useUsers() {
         error: err instanceof Error ? err.message : 'Failed to create user',
       }
     }
+    */
   }
 
   async function updateUser(
