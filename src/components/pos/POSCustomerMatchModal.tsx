@@ -356,31 +356,32 @@ const styles = StyleSheet.create({
     color: '#10b981',
   },
   exactMatchTitle: {
-    fontSize: 10,
+    fontSize: 9,
     fontWeight: '600',
     color: '#10b981',
-    letterSpacing: 2,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
   },
   customerName: {
-    fontSize: 24,
-    fontWeight: '200',
+    fontSize: 22,
+    fontWeight: '700',
     color: '#fff',
-    letterSpacing: -0.5,
+    letterSpacing: -0.4,
     marginBottom: spacing.xs,
     textAlign: 'center',
   },
   loyaltyPoints: {
     fontSize: 13,
-    fontWeight: '300',
+    fontWeight: '400',
     color: 'rgba(16,185,129,0.9)',
-    letterSpacing: 0.3,
+    letterSpacing: -0.1,
     marginBottom: spacing.md,
   },
   matchReason: {
     fontSize: 11,
-    fontWeight: '300',
+    fontWeight: '400',
     color: 'rgba(255,255,255,0.6)',
-    letterSpacing: 0.3,
+    letterSpacing: -0.1,
     textAlign: 'center',
     marginTop: spacing.sm,
   },
@@ -401,10 +402,11 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
   },
   cancelAutoSelectText: {
-    fontSize: 10,
-    fontWeight: '500',
+    fontSize: 9,
+    fontWeight: '600',
     color: 'rgba(255,255,255,0.5)',
-    letterSpacing: 2,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
   },
 
   // Matches List
@@ -431,10 +433,10 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   matchCardName: {
-    fontSize: 16,
-    fontWeight: '300',
+    fontSize: 17,
+    fontWeight: '400',
     color: '#fff',
-    letterSpacing: -0.3,
+    letterSpacing: -0.4,
     flex: 1,
   },
   confidenceBadge: {
@@ -453,7 +455,8 @@ const styles = StyleSheet.create({
     fontSize: 9,
     fontWeight: '600',
     color: '#fff',
-    letterSpacing: 1,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
   },
   matchCardDetails: {
     gap: spacing.xxs,
@@ -461,9 +464,9 @@ const styles = StyleSheet.create({
   },
   matchCardDetail: {
     fontSize: 11,
-    fontWeight: '300',
+    fontWeight: '400',
     color: 'rgba(255,255,255,0.7)',
-    letterSpacing: 0.3,
+    letterSpacing: -0.1,
   },
 
   // Actions
@@ -489,8 +492,9 @@ const styles = StyleSheet.create({
   },
   actionButtonText: {
     fontSize: 12,
-    fontWeight: '500',
+    fontWeight: '600',
     color: '#fff',
-    letterSpacing: 2,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
   },
 })

@@ -24,7 +24,7 @@ interface POSUnifiedCustomerSelectorProps {
 
 function POSUnifiedCustomerSelector({
   visible,
-  vendorId: _vendorId,
+  vendorId,
   onCustomerSelected,
   onNoMatchFoundWithData,
   onAddCustomer,
@@ -257,14 +257,15 @@ function POSUnifiedCustomerSelector({
 
   const lookupCustomer = async (scannedData: AAMVAData) => {
     try {
-      // Quick exact match lookup using Supabase
+      // Quick exact match lookup using Supabase - filter by vendor
       if (scannedData.firstName && scannedData.lastName) {
         const { data: customers } = await supabase
           .from('customers')
           .select('*')
+          .eq('vendor_id', vendorId)
           .ilike('first_name', scannedData.firstName)
           .ilike('last_name', scannedData.lastName)
-          .limit(5)
+          .limit(100000) // Search ALL customers for exact match
 
         const exactMatch = customers?.find((c: any) =>
           c.first_name?.toUpperCase() === scannedData.firstName?.toUpperCase() &&
@@ -359,13 +360,30 @@ function POSUnifiedCustomerSelector({
 
     setSearching(true)
     try {
-      // Search customers directly in Supabase
+      // Smart search - Search ALL customers from this vendor across ALL fields, NO LIMITS
+      // Searches: first_name, last_name, email, phone, display_name, middle_name
+      const searchTerm = query.trim()
+
+      // Normalize phone numbers - remove formatting characters for phone search
+      const normalizedPhone = searchTerm.replace(/[\s\-\(\)\.]/g, '')
+      const isPhoneSearch = /^\d+$/.test(normalizedPhone) && normalizedPhone.length >= 3
+
+      let searchConditions = `first_name.ilike.%${searchTerm}%,last_name.ilike.%${searchTerm}%,middle_name.ilike.%${searchTerm}%,display_name.ilike.%${searchTerm}%,email.ilike.%${searchTerm}%`
+
+      // Add phone search with normalized number for better matching
+      if (isPhoneSearch) {
+        searchConditions += `,phone.ilike.%${normalizedPhone}%`
+      } else {
+        searchConditions += `,phone.ilike.%${searchTerm}%`
+      }
+
       const { data: results } = await supabase
         .from('customers')
         .select('*')
-        .or(`first_name.ilike.%${query}%,last_name.ilike.%${query}%,email.ilike.%${query}%,phone.ilike.%${query}%`)
+        .eq('vendor_id', vendorId)
+        .or(searchConditions)
         .order('created_at', { ascending: false })
-        .limit(50)
+        .limit(100000) // Very high limit to ensure we get ALL customers (Supabase default is only 1000)
 
       setCustomers(results || [])
     } catch (error) {
@@ -561,14 +579,15 @@ function POSUnifiedCustomerSelector({
             <TextInput
               ref={searchInputRef}
               style={styles.searchInput}
-              placeholder="Search by name"
+              placeholder="Search name, email, or phone"
               placeholderTextColor="rgba(255,255,255,0.4)"
               value={searchQuery}
               onChangeText={handleSearch}
-              autoCapitalize="words"
+              autoCapitalize="none"
               autoCorrect={false}
               returnKeyType="search"
               autoFocus={false}
+              keyboardType="default"
               accessible={true}
               accessibilityLabel="Search customers"
               accessibilityHint="Type to search customers by name, email, or phone"
@@ -769,7 +788,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '500',
     color: '#fff',
-    letterSpacing: 2,
+    letterSpacing: 0.5,
   },
 
   // Scan Message
@@ -883,7 +902,7 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '500',
     color: 'rgba(255,255,255,0.5)',
-    letterSpacing: 1,
+    letterSpacing: 0.5,
     marginTop: 2,
     textTransform: 'uppercase',
     minHeight: 14, // Prevent layout shift
@@ -912,7 +931,7 @@ const styles = StyleSheet.create({
   customerName: {
     flex: 1,
     fontSize: 17,
-    fontWeight: '500',
+    fontWeight: '400',
     color: '#fff',
     letterSpacing: -0.4,
   },
@@ -932,6 +951,6 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '400',
     color: 'rgba(255,255,255,0.4)',
-    letterSpacing: -0.3,
+    letterSpacing: -0.2,
   },
 })

@@ -56,7 +56,13 @@ export function ErrorModal({
   }
 
   return (
-    <Modal visible={visible} transparent animationType="fade" statusBarTranslucent>
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      statusBarTranslucent
+      supportedOrientations={['portrait', 'landscape']}
+    >
       <View style={styles.overlay}>
         <Pressable style={StyleSheet.absoluteFill} onPress={handlePrimaryPress} />
 
@@ -147,7 +153,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     paddingHorizontal: spacing.xl,
     marginBottom: spacing.sm,
-    letterSpacing: -0.3,
+    letterSpacing: -0.4,
   },
   message: {
     fontSize: 15,
@@ -156,7 +162,8 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     paddingHorizontal: spacing.xl,
     marginBottom: spacing.xl,
-    lineHeight: 21,
+    lineHeight: 20,
+    letterSpacing: -0.2,
   },
   buttonContainer: {
     flexDirection: 'row',
@@ -178,7 +185,7 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontWeight: '600',
     color: '#fff',
-    letterSpacing: -0.3,
+    letterSpacing: -0.4,
   },
   secondaryButton: {
     flex: 1,
@@ -194,6 +201,6 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontWeight: '600',
     color: 'rgba(235,235,245,0.9)',
-    letterSpacing: -0.3,
+    letterSpacing: -0.4,
   },
 })

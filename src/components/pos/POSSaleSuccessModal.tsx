@@ -358,12 +358,13 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(52,199,89,0.15)',
   },
   title: {
-    fontSize: 24,
+    fontSize: 22,
     fontWeight: '700',
     color: '#FFFFFF',
     textAlign: 'center',
     marginBottom: 20,
-    letterSpacing: 1.2,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
   },
   orderNumberContainer: {
     paddingVertical: 16,
@@ -383,13 +384,14 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#34C759',
     marginBottom: 4,
-    letterSpacing: 1,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
   },
   orderNumber: {
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: '700',
     color: '#FFFFFF',
-    letterSpacing: 0.5,
+    letterSpacing: -0.4,
   },
   totalContainer: {
     alignItems: 'center',
@@ -399,11 +401,12 @@ const styles = StyleSheet.create({
     borderBottomColor: 'rgba(255,255,255,0.1)',
   },
   totalLabel: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
     color: 'rgba(255,255,255,0.6)',
     marginBottom: 6,
-    letterSpacing: 1,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
   },
   totalAmount: {
     fontSize: 42,
@@ -451,7 +454,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
     color: '#FFFFFF',
-    letterSpacing: 0.2,
+    letterSpacing: -0.2,
   },
   closeButton: {
     paddingVertical: 16,
@@ -465,11 +468,12 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(52,199,89,0.2)',
   },
   closeButtonText: {
-    fontSize: 16,
-    fontWeight: '700',
+    fontSize: 15,
+    fontWeight: '600',
     color: '#34C759',
     textAlign: 'center',
-    letterSpacing: 1.5,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
   },
 })
 

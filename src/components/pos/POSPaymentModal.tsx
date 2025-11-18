@@ -4,7 +4,7 @@
  * Apple Standard: Component < 300 lines
  */
 
-import { View, Text, StyleSheet, Modal, TouchableOpacity, Animated, Dimensions, ScrollView } from 'react-native'
+import { View, Text, StyleSheet, Modal, TouchableOpacity, Animated, useWindowDimensions, ScrollView } from 'react-native'
 import { LiquidGlassView } from '@callstack/liquid-glass'
 import { useState, useRef, useEffect, memo } from 'react'
 import { Ionicons } from '@expo/vector-icons'
@@ -14,8 +14,6 @@ import { CashPaymentView } from './payment/CashPaymentView'
 import { CardPaymentView } from './payment/CardPaymentView'
 import { SplitPaymentView } from './payment/SplitPaymentView'
 import type { PaymentModalProps, PaymentData } from './payment/PaymentTypes'
-
-const { height: SCREEN_HEIGHT } = Dimensions.get('window')
 
 function POSPaymentModal({
   visible,
@@ -31,7 +29,11 @@ function POSPaymentModal({
   registerId,
 }: PaymentModalProps) {
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card' | 'split'>('cash')
-  const slideAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current
+  const { width, height } = useWindowDimensions()
+  const isLandscape = width > height
+
+  // Use current height for animations
+  const slideAnim = useRef(new Animated.Value(height)).current
   const fadeAnim = useRef(new Animated.Value(0)).current
 
   const currentProcessor = usePaymentProcessor((state) => state.currentProcessor)
@@ -40,7 +42,7 @@ function POSPaymentModal({
   const hasActiveProcessor = !!currentProcessor
   const canCompleteCard = hasActiveProcessor
 
-  // Animation
+  // Animation - update when visibility or dimensions change
   useEffect(() => {
     if (visible) {
       Animated.parallel([
@@ -57,11 +59,11 @@ function POSPaymentModal({
         }),
       ]).start()
     } else {
-      slideAnim.setValue(SCREEN_HEIGHT)
+      slideAnim.setValue(height)
       fadeAnim.setValue(0)
       setPaymentMethod('cash')
     }
-  }, [visible])
+  }, [visible, height])
 
   const handleClose = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
@@ -110,6 +112,7 @@ function POSPaymentModal({
       <Animated.View
         style={[
           styles.container,
+          isLandscape ? styles.containerLandscape : styles.containerPortrait,
           {
             transform: [{ translateY: slideAnim }],
           },
@@ -119,11 +122,16 @@ function POSPaymentModal({
         <LiquidGlassView
           effect="regular"
           colorScheme="dark"
-          style={styles.modalCard}
+          style={[
+            styles.modalCard,
+            isLandscape ? styles.modalCardLandscape : styles.modalCardPortrait
+          ]}
           accessible={false}
         >
-          {/* Handle */}
-          <View style={styles.handle} accessibilityElementsHidden={true} importantForAccessibility="no" />
+          {/* Handle - only show in portrait */}
+          {!isLandscape && (
+            <View style={styles.handle} accessibilityElementsHidden={true} importantForAccessibility="no" />
+          )}
 
           {/* Header */}
           <View style={styles.header} accessible={false}>
@@ -205,7 +213,7 @@ function POSPaymentModal({
           </View>
 
           <ScrollView
-            style={styles.content}
+            style={[styles.content, { maxHeight: height * (isLandscape ? 0.6 : 0.75) }]}
             showsVerticalScrollIndicator={true}
             indicatorStyle="white"
             scrollIndicatorInsets={{ right: 2 }}
@@ -310,19 +318,33 @@ const styles = StyleSheet.create({
   },
   container: {
     position: 'absolute',
+  },
+  containerPortrait: {
     bottom: 0,
     left: 0,
     right: 0,
     top: '15%',
   },
+  containerLandscape: {
+    // Centered modal in landscape
+    top: '10%',
+    bottom: '10%',
+    left: '15%',
+    right: '15%',
+  },
   modalCard: {
     flex: 1,
-    borderTopLeftRadius: 32,
-    borderTopRightRadius: 32,
+    overflow: 'hidden',
     paddingTop: 12,
     paddingHorizontal: 24,
     paddingBottom: 24,
-    overflow: 'hidden',
+  },
+  modalCardPortrait: {
+    borderTopLeftRadius: 32,
+    borderTopRightRadius: 32,
+  },
+  modalCardLandscape: {
+    borderRadius: 24,
   },
   handle: {
     width: 40,
@@ -337,17 +359,19 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   title: {
-    fontSize: 11,
+    fontSize: 13,
     fontWeight: '600',
     color: 'rgba(255,255,255,0.5)',
-    letterSpacing: 1.5,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
     marginBottom: 8,
   },
   totalLabel: {
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: '600',
     color: 'rgba(255,255,255,0.4)',
-    letterSpacing: 1,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
     marginBottom: 2,
   },
   totalAmount: {
@@ -388,7 +412,7 @@ const styles = StyleSheet.create({
     color: '#10b981',
   },
   content: {
-    maxHeight: SCREEN_HEIGHT * 0.75,
+    // maxHeight is applied inline based on orientation
   },
   summary: {
     gap: 8,
@@ -404,13 +428,15 @@ const styles = StyleSheet.create({
   },
   summaryLabel: {
     fontSize: 12,
-    fontWeight: '500',
+    fontWeight: '400',
     color: 'rgba(255,255,255,0.5)',
+    letterSpacing: 0,
   },
   summaryValue: {
     fontSize: 12,
     fontWeight: '600',
     color: '#fff',
+    letterSpacing: 0,
   },
   actions: {
     flexDirection: 'row',
@@ -426,10 +452,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   cancelButtonText: {
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: '600',
     color: 'rgba(255,255,255,0.9)',
-    letterSpacing: 0.3,
+    letterSpacing: -0.4,
   },
 })
 

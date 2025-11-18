@@ -197,7 +197,7 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: '700',
     color: 'rgba(255,255,255,0.95)',
-    letterSpacing: -0.5,
+    letterSpacing: -0.4,
     marginBottom: 24,
     paddingHorizontal: 4,
   },
@@ -231,10 +231,10 @@ const styles = StyleSheet.create({
     fontSize: 32,
   },
   actionTitlePrimary: {
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: '600',
     color: 'rgba(255,255,255,0.98)',
-    letterSpacing: -0.3,
+    letterSpacing: -0.4,
   },
   // Secondary/Tertiary Action Pills
   actionPill: {
@@ -266,20 +266,20 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   actionTitle: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '600',
     color: 'rgba(255,255,255,0.95)',
-    letterSpacing: -0.2,
+    letterSpacing: -0.4,
   },
   actionSubtitle: {
     fontSize: 13,
     fontWeight: '400',
     color: 'rgba(255,255,255,0.5)',
-    letterSpacing: -0.1,
+    letterSpacing: 0,
   },
   actionChevron: {
     fontSize: 24,
-    fontWeight: '300',
+    fontWeight: '400',
     color: 'rgba(255,255,255,0.4)',
   },
   // Cancel Button
@@ -306,6 +306,6 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontWeight: '600',
     color: 'rgba(255,255,255,0.8)',
-    letterSpacing: -0.2,
+    letterSpacing: -0.4,
   },
 })

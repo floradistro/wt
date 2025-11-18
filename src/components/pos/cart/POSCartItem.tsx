@@ -300,9 +300,9 @@ const styles = StyleSheet.create({
   },
   cartItemName: {
     fontSize: 15,
-    fontWeight: '500',
+    fontWeight: '600',
     color: '#fff',
-    letterSpacing: -0.3,
+    letterSpacing: -0.2,
     flex: 1,
   },
   tierBadge: {
@@ -315,10 +315,11 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   tierBadgeText: {
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: '600',
     color: 'rgba(255,255,255,0.8)',
-    letterSpacing: 0.3,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
   },
   tierBadgeChevron: {
     fontSize: 14,
@@ -339,8 +340,9 @@ const styles = StyleSheet.create({
   },
   cartItemPrice: {
     fontSize: 13,
-    fontWeight: '500',
+    fontWeight: '600',
     color: 'rgba(255,255,255,0.8)',
+    letterSpacing: -0.1,
   },
   cartItemDiscountedPrice: {
     color: '#10b981',
@@ -365,10 +367,11 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
   },
   discountAppliedText: {
-    fontSize: 10,
-    fontWeight: '500',
+    fontSize: 11,
+    fontWeight: '600',
     color: '#10b981',
-    letterSpacing: 0.3,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
   },
   discountRemoveIcon: {
     fontSize: 14,
@@ -381,10 +384,10 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   addDiscountLinkText: {
-    fontSize: 11,
-    fontWeight: '500',
+    fontSize: 13,
+    fontWeight: '400',
     color: 'rgba(255,255,255,0.5)',
-    letterSpacing: 0.2,
+    letterSpacing: -0.1,
   },
   // iOS 26 Quantity Controls - Circular buttons
   cartItemControls: {
@@ -402,9 +405,10 @@ const styles = StyleSheet.create({
     borderWidth: 0,
   },
   cartButtonText: {
-    fontSize: 18,
-    fontWeight: '400',
+    fontSize: 20,
+    fontWeight: '600',
     color: 'rgba(255,255,255,0.95)',
+    letterSpacing: -0.3,
     marginTop: -1,
   },
   cartItemQuantity: {
@@ -424,9 +428,10 @@ const styles = StyleSheet.create({
     borderWidth: 0,
   },
   cartRemoveButtonText: {
-    fontSize: 18,
-    fontWeight: '300',
+    fontSize: 20,
+    fontWeight: '400',
     color: 'rgba(255,60,60,0.95)',
+    letterSpacing: -0.3,
     marginTop: -1,
   },
   cartItemTotal: {
@@ -475,8 +480,9 @@ const styles = StyleSheet.create({
     height: 36,
     paddingHorizontal: 14,
     fontSize: 15,
-    fontWeight: '500',
+    fontWeight: '600',
     color: '#fff',
+    letterSpacing: -0.2,
     backgroundColor: 'rgba(255,255,255,0.08)',
     borderWidth: 0,
     borderRadius: 18,
@@ -495,9 +501,10 @@ const styles = StyleSheet.create({
     opacity: 0.4,
   },
   discountApplyBtnText: {
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: '600',
     color: '#10b981',
+    letterSpacing: -0.4,
   },
   discountCancelBtn: {
     width: 36,

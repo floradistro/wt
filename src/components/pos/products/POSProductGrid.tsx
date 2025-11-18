@@ -113,9 +113,9 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     fontSize: 12,
-    fontWeight: '300',
+    fontWeight: '400',
     color: 'rgba(255,255,255,0.5)',
-    letterSpacing: 1,
+    letterSpacing: 0,
   },
   emptyProductsContainer: {
     flex: 1,
@@ -124,13 +124,13 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   emptyProductsText: {
-    fontSize: 14,
-    fontWeight: '300',
+    fontSize: 15,
+    fontWeight: '400',
     color: 'rgba(255,255,255,0.5)',
   },
   emptyProductsSubtext: {
     fontSize: 12,
-    fontWeight: '300',
+    fontWeight: '400',
     color: 'rgba(255,255,255,0.3)',
   },
   productsScrollBehind: {

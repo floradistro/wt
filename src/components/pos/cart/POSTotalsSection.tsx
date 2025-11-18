@@ -216,12 +216,13 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '400',
     color: 'rgba(255,255,255,0.6)',
-    letterSpacing: 0.2,
+    letterSpacing: -0.1,
   },
   totalValue: {
     fontSize: 15,
-    fontWeight: '500',
+    fontWeight: '600',
     color: 'rgba(255,255,255,0.9)',
+    letterSpacing: -0.2,
   },
   loyaltyLabel: {
     color: 'rgba(255,255,255,0.7)',
@@ -240,13 +241,13 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
     color: 'rgba(255,255,255,0.7)',
-    letterSpacing: 1.5,
+    letterSpacing: 0.6,
   },
   finalTotalValue: {
-    fontSize: 24,
-    fontWeight: '600',
+    fontSize: 22,
+    fontWeight: '700',
     color: '#fff',
-    letterSpacing: -0.5,
+    letterSpacing: -0.4,
   },
   // Checkout Button Container
   checkoutButtonContainer: {
@@ -272,13 +273,14 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
     color: 'rgba(255,255,255,0.8)',
-    letterSpacing: 0.5,
+    letterSpacing: 0.6,
     textTransform: 'uppercase',
   },
   loyaltyRedemptionAvailable: {
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: '400',
     color: 'rgba(255,255,255,0.5)',
+    letterSpacing: 0.6,
   },
   loyaltyRedemptionActive: {
     flexDirection: 'row',
@@ -292,14 +294,16 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.1)',
   },
   loyaltyRedemptionActiveText: {
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: '400',
     color: 'rgba(255,255,255,0.6)',
+    letterSpacing: 0.6,
   },
   loyaltyRedemptionActiveValue: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
     color: '#fff',
+    letterSpacing: -0.1,
   },
   loyaltySlider: {
     width: '100%',

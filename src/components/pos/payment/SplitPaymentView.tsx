@@ -356,10 +356,11 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   sectionLabel: {
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: '600',
     color: 'rgba(255,255,255,0.5)',
-    letterSpacing: 1,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
     marginBottom: 12,
   },
   splitSection: {
@@ -376,7 +377,8 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
     color: 'rgba(255,255,255,0.6)',
-    letterSpacing: 1.5,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
   },
   fillButton: {
     paddingHorizontal: 12,
@@ -387,18 +389,19 @@ const styles = StyleSheet.create({
     borderColor: '#10b981',
   },
   fillButtonText: {
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: '700',
     color: '#10b981',
-    letterSpacing: 1,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
   },
   inputCard: {
     borderRadius: 14,
     padding: 12,
   },
   splitInput: {
-    fontSize: 24,
-    fontWeight: '300',
+    fontSize: 22,
+    fontWeight: '400',
     color: '#fff',
     textAlign: 'center',
     padding: 0,
@@ -413,7 +416,8 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
     color: '#10b981',
-    letterSpacing: 1.5,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
     marginBottom: 8,
   },
   splitTotalLabelError: {
@@ -423,15 +427,16 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: '700',
     color: '#10b981',
-    letterSpacing: -1,
+    letterSpacing: -0.4,
   },
   splitTotalAmountError: {
     color: '#ef4444',
   },
   splitTotalError: {
-    fontSize: 12,
-    fontWeight: '500',
+    fontSize: 13,
+    fontWeight: '400',
     color: 'rgba(239,68,68,0.8)',
+    letterSpacing: 0,
     marginTop: 8,
   },
   completeButtonWrapper: {
@@ -447,10 +452,10 @@ const styles = StyleSheet.create({
     opacity: 0.3,
   },
   completeButtonText: {
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: '600',
     color: 'rgba(255,255,255,0.5)',
-    letterSpacing: 0.3,
+    letterSpacing: -0.2,
   },
   completeButtonTextActive: {
     color: '#10b981',

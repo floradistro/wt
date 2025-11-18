@@ -579,7 +579,8 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     color: '#10b981',
-    letterSpacing: 1.5,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
   },
   processingBody: {
     alignItems: 'center',
@@ -587,9 +588,9 @@ const styles = StyleSheet.create({
   },
   processingAmount: {
     fontSize: 56,
-    fontWeight: '200',
+    fontWeight: '400',
     color: '#fff',
-    letterSpacing: -3,
+    letterSpacing: -0.4,
     marginBottom: 24,
   },
   statusDivider: {
@@ -599,12 +600,13 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   statusText: {
-    fontSize: 18,
-    fontWeight: '500',
+    fontSize: 17,
+    fontWeight: '400',
     color: 'rgba(255,255,255,0.8)',
     marginBottom: 16,
     textAlign: 'center',
     lineHeight: 24,
+    letterSpacing: -0.2,
   },
   terminalName: {
     fontSize: 13,
@@ -625,16 +627,17 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   cardInfoSubtext: {
-    fontSize: 14,
-    fontWeight: '500',
+    fontSize: 15,
+    fontWeight: '400',
     color: 'rgba(255,255,255,0.6)',
     marginBottom: 16,
+    letterSpacing: -0.2,
   },
   cardInfoAmount: {
     fontSize: 42,
     fontWeight: '700',
     color: '#10b981',
-    letterSpacing: -1,
+    letterSpacing: -0.4,
   },
   instructionCard: {
     borderRadius: 16,
@@ -642,11 +645,12 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   instructionText: {
-    fontSize: 14,
-    fontWeight: '500',
+    fontSize: 15,
+    fontWeight: '400',
     color: 'rgba(255,255,255,0.8)',
     textAlign: 'center',
     lineHeight: 20,
+    letterSpacing: -0.2,
   },
   completeButtonWrapper: {
     marginTop: 16,
@@ -661,10 +665,10 @@ const styles = StyleSheet.create({
     opacity: 0.3,
   },
   completeButtonText: {
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: '600',
     color: 'rgba(255,255,255,0.5)',
-    letterSpacing: 0.3,
+    letterSpacing: -0.2,
   },
   completeButtonTextActive: {
     color: '#10b981',

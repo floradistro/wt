@@ -423,9 +423,9 @@ const styles = StyleSheet.create({
   },
   customerPillText: {
     fontSize: 15,
-    fontWeight: '500',
+    fontWeight: '600',
     color: 'rgba(255,255,255,0.9)',
-    letterSpacing: -0.3,
+    letterSpacing: -0.2,
   },
 
   // Customer Pill (when customer selected) - Liquid Glass with regular effect
@@ -454,16 +454,16 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   customerPillName: {
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: '600',
     color: '#fff',
     letterSpacing: -0.4,
   },
   customerPillPoints: {
     fontSize: 13,
-    fontWeight: '500',
+    fontWeight: '400',
     color: 'rgba(100,200,255,0.95)',
-    letterSpacing: -0.2,
+    letterSpacing: 0,
   },
   customerPillClearButton: {
     width: 40,
@@ -475,7 +475,7 @@ const styles = StyleSheet.create({
   },
   customerPillClearText: {
     fontSize: 22,
-    fontWeight: '300',
+    fontWeight: '400',
     color: 'rgba(255,255,255,0.8)',
     letterSpacing: 0,
   },
@@ -505,9 +505,9 @@ const styles = StyleSheet.create({
   },
   actionButtonText: {
     fontSize: 13,
-    fontWeight: '500',
+    fontWeight: '600',
     color: 'rgba(255,255,255,0.9)',
-    letterSpacing: -0.2,
+    letterSpacing: 0,
   },
 
   cartItems: {
@@ -519,14 +519,16 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   emptyCartText: {
-    fontSize: 13,
-    fontWeight: '300',
+    fontSize: 15,
+    fontWeight: '400',
     color: 'rgba(255,255,255,0.4)',
+    letterSpacing: -0.2,
   },
   emptyCartSubtext: {
-    fontSize: 11,
-    fontWeight: '300',
+    fontSize: 13,
+    fontWeight: '400',
     color: 'rgba(255,255,255,0.25)',
+    letterSpacing: 0,
   },
   loyaltySection: {
     paddingHorizontal: 20,
@@ -540,15 +542,16 @@ const styles = StyleSheet.create({
   },
   loyaltySectionTitle: {
     fontSize: 11,
-    fontWeight: '500',
+    fontWeight: '600',
     color: 'rgba(255,255,255,0.7)',
-    letterSpacing: 1,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
   },
   loyaltySectionAvailable: {
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: '400',
     color: 'rgba(100,200,255,0.9)',
-    letterSpacing: 0.3,
+    letterSpacing: 0,
   },
   loyaltyValueDisplay: {
     flexDirection: 'row',
@@ -557,14 +560,16 @@ const styles = StyleSheet.create({
     paddingTop: 4,
   },
   loyaltyPointsText: {
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '400',
     color: 'rgba(255,255,255,0.7)',
+    letterSpacing: 0,
   },
   loyaltyDiscountValue: {
-    fontSize: 14,
-    fontWeight: '500',
+    fontSize: 15,
+    fontWeight: '600',
     color: '#10b981',
+    letterSpacing: -0.2,
   },
   loyaltySlider: {
     width: '100%',
@@ -585,9 +590,10 @@ const styles = StyleSheet.create({
   },
   loyaltyButtonClearText: {
     fontSize: 11,
-    fontWeight: '500',
+    fontWeight: '600',
     color: 'rgba(255,255,255,0.6)',
-    letterSpacing: 1,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
   },
   loyaltyButtonMax: {
     flex: 1,
@@ -600,9 +606,10 @@ const styles = StyleSheet.create({
   },
   loyaltyButtonMaxText: {
     fontSize: 11,
-    fontWeight: '500',
+    fontWeight: '600',
     color: 'rgba(100,200,255,0.95)',
-    letterSpacing: 1,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
   },
   endSessionFooter: {
     marginTop: 16,
@@ -617,9 +624,10 @@ const styles = StyleSheet.create({
   },
   endSessionFooterText: {
     fontSize: 11,
-    fontWeight: '300',
+    fontWeight: '400',
     color: 'rgba(255,255,255,0.4)',
-    letterSpacing: 1,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
   },
   // iOS 26 Divider - Hairline
   cartDivider: {

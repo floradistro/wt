@@ -403,10 +403,10 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.02)',
   },
   placeholderText: {
-    fontSize: 10,
-    fontWeight: '300',
+    fontSize: 9,
+    fontWeight: '600',
     color: 'rgba(255,255,255,0.2)',
-    letterSpacing: 2,
+    letterSpacing: 0.5,
   },
   // JOBS PRINCIPLE: Subtle filter tags (top-right corner)
   filterTagsContainer: {
@@ -426,10 +426,10 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-end',
   },
   filterTagText: {
-    fontSize: 8,
-    fontWeight: '500',
+    fontSize: 9,
+    fontWeight: '600',
     color: 'rgba(255,255,255,0.95)',
-    letterSpacing: 0.8,
+    letterSpacing: 0.5,
     textTransform: 'uppercase',
   },
   outOfStockOverlay: {
@@ -438,10 +438,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   outOfStockText: {
-    fontSize: 10,
+    fontSize: 9,
     fontWeight: '600',
     color: '#fff',
-    letterSpacing: 2,
+    letterSpacing: 0.5,
   },
   info: {
     paddingTop: 12,
@@ -450,9 +450,9 @@ const styles = StyleSheet.create({
   },
   productName: {
     fontSize: 13,
-    fontWeight: '200',
+    fontWeight: '600',
     color: '#fff',
-    letterSpacing: -0.2, // Jobs: Apple tight tracking
+    letterSpacing: -0.1,
     marginBottom: 4,
   },
   metadataRow: {
@@ -462,9 +462,9 @@ const styles = StyleSheet.create({
   },
   category: {
     fontSize: 9,
-    fontWeight: '200',
+    fontWeight: '600',
     color: 'rgba(255,255,255,0.5)',
-    letterSpacing: 0.8,
+    letterSpacing: 0.5,
     textTransform: 'uppercase',
   },
   dot: {
@@ -476,7 +476,7 @@ const styles = StyleSheet.create({
     fontSize: 9,
     fontWeight: '600',
     color: 'rgba(255,255,255,0.7)',
-    letterSpacing: 0,
+    letterSpacing: 0.5,
   },
 
   // Modal
@@ -510,10 +510,10 @@ const styles = StyleSheet.create({
   },
   // JOBS: Just product name, no subtitle
   modalTitle: {
-    fontSize: 24,
-    fontWeight: '200',
+    fontSize: 22,
+    fontWeight: '700',
     color: '#fff',
-    letterSpacing: -0.4, // Apple tight tracking
+    letterSpacing: -0.4,
     paddingHorizontal: 24,
     marginBottom: 24,
   },
@@ -561,15 +561,15 @@ const styles = StyleSheet.create({
   },
   tierLabel: {
     fontSize: 17,
-    fontWeight: '500',
+    fontWeight: '400',
     color: '#fff',
     letterSpacing: -0.4,
   },
   // JOBS: Price is HUGE (28pt, not 24pt)
   tierPrice: {
     fontSize: 28,
-    fontWeight: '600',
+    fontWeight: '700',
     color: '#fff',
-    letterSpacing: 0,
+    letterSpacing: -0.5,
   },
 })

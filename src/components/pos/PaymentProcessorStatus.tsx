@@ -375,13 +375,14 @@ const styles = StyleSheet.create({
   statusText: {
     fontSize: 12,
     fontWeight: '600',
-    letterSpacing: 1.5,
+    letterSpacing: 0,
+    textTransform: 'uppercase',
   },
   lastCheckText: {
-    fontSize: 10,
-    fontWeight: '300',
+    fontSize: 11,
+    fontWeight: '400',
     color: 'rgba(255,255,255,0.4)',
-    letterSpacing: 0.5,
+    letterSpacing: 0,
   },
   // JOBS PRINCIPLE: Subtle test button
   testButton: {
@@ -396,23 +397,23 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   testButtonText: {
-    fontSize: 10,
-    fontWeight: '500',
+    fontSize: 11,
+    fontWeight: '600',
     color: 'rgba(255,255,255,0.7)',
-    letterSpacing: 0.8,
+    letterSpacing: 0.5,
     textTransform: 'uppercase',
   },
   errorMessage: {
     fontSize: 11,
-    fontWeight: '300',
+    fontWeight: '400',
     color: 'rgba(255,255,255,0.6)',
-    letterSpacing: 0.3,
+    letterSpacing: 0,
   },
   infoMessage: {
     fontSize: 11,
-    fontWeight: '300',
+    fontWeight: '400',
     color: 'rgba(255,255,255,0.5)',
-    letterSpacing: 0.3,
+    letterSpacing: 0,
     fontStyle: 'italic',
   },
 
@@ -436,10 +437,10 @@ const styles = StyleSheet.create({
   },
   activityMessage: {
     flex: 1,
-    fontSize: 10,
-    fontWeight: '300',
+    fontSize: 11,
+    fontWeight: '400',
     color: 'rgba(255,255,255,0.6)',
-    letterSpacing: 0.2,
+    letterSpacing: 0,
   },
   activityMetadata: {
     flexDirection: 'row',
@@ -447,14 +448,14 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   activityDuration: {
-    fontSize: 9,
+    fontSize: 11,
     fontWeight: '400',
     color: 'rgba(255,255,255,0.4)',
     letterSpacing: 0,
   },
   activityTime: {
-    fontSize: 9,
-    fontWeight: '300',
+    fontSize: 11,
+    fontWeight: '400',
     color: 'rgba(255,255,255,0.35)',
     letterSpacing: 0,
   },
@@ -478,6 +479,7 @@ const styles = StyleSheet.create({
   compactText: {
     fontSize: 11,
     fontWeight: '600',
-    letterSpacing: 1.2,
+    letterSpacing: 0,
+    textTransform: 'uppercase',
   },
 })
