@@ -188,12 +188,20 @@ export function useUsers() {
         try {
           // Context contains a Response object, try to extract body
           if (context?._bodyInit) {
+            logger.debug('_bodyInit type:', typeof context._bodyInit)
+            logger.debug('_bodyInit has _data?', !!context._bodyInit._data)
+
             // Handle React Native's Blob-like structure
             let bodyText: string
 
             if (context._bodyInit._data) {
               // React Native blob structure - convert to string
               const data = context._bodyInit._data
+
+              logger.debug('_data type:', typeof data)
+              logger.debug('_data keys:', Object.keys(data))
+              logger.debug('_data content:', data)
+
               if (typeof data === 'string') {
                 bodyText = data
               } else if (data.blobId || data.offset !== undefined) {
