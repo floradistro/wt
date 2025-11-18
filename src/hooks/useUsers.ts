@@ -175,6 +175,13 @@ export function useUsers() {
           contextKeys: context ? Object.keys(context) : [],
         })
 
+        // Log each property of context separately
+        if (context) {
+          Object.keys(context).forEach(key => {
+            logger.error(`Context.${key}:`, (context as any)[key])
+          })
+        }
+
         // Try to extract the actual error message from the function response
         let errorMsg = 'Failed to call Edge Function'
 
