@@ -160,7 +160,16 @@ export function useUsers() {
         },
       })
 
-      if (error) throw error
+      logger.debug('Edge Function response:', { data, error })
+
+      if (error) {
+        logger.error('Edge Function error:', error)
+        throw new Error(error.message || 'Failed to call Edge Function')
+      }
+
+      if (!data) {
+        throw new Error('No response from Edge Function')
+      }
 
       if (!data.success) {
         throw new Error(data.error || 'Failed to create user')
@@ -169,7 +178,11 @@ export function useUsers() {
       await loadUsers()
       return { success: true, user: data.user }
     } catch (err) {
-      logger.error('Failed to create user', { error: err })
+      logger.error('Failed to create user', {
+        error: err,
+        message: err instanceof Error ? err.message : 'Unknown error',
+        stack: err instanceof Error ? err.stack : undefined,
+      })
       return {
         success: false,
         error: err instanceof Error ? err.message : 'Failed to create user',
