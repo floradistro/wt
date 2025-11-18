@@ -167,23 +167,29 @@ export function useUsers() {
 
       // Handle network/invocation errors
       if (response.error) {
-        // Log the complete error structure
-        logger.error('Edge Function invocation error - Full error object:', {
-          error: response.error,
-          errorKeys: Object.keys(response.error),
-          context: (response.error as any).context,
-          name: response.error.name,
-          message: response.error.message,
-          stack: response.error.stack,
-          // @ts-ignore - Try to access additional properties
-          details: (response.error as any).details,
-          // @ts-ignore
-          body: (response.error as any).body,
-          // @ts-ignore
-          response: (response.error as any).response,
+        // The actual error response is in the context property
+        const context = (response.error as any).context
+
+        logger.error('Edge Function error context:', {
+          context,
+          contextKeys: context ? Object.keys(context) : [],
         })
 
-        const errorMsg = response.error.message || 'Failed to call Edge Function'
+        // Try to extract the actual error message from the function response
+        let errorMsg = 'Failed to call Edge Function'
+
+        if (context) {
+          // Context might have the response body with error details
+          if (context.error) {
+            errorMsg = context.error
+          } else if (context.message) {
+            errorMsg = context.message
+          } else if (typeof context === 'string') {
+            errorMsg = context
+          }
+        }
+
+        logger.error('Extracted error message:', errorMsg)
         throw new Error(errorMsg)
       }
 
