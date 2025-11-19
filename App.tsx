@@ -26,7 +26,7 @@ import { validatePaymentEnvironment, checkForMockPaymentCode } from './src/utils
 import { useAuth, useAuthActions } from './src/stores/auth.store'
 import { DashboardNavigator } from './src/navigation/DashboardNavigator'
 import { ErrorBoundary } from './src/components/ErrorBoundary'
-import { LoadingScreen } from './src/components/LoadingScreen'
+import { AnimatedSplashScreen } from './src/components/AnimatedSplashScreen'
 import { Button, TextInput as DSTextInput } from './src/theme'
 import { colors, typography, spacing, radius, animation } from './src/theme/tokens'
 import { logger } from './src/utils/logger'
@@ -62,20 +62,19 @@ function App() {
   const orb2 = useRef(new Animated.Value(0)).current
 
   useEffect(() => {
-    // Restore session with minimum loading time for smooth UX
+    // Restore session with smooth animated splash screen
     const restoreWithDelay = async () => {
       try {
         const startTime = Date.now()
         await restoreSession()
         const elapsed = Date.now() - startTime
-        const minimumLoadTime = 1500 // Show loading screen for at least 1.5s
+        const minimumLoadTime = 2200 // Show animated splash for at least 2.2s
 
         if (elapsed < minimumLoadTime) {
           await new Promise(resolve => setTimeout(resolve, minimumLoadTime - elapsed))
         }
 
-        setIsRestoringSession(false)
-
+        // Don't set isRestoringSession false yet - AnimatedSplashScreen will handle it
         // Hide the native splash screen
         await SplashScreen.hideAsync()
       } catch (error) {
@@ -169,11 +168,13 @@ function App() {
     outputRange: [1, 1.3],
   })
 
-  // Show loading screen while restoring session
+  // Show animated splash screen while restoring session
   if (isRestoringSession) {
     return (
       <ErrorBoundary>
-        <LoadingScreen />
+        <AnimatedSplashScreen
+          onAnimationFinish={() => setIsRestoringSession(false)}
+        />
       </ErrorBoundary>
     )
   }

@@ -244,7 +244,7 @@ export function AnimatedSplashScreen({ onAnimationFinish }: AnimatedSplashScreen
           ]}
         >
           <Image
-            source={require('../../assets/logo.png')}
+            source={require('../../assets/whale.png')}
             style={styles.whaleLogo}
             resizeMode="contain"
           />

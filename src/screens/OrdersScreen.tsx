@@ -276,7 +276,7 @@ function OrdersScreenComponent() {
   const [navSearchQuery, setNavSearchQuery] = useState('')
   const [vendorLogo, setVendorLogo] = useState<string | null>(null)
   const [vendorName, setVendorName] = useState<string>('')
-  const [dateRange, setDateRange] = useState<DateRange>('today')
+  const [dateRange, setDateRange] = useState<DateRange>('all')
   const [showDatePicker, setShowDatePicker] = useState(false)
 
   // Location filtering - using global store
