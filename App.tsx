@@ -182,7 +182,7 @@ function App() {
   if (user && session) {
     return (
       <ErrorBoundary>
-        <StatusBar hidden />
+        <StatusBar barStyle="light-content" backgroundColor="#000000" />
         <DashboardNavigator />
       </ErrorBoundary>
     )
