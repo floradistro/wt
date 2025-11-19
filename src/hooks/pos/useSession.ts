@@ -23,7 +23,7 @@ interface UseSessionReturn {
   } | null
   loading: boolean
   error: string | null
-  loadVendorAndLocations: (userEmail: string) => Promise<void>
+  loadVendorAndLocations: (authUserId: string) => Promise<void>
   selectLocation: (locationId: string, locationName: string) => Promise<void>
   selectRegister: (registerId: string, registerName: string) => Promise<{ needsCashDrawer: boolean; registerId?: string; registerName?: string } | void>
   openCashDrawer: (openingCash: number, notes: string) => Promise<void>
@@ -48,19 +48,19 @@ export function useSession(): UseSessionReturn {
   /**
    * Load vendor and locations for the user
    */
-  const loadVendorAndLocations = useCallback(async (userEmail: string) => {
+  const loadVendorAndLocations = useCallback(async (authUserId: string) => {
     try {
       setLoading(true)
       setError(null)
 
-      // Get user's vendor by email
+      // Get user's vendor by auth_user_id
       const { data: userData, error: userError } = await supabase
         .from('users')
         .select('id, role, vendor_id, vendors(id, store_name, logo_url)')
-        .eq('email', userEmail)
-        .single()
+        .eq('auth_user_id', authUserId)
+        .maybeSingle()
 
-      if (userError) throw userError
+      if (userError || !userData) throw userError || new Error('User record not found')
 
       const vendorData = userData.vendors as any
       setVendor(vendorData)

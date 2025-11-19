@@ -2696,14 +2696,15 @@ function SettingsScreen() {
     async function loadVendorInfo() {
       if (!user?.email) return
       try {
+        // Try auth_user_id first (more reliable), fallback to email
         const { data: userData, error: userError } = await supabase
           .from('users')
           .select('vendor_id, vendors(id, store_name, logo_url)')
-          .eq('email', user.email)
-          .single()
+          .eq('auth_user_id', user.id)
+          .maybeSingle()
 
-        if (userError) {
-          logger.error('User query error', { error: userError })
+        if (userError || !userData) {
+          logger.error('[SettingsScreen] User query error', { error: userError })
           return
         }
 

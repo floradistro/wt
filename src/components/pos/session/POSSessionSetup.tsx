@@ -61,11 +61,11 @@ function POSSessionSetup({ user, onSessionReady }: POSSessionSetupProps) {
       const { data: userData, error: userError } = await supabase
         .from('users')
         .select('id, role, vendor_id, vendors(id, store_name)')
-        .eq('email', user?.email)
-        .single()
+        .eq('auth_user_id', user.id)
+        .maybeSingle()
       logger.debug(`[POSSessionSetup] ✅ User query took ${Date.now() - userStart}ms`)
 
-      if (userError) throw userError
+      if (userError || !userData) throw userError || new Error('User record not found')
 
       const vendorData = userData.vendors as any
       // Set vendor without logo first for faster initial render

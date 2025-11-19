@@ -4,7 +4,7 @@
  * Apple Standard: Component < 300 lines
  */
 
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native'
 import { LiquidGlassView } from '@callstack/liquid-glass'
 import { Ionicons } from '@expo/vector-icons'
@@ -21,7 +21,7 @@ interface CardPaymentViewProps extends BasePaymentViewProps {
   processorStatus: string
   locationId?: string
   registerId?: string
-  onComplete: (paymentData: PaymentData) => void
+  onComplete: (paymentData: PaymentData) => Promise<import('./PaymentTypes').SaleCompletionData>
 }
 
 export function CardPaymentView({
@@ -35,6 +35,7 @@ export function CardPaymentView({
 }: CardPaymentViewProps) {
   const [processingCard, setProcessingCard] = useState(false)
   const [paymentStage, setPaymentStage] = useState<PaymentStage>('initializing')
+  const [completionData, setCompletionData] = useState<import('./PaymentTypes').SaleCompletionData | null>(null)
   const [errorModal, setErrorModal] = useState<{
     visible: boolean
     title: string
@@ -46,6 +47,21 @@ export function CardPaymentView({
     message: '',
     canRetry: false,
   })
+
+  // CRITICAL: Track payment request to abort on unmount
+  const abortControllerRef = useRef<AbortController | null>(null)
+
+  // CRITICAL FIX: Cleanup on unmount to prevent hanging requests
+  useEffect(() => {
+    return () => {
+      // Abort any in-flight payment request when component unmounts
+      if (abortControllerRef.current) {
+        logger.debug('🛑 CardPaymentView unmounting - aborting payment request')
+        abortControllerRef.current.abort()
+        abortControllerRef.current = null
+      }
+    }
+  }, [])
 
   const hasActiveProcessor = !!currentProcessor
 
@@ -128,10 +144,11 @@ export function CardPaymentView({
 
       // Get auth session before showing processing UI
       const { supabase } = await import('@/lib/supabase/client')
-      const { data: { session } } = await supabase.auth.getSession()
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession()
 
-      if (!session?.access_token) {
-        throw new Error('Authentication required')
+      if (sessionError || !session?.access_token) {
+        logger.error('Session error:', sessionError)
+        throw new Error('Authentication required. Please log out and log back in.')
       }
 
       const PAYMENT_ENDPOINT = `${BASE_URL}/api/pos/payment/process`
@@ -164,9 +181,15 @@ export function CardPaymentView({
 
       await new Promise(resolve => setTimeout(resolve, 300))
 
+      // CRITICAL FIX: Store abort controller in ref for cleanup on unmount
       const controller = new AbortController()
+      abortControllerRef.current = controller
+
       // 3 minutes timeout - gives customer time to insert card, enter PIN, approve
-      const timeoutId = setTimeout(() => controller.abort(), 180000)
+      const timeoutId = setTimeout(() => {
+        logger.warn('⏱️ Card payment timeout (3 minutes) - aborting request')
+        controller.abort()
+      }, 180000)
 
       setPaymentStage('waiting')
       Sentry.addBreadcrumb({
@@ -200,6 +223,7 @@ export function CardPaymentView({
       // apiSpan.finish()
 
       clearTimeout(timeoutId)
+      abortControllerRef.current = null // Clear ref after successful response
 
       setPaymentStage('processing')
       Sentry.addBreadcrumb({
@@ -289,13 +313,72 @@ export function CardPaymentView({
         },
       })
 
-      await new Promise(resolve => setTimeout(resolve, 1500))
+      // Brief celebration moment
+      await new Promise(resolve => setTimeout(resolve, 800))
 
-      // TODO: Re-enable Sentry measurement with Sentry v7 compatible API
-      // transaction.setMeasurement('payment.amount', total, 'usd')
+      // CRITICAL: Save sale to database - MUST complete
+      setPaymentStage('saving')
+      Sentry.addBreadcrumb({
+        category: 'checkout',
+        message: 'Saving sale to database',
+        level: 'info',
+      })
 
-      logger.debug('💳 Payment successful:', paymentData)
-      onComplete(paymentData)
+      logger.debug('💳 Payment successful, saving sale...', paymentData)
+
+      try {
+        const saleData = await onComplete(paymentData)
+
+        // Sale saved successfully!
+        setCompletionData(saleData)
+        setPaymentStage('complete')
+
+        Sentry.addBreadcrumb({
+          category: 'checkout',
+          message: 'Sale completed successfully',
+          level: 'info',
+          data: {
+            orderNumber: saleData.orderNumber,
+          },
+        })
+
+        // TODO: Re-enable Sentry measurement with Sentry v7 compatible API
+        // transaction.setMeasurement('payment.amount', total, 'usd')
+
+        // Show completion details briefly, then reset
+        await new Promise(resolve => setTimeout(resolve, 2000))
+
+        // Reset payment state for next transaction
+        setProcessingCard(false)
+        setPaymentStage('initializing')
+        setCompletionData(null)
+
+      } catch (saveError) {
+        // CRITICAL: Payment succeeded but save failed - THIS IS THE WORST CASE SCENARIO
+        logger.error('💥 CRITICAL: Payment succeeded but sale save failed', saveError)
+
+        Sentry.captureException(saveError, {
+          level: 'fatal',
+          contexts: {
+            card_payment: {
+              amount: total,
+              transactionId: result.transactionId,
+              authCode: result.authorizationCode,
+              cardType: result.cardType,
+              cardLast4: result.cardLast4,
+              stage: 'save_failed_after_payment_success',
+            },
+          },
+          tags: {
+            payment_method: 'card',
+            critical: 'payment_captured_sale_not_saved',
+            requires_manual_intervention: 'true',
+          },
+        })
+
+        setPaymentStage('error')
+        throw new Error('Payment was processed but sale could not be saved. Please contact support with this transaction: ' + result.transactionId)
+      }
     } catch (error: any) {
       setPaymentStage('error')
       await new Promise(resolve => setTimeout(resolve, 1000))
@@ -313,6 +396,13 @@ export function CardPaymentView({
         errorType = 'session_expired'
         userMessage = 'Your session has expired.\n\nPlease log out and log back in.'
         shouldRetry = false
+      } else if (error.message.includes('Terminal in use')) {
+        errorType = 'terminal_busy'
+        // Extract wait time from message if available
+        const waitTimeMatch = error.message.match(/wait (\d+ min \d+ sec|\d+ sec)/)
+        const waitTime = waitTimeMatch ? waitTimeMatch[1] : 'a moment'
+        userMessage = `Terminal is currently processing another transaction.\n\nPlease wait ${waitTime} and try again.`
+        shouldRetry = true
       } else if (error.message.includes('terminal is offline')) {
         errorType = 'terminal_offline'
         userMessage = 'Payment terminal is not responding.\n\nPlease:\n• Check terminal power and connection\n• Wait a moment and try again'
@@ -409,7 +499,9 @@ export function CardPaymentView({
               paymentStage === 'waiting' ? 'Follow prompts on terminal' :
               paymentStage === 'processing' ? 'Authorizing payment' :
               paymentStage === 'approving' ? 'Finalizing transaction' :
-              paymentStage === 'success' ? 'Payment approved' : ''
+              paymentStage === 'success' ? 'Payment approved' :
+              paymentStage === 'saving' ? 'Completing sale' :
+              paymentStage === 'complete' ? 'Sale complete' : ''
             }`
           }}
         >
@@ -448,11 +540,31 @@ export function CardPaymentView({
               {paymentStage === 'processing' && 'Authorizing...'}
               {paymentStage === 'approving' && 'Finalizing transaction...'}
               {paymentStage === 'success' && 'Approved ✓'}
+              {paymentStage === 'saving' && 'Saving sale...'}
+              {paymentStage === 'complete' && 'Complete ✓'}
             </Text>
 
-            <Text style={styles.terminalName}>
-              {currentProcessor?.processor_name || 'Terminal'}
-            </Text>
+            {paymentStage === 'complete' && completionData && (
+              <View style={styles.completionDetails}>
+                <Text style={styles.completionLabel}>Order #{completionData.orderNumber}</Text>
+                {completionData.authorizationCode && (
+                  <Text style={styles.completionSubtext}>
+                    Auth: {completionData.authorizationCode}
+                  </Text>
+                )}
+                {completionData.loyaltyPointsAdded !== undefined && completionData.loyaltyPointsAdded > 0 && (
+                  <Text style={styles.completionSubtext}>
+                    +{completionData.loyaltyPointsAdded} points earned
+                  </Text>
+                )}
+              </View>
+            )}
+
+            {paymentStage !== 'complete' && (
+              <Text style={styles.terminalName}>
+                {currentProcessor?.processor_name || 'Terminal'}
+              </Text>
+            )}
           </View>
         </View>
       ) : !hasActiveProcessor ? (
@@ -673,5 +785,22 @@ const styles = StyleSheet.create({
   completeButtonTextActive: {
     color: '#10b981',
     fontWeight: '700',
+  },
+  completionDetails: {
+    marginTop: 16,
+    alignItems: 'center',
+    gap: 6,
+  },
+  completionLabel: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#10b981',
+    letterSpacing: -0.2,
+  },
+  completionSubtext: {
+    fontSize: 13,
+    fontWeight: '400',
+    color: 'rgba(255,255,255,0.6)',
+    letterSpacing: -0.1,
   },
 })

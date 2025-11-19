@@ -50,10 +50,12 @@ export function useInventory(options: UseInventoryOptions = {}) {
       const { data: userData, error: userError } = await supabase
         .from('users')
         .select('vendor_id')
-        .eq('email', user.email)
-        .single()
+        .eq('auth_user_id', user.id)
+        .maybeSingle()
 
-      if (userError) throw userError
+      if (userError || !userData) {
+        throw new Error('User record not found')
+      }
 
       logger.info('Loading inventory', { vendorId: userData.vendor_id, options })
 

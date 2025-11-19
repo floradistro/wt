@@ -216,10 +216,10 @@ function ProductsScreenComponent() {
         const { data: userData, error: userError } = await supabase
           .from('users')
           .select('vendor_id, vendors(id, store_name, logo_url)')
-          .eq('email', user.email)
-          .single()
+          .eq('auth_user_id', user.id)
+          .maybeSingle()
 
-        if (userError) {
+        if (userError || !userData) {
           logger.error('User query error', { error: userError })
           return
         }
@@ -1394,10 +1394,10 @@ function ProductDetail({ product, onBack, onProductUpdated }: { product: Product
       const { data: userData, error: userError } = await supabase
         .from('users')
         .select('vendor_id')
-        .eq('email', user.email)
-        .single()
+        .eq('auth_user_id', user.id)
+        .maybeSingle()
 
-      if (userError) throw userError
+      if (userError || !userData) throw userError || new Error('User record not found')
 
       const pricingData = {
         mode: pricingMode,

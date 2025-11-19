@@ -47,18 +47,18 @@ export function useUsers() {
       setIsLoading(true)
       setError(null)
 
-      logger.info('Loading users', { userEmail: user!.email })
+      logger.info('Loading users', { authUserId: user!.id })
 
       // First, get current user data to check permissions and get vendor_id
       const { data: currentUser, error: userError } = await supabase
         .from('users')
         .select('id, role, vendor_id')
-        .eq('email', user!.email)
-        .single()
+        .eq('auth_user_id', user!.id)
+        .maybeSingle()
 
-      if (userError) {
+      if (userError || !currentUser) {
         logger.error('Failed to fetch current user data', { error: userError })
-        throw userError
+        throw userError || new Error('User record not found')
       }
 
       // Check if user has permission to manage users (owner or admin)
@@ -251,7 +251,8 @@ export function useUsers() {
       const { data: { session }, error: sessionError } = await supabase.auth.getSession()
 
       if (sessionError || !session?.access_token) {
-        throw new Error('Not authenticated')
+        logger.warn('[useUsers] No session for operation')
+        throw new Error('Session expired. Please log in again.')
       }
 
       // Call Edge Function to delete user (requires service role for auth deletion)
@@ -333,7 +334,8 @@ export function useUsers() {
       const { data: { session }, error: sessionError } = await supabase.auth.getSession()
 
       if (sessionError || !session?.access_token) {
-        throw new Error('Not authenticated')
+        logger.warn('[useUsers] No session for operation')
+        throw new Error('Session expired. Please log in again.')
       }
 
       // Call Edge Function to set password (requires service role)

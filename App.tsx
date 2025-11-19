@@ -23,7 +23,9 @@ import * as Haptics from 'expo-haptics'
 // Initialize Sentry FIRST (before anything else)
 import { initializeSentry, Sentry } from './src/utils/sentry'
 import { validatePaymentEnvironment, checkForMockPaymentCode } from './src/utils/payment-validation'
-import { useAuth, useAuthActions } from './src/stores/auth.store'
+import { useAuth, useAuthActions, useAuthStore } from './src/stores/auth.store'
+import { supabase } from './src/lib/supabase/client'
+import type { AuthChangeEvent, Session } from '@supabase/supabase-js'
 import { DashboardNavigator } from './src/navigation/DashboardNavigator'
 import { ErrorBoundary } from './src/components/ErrorBoundary'
 import { AnimatedSplashScreen } from './src/components/AnimatedSplashScreen'
@@ -60,6 +62,30 @@ function App() {
   const slideAnim = useRef(new Animated.Value(30)).current
   const orb1 = useRef(new Animated.Value(0)).current
   const orb2 = useRef(new Animated.Value(0)).current
+
+  // Set up auth state change listener to keep store in sync with auto-refreshed sessions
+  useEffect(() => {
+    const { data: authListener } = supabase.auth.onAuthStateChange((event: AuthChangeEvent, session: Session | null) => {
+      logger.debug('[App] Auth state changed:', { event })
+
+      if (event === 'TOKEN_REFRESHED') {
+        logger.info('[App] Session token auto-refreshed')
+        useAuthStore.getState().setSession(session)
+        useAuthStore.getState().setUser(session?.user ?? null)
+      } else if (event === 'SIGNED_OUT') {
+        useAuthStore.getState().setSession(null)
+        useAuthStore.getState().setUser(null)
+      } else if (event === 'SIGNED_IN') {
+        useAuthStore.getState().setSession(session)
+        useAuthStore.getState().setUser(session?.user ?? null)
+      }
+    })
+
+    return () => {
+      // Cleanup auth listener on unmount
+      authListener?.subscription?.unsubscribe()
+    }
+  }, [])
 
   useEffect(() => {
     // Restore session with smooth animated splash screen

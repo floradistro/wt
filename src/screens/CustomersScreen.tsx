@@ -129,10 +129,10 @@ function CustomersScreenComponent() {
         const { data: userData, error: userError } = await supabase
           .from('users')
           .select('vendor_id, vendors(id, store_name, logo_url)')
-          .eq('email', user.email)
-          .single()
+          .eq('auth_user_id', user.id)
+          .maybeSingle()
 
-        if (userError) {
+        if (userError || !userData) {
           logger.error('User query error', { error: userError })
           return
         }

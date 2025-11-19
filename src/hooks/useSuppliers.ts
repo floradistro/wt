@@ -42,10 +42,12 @@ export function useSuppliers() {
       const { data: userData, error: userError } = await supabase
         .from('users')
         .select('vendor_id')
-        .eq('email', user.email)
-        .single()
+        .eq('auth_user_id', user.id)
+        .maybeSingle()
 
-      if (userError) throw userError
+      if (userError || !userData) {
+        throw new Error('User record not found')
+      }
       if (!userData?.vendor_id) throw new Error('No vendor ID found')
 
       // Fetch all suppliers (including inactive for management)
@@ -87,10 +89,12 @@ export function useSuppliers() {
       const { data: userData, error: userError } = await supabase
         .from('users')
         .select('vendor_id')
-        .eq('email', user.email)
-        .single()
+        .eq('auth_user_id', user.id)
+        .maybeSingle()
 
-      if (userError) throw userError
+      if (userError || !userData) {
+        throw new Error('User record not found')
+      }
 
       // Create supplier
       const { data: newSupplier, error: insertError } = await supabase

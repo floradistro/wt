@@ -42,29 +42,51 @@ export function useUserLocations() {
       setIsLoading(true)
       setError(null)
 
-      logger.info('Loading user locations', { userEmail: user!.email })
+      logger.info('[useUserLocations] Loading user locations', {
+        userEmail: user!.email,
+        authUserId: user!.id
+      })
 
-      // First, get user data to check if they're admin
-      const { data: userData, error: userError } = await supabase
+      // Get user data by auth_user_id
+      const { data: userData, error: authIdError } = await supabase
         .from('users')
-        .select('id, role, vendor_id')
-        .eq('email', user!.email)
-        .single()
+        .select('id, role, vendor_id, email')
+        .eq('auth_user_id', user!.id)
+        .maybeSingle()
 
-      if (userError) {
-        logger.error('Failed to fetch user data', { error: userError, email: user!.email })
-        throw userError
+      if (authIdError || !userData) {
+        logger.error('[useUserLocations] Failed to fetch user data by auth_user_id', {
+          authUserId: user!.id,
+          email: user!.email,
+          error: authIdError
+        })
+        throw new Error(`Could not find user record. Please contact support. (Auth ID: ${user!.id})`)
       }
 
-      logger.info('User data fetched', { role: userData.role, vendorId: userData.vendor_id })
+      logger.info('[useUserLocations] User data fetched', {
+        userId: userData.id,
+        role: userData.role,
+        vendorId: userData.vendor_id,
+        email: userData.email
+      })
 
       // Check if user is admin (owner, admin, or vendor_admin role)
       const isAdmin = ['vendor_owner', 'vendor_admin', 'admin'].includes(userData.role)
+
+      logger.info('[useUserLocations] Admin check', {
+        role: userData.role,
+        isAdmin,
+        vendorId: userData.vendor_id
+      })
 
       let formattedLocations: UserLocationAccess[] = []
 
       if (isAdmin) {
         // Admin users see ALL locations for their vendor
+        logger.info('[useUserLocations] User is admin, loading all locations for vendor', {
+          vendorId: userData.vendor_id
+        })
+
         const { data: allLocations, error: locationsError } = await supabase
           .from('locations')
           .select('id, name, address_line1, city, state, is_primary')
@@ -72,7 +94,18 @@ export function useUserLocations() {
           .eq('is_active', true)
           .order('name')
 
-        if (locationsError) throw locationsError
+        if (locationsError) {
+          logger.error('[useUserLocations] Failed to load admin locations', {
+            error: locationsError,
+            vendorId: userData.vendor_id
+          })
+          throw locationsError
+        }
+
+        logger.info('[useUserLocations] Admin locations loaded', {
+          count: allLocations?.length || 0,
+          locations: allLocations?.map(l => ({ id: l.id, name: l.name }))
+        })
 
         formattedLocations = (allLocations || []).map((loc) => ({
           location: loc,
@@ -87,6 +120,10 @@ export function useUserLocations() {
         })
       } else {
         // Regular users see only their assigned locations
+        logger.info('[useUserLocations] User is NOT admin, loading assigned locations', {
+          userId: userData.id
+        })
+
         const { data: userLocationsData, error: locationsError } = await supabase
           .from('user_locations')
           .select(`
@@ -105,7 +142,18 @@ export function useUserLocations() {
           .eq('user_id', userData.id)
           .eq('locations.is_active', true)
 
-        if (locationsError) throw locationsError
+        if (locationsError) {
+          logger.error('[useUserLocations] Failed to load user assigned locations', {
+            error: locationsError,
+            userId: userData.id
+          })
+          throw locationsError
+        }
+
+        logger.info('[useUserLocations] User assigned locations loaded', {
+          count: userLocationsData?.length || 0,
+          data: userLocationsData
+        })
 
         formattedLocations = (userLocationsData || []).map((ul: any) => {
           // Derive role from permissions
@@ -128,9 +176,18 @@ export function useUserLocations() {
         })
       }
 
+      logger.info('[useUserLocations] Final formatted locations', {
+        count: formattedLocations.length,
+        locations: formattedLocations.map(fl => ({
+          id: fl.location.id,
+          name: fl.location.name,
+          role: fl.role
+        }))
+      })
+
       setLocations(formattedLocations)
     } catch (err) {
-      logger.error('Failed to load user locations', { error: err })
+      logger.error('[useUserLocations] Failed to load user locations', { error: err })
       setError(err instanceof Error ? err.message : 'Failed to load locations')
     } finally {
       setIsLoading(false)

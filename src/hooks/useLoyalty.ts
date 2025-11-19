@@ -42,10 +42,12 @@ export function useLoyalty() {
       const { data: userData, error: userError } = await supabase
         .from('users')
         .select('vendor_id')
-        .eq('email', user.email)
-        .single()
+        .eq('auth_user_id', user.id)
+        .maybeSingle()
 
-      if (userError) throw userError
+      if (userError || !userData) {
+        throw new Error('User record not found')
+      }
       if (!userData?.vendor_id) throw new Error('No vendor ID found')
 
       // Fetch loyalty program (should only be one per vendor)
@@ -89,10 +91,12 @@ export function useLoyalty() {
       const { data: userData, error: userError } = await supabase
         .from('users')
         .select('vendor_id')
-        .eq('email', user.email)
-        .single()
+        .eq('auth_user_id', user.id)
+        .maybeSingle()
 
-      if (userError) throw userError
+      if (userError || !userData) {
+        throw new Error('User record not found')
+      }
 
       // Create loyalty program
       const { data: newProgram, error: insertError } = await supabase

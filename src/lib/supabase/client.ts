@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
+import AsyncStorage from '@react-native-async-storage/async-storage'
 import Constants from 'expo-constants'
 import { logger } from '@/utils/logger'
 
@@ -22,6 +23,33 @@ if (!isSupabaseConfigured) {
   }
 }
 
+// AsyncStorage adapter for Supabase auth
+const AsyncStorageAdapter = {
+  getItem: async (key: string) => {
+    try {
+      const value = await AsyncStorage.getItem(key)
+      return value
+    } catch (error) {
+      logger.error('AsyncStorage getItem error:', error)
+      return null
+    }
+  },
+  setItem: async (key: string, value: string) => {
+    try {
+      await AsyncStorage.setItem(key, value)
+    } catch (error) {
+      logger.error('AsyncStorage setItem error:', error)
+    }
+  },
+  removeItem: async (key: string) => {
+    try {
+      await AsyncStorage.removeItem(key)
+    } catch (error) {
+      logger.error('AsyncStorage removeItem error:', error)
+    }
+  },
+}
+
 // Create Supabase client with fallback for unconfigured state
 // Use dummy values if not configured to prevent initialization errors
 export const supabase = createClient(
@@ -29,7 +57,7 @@ export const supabase = createClient(
   isSupabaseConfigured ? supabaseAnonKey! : 'placeholder-anon-key',
   {
     auth: {
-      storage: undefined, // We'll implement custom storage with AsyncStorage
+      storage: AsyncStorageAdapter,
       autoRefreshToken: true,
       persistSession: true,
       detectSessionInUrl: false,
