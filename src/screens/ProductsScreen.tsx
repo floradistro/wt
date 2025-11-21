@@ -27,7 +27,7 @@ import { useUserLocations } from '@/hooks/useUserLocations'
 import { useLocationFilter } from '@/stores/location-filter.store'
 import { usePurchaseOrders } from '@/hooks/usePurchaseOrders'
 import { PurchaseOrdersList, PurchaseOrderDetail, CreatePOModal, ReceivePOModal } from '@/components/purchase-orders'
-import type { PurchaseOrder } from '@/services/purchase-orders.service'
+import { getPurchaseOrderById, type PurchaseOrder } from '@/services/purchase-orders.service'
 import { useDockOffset } from '@/navigation/DashboardNavigator'
 
 type NavSection = 'all' | 'low-stock' | 'out-of-stock' | 'categories' | 'purchase-orders' | 'audits'
@@ -38,75 +38,175 @@ const ProductItem = React.memo<{
   isLast: boolean
   isSelected: boolean
   categoryName: string | null
+  selectedLocationIds: string[]
+  locationNames: string[]
   onPress: () => void
 }>(({
   item,
   isLast,
   isSelected,
   categoryName,
+  selectedLocationIds,
+  locationNames,
   onPress
-}) => (
-  <Pressable
-    key={item.id}
-    style={[
-      styles.productItem,
-      isSelected && styles.productItemActive,
-      isLast && styles.productItemLast,
-    ]}
-    onPress={onPress}
-    accessibilityRole="none"
-  >
-    {/* Icon/Thumbnail */}
-    <View style={styles.productIcon}>
-      {item.featured_image ? (
-        <Image
-          source={{ uri: item.featured_image }}
-          style={styles.productIconImage}
-        />
-      ) : (
-        <View style={[styles.productIconPlaceholder, styles.productIconImage]}>
-          <Text style={styles.productIconText}>
-            {item.name.charAt(0).toUpperCase()}
-          </Text>
+}) => {
+  // Calculate location-aware inventory display
+  const inventoryDisplay = useMemo(() => {
+    if (selectedLocationIds.length === 0) {
+      // No filter - show aggregate across all locations
+      return {
+        type: 'aggregate' as const,
+        totalStock: item.total_stock ?? 0,
+        locationsCount: item.inventory?.length || 0,
+      }
+    } else if (selectedLocationIds.length === 1) {
+      // Single location - show just that location's stock
+      const locationInv = item.inventory?.find(inv => inv.location_id === selectedLocationIds[0])
+      const qty = locationInv?.quantity || 0
+      return {
+        type: 'single' as const,
+        stock: qty,
+        isInStock: qty > 0,
+      }
+    } else {
+      // Multiple locations - show total with breakdown
+      const selectedInv = item.inventory?.filter(inv => selectedLocationIds.includes(inv.location_id)) || []
+      const totalFiltered = selectedInv.reduce((sum, inv) => sum + (inv.quantity || 0), 0)
+
+      // Get top 2 locations by stock for preview
+      const locationStocks = selectedLocationIds
+        .map((locId, idx) => {
+          const inv = item.inventory?.find(i => i.location_id === locId)
+          return {
+            name: locationNames[idx],
+            quantity: inv?.quantity || 0,
+          }
+        })
+        .sort((a, b) => b.quantity - a.quantity)
+        .slice(0, 2)
+
+      return {
+        type: 'multi' as const,
+        totalStock: totalFiltered,
+        topLocations: locationStocks,
+        totalLocations: selectedLocationIds.length,
+      }
+    }
+  }, [item, selectedLocationIds, locationNames])
+
+  return (
+    <Pressable
+      key={item.id}
+      style={[
+        styles.productItem,
+        isSelected && styles.productItemActive,
+        isLast && styles.productItemLast,
+      ]}
+      onPress={onPress}
+      accessibilityRole="none"
+    >
+      {/* Icon/Thumbnail */}
+      <View style={styles.productIcon}>
+        {item.featured_image ? (
+          <Image
+            source={{ uri: item.featured_image }}
+            style={styles.productIconImage}
+          />
+        ) : (
+          <View style={[styles.productIconPlaceholder, styles.productIconImage]}>
+            <Text style={styles.productIconText}>
+              {item.name.charAt(0).toUpperCase()}
+            </Text>
+          </View>
+        )}
+      </View>
+
+      {/* Product Name & Category */}
+      <View style={styles.productInfo}>
+        <Text style={styles.productName} numberOfLines={1}>
+          {item.name}
+        </Text>
+        <Text style={styles.productSKU} numberOfLines={1}>
+          {categoryName || 'Uncategorized'}
+        </Text>
+      </View>
+
+      {/* Inventory Display - Adapts based on filter */}
+      {inventoryDisplay.type === 'aggregate' && (
+        <>
+          <View style={styles.dataColumn}>
+            <Text style={styles.dataLabel}>STOCK</Text>
+            <Text
+              style={[
+                styles.dataValue,
+                styles.stockValue,
+                inventoryDisplay.totalStock === 0 && styles.stockOut,
+                inventoryDisplay.totalStock > 0 && inventoryDisplay.totalStock < 10 && styles.stockLow,
+                inventoryDisplay.totalStock >= 10 && styles.stockOk,
+              ]}
+            >
+              {inventoryDisplay.totalStock}g
+            </Text>
+          </View>
+          <View style={styles.dataColumn}>
+            <Text style={styles.dataLabel}>LOCATIONS</Text>
+            <Text style={styles.dataValue}>{inventoryDisplay.locationsCount}</Text>
+          </View>
+        </>
+      )}
+
+      {inventoryDisplay.type === 'single' && (
+        <>
+          <View style={styles.dataColumn}>
+            <Text style={styles.dataLabel}>STOCK</Text>
+            <Text
+              style={[
+                styles.dataValue,
+                styles.stockValue,
+                inventoryDisplay.stock === 0 && styles.stockOut,
+                inventoryDisplay.stock > 0 && inventoryDisplay.stock < 10 && styles.stockLow,
+                inventoryDisplay.stock >= 10 && styles.stockOk,
+              ]}
+            >
+              {inventoryDisplay.stock}g
+            </Text>
+          </View>
+          <View style={styles.dataColumn}>
+            <Text style={styles.dataLabel}>STATUS</Text>
+            <Text style={[styles.dataValue, inventoryDisplay.isInStock ? styles.stockOk : styles.stockOut]}>
+              {inventoryDisplay.isInStock ? 'In Stock' : 'Out'}
+            </Text>
+          </View>
+        </>
+      )}
+
+      {inventoryDisplay.type === 'multi' && (
+        <View style={styles.locationBreakdown}>
+          {inventoryDisplay.topLocations.map((loc, idx) => (
+            <View key={idx} style={styles.locationRow}>
+              <Text style={styles.locationName} numberOfLines={1}>{loc.name}</Text>
+              <Text
+                style={[
+                  styles.locationQty,
+                  loc.quantity === 0 && styles.stockOut,
+                  loc.quantity > 0 && loc.quantity < 10 && styles.stockLow,
+                  loc.quantity >= 10 && styles.stockOk,
+                ]}
+              >
+                {loc.quantity}g
+              </Text>
+            </View>
+          ))}
+          {inventoryDisplay.totalLocations > 2 && (
+            <Text style={styles.moreLocations}>
+              +{inventoryDisplay.totalLocations - 2} more
+            </Text>
+          )}
         </View>
       )}
-    </View>
-
-    {/* Product Name & Category */}
-    <View style={styles.productInfo}>
-      <Text style={styles.productName} numberOfLines={1}>
-        {item.name}
-      </Text>
-      <Text style={styles.productSKU} numberOfLines={1}>
-        {categoryName || 'Uncategorized'}
-      </Text>
-    </View>
-
-    {/* Stock Column - Color Coded */}
-    <View style={styles.dataColumn}>
-      <Text style={styles.dataLabel}>STOCK</Text>
-      <Text
-        style={[
-          styles.dataValue,
-          styles.stockValue,
-          (item.total_stock ?? 0) === 0 && styles.stockOut,
-          (item.total_stock ?? 0) > 0 && (item.total_stock ?? 0) < 10 && styles.stockLow,
-          (item.total_stock ?? 0) >= 10 && styles.stockOk,
-        ]}
-      >
-        {item.total_stock ?? 0}g
-      </Text>
-    </View>
-
-    {/* Locations Column */}
-    <View style={styles.dataColumn}>
-      <Text style={styles.dataLabel}>LOCATIONS</Text>
-      <Text style={styles.dataValue}>
-        {item.inventory?.length || 0}
-      </Text>
-    </View>
-  </Pressable>
-))
+    </Pressable>
+  )
+})
 
 ProductItem.displayName = 'ProductItem'
 
@@ -785,6 +885,7 @@ function ProductsScreenComponent() {
                 onCreatePress={() => setShowCreateAuditModal(true)}
                 headerOpacity={productsHeaderOpacity}
                 vendorLogo={vendorLogo}
+                selectedLocationIds={selectedLocationIds}
               />
             </View>
           ) : activeNav === 'purchase-orders' ? (
@@ -1070,6 +1171,8 @@ function ProductsScreenComponent() {
                                   isLast={isLast}
                                   isSelected={selectedProduct?.id === item.id}
                                   categoryName={categoryName}
+                                  selectedLocationIds={selectedLocationIds}
+                                  locationNames={selectedLocationNames}
                                   onPress={() => handleProductSelect(item)}
                                 />
                               )
@@ -1291,9 +1394,21 @@ function ProductsScreenComponent() {
           visible={showReceivePOModal}
           purchaseOrder={selectedPurchaseOrder}
           onClose={() => setShowReceivePOModal(false)}
-          onReceived={() => {
+          onReceived={async () => {
             setShowReceivePOModal(false)
-            reloadPurchaseOrders()
+            // Reload the list to update counts and status
+            const reloadPromise = reloadPurchaseOrders()
+            // Fetch the updated PO to refresh the detail view immediately
+            if (selectedPurchaseOrder) {
+              try {
+                const updatedPO = await getPurchaseOrderById(selectedPurchaseOrder.id)
+                setSelectedPurchaseOrder(updatedPO)
+              } catch (err) {
+                logger.error('Failed to refresh PO detail after receiving', { error: err })
+              }
+            }
+            // Wait for list reload to complete
+            await reloadPromise
           }}
         />
       )}
@@ -1588,12 +1703,12 @@ function ProductDetail({ product, onBack, onProductUpdated }: { product: Product
 
           {/* Multi-location breakdown */}
           {hasMultipleLocations && product.inventory && (
-            <View style={styles.locationBreakdown}>
-              <View style={styles.locationDivider} />
+            <View style={styles.inventoryLocationBreakdown}>
+              <View style={styles.inventoryLocationDivider} />
               {product.inventory.map((inv, index) => (
-                <View key={inv.location_id} style={styles.locationRow}>
-                  <View style={styles.locationInfo}>
-                    <Text style={styles.locationName}>{inv.location_name}</Text>
+                <View key={inv.location_id} style={styles.inventoryLocationRow}>
+                  <View style={styles.inventoryLocationInfo}>
+                    <Text style={styles.inventoryLocationName}>{inv.location_name}</Text>
                     <View style={styles.locationBar}>
                       <View
                         style={[
@@ -1862,6 +1977,39 @@ const styles = StyleSheet.create({
     color: 'rgba(235,235,245,0.6)',
     letterSpacing: 0.2,
     textTransform: 'uppercase',
+  },
+
+  // Multi-location breakdown
+  locationBreakdown: {
+    gap: 3,
+    minWidth: 140,
+  },
+  locationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  locationName: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: 'rgba(235,235,245,0.6)',
+    letterSpacing: -0.1,
+    flex: 1,
+  },
+  locationQty: {
+    fontSize: 13,
+    fontWeight: '600',
+    letterSpacing: -0.2,
+    minWidth: 45,
+    textAlign: 'right',
+  },
+  moreLocations: {
+    fontSize: 10,
+    fontWeight: '500',
+    color: 'rgba(235,235,245,0.4)',
+    letterSpacing: 0.2,
+    marginTop: 1,
   },
 
   // Data Columns
@@ -2194,16 +2342,16 @@ const styles = StyleSheet.create({
     letterSpacing: -0.3,
   },
 
-  // Location Breakdown
-  locationBreakdown: {
+  // Inventory Location Breakdown
+  inventoryLocationBreakdown: {
     paddingTop: 8,
   },
-  locationDivider: {
+  inventoryLocationDivider: {
     height: 0.5,
     backgroundColor: 'rgba(255,255,255,0.1)',
     marginBottom: 8,
   },
-  locationRow: {
+  inventoryLocationRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -2211,11 +2359,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     gap: 16,
   },
-  locationInfo: {
+  inventoryLocationInfo: {
     flex: 1,
     gap: 6,
   },
-  locationName: {
+  inventoryLocationName: {
     fontSize: 13,
     fontWeight: '500',
     color: 'rgba(235,235,245,0.9)',
@@ -2350,6 +2498,10 @@ const styles = StyleSheet.create({
     color: '#60A5FA',
     fontWeight: '300',
   },
+  addButtonsContainer: {
+    flexDirection: 'row',
+    gap: spacing.xs,
+  },
   addProductButton: {
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs,
@@ -2362,6 +2514,20 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     color: '#fff',
+    letterSpacing: -0.2,
+  },
+  addProductButtonSecondary: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.md,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  addProductButtonSecondaryText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.6)',
     letterSpacing: -0.2,
   },
 

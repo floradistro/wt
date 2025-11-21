@@ -39,29 +39,22 @@ export function validateRealPaymentData(paymentData: PaymentData): void {
     }
   }
 
-  // Validate required fields for card payments
-  if (paymentData.paymentMethod === 'card' || paymentData.paymentMethod === 'split') {
-    if (!paymentData.authorizationCode) {
-      throw new Error(
-        'INVALID PAYMENT DATA: Card payment is missing authorization code. ' +
-        'This suggests the payment was not processed through the terminal.'
-      )
-    }
+  // ========================================================================
+  // NOTE: In the TWO-PHASE COMMIT architecture with Edge Functions:
+  // - Client passes paymentMethod: 'card' or 'split'
+  // - Edge Function handles Dejavoo processing and gets authorization
+  // - Authorization codes come from Edge Function, NOT from client
+  //
+  // We don't validate authorization codes here because they don't exist yet.
+  // The Edge Function will validate that Dejavoo payment succeeded.
+  // ========================================================================
 
-    if (!paymentData.transactionId) {
-      throw new Error(
-        'INVALID PAYMENT DATA: Card payment is missing transaction ID. ' +
-        'This suggests the payment was not processed through the terminal.'
-      )
-    }
-
-    // Warn if using common test card numbers
-    if (paymentData.cardLast4 === '4242' && __DEV__) {
-      logger.warn(
-        '⚠️ WARNING: Card ending in 4242 detected. This is a common test card. ' +
-        'Ensure you are using real payment processing in production.'
-      )
-    }
+  // Validation for card payments (future extension - not needed for Edge Function architecture)
+  if (paymentData.authorizationCode && paymentData.cardLast4 === '4242' && __DEV__) {
+    logger.warn(
+      '⚠️ WARNING: Card ending in 4242 detected. This is a common test card. ' +
+      'Ensure you are using real payment processing in production.'
+    )
   }
 }
 
@@ -92,6 +85,11 @@ export function validatePaymentMethod(method: string): void {
 export function normalizePaymentMethod(method: string): string {
   // Map 'card' to 'credit' for database compatibility
   if (method.toLowerCase() === 'card') {
+    return 'credit'
+  }
+
+  // Map 'split' to 'credit' (split details are stored separately in split_payments array)
+  if (method.toLowerCase() === 'split') {
     return 'credit'
   }
 
@@ -162,11 +160,11 @@ export function checkForMockPaymentCode(): void {
   // This is a compile-time check - we can't actually scan source code at runtime
   // But we can log a reminder for developers
   logger.debug(
-    '✅ Payment Validation: Ensure no mock payment code exists in POSPaymentModal.tsx:\n' +
+    '✅ Payment Validation: Ensure no mock payment code exists:\n' +
     '   - No "AUTH${Date.now()}" patterns\n' +
     '   - No "TXN${Date.now()}" patterns\n' +
     '   - No hardcoded card numbers (4242, etc.)\n' +
-    '   - All payments call /api/pos/payment/process endpoint'
+    '   - All payments use Edge Function (process-payment)'
   )
 }
 

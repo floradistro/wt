@@ -5,13 +5,16 @@
  */
 
 import { useState, useMemo } from 'react'
-import { View, Text, TextInput, TouchableOpacity, StyleSheet } from 'react-native'
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native'
 import { LiquidGlassView } from '@callstack/liquid-glass'
+import { Ionicons } from '@expo/vector-icons'
 import * as Haptics from 'expo-haptics'
-import type { BasePaymentViewProps, PaymentData } from './PaymentTypes'
+import { logger } from '@/utils/logger'
+import { Sentry } from '@/utils/sentry'
+import type { BasePaymentViewProps, PaymentData, SaleCompletionData, PaymentStage } from './PaymentTypes'
 
 interface CashPaymentViewProps extends BasePaymentViewProps {
-  onComplete: (paymentData: PaymentData) => void
+  onComplete: (paymentData: PaymentData) => Promise<SaleCompletionData>
 }
 
 export function CashPaymentView({
@@ -19,6 +22,9 @@ export function CashPaymentView({
   onComplete,
 }: CashPaymentViewProps) {
   const [cashTendered, setCashTendered] = useState('')
+  const [processing, setProcessing] = useState(false)
+  const [paymentStage, setPaymentStage] = useState<PaymentStage>('initializing')
+  const [completionData, setCompletionData] = useState<SaleCompletionData | null>(null)
 
   // Calculate change
   const changeAmount = useMemo(() => {
@@ -26,8 +32,8 @@ export function CashPaymentView({
   }, [cashTendered, total])
 
   const canComplete = useMemo(() => {
-    return cashTendered && !isNaN(parseFloat(cashTendered)) && changeAmount >= 0
-  }, [cashTendered, changeAmount])
+    return cashTendered && !isNaN(parseFloat(cashTendered)) && changeAmount >= 0 && !processing
+  }, [cashTendered, changeAmount, processing])
 
   // Smart quick amounts
   const quickAmounts = useMemo(() => {
@@ -44,23 +50,175 @@ export function CashPaymentView({
     setCashTendered(amount.toString())
   }
 
-  const handleComplete = () => {
+  const handleComplete = async () => {
     if (!canComplete) return
 
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+    setProcessing(true)
+    setPaymentStage('processing')
 
-    const paymentData: PaymentData = {
-      paymentMethod: 'cash',
+    // Set Sentry context for cash payment tracking
+    Sentry.setContext('cash_payment', {
+      amount: total,
       cashTendered: parseFloat(cashTendered),
       changeGiven: changeAmount,
-    }
+    })
 
-    onComplete(paymentData)
+    Sentry.addBreadcrumb({
+      category: 'payment',
+      message: 'Cash payment initiated',
+      level: 'info',
+      data: {
+        amount: total,
+        cashTendered: parseFloat(cashTendered),
+        changeGiven: changeAmount,
+      },
+    })
+
+    try {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+
+      const paymentData: PaymentData = {
+        paymentMethod: 'cash',
+        cashTendered: parseFloat(cashTendered),
+        changeGiven: changeAmount,
+      }
+
+      // Brief moment to show success
+      await new Promise(resolve => setTimeout(resolve, 500))
+      setPaymentStage('success')
+
+      Sentry.addBreadcrumb({
+        category: 'payment',
+        message: 'Cash payment accepted',
+        level: 'info',
+      })
+
+      // CRITICAL: Save sale to database - MUST complete
+      setPaymentStage('saving')
+      logger.debug('💵 Cash payment complete, saving sale...', paymentData)
+
+      Sentry.addBreadcrumb({
+        category: 'payment',
+        message: 'Saving cash sale to database',
+        level: 'info',
+      })
+
+      try {
+        const saleData = await onComplete(paymentData)
+
+        // Sale saved successfully!
+        setCompletionData(saleData)
+        setPaymentStage('complete')
+
+        logger.debug('💵 Cash sale completed successfully', { orderNumber: saleData.orderNumber })
+
+        Sentry.addBreadcrumb({
+          category: 'payment',
+          message: 'Cash sale completed successfully',
+          level: 'info',
+          data: {
+            orderNumber: saleData.orderNumber,
+            loyaltyPointsAdded: saleData.loyaltyPointsAdded,
+          },
+        })
+
+        // Show completion details briefly, then reset
+        await new Promise(resolve => setTimeout(resolve, 2000))
+
+        // Reset payment state for next transaction
+        setProcessing(false)
+        setPaymentStage('initializing')
+        setCompletionData(null)
+        setCashTendered('')
+
+      } catch (saveError) {
+        // CRITICAL: Sale save failed
+        logger.error('💥 CRITICAL: Cash payment accepted but sale save failed', saveError)
+
+        Sentry.captureException(saveError, {
+          level: 'fatal',
+          contexts: {
+            cash_payment: {
+              amount: total,
+              cashTendered: parseFloat(cashTendered),
+              changeGiven: changeAmount,
+              stage: 'save_failed',
+            },
+          },
+          tags: {
+            payment_method: 'cash',
+            critical: 'sale_save_failure',
+          },
+        })
+
+        setPaymentStage('error')
+        setProcessing(false)
+        throw new Error('Sale could not be saved. Please contact support.')
+      }
+    } catch (error: any) {
+      setPaymentStage('error')
+      setProcessing(false)
+      logger.error('Cash payment error:', error)
+
+      Sentry.captureException(error, {
+        level: 'error',
+        contexts: {
+          cash_payment: {
+            amount: total,
+            cashTendered: parseFloat(cashTendered),
+            stage: paymentStage,
+          },
+        },
+        tags: {
+          payment_method: 'cash',
+        },
+      })
+
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
+      // Error will be shown by parent
+    }
   }
 
   return (
     <View style={styles.container}>
-      <Text style={styles.sectionLabel}>CASH RECEIVED</Text>
+      {processing ? (
+        <View style={styles.processingContainer}>
+          <View style={styles.processingHeader}>
+            {paymentStage === 'complete' ? (
+              <Ionicons name="checkmark-circle" size={48} color="#10b981" />
+            ) : (
+              <ActivityIndicator size="large" color="#10b981" />
+            )}
+          </View>
+
+          <View style={styles.processingBody}>
+            <Text style={styles.processingAmount}>${total.toFixed(2)}</Text>
+
+            <View style={styles.statusDivider} />
+
+            <Text style={styles.statusText}>
+              {paymentStage === 'processing' && 'Processing...'}
+              {paymentStage === 'success' && 'Approved ✓'}
+              {paymentStage === 'saving' && 'Saving sale...'}
+              {paymentStage === 'complete' && 'Complete ✓'}
+              {paymentStage === 'error' && 'Error'}
+            </Text>
+
+            {paymentStage === 'complete' && completionData && (
+              <View style={styles.completionDetails}>
+                <Text style={styles.completionLabel}>Order #{completionData.orderNumber}</Text>
+                {completionData.loyaltyPointsAdded !== undefined && completionData.loyaltyPointsAdded > 0 && (
+                  <Text style={styles.completionSubtext}>
+                    +{completionData.loyaltyPointsAdded} points earned
+                  </Text>
+                )}
+              </View>
+            )}
+          </View>
+        </View>
+      ) : (
+        <>
+          <Text style={styles.sectionLabel}>CASH RECEIVED</Text>
 
       {/* Quick Buttons */}
       <View style={styles.quickButtons}>
@@ -165,6 +323,8 @@ export function CashPaymentView({
           </Text>
         </LiquidGlassView>
       </TouchableOpacity>
+        </>
+      )}
     </View>
   )
 }
@@ -172,6 +332,55 @@ export function CashPaymentView({
 const styles = StyleSheet.create({
   container: {
     marginBottom: 12,
+  },
+  processingContainer: {
+    paddingVertical: 48,
+    paddingHorizontal: 24,
+    alignItems: 'center',
+  },
+  processingHeader: {
+    marginBottom: 24,
+  },
+  processingBody: {
+    width: '100%',
+    alignItems: 'center',
+    gap: 12,
+  },
+  processingAmount: {
+    fontSize: 42,
+    fontWeight: '700',
+    color: '#fff',
+    letterSpacing: -0.4,
+  },
+  statusDivider: {
+    width: 40,
+    height: 2,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    marginVertical: 8,
+  },
+  statusText: {
+    fontSize: 15,
+    fontWeight: '400',
+    color: 'rgba(255,255,255,0.8)',
+    textAlign: 'center',
+    letterSpacing: -0.2,
+  },
+  completionDetails: {
+    marginTop: 16,
+    alignItems: 'center',
+    gap: 6,
+  },
+  completionLabel: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#10b981',
+    letterSpacing: -0.2,
+  },
+  completionSubtext: {
+    fontSize: 13,
+    fontWeight: '400',
+    color: 'rgba(255,255,255,0.6)',
+    letterSpacing: -0.1,
   },
   sectionLabel: {
     fontSize: 11,

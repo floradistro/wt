@@ -27,19 +27,19 @@ export interface PurchaseOrder {
   expected_delivery_date?: string
   notes?: string
   subtotal: number
-  tax: number
-  shipping: number
-  total: number
+  tax_amount: number // Database column
+  shipping_cost: number // Database column
+  total_amount: number // Database column
   created_at: string
   updated_at: string
   created_by?: string
   // Computed fields
   items_count?: number
   received_items_count?: number
-  // Aliases for compatibility
-  tax_amount?: number
-  shipping_cost?: number
-  total_amount?: number
+  // Aliases for compatibility with existing code
+  tax?: number
+  shipping?: number
+  total?: number
 }
 
 export interface PurchaseOrderItem {
@@ -159,10 +159,10 @@ export async function getPurchaseOrders(params?: {
       location_name: location?.name || '',
       items_count: items.length,
       received_items_count: items.filter((item: any) => (item.received_quantity || 0) >= (item.quantity || 0)).length,
-      // Aliases for compatibility
-      tax_amount: po.tax,
-      shipping_cost: po.shipping,
-      total_amount: po.total,
+      // Aliases for compatibility (database has tax_amount/shipping_cost/total_amount)
+      tax: po.tax_amount,
+      shipping: po.shipping_cost,
+      total: po.total_amount,
       suppliers: undefined, // Remove nested object
       wholesale_customers: undefined, // Remove nested object
       locations: undefined, // Remove nested object
@@ -239,19 +239,61 @@ export async function getPurchaseOrderById(poId: string): Promise<PurchaseOrder 
 
 /**
  * Create a new purchase order
+ *
+ * @param vendorId - Vendor ID creating the PO
+ * @param params - PO creation parameters
+ * @returns Created purchase order
+ * @throws Error if validation fails or database operation fails
  */
 export async function createPurchaseOrder(
   vendorId: string,
   params: CreatePurchaseOrderParams
 ): Promise<PurchaseOrder> {
+  const span = logger.startSpan('create_purchase_order', 'purchase_order.create')
+
   try {
-    const { items, ...poData } = params
+    // Input validation
+    if (!vendorId) {
+      throw new Error('Vendor ID is required')
+    }
+
+    if (!params.po_type || !['inbound', 'outbound'].includes(params.po_type)) {
+      throw new Error('Valid PO type is required (inbound or outbound)')
+    }
+
+    if (params.po_type === 'inbound' && !params.supplier_id) {
+      throw new Error('Supplier is required for inbound POs')
+    }
+
+    if (params.po_type === 'outbound' && !params.wholesale_customer_id) {
+      throw new Error('Wholesale customer is required for outbound POs')
+    }
+
+    if (!params.items || params.items.length === 0) {
+      throw new Error('At least one item is required')
+    }
+
+    // Validate items
+    for (const item of params.items) {
+      if (!item.product_id) {
+        throw new Error('Product ID is required for all items')
+      }
+      if (typeof item.quantity !== 'number' || item.quantity <= 0) {
+        throw new Error('Item quantity must be greater than 0')
+      }
+      if (typeof item.unit_price !== 'number' || item.unit_price < 0) {
+        throw new Error('Item unit price must be 0 or greater')
+      }
+    }
+
+    // Extract items, tax, shipping from params (to avoid inserting old column names)
+    const { items, tax, shipping, ...poData } = params
 
     // Calculate totals
     const subtotal = items.reduce((sum, item) => sum + item.quantity * item.unit_price, 0)
-    const tax = params.tax || 0
-    const shipping = params.shipping || 0
-    const total = subtotal + tax + shipping
+    const taxAmount = tax || 0
+    const shippingCost = shipping || 0
+    const total = subtotal + taxAmount + shippingCost
 
     const poNumber = await generatePONumber()
 
@@ -261,12 +303,24 @@ export async function createPurchaseOrder(
       po_number: poNumber,
       status: 'draft' as const,
       subtotal,
-      tax,
-      shipping,
-      total,
+      tax_amount: taxAmount,
+      shipping_cost: shippingCost,
+      total_amount: total,
     }
 
-    logger.info('Creating purchase order', { insertData })
+    logger.info('Creating purchase order', {
+      poType: params.po_type,
+      itemCount: items.length,
+      total,
+      poNumber,
+    })
+
+    // Set Sentry context
+    logger.setContext('purchase_order_create', {
+      po_type: params.po_type,
+      item_count: items.length,
+      total_amount: total,
+    })
 
     // 1. Create the purchase order
     const { data: po, error: poError } = await supabase
@@ -278,52 +332,66 @@ export async function createPurchaseOrder(
     if (poError) {
       logger.error('Failed to create purchase order', {
         error: poError,
-        message: poError.message,
-        details: poError.details,
-        hint: poError.hint,
-        code: poError.code,
-        insertData
+        errorMessage: poError.message,
+        errorDetails: poError.details,
+        errorHint: poError.hint,
+        errorCode: poError.code,
       })
       throw new Error(`Failed to create purchase order: ${poError.message}`)
     }
 
-    logger.info('Purchase order created', { poId: po.id })
+    logger.info('Purchase order created', { poId: po.id, poNumber: po.po_number })
 
-    // 2. Create purchase order items (only if items exist)
+    // 2. Create purchase order items
     if (items.length > 0) {
       const poItems = items.map((item) => ({
         purchase_order_id: po.id,
         product_id: item.product_id,
         quantity: item.quantity,
-        quantity_received: 0,
+        received_quantity: 0,
         unit_price: item.unit_price,
-        line_total: item.quantity * item.unit_price,
+        subtotal: item.quantity * item.unit_price,
       }))
 
       const { error: itemsError } = await supabase.from('purchase_order_items').insert(poItems)
 
       if (itemsError) {
         // Rollback: delete the PO
+        logger.warn('Rolling back PO creation due to item insert failure', { poId: po.id })
         await supabase.from('purchase_orders').delete().eq('id', po.id)
+
         logger.error('Failed to create purchase order items', {
           error: itemsError,
-          message: itemsError.message,
-          details: itemsError.details,
-          hint: itemsError.hint,
-          code: itemsError.code
+          errorMessage: itemsError.message,
+          errorDetails: itemsError.details,
+          errorHint: itemsError.hint,
+          errorCode: itemsError.code,
         })
         throw new Error(`Failed to create purchase order items: ${itemsError.message}`)
       }
+
+      logger.info('Purchase order items created', { poId: po.id, itemCount: items.length })
     }
+
+    span.finish()
 
     return po
   } catch (error) {
+    span.finish()
+
     logger.error('Create purchase order exception', {
       error,
-      message: error instanceof Error ? error.message : 'Unknown error',
-      stack: error instanceof Error ? error.stack : undefined
+      vendorId,
+      poType: params?.po_type,
+      itemCount: params?.items?.length || 0,
     })
-    throw error
+
+    // Re-throw with context
+    if (error instanceof Error) {
+      throw error
+    } else {
+      throw new Error(`Failed to create purchase order: ${String(error)}`)
+    }
   }
 }
 
@@ -347,106 +415,135 @@ export async function updatePurchaseOrderStatus(
 
 /**
  * Receive items from purchase order
- * This function updates inventory and marks items as received
+ * Uses a stored procedure for transactional safety - all items receive successfully or none do
+ *
+ * @param poId - Purchase order ID
+ * @param items - Array of items to receive with quantities and conditions
+ * @param locationId - Location where items will be added to inventory
+ * @throws Error if validation fails or database operation fails
  */
 export async function receiveItems(
   poId: string,
   items: { item_id: string; quantity: number; condition: ItemCondition; quality_notes?: string }[],
   locationId: string
-): Promise<void> {
+): Promise<{
+  success: boolean
+  itemsProcessed: number
+  newStatus: PurchaseOrderStatus
+}> {
+  const span = logger.startSpan('receive_po_items', 'purchase_order.receive')
+
   try {
-    // Update each item's received quantity
+    // Input validation
+    if (!poId) {
+      throw new Error('Purchase order ID is required')
+    }
+
+    if (!locationId) {
+      throw new Error('Location ID is required')
+    }
+
+    if (!items || items.length === 0) {
+      throw new Error('At least one item is required')
+    }
+
+    // Validate each item
     for (const item of items) {
-      const { data: poItem, error: fetchError } = await supabase
-        .from('purchase_order_items')
-        .select('quantity_received, quantity, product_id')
-        .eq('id', item.item_id)
-        .single()
+      if (!item.item_id) {
+        throw new Error('Item ID is required for all items')
+      }
 
-      if (fetchError) throw fetchError
+      if (typeof item.quantity !== 'number' || item.quantity <= 0) {
+        throw new Error(`Invalid quantity ${item.quantity} for item ${item.item_id}. Must be a number greater than 0`)
+      }
 
-      const newReceivedQty = (poItem.quantity_received || 0) + item.quantity
-
-      // Update received quantity and condition
-      const { error: updateError } = await supabase
-        .from('purchase_order_items')
-        .update({
-          quantity_received: newReceivedQty,
-          condition: item.condition,
-          quality_notes: item.quality_notes,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', item.item_id)
-
-      if (updateError) throw updateError
-
-      // Only add to inventory if condition is 'good'
-      if (item.condition === 'good') {
-        // Update or insert inventory
-        const { data: existingInventory } = await supabase
-          .from('inventory')
-          .select('id, quantity')
-          .eq('product_id', poItem.product_id)
-          .eq('location_id', locationId)
-          .single()
-
-        if (existingInventory) {
-          // Update existing inventory
-          const { error: invError } = await supabase
-            .from('inventory')
-            .update({
-              quantity: (existingInventory.quantity || 0) + item.quantity,
-              updated_at: new Date().toISOString(),
-            })
-            .eq('id', existingInventory.id)
-
-          if (invError) throw invError
-        } else {
-          // Create new inventory record
-          const { error: invError } = await supabase.from('inventory').insert({
-            product_id: poItem.product_id,
-            location_id: locationId,
-            quantity: item.quantity,
-          })
-
-          if (invError) throw invError
-        }
+      if (!item.condition || !['good', 'damaged', 'expired', 'rejected'].includes(item.condition)) {
+        throw new Error(`Invalid condition "${item.condition}" for item ${item.item_id}. Must be one of: good, damaged, expired, rejected`)
       }
     }
 
-    // Check if PO is fully received
-    const { data: po } = await supabase
-      .from('purchase_orders')
-      .select(`
-        purchase_order_items (
-          quantity,
-          quantity_received
-        )
-      `)
-      .eq('id', poId)
-      .single()
+    logger.info('Receiving PO items', {
+      poId,
+      locationId,
+      itemCount: items.length,
+      totalQuantity: items.reduce((sum, item) => sum + item.quantity, 0),
+    })
 
-    if (po) {
-      const allItems = po.purchase_order_items || []
-      const fullyReceived = allItems.every(
-        (item: any) => (item.quantity_received || 0) >= item.quantity
-      )
+    // Set Sentry context for better error tracking
+    logger.setContext('purchase_order', {
+      po_id: poId,
+      location_id: locationId,
+      items_count: items.length,
+      items: items.map(item => ({
+        item_id: item.item_id,
+        quantity: item.quantity,
+        condition: item.condition,
+      })),
+    })
 
-      const partiallyReceived = allItems.some(
-        (item: any) => (item.quantity_received || 0) > 0 && (item.quantity_received || 0) < item.quantity
-      )
+    // Call stored procedure for transactional receive
+    const { data, error } = await supabase.rpc('receive_po_items', {
+      p_po_id: poId,
+      p_location_id: locationId,
+      p_items: items,
+    })
 
-      const newStatus = fullyReceived
-        ? 'received'
-        : partiallyReceived
-        ? 'partially_received'
-        : 'pending'
+    if (error) {
+      logger.error('Database error receiving PO items', {
+        error,
+        poId,
+        locationId,
+        itemCount: items.length,
+        errorMessage: error.message,
+        errorDetails: error.details,
+        errorHint: error.hint,
+        errorCode: error.code,
+      })
 
-      await updatePurchaseOrderStatus(poId, newStatus)
+      // Provide user-friendly error messages
+      if (error.message?.includes('not found')) {
+        throw new Error('Purchase order or item not found. Please refresh and try again.')
+      } else if (error.message?.includes('Cannot receive')) {
+        throw new Error(error.message) // Already user-friendly from stored proc
+      } else if (error.message?.includes('Invalid condition')) {
+        throw new Error(error.message) // Already user-friendly from stored proc
+      } else {
+        throw new Error(`Failed to receive items: ${error.message}`)
+      }
+    }
+
+    const result = data as { success: boolean; items_processed: number; new_status: PurchaseOrderStatus }
+
+    logger.info('Successfully received PO items', {
+      poId,
+      itemsProcessed: result.items_processed,
+      newStatus: result.new_status,
+    })
+
+    span.finish()
+
+    return {
+      success: result.success,
+      itemsProcessed: result.items_processed,
+      newStatus: result.new_status,
     }
   } catch (error) {
-    logger.error('Failed to receive items', { error })
-    throw new Error(`Failed to receive items: ${error instanceof Error ? error.message : 'Unknown error'}`)
+    span.finish()
+
+    // Log error with full context
+    logger.error('Failed to receive PO items', {
+      error,
+      poId,
+      locationId,
+      itemCount: items?.length || 0,
+    })
+
+    // Re-throw with context
+    if (error instanceof Error) {
+      throw error
+    } else {
+      throw new Error(`Failed to receive items: ${String(error)}`)
+    }
   }
 }
 
@@ -513,7 +610,7 @@ export async function getPurchaseOrderStats(params?: {
 }> {
   let query = supabase
     .from('purchase_orders')
-    .select('status, total')
+    .select('status, total_amount')
 
   if (params?.locationIds && params.locationIds.length > 0) {
     query = query.in('location_id', params.locationIds)
@@ -531,7 +628,7 @@ export async function getPurchaseOrderStats(params?: {
     draft: data?.filter(po => po.status === 'draft').length || 0,
     pending: data?.filter(po => po.status === 'pending' || po.status === 'approved' || po.status === 'partially_received').length || 0,
     received: data?.filter(po => po.status === 'received').length || 0,
-    totalValue: data?.reduce((sum, po) => sum + (po.total || 0), 0) || 0,
+    totalValue: data?.reduce((sum, po) => sum + (po.total_amount || 0), 0) || 0,
   }
 
   return stats

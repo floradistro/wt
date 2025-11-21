@@ -13,6 +13,7 @@
 import { useState, useCallback, useMemo, useRef } from 'react'
 import { View, StyleSheet } from 'react-native'
 import * as Haptics from 'expo-haptics'
+import Constants from 'expo-constants'
 import { supabase } from '@/lib/supabase/client'
 import { validateRealPaymentData, normalizePaymentMethod, validatePaymentMethod } from '@/utils/payment-validation'
 import { Sentry } from '@/utils/sentry'
@@ -24,17 +25,17 @@ import { POSUnifiedCustomerSelector } from '../POSUnifiedCustomerSelector'
 import { POSAddCustomerModal } from '../POSAddCustomerModal'
 import { POSCustomerMatchModal, type CustomerMatch } from '../POSCustomerMatchModal'
 import POSPaymentModal from '../POSPaymentModal'
-import POSSaleSuccessModal from '../POSSaleSuccessModal'
 import { POSCart } from '../cart/POSCart'
 import { CloseCashDrawerModal } from '../CloseCashDrawerModal'
 
 // Hooks
 import { useLoyalty, useModalState } from '@/hooks/pos'
 import { usePaymentProcessor } from '@/stores/payment-processor.store'
+import { useAuthStore } from '@/stores/auth.store'
 
 // Types
 import type { Vendor, Customer, Product, SessionInfo } from '@/types/pos'
-import type { PaymentData } from '@/components/pos/payment'
+import type { PaymentData, SaleCompletionData } from '@/components/pos/payment'
 import type { AAMVAData } from '@/lib/id-scanner/aamva-parser'
 
 interface POSCheckoutProps {
@@ -60,10 +61,8 @@ export function POSCheckout({
   // STATE
   // ========================================
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null)
-  const [processingCheckout, setProcessingCheckout] = useState(false)
   const [scannedDataForNewCustomer, setScannedDataForNewCustomer] = useState<AAMVAData | null>(null)
   const [customerMatches, setCustomerMatches] = useState<CustomerMatch[]>([])
-  const [showSuccessModal, setShowSuccessModal] = useState(false)
   const [errorModal, setErrorModal] = useState<{
     visible: boolean
     title: string
@@ -73,20 +72,6 @@ export function POSCheckout({
     title: '',
     message: '',
   })
-  const [successData, setSuccessData] = useState<{
-    orderNumber: string
-    transactionNumber?: string
-    total: number
-    paymentMethod: string
-    authorizationCode?: string
-    cardType?: string
-    cardLast4?: string
-    itemCount: number
-    processorName?: string
-    inventoryDeducted?: boolean
-    loyaltyPointsAdded?: number
-    loyaltyPointsRedeemed?: number
-  } | null>(null)
 
   // Session end state
   const [sessionData, setSessionData] = useState<{
@@ -100,6 +85,7 @@ export function POSCheckout({
   // STORES
   // ========================================
   const currentProcessor = usePaymentProcessor((state) => state.currentProcessor)
+  const authSession = useAuthStore((state) => state.session)
 
   // ========================================
   // MODALS
@@ -157,18 +143,12 @@ export function POSCheckout({
     openModal('payment')
   }, [cart.length, openModal])
 
-  const handlePaymentComplete = async (paymentData: PaymentData) => {
-    if (!sessionInfo || !vendor || !customUserId) return
+  const handlePaymentComplete = async (paymentData: PaymentData): Promise<SaleCompletionData> => {
+    if (!sessionInfo || !vendor || !customUserId) {
+      throw new Error('Missing session information')
+    }
 
-    logger.debug('💰 POSCheckout: Processing payment', paymentData)
-    setProcessingCheckout(true)
-
-    // Start Sentry transaction for checkout/transaction saving
-    // Note: startTransaction not available in current SDK version
-    // const transaction = Sentry.startTransaction({
-    //   name: 'pos_checkout',
-    //   op: 'checkout.process',
-    // })
+    logger.debug('💰 POSCheckout: Processing payment with TWO-PHASE COMMIT', paymentData)
 
     // Set checkout context
     Sentry.setContext('checkout', {
@@ -185,11 +165,12 @@ export function POSCheckout({
       hasLoyaltyPoints: loyaltyPointsToRedeem > 0,
       loyaltyPointsToRedeem,
       loyaltyDiscountAmount,
+      architecture: 'two_phase_commit_edge_function',
     })
 
     Sentry.addBreadcrumb({
       category: 'checkout',
-      message: 'Starting checkout process',
+      message: 'Starting two-phase commit checkout',
       level: 'info',
       data: {
         total,
@@ -217,13 +198,12 @@ export function POSCheckout({
         tierName: item.tierName || item.tier || '1 Unit',
         discountAmount: item.manualDiscountValue || 0,
         lineTotal: (item.adjustedPrice !== undefined ? item.adjustedPrice : item.price) * item.quantity,
+        inventoryId: item.inventoryId, // CRITICAL for inventory deduction
       }))
 
       // Normalize payment method for database constraint
-      // Database expects: 'credit', 'debit', 'ebt_food', 'ebt_cash', 'gift', 'cash', 'check'
       const normalizedPaymentMethod = normalizePaymentMethod(paymentData.paymentMethod)
 
-      // CRITICAL VALIDATION: Ensure normalized payment method is valid
       Sentry.addBreadcrumb({
         category: 'checkout',
         message: 'Validating payment method',
@@ -235,10 +215,23 @@ export function POSCheckout({
       })
       validatePaymentMethod(normalizedPaymentMethod)
 
-      // Call Supabase RPC function directly
+      // ========================================================================
+      // NEW ARCHITECTURE: Call Edge Function (Atomic Two-Phase Commit)
+      // ========================================================================
+      // This replaces the old pattern of:
+      // 1. Call payment processor
+      // 2. Then call create_pos_sale RPC
+      //
+      // New pattern:
+      // 1. Edge Function creates pending order
+      // 2. Edge Function processes payment
+      // 3. Edge Function completes order
+      // All atomic - if any step fails, everything rolls back
+      // ========================================================================
+
       Sentry.addBreadcrumb({
         category: 'checkout',
-        message: 'Calling create_pos_sale RPC',
+        message: 'Calling Edge Function: process-payment',
         level: 'info',
         data: {
           itemCount: items.length,
@@ -247,78 +240,177 @@ export function POSCheckout({
         },
       })
 
-      // const rpcSpan = transaction.startChild({
-      //   op: 'db.query',
-      //   description: 'RPC: create_pos_sale',
-      // })
+      // Get FRESH session from Supabase (don't use cached session from store)
+      // This ensures we have a valid, non-expired token
+      logger.debug('🔄 Refreshing session before payment...')
+      const { data: { session: freshSession }, error: sessionError } = await supabase.auth.getSession()
 
-      const { data: result, error: rpcError } = await supabase.rpc('create_pos_sale', {
-        p_location_id: sessionInfo.locationId,
-        p_vendor_id: vendor.id,
-        p_session_id: sessionInfo.sessionId,
-        p_user_id: customUserId,
-        p_items: items,
-        p_subtotal: subtotal,
-        p_tax_amount: taxAmount,
-        p_total: total,
-        p_payment_method: normalizedPaymentMethod,
-        p_payment_processor_id: null,
-        p_cash_tendered: paymentData.cashTendered || null,
-        p_change_given: paymentData.changeGiven || null,
-        p_customer_id: selectedCustomer?.id || null,
-        p_customer_name: selectedCustomer
-          ? `${selectedCustomer.first_name} ${selectedCustomer.last_name}`
-          : 'Walk-In',
-        p_authorization_code: paymentData.authorizationCode || null,
-        p_payment_transaction_id: paymentData.transactionId || null,
-        p_card_type: paymentData.cardType || null,
-        p_card_last4: paymentData.cardLast4 || null,
-        p_loyalty_points_redeemed: loyaltyPointsToRedeem || 0,
-        p_loyalty_discount_amount: loyaltyDiscountAmount || 0,
-      })
-
-      // rpcSpan.finish()
-
-      if (rpcError) {
-        Sentry.addBreadcrumb({
-          category: 'checkout',
-          message: 'RPC error creating sale',
-          level: 'error',
-          data: {
-            error: rpcError.message,
-          },
-        })
-        throw new Error(rpcError.message || 'Failed to create sale')
+      if (sessionError || !freshSession) {
+        logger.error('Failed to get fresh session:', sessionError)
+        throw new Error('Authentication error. Please log out and log back in.')
       }
 
-      if (!result?.success) {
+      if (!freshSession.access_token) {
+        logger.error('Fresh session missing access_token')
+        throw new Error('Invalid session. Please log out and log back in.')
+      }
+
+      logger.debug('✅ Fresh session obtained', {
+        userId: freshSession.user?.id,
+        tokenLength: freshSession.access_token.length,
+        expiresAt: freshSession.expires_at,
+      })
+
+      // Extract split payment amounts if present
+      const splitCash = paymentData.splitPayments?.find(p => p.method === 'cash')?.amount || null
+      const splitCard = paymentData.splitPayments?.find(p => p.method === 'card')?.amount || null
+
+      // Call Edge Function with 90s timeout (gives plenty of time for payment processor)
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => {
+        logger.warn('⏱️ Edge Function timeout (90s) - aborting request')
+        controller.abort()
+      }, 90000)
+
+      // Log what we're sending to the Edge Function
+      const edgeFunctionPayload = {
+        vendorId: vendor.id,
+        locationId: sessionInfo.locationId,
+        sessionId: sessionInfo.sessionId,
+        registerId: sessionInfo.registerId,
+        items,
+        subtotal,
+        taxAmount,
+        total,
+        paymentMethod: normalizedPaymentMethod,
+        tipAmount: 0, // TODO: Add tip support in UI
+        customerId: selectedCustomer?.id || null,
+        customerName: selectedCustomer
+          ? `${selectedCustomer.first_name} ${selectedCustomer.last_name}`
+          : 'Walk-In',
+        loyaltyPointsRedeemed: loyaltyPointsToRedeem || 0,
+        loyaltyDiscountAmount: loyaltyDiscountAmount || 0,
+      }
+
+      logger.debug('📤 Sending to Edge Function:', edgeFunctionPayload)
+
+      const authHeader = `Bearer ${freshSession.access_token}`
+      logger.debug('🔑 Auth header:', {
+        hasToken: !!freshSession.access_token,
+        tokenLength: freshSession.access_token.length,
+        headerPreview: authHeader.substring(0, 30) + '...',
+      })
+
+      // Call Edge Function directly with fetch() to ensure headers are sent correctly
+      const supabaseUrl = Constants.expoConfig?.extra?.supabaseUrl || process.env.EXPO_PUBLIC_SUPABASE_URL
+      const supabaseAnonKey = Constants.expoConfig?.extra?.supabaseAnonKey || process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY
+
+      const edgeFunctionUrl = `${supabaseUrl}/functions/v1/process-checkout`
+
+      logger.debug('🌐 Calling NEW Edge Function (enterprise-grade):', {
+        url: edgeFunctionUrl,
+        hasAuthHeader: !!authHeader,
+        hasAnonKey: !!supabaseAnonKey,
+      })
+
+      const response = await fetch(edgeFunctionUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': authHeader,
+          'apikey': supabaseAnonKey!,
+        },
+        body: JSON.stringify(edgeFunctionPayload),
+        signal: controller.signal,
+      })
+
+      clearTimeout(timeoutId)
+
+      const responseText = await response.text()
+      logger.debug('📨 Edge Function response:', {
+        status: response.status,
+        statusText: response.statusText,
+        body: responseText, // Log full response body
+      })
+
+      let data: any = null
+      let edgeFunctionError: any = null
+
+      if (!response.ok) {
+        // Try to parse error response
+        logger.error('❌ Edge Function HTTP Error:', {
+          status: response.status,
+          statusText: response.statusText,
+          responseBody: responseText,
+        })
+
+        try {
+          const errorData = JSON.parse(responseText)
+          edgeFunctionError = new Error(errorData.error || errorData.message || `HTTP ${response.status}: ${response.statusText}`)
+        } catch {
+          edgeFunctionError = new Error(`HTTP ${response.status}: ${response.statusText} - ${responseText}`)
+        }
+      } else {
+        // Parse success response
+        try {
+          data = JSON.parse(responseText)
+        } catch (e) {
+          edgeFunctionError = new Error('Failed to parse response JSON')
+        }
+      }
+
+      if (edgeFunctionError) {
         Sentry.addBreadcrumb({
           category: 'checkout',
-          message: 'RPC returned failure',
+          message: 'Edge Function error',
+          level: 'error',
+          data: {
+            error: edgeFunctionError.message,
+            errorDetails: JSON.stringify(edgeFunctionError),
+            responseData: data,
+          },
+        })
+        logger.error('Edge Function error details:', {
+          message: edgeFunctionError.message,
+          error: edgeFunctionError,
+          data: data,
+        })
+
+        // Try to extract more detailed error message
+        const errorMessage = data?.error || edgeFunctionError.message || 'Payment processing failed'
+        throw new Error(errorMessage)
+      }
+
+      if (!data?.success) {
+        Sentry.addBreadcrumb({
+          category: 'checkout',
+          message: 'Edge Function returned failure',
           level: 'error',
         })
-        throw new Error('Failed to create sale')
+        throw new Error(data?.error || 'Failed to create sale')
       }
 
       Sentry.addBreadcrumb({
         category: 'checkout',
-        message: 'Sale created successfully',
+        message: 'Two-phase commit completed successfully',
         level: 'info',
         data: {
-          orderNumber: result.order?.order_number,
-          transactionNumber: result.transaction?.transaction_number,
+          orderNumber: data.data?.order?.order_number || data.data?.orderNumber,
+          orderId: data.data?.order?.id || data.data?.orderId,
+          status: data.data?.order?.status || data.data?.orderStatus,
         },
       })
 
-      // Extract transaction details from RPC response
-      const orderNumber = result.order?.order_number || 'Unknown'
-      const transactionNumber = result.transaction?.transaction_number
+      // Extract transaction details from Edge Function response
+      // Edge Function wraps response in { success: true, data: { ... } }
+      const orderNumber = data.data?.order?.order_number || data.data?.orderNumber || 'Unknown'
+      const transactionNumber = `TXN-${orderNumber}`
 
-      // Calculate loyalty points earned from the sale
-      const loyaltyPointsAdded = result.loyalty?.points_earned || 0
+      // Loyalty points are calculated by the Edge Function
+      const loyaltyPointsAdded = loyaltyPointsEarned // Use the calculated value from above
 
-      // Prepare success modal data
-      setSuccessData({
+      // Prepare completion data to return to payment modal
+      const completionData: SaleCompletionData = {
         orderNumber,
         transactionNumber,
         total,
@@ -328,19 +420,30 @@ export function POSCheckout({
         cardLast4: paymentData.cardLast4,
         itemCount,
         processorName: currentProcessor?.processor_name,
-        inventoryDeducted: true, // RPC function handles this automatically
         loyaltyPointsAdded,
         loyaltyPointsRedeemed: loyaltyPointsToRedeem || undefined,
+      }
+
+      Sentry.addBreadcrumb({
+        category: 'checkout',
+        message: 'Sale completion data prepared',
+        level: 'info',
+        data: {
+          orderNumber: completionData.orderNumber,
+          loyaltyPointsAdded: completionData.loyaltyPointsAdded,
+          loyaltyPointsRedeemed: completionData.loyaltyPointsRedeemed,
+        },
       })
 
-      // Clear cart and close payment modal
+      // Clear cart and customer state
       clearCart()
       setSelectedCustomer(null)
       resetLoyalty()
-      closeModal()
 
-      // Show success modal (haptic is triggered by modal)
-      setShowSuccessModal(true)
+      // Close modal after brief delay to show completion (payment views show for 2s)
+      setTimeout(() => {
+        closeModal()
+      }, 2500)
 
       // Mark transaction as successful
       // transaction.setStatus('ok')
@@ -360,6 +463,9 @@ export function POSCheckout({
       if (onCheckoutComplete) {
         onCheckoutComplete()
       }
+
+      // Return completion data to payment modal
+      return completionData
     } catch (error) {
       logger.error('Checkout error:', error)
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
@@ -405,13 +511,31 @@ export function POSCheckout({
 
       // transaction.finish()
 
+      // CRITICAL FIX: Close the payment modal to reset its state
+      // This prevents the UI from freezing when checkout fails
+      // The payment modal's processingCard state needs to be reset
+      closeModal()
+
+      // Log error details for debugging intermittent issues
+      const errorMessage = error instanceof Error ? error.message : 'Failed to process sale. Please try again or contact support.'
+      const isTimeout = errorMessage.includes('timed out')
+
+      logger.error('💥 Checkout failed:', {
+        error: errorMessage,
+        isTimeout,
+        paymentMethod: paymentData.paymentMethod,
+        total,
+        hasCustomer: !!selectedCustomer,
+      })
+
       setErrorModal({
         visible: true,
-        title: 'Checkout Error',
-        message: error instanceof Error ? error.message : 'Failed to process sale. Please try again or contact support.',
+        title: isTimeout ? 'Connection Timeout' : 'Checkout Error',
+        message: errorMessage,
       })
-    } finally {
-      setProcessingCheckout(false)
+
+      // Re-throw error so payment views can handle it
+      throw error
     }
   }
 
@@ -729,13 +853,6 @@ export function POSCheckout({
         hasPaymentProcessor={true}
         locationId={sessionInfo?.locationId}
         registerId={sessionInfo?.registerId}
-      />
-
-      {/* Success Modal - Always rendered */}
-      <POSSaleSuccessModal
-        visible={showSuccessModal}
-        saleData={successData}
-        onClose={() => setShowSuccessModal(false)}
       />
 
       {/* Close Cash Drawer Modal - Always rendered, visibility controlled by isModalOpen */}

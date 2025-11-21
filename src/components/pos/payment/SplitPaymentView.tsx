@@ -1,7 +1,10 @@
 /**
- * Split Payment View
- * Single Responsibility: Handle split payment (cash + card)
- * Apple Standard: Component < 300 lines
+ * Split Payment View - CLEAN VERSION
+ * Two-Phase Commit Architecture
+ *
+ * DOES NOT process payments itself.
+ * Just collects split amounts and triggers checkout.
+ * Edge Function handles the actual payment processing.
  */
 
 import { useState, useMemo } from 'react'
@@ -9,40 +12,24 @@ import { View, Text, TextInput, TouchableOpacity, StyleSheet } from 'react-nativ
 import { LiquidGlassView } from '@callstack/liquid-glass'
 import { Ionicons } from '@expo/vector-icons'
 import * as Haptics from 'expo-haptics'
-import { validatePaymentResponse } from '@/utils/payment-validation'
-import { ErrorModal } from '@/components/ErrorModal'
 import type { ProcessorInfo } from '@/stores/payment-processor.store'
-import type { BasePaymentViewProps, PaymentData } from './PaymentTypes'
-import { logger } from '@/utils/logger'
+import type { BasePaymentViewProps, PaymentData, SaleCompletionData } from './PaymentTypes'
 
 interface SplitPaymentViewProps extends BasePaymentViewProps {
   currentProcessor: ProcessorInfo | null
   locationId?: string
   registerId?: string
-  onComplete: (paymentData: PaymentData) => void
+  onComplete: (paymentData: PaymentData) => Promise<SaleCompletionData>
 }
 
 export function SplitPaymentView({
   total,
   currentProcessor,
-  locationId,
-  registerId,
   onComplete,
 }: SplitPaymentViewProps) {
   const [splitCashAmount, setSplitCashAmount] = useState('')
   const [splitCardAmount, setSplitCardAmount] = useState('')
   const [processing, setProcessing] = useState(false)
-  const [errorModal, setErrorModal] = useState<{
-    visible: boolean
-    title: string
-    message: string
-    canRetry: boolean
-  }>({
-    visible: false,
-    title: '',
-    message: '',
-    canRetry: false,
-  })
 
   // Calculate totals
   const splitCash = parseFloat(splitCashAmount) || 0
@@ -50,8 +37,8 @@ export function SplitPaymentView({
   const splitTotal = splitCash + splitCard
 
   const canComplete = useMemo(() => {
-    return Math.abs(splitTotal - total) < 0.01 && splitCash >= 0 && splitCard >= 0
-  }, [splitTotal, total, splitCash, splitCard])
+    return Math.abs(splitTotal - total) < 0.01 && splitCash >= 0 && splitCard >= 0 && !!currentProcessor
+  }, [splitTotal, total, splitCash, splitCard, currentProcessor])
 
   const fillSplitCard = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
@@ -68,285 +55,141 @@ export function SplitPaymentView({
   const handleSplitPayment = async () => {
     if (!canComplete) return
 
-    // Process card portion first if > 0
-    if (splitCard > 0) {
-      if (!currentProcessor) {
-        setErrorModal({
-          visible: true,
-          title: 'No Payment Processor',
-          message: 'No payment processor is configured for the card portion. Please set up a payment terminal in settings.',
-          canRetry: false,
-        })
-        return
-      }
-
+    try {
       setProcessing(true)
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
 
-      try {
-        const BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000'
-
-        // Get auth session
-        const { supabase } = await import('@/lib/supabase/client')
-        const { data: { session } } = await supabase.auth.getSession()
-
-        if (!session?.access_token) {
-          throw new Error('Authentication required')
-        }
-
-        const PAYMENT_ENDPOINT = `${BASE_URL}/api/pos/payment/process`
-
-        logger.debug('💳 Processing split payment (card portion):', {
-          cardAmount: splitCard,
-          cashAmount: splitCash,
-          locationId,
-          registerId,
-        })
-
-        const controller = new AbortController()
-        // 3 minutes timeout for split payment card portion
-        const timeoutId = setTimeout(() => controller.abort(), 180000)
-
-        const response = await fetch(PAYMENT_ENDPOINT, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${session.access_token}`,
-          },
-          body: JSON.stringify({
-            locationId,
-            registerId,
-            amount: splitCard,
-            paymentMethod: 'credit',
-          }),
-          signal: controller.signal,
-        })
-
-        clearTimeout(timeoutId)
-
-        if (!response.ok) {
-          let errorMessage = `Payment failed (${response.status})`
-
-          try {
-            const contentType = response.headers.get('content-type')
-            if (contentType && contentType.includes('application/json')) {
-              const errorData = await response.json()
-              errorMessage = errorData.error || errorData.message || errorMessage
-            } else {
-              const errorText = await response.text()
-              logger.error('❌ Non-JSON error response:', errorText.substring(0, 200))
-
-              if (response.status === 401) {
-                errorMessage = 'Session expired. Please log in again.'
-              } else if (response.status === 503) {
-                errorMessage = 'Payment terminal is offline. Please check terminal connection.'
-              } else if (response.status === 500) {
-                errorMessage = 'Server error. Please try again or contact support.'
-              }
-            }
-          } catch (parseError) {
-            logger.error('❌ Error parsing error response:', parseError)
-          }
-
-          throw new Error(errorMessage)
-        }
-
-        let result
-        try {
-          result = await response.json()
-        } catch (jsonError) {
-          logger.error('❌ Failed to parse payment response as JSON:', jsonError)
-          throw new Error('Invalid response from payment server. Please try again.')
-        }
-
-        // Validate response
-        validatePaymentResponse(result)
-
-        const paymentData: PaymentData = {
-          paymentMethod: 'split',
-          splitPayments: [
-            { method: 'cash', amount: splitCash },
-            { method: 'card', amount: splitCard },
-          ],
-          authorizationCode: result.authorizationCode,
-          transactionId: result.transactionId,
-          cardType: result.cardType,
-          cardLast4: result.cardLast4,
-        }
-
-        logger.debug('💳 Split payment successful:', paymentData)
-        onComplete(paymentData)
-      } catch (error: any) {
-        const isTimeout = error.name === 'AbortError'
-
-        let userMessage = ''
-        let shouldRetry = false
-
-        if (isTimeout) {
-          userMessage = 'Split payment took too long (3 min timeout).\n\nThe terminal may still be processing. Please:\n• Check the terminal screen\n• If transaction completed, do NOT retry\n• If transaction failed, you can try again'
-          shouldRetry = true
-        } else if (error.message.includes('Session expired')) {
-          userMessage = 'Your session has expired.\n\nPlease log out and log back in.'
-          shouldRetry = false
-        } else if (error.message.includes('terminal is offline')) {
-          userMessage = 'Payment terminal is not responding.\n\nPlease:\n• Check terminal power and connection\n• Wait a moment and try again'
-          shouldRetry = true
-        } else if (error.message.includes('Network request failed')) {
-          userMessage = 'Network connection lost.\n\nPlease:\n• Check your internet connection\n• Try again in a moment'
-          shouldRetry = true
-        } else if (error.message.includes('Invalid response')) {
-          userMessage = 'Server returned invalid response.\n\nPlease try again or contact support if this persists.'
-          shouldRetry = true
-        } else {
-          userMessage = error.message || 'Split payment failed for an unknown reason'
-          shouldRetry = true
-        }
-
-        logger.error('❌ Split payment error:', error)
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
-
-        // Show user-friendly error with retry option
-        setErrorModal({
-          visible: true,
-          title: 'Split Payment Failed',
-          message: userMessage,
-          canRetry: shouldRetry,
-        })
-      } finally {
-        setProcessing(false)
-      }
-    } else {
-      // Cash only split (shouldn't happen but handle it)
-      const paymentData: PaymentData = {
+      // NEW ARCHITECTURE: Just pass split payment data
+      // POSCheckout's handlePaymentComplete will call Edge Function
+      // Edge Function will handle everything atomically
+      await onComplete({
         paymentMethod: 'split',
-        splitPayments: [{ method: 'cash', amount: splitCash }],
-      }
-      onComplete(paymentData)
+        splitPayments: [
+          { method: 'cash', amount: splitCash },
+          { method: 'card', amount: splitCard },
+        ],
+      })
+
+      // Success handled by parent
+    } catch (error) {
+      // Error handled by parent
+      console.error('Split payment error:', error)
+    } finally {
+      setProcessing(false)
     }
   }
 
   return (
     <View style={styles.container}>
-      {/* Error Modal */}
-      <ErrorModal
-        visible={errorModal.visible}
-        title={errorModal.title}
-        message={errorModal.message}
-        primaryButtonText={errorModal.canRetry ? 'Retry Payment' : 'OK'}
-        secondaryButtonText={errorModal.canRetry ? 'Cancel' : undefined}
-        onPrimaryPress={() => {
-          setErrorModal({ visible: false, title: '', message: '', canRetry: false })
-          if (errorModal.canRetry) {
-            handleSplitPayment()
-          }
-        }}
-        onSecondaryPress={
-          errorModal.canRetry
-            ? () => setErrorModal({ visible: false, title: '', message: '', canRetry: false })
-            : undefined
-        }
-        variant="error"
-      />
-
-      <Text style={styles.sectionLabel}>SPLIT PAYMENT</Text>
-
-      {/* Cash Portion */}
-      <View style={styles.splitSection}>
-        <View style={styles.splitHeader}>
-          <Ionicons name="cash-outline" size={20} color="#10b981" />
-          <Text style={styles.splitLabel}>CASH AMOUNT</Text>
-          <TouchableOpacity onPress={fillSplitCash} style={styles.fillButton}>
-            <Text style={styles.fillButtonText}>FILL</Text>
-          </TouchableOpacity>
-        </View>
-        <LiquidGlassView
-          effect="regular"
-          colorScheme="dark"
-          style={styles.inputCard}
-        >
-          <TextInput
-            style={styles.splitInput}
-            value={splitCashAmount}
-            onChangeText={setSplitCashAmount}
-            keyboardType="decimal-pad"
-            placeholder="$0.00"
-            placeholderTextColor="rgba(255,255,255,0.3)"
-            selectionColor="#10b981"
-          />
-        </LiquidGlassView>
-      </View>
-
-      {/* Card Portion */}
-      <View style={styles.splitSection}>
-        <View style={styles.splitHeader}>
-          <Ionicons name="card-outline" size={20} color="#3b82f6" />
-          <Text style={styles.splitLabel}>CARD AMOUNT</Text>
-          <TouchableOpacity onPress={fillSplitCard} style={styles.fillButton}>
-            <Text style={styles.fillButtonText}>FILL</Text>
-          </TouchableOpacity>
-        </View>
-        <LiquidGlassView
-          effect="regular"
-          colorScheme="dark"
-          style={styles.inputCard}
-        >
-          <TextInput
-            style={styles.splitInput}
-            value={splitCardAmount}
-            onChangeText={setSplitCardAmount}
-            keyboardType="decimal-pad"
-            placeholder="$0.00"
-            placeholderTextColor="rgba(255,255,255,0.3)"
-            selectionColor="#3b82f6"
-          />
-        </LiquidGlassView>
-      </View>
-
-      {/* Split Total Display */}
-      {(splitCash > 0 || splitCard > 0) && (
-        <LiquidGlassView
-          effect="regular"
-          colorScheme="dark"
-          tintColor={canComplete ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)'}
-          style={styles.splitTotalCard}
-        >
-          <Text style={[styles.splitTotalLabel, !canComplete && styles.splitTotalLabelError]}>
-            {canComplete ? 'TOTAL MATCHES' : 'TOTAL MISMATCH'}
-          </Text>
-          <Text style={[styles.splitTotalAmount, !canComplete && styles.splitTotalAmountError]}>
-            ${splitTotal.toFixed(2)} / ${total.toFixed(2)}
-          </Text>
-          {!canComplete && (
-            <Text style={styles.splitTotalError}>
-              Adjust amounts to match total
+      {processing ? (
+        <View style={styles.processingContainer}>
+          <View style={styles.processingHeader}>
+            <Ionicons name="radio-outline" size={20} color="#10b981" />
+            <Text style={styles.listeningText}>PROCESSING</Text>
+          </View>
+          <View style={styles.processingBody}>
+            <Text style={styles.processingAmount}>${total.toFixed(2)}</Text>
+            <View style={styles.statusDivider} />
+            <Text style={styles.statusText}>Processing split payment...</Text>
+            <Text style={styles.splitBreakdown}>
+              Cash: ${splitCash.toFixed(2)} | Card: ${splitCard.toFixed(2)}
             </Text>
-          )}
-        </LiquidGlassView>
-      )}
+          </View>
+        </View>
+      ) : (
+        <>
+          <View style={styles.splitHeader}>
+            <Ionicons name="swap-horizontal-outline" size={32} color="#10b981" />
+            <Text style={styles.splitTitle}>Split Payment</Text>
+            <Text style={styles.splitSubtext}>Cash + Card</Text>
+          </View>
 
-      {/* Complete Button */}
-      <TouchableOpacity
-        onPress={handleSplitPayment}
-        disabled={!canComplete || processing}
-        activeOpacity={0.7}
-        style={styles.completeButtonWrapper}
-      >
-        <LiquidGlassView
-          effect="regular"
-          colorScheme="dark"
-          tintColor={canComplete ? 'rgba(16,185,129,0.3)' : undefined}
-          style={[
-            styles.completeButton,
-            (!canComplete || processing) && styles.completeButtonDisabled,
-          ]}
-        >
-          <Text style={[
-            styles.completeButtonText,
-            canComplete && !processing && styles.completeButtonTextActive
-          ]}>
-            {processing ? 'Processing...' : 'Complete'}
-          </Text>
-        </LiquidGlassView>
-      </TouchableOpacity>
+          <View style={styles.totalDisplay}>
+            <Text style={styles.totalLabel}>Total Due</Text>
+            <Text style={styles.totalAmount}>${total.toFixed(2)}</Text>
+          </View>
+
+          {/* Cash Input */}
+          <LiquidGlassView effect="regular" colorScheme="dark" style={styles.inputCard}>
+            <View style={styles.inputRow}>
+              <Text style={styles.inputLabel}>Cash Amount</Text>
+              <TouchableOpacity onPress={fillSplitCash} style={styles.fillButton}>
+                <Text style={styles.fillButtonText}>Fill Remaining</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.inputWrapper}>
+              <Text style={styles.currencySymbol}>$</Text>
+              <TextInput
+                style={styles.input}
+                value={splitCashAmount}
+                onChangeText={setSplitCashAmount}
+                keyboardType="decimal-pad"
+                placeholder="0.00"
+                placeholderTextColor="rgba(255,255,255,0.3)"
+                selectTextOnFocus
+              />
+            </View>
+          </LiquidGlassView>
+
+          {/* Card Input */}
+          <LiquidGlassView effect="regular" colorScheme="dark" style={styles.inputCard}>
+            <View style={styles.inputRow}>
+              <Text style={styles.inputLabel}>Card Amount</Text>
+              <TouchableOpacity onPress={fillSplitCard} style={styles.fillButton}>
+                <Text style={styles.fillButtonText}>Fill Remaining</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.inputWrapper}>
+              <Text style={styles.currencySymbol}>$</Text>
+              <TextInput
+                style={styles.input}
+                value={splitCardAmount}
+                onChangeText={setSplitCardAmount}
+                keyboardType="decimal-pad"
+                placeholder="0.00"
+                placeholderTextColor="rgba(255,255,255,0.3)"
+                selectTextOnFocus
+              />
+            </View>
+          </LiquidGlassView>
+
+          {/* Split Total Display */}
+          <View style={styles.splitTotalRow}>
+            <Text style={styles.splitTotalLabel}>Split Total</Text>
+            <Text style={[
+              styles.splitTotalAmount,
+              canComplete ? styles.splitTotalValid : styles.splitTotalInvalid
+            ]}>
+              ${splitTotal.toFixed(2)}
+            </Text>
+          </View>
+
+          {/* Complete Button */}
+          <TouchableOpacity
+            onPress={handleSplitPayment}
+            disabled={!canComplete}
+            activeOpacity={0.7}
+            style={styles.completeButtonWrapper}
+          >
+            <LiquidGlassView
+              effect="regular"
+              colorScheme="dark"
+              tintColor={canComplete ? 'rgba(16,185,129,0.3)' : undefined}
+              style={[
+                styles.completeButton,
+                !canComplete && styles.completeButtonDisabled,
+              ]}
+            >
+              <Text style={[
+                styles.completeButtonText,
+                canComplete && styles.completeButtonTextActive
+              ]}>
+                Complete Split Payment
+              </Text>
+            </LiquidGlassView>
+          </TouchableOpacity>
+        </>
+      )}
     </View>
   )
 }
@@ -355,89 +198,166 @@ const styles = StyleSheet.create({
   container: {
     marginBottom: 12,
   },
-  sectionLabel: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.5)',
-    letterSpacing: 0.6,
-    textTransform: 'uppercase',
-    marginBottom: 12,
+  processingContainer: {
+    paddingVertical: 48,
+    paddingHorizontal: 24,
+    alignItems: 'center',
   },
-  splitSection: {
-    marginBottom: 20,
-  },
-  splitHeader: {
+  processingHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    marginBottom: 12,
+    marginBottom: 32,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: 'rgba(16,185,129,0.12)',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(16,185,129,0.3)',
   },
-  splitLabel: {
-    flex: 1,
+  listeningText: {
     fontSize: 11,
+    fontWeight: '700',
+    color: '#10b981',
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+  },
+  processingBody: {
+    alignItems: 'center',
+    width: '100%',
+  },
+  processingAmount: {
+    fontSize: 56,
+    fontWeight: '400',
+    color: '#fff',
+    letterSpacing: -0.4,
+    marginBottom: 24,
+  },
+  statusDivider: {
+    width: 60,
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    marginBottom: 24,
+  },
+  statusText: {
+    fontSize: 17,
+    fontWeight: '400',
+    color: 'rgba(255,255,255,0.8)',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  splitBreakdown: {
+    fontSize: 13,
+    fontWeight: '400',
+    color: 'rgba(255,255,255,0.6)',
+    textAlign: 'center',
+  },
+  splitHeader: {
+    alignItems: 'center',
+    paddingVertical: 24,
+  },
+  splitTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#fff',
+    marginTop: 12,
+  },
+  splitSubtext: {
+    fontSize: 13,
+    fontWeight: '400',
+    color: 'rgba(255,255,255,0.6)',
+    marginTop: 4,
+  },
+  totalDisplay: {
+    alignItems: 'center',
+    marginBottom: 24,
+    paddingVertical: 16,
+    backgroundColor: 'rgba(16,185,129,0.08)',
+    borderRadius: 12,
+  },
+  totalLabel: {
+    fontSize: 13,
     fontWeight: '600',
     color: 'rgba(255,255,255,0.6)',
-    letterSpacing: 0.5,
     textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  totalAmount: {
+    fontSize: 36,
+    fontWeight: '700',
+    color: '#10b981',
+    marginTop: 4,
+  },
+  inputCard: {
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+  },
+  inputRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  inputLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.8)',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   fillButton: {
     paddingHorizontal: 12,
     paddingVertical: 6,
-    backgroundColor: 'rgba(16,185,129,0.2)',
+    backgroundColor: 'rgba(16,185,129,0.15)',
     borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#10b981',
   },
   fillButtonText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#10b981',
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
-  },
-  inputCard: {
-    borderRadius: 14,
-    padding: 12,
-  },
-  splitInput: {
-    fontSize: 22,
-    fontWeight: '400',
-    color: '#fff',
-    textAlign: 'center',
-    padding: 0,
-  },
-  splitTotalCard: {
-    borderRadius: 16,
-    padding: 20,
-    alignItems: 'center',
-    marginTop: 8,
-  },
-  splitTotalLabel: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '600',
     color: '#10b981',
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
-    marginBottom: 8,
   },
-  splitTotalLabelError: {
-    color: '#ef4444',
+  inputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  currencySymbol: {
+    fontSize: 32,
+    fontWeight: '400',
+    color: 'rgba(255,255,255,0.5)',
+    marginRight: 8,
+  },
+  input: {
+    flex: 1,
+    fontSize: 32,
+    fontWeight: '400',
+    color: '#fff',
+    padding: 0,
+  },
+  splitTotalRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 12,
+    marginBottom: 24,
+  },
+  splitTotalLabel: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.8)',
   },
   splitTotalAmount: {
-    fontSize: 28,
+    fontSize: 24,
     fontWeight: '700',
+  },
+  splitTotalValid: {
     color: '#10b981',
-    letterSpacing: -0.4,
   },
-  splitTotalAmountError: {
+  splitTotalInvalid: {
     color: '#ef4444',
-  },
-  splitTotalError: {
-    fontSize: 13,
-    fontWeight: '400',
-    color: 'rgba(239,68,68,0.8)',
-    letterSpacing: 0,
-    marginTop: 8,
   },
   completeButtonWrapper: {
     marginTop: 16,

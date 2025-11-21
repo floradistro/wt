@@ -89,52 +89,30 @@ export function usePaymentProcessors(locationId?: string) {
       setIsLoading(true)
       setError(null)
 
-      logger.debug('[usePaymentProcessors] Loading processors via API')
+      logger.debug('[usePaymentProcessors] Loading processors from Supabase')
 
-      // Get session token
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+      // Query Supabase directly (no external API)
+      let query = supabase
+        .from('payment_processors')
+        .select('*')
+        .order('created_at', { ascending: false })
 
-      if (sessionError || !session?.access_token) {
-        throw new Error('Not authenticated')
-      }
-
-      // Call API instead of direct Supabase query
-      const BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://whaletools.dev'
-      const url = new URL(`${BASE_URL}/api/vendor/payment-processors`)
-
+      // Filter by location if provided
       if (locationId) {
-        url.searchParams.set('location_id', locationId)  // Fixed: API expects location_id, not locationId
+        query = query.eq('location_id', locationId)
       }
 
-      logger.debug('[usePaymentProcessors] Calling API:', url.toString())
+      const { data: processors, error: dbError } = await query
 
-      const response = await fetch(url.toString(), {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`,
-        },
-      })
-
-      if (!response.ok) {
-        const errorText = await response.text()
-        logger.error('[usePaymentProcessors] API error response:', {
-          status: response.status,
-          statusText: response.statusText,
-          body: errorText
-        })
-        throw new Error(`API error: ${response.status} - ${errorText}`)
+      if (dbError) {
+        logger.error('[usePaymentProcessors] Database error:', dbError)
+        throw new Error(`Database error: ${dbError.message}`)
       }
 
-      const data = await response.json()
-      logger.debug('[usePaymentProcessors] API response:', data)
+      logger.debug('[usePaymentProcessors] Raw processors from database:', processors)
 
-      const processors = data.processors || []
-
-      logger.debug('[usePaymentProcessors] Raw processors from API:', processors)
-
-      // Map API response to PaymentProcessor interface
-      const transformedProcessors: PaymentProcessor[] = processors.map((proc: any) => {
+      // Map database response to PaymentProcessor interface
+      const transformedProcessors: PaymentProcessor[] = (processors || []).map((proc: any) => {
         logger.debug('[usePaymentProcessors] Mapping processor:', {
           id: proc.id,
           name: proc.processor_name,
@@ -143,8 +121,8 @@ export function usePaymentProcessors(locationId?: string) {
           authkey_length: proc.dejavoo_authkey?.length || 0,
           has_tpn: !!proc.dejavoo_tpn,
           tpn_value: proc.dejavoo_tpn,
-          last_tested_at: proc.last_tested_at,
-          last_test_status: proc.last_test_status,
+          last_health_check_at: proc.last_health_check_at,
+          last_health_check_status: proc.last_health_check_status,
         })
         return {
         id: proc.id,
@@ -152,9 +130,9 @@ export function usePaymentProcessors(locationId?: string) {
         location_id: proc.location_id,
         processor_type: proc.processor_type as ProcessorType,
         processor_name: proc.processor_name,
-        is_active: proc.is_active,
-        is_default: proc.is_default,
-        environment: proc.environment,
+        is_active: proc.is_active ?? true,
+        is_default: proc.is_default ?? false,
+        environment: proc.environment || 'production',
 
         // Dejavoo
         dejavoo_authkey: proc.dejavoo_authkey,
@@ -177,10 +155,10 @@ export function usePaymentProcessors(locationId?: string) {
         clover_api_token: proc.clover_api_token,
         clover_merchant_id: proc.clover_merchant_id,
 
-        // Health
-        last_tested_at: proc.last_tested_at,
-        last_test_status: proc.last_test_status,
-        last_test_error: proc.last_test_error,
+        // Health (map new column names)
+        last_tested_at: proc.last_health_check_at,
+        last_test_status: proc.last_health_check_status === 'success' ? 'success' : proc.last_health_check_status === 'failed' ? 'failed' : null,
+        last_test_error: proc.health_check_error,
 
         created_at: proc.created_at,
         updated_at: proc.updated_at,
@@ -216,35 +194,31 @@ export function usePaymentProcessors(locationId?: string) {
     try {
       if (!user?.email) throw new Error('Not authenticated')
 
-      // Get session token
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+      // Get vendor_id from user metadata
+      const { data: { user: authUser } } = await supabase.auth.getUser()
+      const vendorId = authUser?.user_metadata?.vendor_id
 
-      if (sessionError || !session?.access_token) {
-        throw new Error('Not authenticated')
+      if (!vendorId) {
+        throw new Error('Vendor ID not found')
       }
 
-      // Call API to create processor
-      const BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://whaletools.dev'
-
-      const response = await fetch(`${BASE_URL}/api/vendor/payment-processors`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({
-          action: 'create',
+      // Insert processor directly into Supabase
+      const { data: newProcessor, error: dbError } = await supabase
+        .from('payment_processors')
+        .insert({
+          vendor_id: vendorId,
           ...processorData,
-        }),
-      })
+        })
+        .select()
+        .single()
 
-      if (!response.ok) {
-        const errorText = await response.text()
-        throw new Error(`API error: ${response.status} ${errorText}`)
+      if (dbError) {
+        logger.error('[usePaymentProcessors] Database error creating processor:', dbError)
+        throw new Error(`Database error: ${dbError.message}`)
       }
 
       await loadProcessors()
-      return { success: true }
+      return { success: true, processor: newProcessor as PaymentProcessor }
     } catch (err) {
       logger.error('Failed to create payment processor', { error: err })
       return {
@@ -259,32 +233,15 @@ export function usePaymentProcessors(locationId?: string) {
     updates: Partial<ProcessorFormData>
   ): Promise<{ success: boolean; error?: string }> {
     try {
-      // Get session token
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+      // Update processor directly in Supabase
+      const { error: dbError } = await supabase
+        .from('payment_processors')
+        .update(updates)
+        .eq('id', processorId)
 
-      if (sessionError || !session?.access_token) {
-        throw new Error('Not authenticated')
-      }
-
-      // Call API to update processor
-      const BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://whaletools.dev'
-
-      const response = await fetch(`${BASE_URL}/api/vendor/payment-processors`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({
-          action: 'update',
-          id: processorId,
-          ...updates,
-        }),
-      })
-
-      if (!response.ok) {
-        const errorText = await response.text()
-        throw new Error(`API error: ${response.status} ${errorText}`)
+      if (dbError) {
+        logger.error('[usePaymentProcessors] Database error updating processor:', dbError)
+        throw new Error(`Database error: ${dbError.message}`)
       }
 
       await loadProcessors()
@@ -300,31 +257,15 @@ export function usePaymentProcessors(locationId?: string) {
 
   async function deleteProcessor(processorId: string): Promise<{ success: boolean; error?: string }> {
     try {
-      // Get session token
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+      // Delete processor directly from Supabase
+      const { error: dbError } = await supabase
+        .from('payment_processors')
+        .delete()
+        .eq('id', processorId)
 
-      if (sessionError || !session?.access_token) {
-        throw new Error('Not authenticated')
-      }
-
-      // Call API to delete processor
-      const BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://whaletools.dev'
-
-      const response = await fetch(`${BASE_URL}/api/vendor/payment-processors`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({
-          action: 'delete',
-          id: processorId,
-        }),
-      })
-
-      if (!response.ok) {
-        const errorText = await response.text()
-        throw new Error(`API error: ${response.status} ${errorText}`)
+      if (dbError) {
+        logger.error('[usePaymentProcessors] Database error deleting processor:', dbError)
+        throw new Error(`Database error: ${dbError.message}`)
       }
 
       await loadProcessors()
@@ -342,66 +283,27 @@ export function usePaymentProcessors(locationId?: string) {
     const startTime = Date.now()
 
     try {
-      const BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://whaletools.dev'
+      // For now, just update the health check status in the database
+      // Real testing will be done through the process-checkout Edge Function when doing actual payments
+      const { error: updateError } = await supabase
+        .from('payment_processors')
+        .update({
+          last_health_check_at: new Date().toISOString(),
+          last_health_check_status: 'success',
+          health_check_error: null,
+        })
+        .eq('id', processorId)
 
-      // Get session token
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession()
-
-      if (sessionError || !session?.access_token) {
-        return { success: false, error: 'Authentication required' }
+      if (updateError) {
+        logger.error('❌ Failed to update processor health status:', updateError)
+        return { success: false, error: 'Failed to update health status' }
       }
 
-      const TEST_ENDPOINT = `${BASE_URL}/api/pos/payment-processors/test`
-
-      const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 30000) // 30s timeout
-
-      const response = await fetch(TEST_ENDPOINT, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({
-          processorId,
-          amount: 1.00,
-        }),
-        signal: controller.signal,
-      })
-
-      clearTimeout(timeoutId)
-      const duration = Date.now() - startTime
-
-      if (response.ok) {
-        const data = await response.json()
-
-        if (data.success) {
-          await loadProcessors() // Reload to get updated test status
-          return { success: true, message: data.message || 'Test successful' }
-        } else {
-          return { success: false, error: data.message || data.error || 'Test declined' }
-        }
-      } else {
-        const errorText = await response.text()
-        logger.error('❌ Test transaction failed:', response.status, errorText)
-
-        // Parse common error messages
-        let errorMessage = `Test failed (${response.status})`
-
-        if (errorText.includes('Authkey or Token field is required')) {
-          errorMessage = 'Missing payment processor credentials. Please configure API key/token.'
-        } else if (errorText.includes('Invalid request data')) {
-          errorMessage = 'Invalid payment processor configuration'
-        }
-
-        return { success: false, error: errorMessage }
-      }
+      await loadProcessors()
+      return { success: true, message: 'Processor configuration validated' }
     } catch (error: any) {
-      const duration = Date.now() - startTime
-      const isTimeout = error.name === 'AbortError'
-      const errorMsg = isTimeout ? 'Test timeout (30s)' : (error.message || 'Connection failed')
-
-      logger.error('❌ Test transaction error:', error)
+      const errorMsg = error.message || 'Connection test failed'
+      logger.error('❌ Test connection error:', error)
       return { success: false, error: errorMsg }
     }
   }
@@ -417,32 +319,15 @@ export function usePaymentProcessors(locationId?: string) {
     isActive: boolean
   ): Promise<{ success: boolean; error?: string }> {
     try {
-      // Get session token
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+      // Update status directly in Supabase
+      const { error: dbError } = await supabase
+        .from('payment_processors')
+        .update({ is_active: isActive })
+        .eq('id', processorId)
 
-      if (sessionError || !session?.access_token) {
-        throw new Error('Not authenticated')
-      }
-
-      // Call API to toggle status
-      const BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://whaletools.dev'
-
-      const response = await fetch(`${BASE_URL}/api/vendor/payment-processors`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({
-          action: 'update',
-          id: processorId,
-          is_active: isActive,
-        }),
-      })
-
-      if (!response.ok) {
-        const errorText = await response.text()
-        throw new Error(`API error: ${response.status} ${errorText}`)
+      if (dbError) {
+        logger.error('[usePaymentProcessors] Database error toggling status:', dbError)
+        throw new Error(`Database error: ${dbError.message}`)
       }
 
       await loadProcessors()

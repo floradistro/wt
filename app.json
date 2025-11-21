@@ -22,6 +22,8 @@
       "infoPlist": {
         "NSCameraUsageDescription": "Whaletools needs camera access to scan ID barcodes for age verification and product barcodes.",
         "NSPhotoLibraryUsageDescription": "Whaletools needs photo library access to select product images.",
+        "NSLocationWhenInUseUsageDescription": "Whaletools does not access your location. This permission is required by iOS for compliance purposes.",
+        "ITSAppUsesNonExemptEncryption": false,
         "UIViewControllerBasedStatusBarAppearance": false,
         "UIStatusBarStyle": "UIStatusBarStyleLightContent"
       },

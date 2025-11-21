@@ -10,6 +10,8 @@ export type PaymentStage =
   | 'processing'
   | 'approving'
   | 'success'
+  | 'saving'      // NEW: Saving sale to database
+  | 'complete'    // NEW: Sale completed successfully
   | 'error'
 
 export interface SplitPayment {
@@ -28,6 +30,21 @@ export interface PaymentData {
   splitPayments?: SplitPayment[]
 }
 
+// NEW: Sale completion data (shown after save completes)
+export interface SaleCompletionData {
+  orderNumber: string
+  transactionNumber?: string
+  total: number
+  paymentMethod: string
+  authorizationCode?: string
+  cardType?: string
+  cardLast4?: string
+  itemCount: number
+  processorName?: string
+  loyaltyPointsAdded?: number
+  loyaltyPointsRedeemed?: number
+}
+
 export interface PaymentModalProps {
   visible: boolean
   total: number
@@ -43,7 +60,7 @@ export interface PaymentModalProps {
   itemCount: number
   customerName?: string
   onApplyLoyaltyPoints?: (points: number) => void
-  onPaymentComplete: (paymentData: PaymentData) => void
+  onPaymentComplete: (paymentData: PaymentData) => Promise<SaleCompletionData>  // CHANGED: Now returns sale data
   onCancel: () => void
   hasPaymentProcessor?: boolean
   locationId?: string

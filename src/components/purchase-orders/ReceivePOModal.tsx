@@ -11,7 +11,8 @@ import * as Haptics from 'expo-haptics'
 import { colors, spacing, radius } from '@/theme/tokens'
 import { supabase } from '@/lib/supabase/client'
 import { logger } from '@/utils/logger'
-import type { PurchaseOrder } from '@/services/purchase-orders.service'
+import { receiveItems } from '@/services/purchase-orders.service'
+import type { PurchaseOrder, ItemCondition } from '@/services/purchase-orders.service'
 
 interface ReceivePOModalProps {
   visible: boolean
@@ -28,11 +29,6 @@ interface POItem {
   quantity: number
   received_quantity: number
   unit_price: number
-}
-
-interface ReceiveItem {
-  itemId: string
-  receiveQuantity: number
 }
 
 export function ReceivePOModal({
@@ -147,7 +143,13 @@ export function ReceivePOModal({
       setError(null)
 
       // Validate and collect receive items
-      const receiveItems: ReceiveItem[] = []
+      const itemsToReceive: Array<{
+        item_id: string
+        quantity: number
+        condition: ItemCondition
+        quality_notes?: string
+      }> = []
+
       for (const item of items) {
         const qtyStr = receiveQuantities[item.id] || '0'
         const qty = parseFloat(qtyStr)
@@ -163,98 +165,46 @@ export function ReceivePOModal({
             setError(`Cannot receive more than ${remaining} for ${item.product_name}`)
             return
           }
-          receiveItems.push({
-            itemId: item.id,
-            receiveQuantity: qty,
+          itemsToReceive.push({
+            item_id: item.id,
+            quantity: qty,
+            condition: 'good', // Default to good condition
+            quality_notes: undefined,
           })
         }
       }
 
-      if (receiveItems.length === 0) {
+      if (itemsToReceive.length === 0) {
         setError('Please enter quantities to receive')
+        return
+      }
+
+      if (!purchaseOrder.location_id) {
+        setError('Purchase order must have a location to receive items')
         return
       }
 
       setIsSubmitting(true)
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy)
 
-      // Update received quantities for each item
-      for (const receiveItem of receiveItems) {
-        const item = items.find(i => i.id === receiveItem.itemId)
-        if (!item) continue
+      // Use service layer for transactional receive
+      const result = await receiveItems(
+        purchaseOrder.id,
+        itemsToReceive,
+        purchaseOrder.location_id
+      )
 
-        const newReceivedQty = item.received_quantity + receiveItem.receiveQuantity
-
-        const { error: updateError } = await supabase
-          .from('purchase_order_items')
-          .update({
-            received_quantity: newReceivedQty,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', item.id)
-
-        if (updateError) throw updateError
-
-        // Update inventory stock for the product at the location
-        if (purchaseOrder.location_id) {
-          // Check if inventory record exists
-          const { data: existingInventory } = await supabase
-            .from('inventory')
-            .select('id, quantity')
-            .eq('product_id', item.product_id)
-            .eq('location_id', purchaseOrder.location_id)
-            .single()
-
-          if (existingInventory) {
-            // Update existing inventory
-            const { error: invError } = await supabase
-              .from('inventory')
-              .update({
-                quantity: existingInventory.quantity + receiveItem.receiveQuantity,
-                updated_at: new Date().toISOString(),
-              })
-              .eq('id', existingInventory.id)
-
-            if (invError) throw invError
-          } else {
-            // Create new inventory record
-            const { error: invError } = await supabase
-              .from('inventory')
-              .insert({
-                product_id: item.product_id,
-                location_id: purchaseOrder.location_id,
-                quantity: receiveItem.receiveQuantity,
-                vendor_id: purchaseOrder.vendor_id,
-              })
-
-            if (invError) throw invError
-          }
-        }
-      }
-
-      // Calculate total received vs total ordered
-      const allItemsFullyReceived = items.every((item) => {
-        const receiveQty = parseFloat(receiveQuantities[item.id] || '0')
-        return item.received_quantity + receiveQty >= item.quantity
+      logger.info('Items received successfully', {
+        poId: purchaseOrder.id,
+        itemsProcessed: result.itemsProcessed,
+        newStatus: result.newStatus,
       })
-
-      // Update PO status
-      const newStatus = allItemsFullyReceived ? 'received' : 'partially_received'
-      const { error: statusError } = await supabase
-        .from('purchase_orders')
-        .update({
-          status: newStatus,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', purchaseOrder.id)
-
-      if (statusError) throw statusError
 
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
       onReceived()
       onClose()
     } catch (err) {
-      logger.error('Failed to receive items', { error: err })
+      logger.error('Failed to receive items in modal', { error: err, poId: purchaseOrder.id })
       setError(err instanceof Error ? err.message : 'Failed to receive items')
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
     } finally {

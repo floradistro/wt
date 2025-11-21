@@ -75,9 +75,9 @@ function POSPaymentModal({
     setPaymentMethod(method)
   }
 
-  const handlePaymentComplete = (paymentData: PaymentData) => {
+  const handlePaymentComplete = async (paymentData: PaymentData) => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
-    onPaymentComplete(paymentData)
+    return await onPaymentComplete(paymentData)
   }
 
   return (
@@ -213,10 +213,11 @@ function POSPaymentModal({
           </View>
 
           <ScrollView
-            style={[styles.content, { maxHeight: height * (isLandscape ? 0.6 : 0.75) }]}
+            style={[styles.content, { maxHeight: height * (isLandscape ? 0.5 : 0.75) }]}
             showsVerticalScrollIndicator={true}
             indicatorStyle="white"
             scrollIndicatorInsets={{ right: 2 }}
+            bounces={false}
           >
             {/* Payment Views */}
             {paymentMethod === 'cash' && (
@@ -326,11 +327,13 @@ const styles = StyleSheet.create({
     top: '15%',
   },
   containerLandscape: {
-    // Centered modal in landscape
-    top: '10%',
-    bottom: '10%',
-    left: '15%',
-    right: '15%',
+    // FIXED: Responsive modal for iPad Pro 11" and all landscape sizes
+    // Uses smaller percentages to ensure it fits on smaller iPads
+    top: '5%',
+    bottom: '5%',
+    left: '10%',
+    right: '10%',
+    maxHeight: '90%', // Prevent overflow on smaller screens
   },
   modalCard: {
     flex: 1,

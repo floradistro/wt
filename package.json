@@ -4,6 +4,10 @@
   "main": "index.ts",
   "scripts": {
     "start": "expo start",
+    "start:dev": "cp .env.development .env && expo start",
+    "start:prod": "cp .env.production .env && expo start",
+    "env:dev": "cp .env.development .env && echo '✅ Switched to DEVELOPMENT database'",
+    "env:prod": "cp .env.production .env && echo '⚠️  Switched to PRODUCTION database'",
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",

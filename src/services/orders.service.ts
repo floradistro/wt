@@ -227,44 +227,17 @@ export async function getOrderById(orderId: string): Promise<Order & { items: Or
 }
 
 /**
- * Create a new order
+ * DEPRECATED: Order creation now happens in process-checkout Edge Function
+ * This ensures atomic two-phase commit with payment processing
+ *
+ * @deprecated Use process-checkout Edge Function instead
  */
 export async function createOrder(params: CreateOrderParams): Promise<Order> {
-  // Start a transaction
-  const { items, ...orderData } = params
-
-  // 1. Create the order
-  const { data: order, error: orderError } = await supabase
-    .from('orders')
-    .insert({
-      ...orderData,
-      order_number: await generateOrderNumber(),
-      status: orderData.status || 'pending',
-      payment_status: orderData.payment_status || 'pending',
-      fulfillment_status: 'unfulfilled',
-    })
-    .select()
-    .single()
-
-  if (orderError) {
-    throw new Error(`Failed to create order: ${orderError.message}`)
-  }
-
-  // 2. Create order items
-  const orderItems = items.map((item) => ({
-    ...item,
-    order_id: order.id,
-  }))
-
-  const { error: itemsError } = await supabase.from('order_items').insert(orderItems)
-
-  if (itemsError) {
-    // Rollback: delete the order
-    await supabase.from('orders').delete().eq('id', order.id)
-    throw new Error(`Failed to create order items: ${itemsError.message}`)
-  }
-
-  return order
+  throw new Error(
+    'DEPRECATED: createOrder() is no longer supported. ' +
+    'All POS sales must use the process-checkout Edge Function for atomic transactions. ' +
+    'This ensures payment and order creation happen atomically with proper rollback on failure.'
+  )
 }
 
 /**
@@ -441,7 +414,7 @@ export async function searchOrders(searchTerm: string): Promise<Order[]> {
 export const ordersService = {
   getOrders,
   getOrderById,
-  createOrder,
+  createOrder, // DEPRECATED - throws error directing to Edge Function
   updateOrderStatus,
   updatePaymentStatus,
   getTodaysOrders,

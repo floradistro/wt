@@ -4,9 +4,11 @@
  * Professional, interactive order management - POS-quality UX
  */
 
-import { View, Text, StyleSheet, Pressable, ActivityIndicator, ScrollView, Linking, Alert, Animated, TextInput } from 'react-native'
+import { View, Text, StyleSheet, Pressable, ActivityIndicator, ScrollView, Linking, Alert, Animated, TextInput, Image } from 'react-native'
 import { useState, useEffect, useRef } from 'react'
 import * as Haptics from 'expo-haptics'
+import { BlurView } from 'expo-blur'
+import { Ionicons } from '@expo/vector-icons'
 import { colors, spacing, radius } from '@/theme/tokens'
 import { layout } from '@/theme/layout'
 import { supabase } from '@/lib/supabase/client'
@@ -39,6 +41,12 @@ export function OrderDetail({ order: initialOrder, onBack, onOrderUpdated }: Ord
   const [showLabelModal, setShowLabelModal] = useState(false)
   const [trackingNumber, setTrackingNumber] = useState(order.tracking_number || '')
   const [shippingCost, setShippingCost] = useState(order.shipping_cost?.toString() || '')
+  const [vendorLogo, setVendorLogo] = useState<string | null>(null)
+  const [vendorName, setVendorName] = useState<string>('')
+  const [loyaltyPointsEarned, setLoyaltyPointsEarned] = useState<number>(0)
+  const [loyaltyPointsRedeemed, setLoyaltyPointsRedeemed] = useState<number>(0)
+  const [taxDetails, setTaxDetails] = useState<Array<{ name: string; amount: number; rate?: number }>>([])
+
 
   // Animation values
   const successOpacity = useRef(new Animated.Value(0)).current
@@ -72,7 +80,65 @@ export function OrderDetail({ order: initialOrder, onBack, onOrderUpdated }: Ord
 
   useEffect(() => {
     loadOrderItems()
+    loadVendorInfo()
+    loadLoyaltyAndPaymentInfo()
+    loadTaxDetails()
   }, [order.id])
+
+  const loadVendorInfo = async () => {
+    try {
+      const { data: orderData, error: orderError } = await supabase
+        .from('orders')
+        .select('vendor_id, vendors(id, store_name, logo_url)')
+        .eq('id', order.id)
+        .single()
+
+      if (orderError) {
+        logger.error('Order vendor query error', { error: orderError })
+        return
+      }
+
+      if (orderData?.vendors) {
+        const vendor = orderData.vendors as any
+        setVendorName(vendor.store_name || '')
+        setVendorLogo(vendor.logo_url || null)
+      }
+    } catch (error) {
+      logger.error('Failed to load vendor info', { error })
+    }
+  }
+
+  const loadLoyaltyAndPaymentInfo = async () => {
+    try {
+      // Load loyalty transactions
+      if (order.customer_id) {
+        const { data: loyaltyData, error: loyaltyError} = await supabase
+          .from('loyalty_transactions')
+          .select('transaction_type, points')
+          .eq('reference_type', 'order')
+          .eq('reference_id', order.id)
+
+        if (!loyaltyError && loyaltyData) {
+          const earned = loyaltyData.find(t => t.transaction_type === 'earned')?.points || 0
+          const spent = Math.abs(loyaltyData.find(t => t.transaction_type === 'spent')?.points || 0)
+          setLoyaltyPointsEarned(earned)
+          setLoyaltyPointsRedeemed(spent)
+        }
+      }
+
+      // NOTE: Split payment details are not currently stored in the database
+      // The payment_method is normalized ('split' -> 'credit') and only one transaction is created
+      // To display split payments, we would need to:
+      // 1. Add split_payment_cash and split_payment_card columns to orders table
+      // 2. OR create multiple payment_transactions records for split payments
+      // 3. OR add split_payments JSONB column to orders table
+      //
+      // For now, we just show the normalized payment method from the order
+      logger.debug('[OrderDetail] Payment method from order:', order.payment_method)
+    } catch (error) {
+      logger.error('Failed to load loyalty and payment info', { error })
+    }
+  }
 
   const loadOrderItems = async () => {
     try {
@@ -87,6 +153,49 @@ export function OrderDetail({ order: initialOrder, onBack, onOrderUpdated }: Ord
       logger.error('Failed to load order items:', error)
     } finally {
       setIsLoading(false)
+    }
+  }
+
+  const loadTaxDetails = async () => {
+    try {
+      logger.debug('[OrderDetail] Loading tax details for order', {
+        orderId: order.id,
+        pickupLocationId: order.pickup_location_id,
+        taxAmount: order.tax_amount
+      })
+
+      // Load location tax information
+      if (order.pickup_location_id) {
+        const { data: locationData, error: locationError } = await supabase
+          .from('locations')
+          .select('tax_name, tax_rate')
+          .eq('id', order.pickup_location_id)
+          .single()
+
+        logger.debug('[OrderDetail] Location tax data', { locationData, locationError })
+
+        if (!locationError && locationData) {
+          // Use the ACTUAL tax rate from the location, not calculated
+          // The stored tax_amount is calculated on subtotal AFTER loyalty discounts,
+          // so calculating rate from tax_amount/subtotal gives wrong results
+          const taxes = []
+          if (order.tax_amount > 0) {
+            taxes.push({
+              name: locationData.tax_name || 'Tax',
+              amount: order.tax_amount,
+              rate: locationData.tax_rate // Store the actual rate from location
+            })
+          }
+          logger.debug('[OrderDetail] Setting tax details', { taxes })
+          setTaxDetails(taxes)
+        } else {
+          logger.warn('[OrderDetail] No location data found or error', { locationError })
+        }
+      } else {
+        logger.warn('[OrderDetail] No pickup_location_id on order')
+      }
+    } catch (error) {
+      logger.error('Failed to load tax details:', error)
     }
   }
 
@@ -183,6 +292,10 @@ export function OrderDetail({ order: initialOrder, onBack, onOrderUpdated }: Ord
 
       if (error) throw error
 
+      // Update local state immediately for instant UI feedback
+      setOrder(prev => ({ ...prev, ...updates }))
+      onOrderUpdated?.() // Notify parent component
+
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
       showSuccessAnimation(label)
     } catch (error) {
@@ -207,15 +320,22 @@ export function OrderDetail({ order: initialOrder, onBack, onOrderUpdated }: Ord
           onPress: async () => {
             try {
               setIsUpdating(true)
+              const now = new Date().toISOString()
+              const updates = {
+                status: 'cancelled' as Order['status'],
+                updated_at: now,
+              }
+
               const { error } = await supabase
                 .from('orders')
-                .update({
-                  status: 'cancelled',
-                  updated_at: new Date().toISOString(),
-                })
+                .update(updates)
                 .eq('id', order.id)
 
               if (error) throw error
+
+              // Update local state immediately for instant UI feedback
+              setOrder(prev => ({ ...prev, ...updates }))
+              onOrderUpdated?.() // Notify parent component
 
               Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
               showSuccessAnimation('Order cancelled')
@@ -234,15 +354,22 @@ export function OrderDetail({ order: initialOrder, onBack, onOrderUpdated }: Ord
   // Save staff notes
   const handleSaveNotes = async () => {
     try {
+      const now = new Date().toISOString()
+      const updates = {
+        staff_notes: staffNotes,
+        updated_at: now,
+      }
+
       const { error } = await supabase
         .from('orders')
-        .update({
-          staff_notes: staffNotes,
-          updated_at: new Date().toISOString(),
-        })
+        .update(updates)
         .eq('id', order.id)
 
       if (error) throw error
+
+      // Update local state immediately
+      setOrder(prev => ({ ...prev, ...updates }))
+      onOrderUpdated?.()
 
       setShowNotesModal(false)
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
@@ -279,6 +406,10 @@ export function OrderDetail({ order: initialOrder, onBack, onOrderUpdated }: Ord
         .eq('id', order.id)
 
       if (error) throw error
+
+      // Update local state immediately
+      setOrder(prev => ({ ...prev, ...updates }))
+      onOrderUpdated?.()
 
       setShowLabelModal(false)
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
@@ -324,6 +455,54 @@ export function OrderDetail({ order: initialOrder, onBack, onOrderUpdated }: Ord
         return 'Shipping'
       default:
         return 'Store'
+    }
+  }
+
+  const getStatusColor = (status: Order['status']) => {
+    switch (status) {
+      case 'completed':
+      case 'delivered':
+        return '#34c759'
+      case 'cancelled':
+        return '#ff3b30'
+      case 'pending':
+      case 'ready_to_ship':
+        return '#ff9500'
+      case 'preparing':
+      case 'ready':
+      case 'out_for_delivery':
+      case 'shipped':
+      case 'in_transit':
+        return '#0a84ff'
+      default:
+        return '#8e8e93'
+    }
+  }
+
+  const getStatusLabel = (status: Order['status']) => {
+    switch (status) {
+      case 'pending':
+        return 'Pending'
+      case 'preparing':
+        return 'Preparing'
+      case 'ready':
+        return 'Ready'
+      case 'out_for_delivery':
+        return 'Out for Delivery'
+      case 'ready_to_ship':
+        return 'Ready to Ship'
+      case 'shipped':
+        return 'Shipped'
+      case 'in_transit':
+        return 'In Transit'
+      case 'delivered':
+        return 'Delivered'
+      case 'completed':
+        return 'Completed'
+      case 'cancelled':
+        return 'Cancelled'
+      default:
+        return status
     }
   }
 
@@ -478,48 +657,8 @@ export function OrderDetail({ order: initialOrder, onBack, onOrderUpdated }: Ord
     return buttons.length > 0 ? buttons : null
   }
 
-  const getWorkflowSteps = () => {
-    const type = (order.order_type || order.delivery_type || 'walk_in').toLowerCase()
-
-    if (type === 'walk_in' || type === 'instore') {
-      return ['Completed']
-    } else if (type === 'pickup') {
-      return ['Pending', 'Preparing', 'Ready', 'Completed']
-    } else if (type === 'delivery') {
-      return ['Pending', 'Preparing', 'Out for Delivery', 'Completed']
-    } else if (type === 'shipping') {
-      return ['Pending', 'Preparing', 'Ready to Ship', 'Shipped', 'In Transit', 'Delivered']
-    }
-
-    return ['Pending', 'Preparing', 'Completed']
-  }
-
-  const getCurrentStepIndex = () => {
-    const steps = getWorkflowSteps()
-    const status = order.status
-
-    const statusMap: Record<string, string> = {
-      'pending': 'Pending',
-      'preparing': 'Preparing',
-      'ready': 'Ready',
-      'out_for_delivery': 'Out for Delivery',
-      'ready_to_ship': 'Ready to Ship',
-      'shipped': 'Shipped',
-      'in_transit': 'In Transit',
-      'delivered': 'Delivered',
-      'completed': 'Completed',
-      'cancelled': 'Cancelled',
-    }
-
-    const currentLabel = statusMap[status] || 'Pending'
-    const index = steps.indexOf(currentLabel)
-    return index >= 0 ? index : 0
-  }
-
   const orderType = getOrderType()
   const actionButtons = getActionButtons()
-  const workflowSteps = getWorkflowSteps()
-  const currentStep = getCurrentStepIndex()
 
   if (isLoading) {
     return (
@@ -545,54 +684,42 @@ export function OrderDetail({ order: initialOrder, onBack, onOrderUpdated }: Ord
           </Pressable>
         </View>
 
-        {/* Order Info */}
-        <View style={styles.compactInfo}>
-          <Text style={styles.orderNumber}>{order.order_number}</Text>
-          <View style={styles.compactMeta}>
-            <Text style={styles.compactMetaText}>{orderType}</Text>
-            <Text style={styles.compactMetaDot}>•</Text>
-            <Text style={styles.compactMetaText}>{order.customer_name || 'Guest'}</Text>
-            <Text style={styles.compactMetaDot}>•</Text>
-            <Text style={styles.compactMetaText}>
-              ${order.total_amount.toFixed(2)}
-            </Text>
+        {/* Hero Header with Vendor Logo */}
+        <View style={styles.heroSection}>
+          <View style={styles.heroContainer}>
+            <View style={styles.heroContent}>
+              {/* Vendor Logo */}
+              {vendorLogo ? (
+                <Image source={{ uri: vendorLogo }} style={styles.vendorLogo} />
+              ) : (
+                <View style={[styles.vendorLogo, styles.vendorLogoPlaceholder]}>
+                  <Ionicons name="storefront" size={32} color="rgba(255,255,255,0.6)" />
+                </View>
+              )}
+
+              {/* Order Info */}
+              <View style={styles.heroInfo}>
+                <Text style={styles.heroOrderNumber}>{order.order_number}</Text>
+                {vendorName && (
+                  <Text style={styles.heroVendorName}>{vendorName}</Text>
+                )}
+              </View>
+
+              {/* Status Badge */}
+              <View
+                style={[
+                  styles.statusBadge,
+                  { backgroundColor: getStatusColor(order.status) + '20', borderColor: getStatusColor(order.status) }
+                ]}
+              >
+                <Text style={[styles.statusBadgeText, { color: getStatusColor(order.status) }]}>
+                  {getStatusLabel(order.status)}
+                </Text>
+              </View>
+            </View>
           </View>
         </View>
 
-        {/* Workflow Progress */}
-        {order.status !== 'cancelled' && (
-          <View style={styles.workflowContainer}>
-            <View style={styles.workflowSteps}>
-              {workflowSteps.map((step, index) => (
-                <View key={step} style={styles.workflowStep}>
-                  <View style={[
-                    styles.workflowDot,
-                    index <= currentStep && styles.workflowDotActive
-                  ]} />
-                  <Text style={[
-                    styles.workflowStepLabel,
-                    index === currentStep && styles.workflowStepLabelActive
-                  ]}>
-                    {step}
-                  </Text>
-                  {index < workflowSteps.length - 1 && (
-                    <View style={[
-                      styles.workflowLine,
-                      index < currentStep && styles.workflowLineActive
-                    ]} />
-                  )}
-                </View>
-              ))}
-            </View>
-          </View>
-        )}
-
-        {/* Cancelled Badge */}
-        {order.status === 'cancelled' && (
-          <View style={styles.cancelledBadge}>
-            <Text style={styles.cancelledText}>ORDER CANCELLED</Text>
-          </View>
-        )}
 
         {/* Action Buttons */}
         {actionButtons && actionButtons.length > 0 && (
@@ -624,47 +751,159 @@ export function OrderDetail({ order: initialOrder, onBack, onOrderUpdated }: Ord
           </View>
         )}
 
-        {/* Staff Notes */}
+        {/* Order Info - Unified Section */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>STAFF NOTES</Text>
-          <Pressable
-            style={styles.card}
-            onPress={() => {
-              setStaffNotes(order.staff_notes || '')
-              setShowNotesModal(true)
-            }}
-          >
-            <Text style={styles.notesText}>
-              {order.staff_notes || 'Tap to add notes...'}
-            </Text>
-          </Pressable>
+          <Text style={styles.sectionTitle}>ORDER INFORMATION</Text>
+          <View style={styles.infoCard}>
+            {/* Customer */}
+            <View style={styles.infoRow}>
+              <Text style={styles.infoLabel}>Customer</Text>
+              <Text style={styles.infoValue}>{order.customer_name || 'Guest'}</Text>
+            </View>
+
+            {/* Type */}
+            <View style={styles.infoRow}>
+              <Text style={styles.infoLabel}>Type</Text>
+              <Text style={styles.infoValue}>{orderType}</Text>
+            </View>
+
+            {/* Date */}
+            <View style={styles.infoRow}>
+              <Text style={styles.infoLabel}>Date</Text>
+              <Text style={styles.infoValue}>
+                {new Date(order.created_at).toLocaleDateString('en-US', {
+                  month: 'short',
+                  day: 'numeric',
+                  year: 'numeric',
+                  hour: 'numeric',
+                  minute: '2-digit',
+                })}
+              </Text>
+            </View>
+
+            {/* Payment Method */}
+            <View style={[styles.infoRow, !order.staff_notes && styles.infoRowLast]}>
+              <Text style={styles.infoLabel}>Payment</Text>
+              <View style={{ alignItems: 'flex-end', flex: 1, marginLeft: 16 }}>
+                {(order as any).split_payment_cash && (order as any).split_payment_card ? (
+                  <>
+                    <Text style={styles.infoValue}>Split Payment</Text>
+                    <Text style={[styles.infoValue, { fontSize: 13, marginTop: 2 }]}>
+                      Cash: ${((order as any).split_payment_cash).toFixed(2)}
+                    </Text>
+                    <Text style={[styles.infoValue, { fontSize: 13 }]}>
+                      Card: ${((order as any).split_payment_card).toFixed(2)}
+                    </Text>
+                  </>
+                ) : (
+                  <Text style={styles.infoValue}>
+                    {order.payment_method === 'cash' ? 'Cash'
+                      : order.payment_method === 'card' || order.payment_method === 'credit' || order.payment_method === 'debit' ? 'Card'
+                      : order.payment_method || 'N/A'}
+                  </Text>
+                )}
+              </View>
+            </View>
+
+            {/* Staff Notes */}
+            {order.staff_notes && (
+              <View style={[styles.infoRow, styles.infoRowLast]}>
+                <Text style={styles.infoLabel}>Notes</Text>
+                <Text style={styles.infoValue} numberOfLines={2}>{order.staff_notes}</Text>
+              </View>
+            )}
+          </View>
+        </View>
+
+        {/* Payment Breakdown - Clean Rows */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>PAYMENT</Text>
+          <View style={styles.infoCard}>
+            {/* Subtotal */}
+            <View style={styles.infoRow}>
+              <Text style={styles.infoLabel}>Subtotal</Text>
+              <Text style={styles.infoValue}>${order.subtotal.toFixed(2)}</Text>
+            </View>
+
+            {/* Tax Breakdown */}
+            {taxDetails.length > 0 ? (
+              <>
+                {taxDetails.map((tax, index) => (
+                  <View key={index} style={styles.infoRow}>
+                    <Text style={styles.infoLabel}>{tax.name}</Text>
+                    <View style={{ alignItems: 'flex-end', flex: 1, marginLeft: 16 }}>
+                      <Text style={styles.infoValue}>${tax.amount.toFixed(2)}</Text>
+                      <Text style={[styles.infoValue, { fontSize: 13, marginTop: 2 }]}>
+                        {tax.rate ? `${(tax.rate * 100).toFixed(2)}% rate` : 'Tax'}
+                      </Text>
+                    </View>
+                  </View>
+                ))}
+              </>
+            ) : (
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Tax</Text>
+                <View style={{ alignItems: 'flex-end', flex: 1, marginLeft: 16 }}>
+                  <Text style={styles.infoValue}>${order.tax_amount.toFixed(2)}</Text>
+                </View>
+              </View>
+            )}
+
+            {/* Discount */}
+            {order.discount_amount > 0 && (
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Discount</Text>
+                <Text style={styles.infoValue}>-${order.discount_amount.toFixed(2)}</Text>
+              </View>
+            )}
+
+            {/* Loyalty Points Redeemed */}
+            {loyaltyPointsRedeemed > 0 && (
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Points Redeemed</Text>
+                <Text style={styles.infoValue}>-{loyaltyPointsRedeemed} pts</Text>
+              </View>
+            )}
+
+            {/* Loyalty Points Earned */}
+            {loyaltyPointsEarned > 0 && (
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Points Earned</Text>
+                <Text style={styles.infoValue}>+{loyaltyPointsEarned} pts</Text>
+              </View>
+            )}
+
+            {/* Total */}
+            <View style={[styles.infoRow, styles.infoRowTotal, styles.infoRowLast]}>
+              <Text style={styles.infoLabelTotal}>Total</Text>
+              <Text style={styles.infoValueTotal}>${order.total_amount.toFixed(2)}</Text>
+            </View>
+          </View>
         </View>
 
         {/* Customer Contact */}
         {(order.customer_email || order.customer_phone) && (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>CUSTOMER CONTACT</Text>
-            <View style={styles.card}>
+            <Text style={styles.sectionTitle}>CONTACT</Text>
+            <View style={styles.infoCard}>
               {order.customer_phone && (
-                <View style={styles.contactRow}>
-                  <Text style={styles.contactLabel}>Phone</Text>
-                  <View style={styles.contactActions}>
-                    <Pressable style={styles.contactButton} onPress={handleCall}>
-                      <Text style={styles.contactButtonText}>Call</Text>
-                    </Pressable>
-                    <Pressable style={styles.contactButton} onPress={handleText}>
-                      <Text style={styles.contactButtonText}>Text</Text>
-                    </Pressable>
-                  </View>
-                </View>
+                <Pressable
+                  style={[styles.infoRow, !order.customer_email && styles.infoRowLast]}
+                  onPress={handleCall}
+                >
+                  <Text style={styles.infoLabel}>Phone</Text>
+                  <Text style={styles.infoValue}>{order.customer_phone}</Text>
+                </Pressable>
               )}
+
               {order.customer_email && (
-                <View style={[styles.contactRow, !order.customer_phone && styles.contactRowFirst]}>
-                  <Text style={styles.contactLabel}>Email</Text>
-                  <Pressable style={styles.contactButton} onPress={handleEmail}>
-                    <Text style={styles.contactButtonText}>Send Email</Text>
-                  </Pressable>
-                </View>
+                <Pressable
+                  style={[styles.infoRow, styles.infoRowLast]}
+                  onPress={handleEmail}
+                >
+                  <Text style={styles.infoLabel}>Email</Text>
+                  <Text style={styles.infoValue} numberOfLines={1}>{order.customer_email}</Text>
+                </Pressable>
               )}
             </View>
           </View>
@@ -673,30 +912,30 @@ export function OrderDetail({ order: initialOrder, onBack, onOrderUpdated }: Ord
         {/* Shipping Info */}
         {(order.order_type === 'shipping' && (order.tracking_number || order.shipping_address_line1)) && (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>SHIPPING INFO</Text>
-            <View style={styles.card}>
+            <Text style={styles.sectionTitle}>SHIPPING</Text>
+            <View style={styles.infoCard}>
               {order.tracking_number && (
-                <View style={styles.detailRow}>
-                  <Text style={styles.detailLabel}>Tracking Number</Text>
-                  <Text style={styles.detailValue}>{order.tracking_number}</Text>
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Tracking</Text>
+                  <Text style={styles.infoValue}>{order.tracking_number}</Text>
                 </View>
               )}
               {order.shipping_cost && (
-                <View style={styles.detailRow}>
-                  <Text style={styles.detailLabel}>Shipping Cost</Text>
-                  <Text style={styles.detailValue}>${order.shipping_cost.toFixed(2)}</Text>
+                <View style={[styles.infoRow, !order.shipping_address_line1 && styles.infoRowLast]}>
+                  <Text style={styles.infoLabel}>Cost</Text>
+                  <Text style={styles.infoValue}>${order.shipping_cost.toFixed(2)}</Text>
                 </View>
               )}
               {order.shipping_address_line1 && (
-                <View style={[styles.detailRow, styles.detailRowLast]}>
-                  <Text style={styles.detailLabel}>Address</Text>
-                  <View style={{ alignItems: 'flex-end' }}>
-                    <Text style={styles.detailValue}>{order.shipping_name}</Text>
-                    <Text style={styles.detailValue}>{order.shipping_address_line1}</Text>
+                <View style={[styles.infoRow, styles.infoRowLast]}>
+                  <Text style={styles.infoLabel}>Address</Text>
+                  <View style={{ alignItems: 'flex-end', flex: 1, marginLeft: 16 }}>
+                    <Text style={styles.infoValue}>{order.shipping_name}</Text>
+                    <Text style={styles.infoValue}>{order.shipping_address_line1}</Text>
                     {order.shipping_address_line2 && (
-                      <Text style={styles.detailValue}>{order.shipping_address_line2}</Text>
+                      <Text style={styles.infoValue}>{order.shipping_address_line2}</Text>
                     )}
-                    <Text style={styles.detailValue}>
+                    <Text style={styles.infoValue}>
                       {order.shipping_city}, {order.shipping_state} {order.shipping_zip}
                     </Text>
                   </View>
@@ -708,115 +947,23 @@ export function OrderDetail({ order: initialOrder, onBack, onOrderUpdated }: Ord
 
         {/* Order Items */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>ITEMS</Text>
-          <View style={styles.card}>
+          <Text style={styles.sectionTitle}>ITEMS ({orderItems.length})</Text>
+          <View style={styles.infoCard}>
             {orderItems.map((item, index) => (
               <View
                 key={item.id}
-                style={[styles.itemRow, index === orderItems.length - 1 && styles.itemRowLast]}
+                style={[
+                  styles.itemRow,
+                  index === orderItems.length - 1 && styles.itemRowLast
+                ]}
               >
                 <View style={styles.itemInfo}>
                   <Text style={styles.itemName}>{item.product_name}</Text>
-                  <Text style={styles.itemQuantity}>Qty: {item.quantity}</Text>
+                  <Text style={styles.itemQuantity}>Qty {item.quantity} × ${item.unit_price.toFixed(2)}</Text>
                 </View>
                 <Text style={styles.itemPrice}>${item.line_total.toFixed(2)}</Text>
               </View>
             ))}
-          </View>
-        </View>
-
-        {/* Order Total */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>TOTAL</Text>
-          <View style={styles.card}>
-            <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>Subtotal</Text>
-              <Text style={styles.summaryValue}>${order.subtotal.toFixed(2)}</Text>
-            </View>
-            <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>Tax</Text>
-              <Text style={styles.summaryValue}>${order.tax_amount.toFixed(2)}</Text>
-            </View>
-            {order.discount_amount > 0 && (
-              <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>Discount</Text>
-                <Text style={styles.summaryValue}>-${order.discount_amount.toFixed(2)}</Text>
-              </View>
-            )}
-            <View style={styles.totalRow}>
-              <Text style={styles.totalLabel}>Total</Text>
-              <Text style={styles.totalValue}>${order.total_amount.toFixed(2)}</Text>
-            </View>
-          </View>
-        </View>
-
-        {/* Timestamps */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>TIMELINE</Text>
-          <View style={styles.card}>
-            <View style={styles.detailRow}>
-              <Text style={styles.detailLabel}>Created</Text>
-              <Text style={styles.detailValue}>
-                {new Date(order.created_at).toLocaleString('en-US', {
-                  month: 'short',
-                  day: 'numeric',
-                  hour: 'numeric',
-                  minute: '2-digit',
-                })}
-              </Text>
-            </View>
-            {order.prepared_at && (
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>Started</Text>
-                <Text style={styles.detailValue}>
-                  {new Date(order.prepared_at).toLocaleString('en-US', {
-                    month: 'short',
-                    day: 'numeric',
-                    hour: 'numeric',
-                    minute: '2-digit',
-                  })}
-                </Text>
-              </View>
-            )}
-            {order.ready_at && (
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>Ready</Text>
-                <Text style={styles.detailValue}>
-                  {new Date(order.ready_at).toLocaleString('en-US', {
-                    month: 'short',
-                    day: 'numeric',
-                    hour: 'numeric',
-                    minute: '2-digit',
-                  })}
-                </Text>
-              </View>
-            )}
-            {order.shipped_at && (
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>Shipped</Text>
-                <Text style={styles.detailValue}>
-                  {new Date(order.shipped_at).toLocaleString('en-US', {
-                    month: 'short',
-                    day: 'numeric',
-                    hour: 'numeric',
-                    minute: '2-digit',
-                  })}
-                </Text>
-              </View>
-            )}
-            {order.completed_at && (
-              <View style={[styles.detailRow, styles.detailRowLast]}>
-                <Text style={styles.detailLabel}>Completed</Text>
-                <Text style={styles.detailValue}>
-                  {new Date(order.completed_at).toLocaleString('en-US', {
-                    month: 'short',
-                    day: 'numeric',
-                    hour: 'numeric',
-                    minute: '2-digit',
-                  })}
-                </Text>
-              </View>
-            )}
           </View>
         </View>
       </ScrollView>
@@ -980,95 +1127,59 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 
-  compactInfo: {
-    paddingHorizontal: layout.contentHorizontal,
-    marginBottom: 24,
-  },
-  orderNumber: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: '#fff',
-    letterSpacing: -0.5,
-    marginBottom: 6,
-  },
-  compactMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  compactMetaText: {
-    fontSize: 15,
-    color: 'rgba(255,255,255,0.6)',
-    fontWeight: '500',
-  },
-  compactMetaDot: {
-    fontSize: 15,
-    color: 'rgba(255,255,255,0.3)',
-  },
-
-  workflowContainer: {
-    paddingHorizontal: layout.contentHorizontal,
-    marginBottom: 24,
-  },
-  workflowSteps: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  workflowStep: {
-    flex: 1,
-    alignItems: 'center',
-    position: 'relative',
-  },
-  workflowDot: {
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    marginBottom: 8,
-  },
-  workflowDotActive: {
-    backgroundColor: '#fff',
-  },
-  workflowStepLabel: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.4)',
-    textAlign: 'center',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  workflowStepLabelActive: {
-    color: '#fff',
-  },
-  workflowLine: {
-    position: 'absolute',
-    top: 8,
-    left: '50%',
-    right: '-50%',
-    height: 2,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-  },
-  workflowLineActive: {
-    backgroundColor: '#fff',
-  },
-
-  cancelledBadge: {
+  // Hero Header
+  heroSection: {
     marginHorizontal: layout.contentHorizontal,
     marginBottom: 24,
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255,59,48,0.15)',
-    borderWidth: 1,
-    borderColor: '#ff3b30',
+    backgroundColor: 'rgba(118,118,128,0.24)',
+    borderRadius: 10,
+    overflow: 'hidden',
+  },
+  heroContainer: {
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+  },
+  heroContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+  },
+  vendorLogo: {
+    width: 56,
+    height: 56,
+    borderRadius: 12,
+  },
+  vendorLogoPlaceholder: {
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    justifyContent: 'center',
     alignItems: 'center',
   },
-  cancelledText: {
-    fontSize: 15,
+  heroInfo: {
+    flex: 1,
+    gap: 4,
+  },
+  heroOrderNumber: {
+    fontSize: 20,
     fontWeight: '700',
-    color: '#ff3b30',
-    letterSpacing: 1,
+    color: '#fff',
+    letterSpacing: -0.3,
+  },
+  heroVendorName: {
+    fontSize: 15,
+    fontWeight: '400',
+    color: 'rgba(235,235,245,0.6)',
+    letterSpacing: -0.2,
+  },
+  statusBadge: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 20,
+    borderWidth: 1,
+  },
+  statusBadgeText: {
+    fontSize: 13,
+    fontWeight: '600',
+    letterSpacing: -0.1,
   },
 
   primaryActionContainer: {
@@ -1090,14 +1201,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     borderRadius: 20,
     backgroundColor: 'rgba(255,255,255,0.1)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   dangerActionButton: {
-    backgroundColor: 'rgba(255,59,48,0.1)',
-    borderColor: '#ff3b30',
+    backgroundColor: 'rgba(255,59,48,0.15)',
   },
   primaryActionButtonDisabled: {
     opacity: 0.6,
@@ -1128,70 +1236,66 @@ const styles = StyleSheet.create({
     paddingHorizontal: layout.contentHorizontal,
   },
 
-  card: {
+  // Unified Info Card Pattern (iOS Settings Style)
+  infoCard: {
     marginHorizontal: layout.contentHorizontal,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.1)',
-    padding: 16,
+    backgroundColor: 'rgba(118,118,128,0.24)',
+    borderRadius: 10,
+    overflow: 'hidden',
   },
-
-  notesText: {
-    fontSize: 15,
-    color: 'rgba(255,255,255,0.7)',
-    fontWeight: '400',
-    lineHeight: 22,
-  },
-
-  contactRow: {
+  infoRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingTop: 12,
+    paddingVertical: 11,
+    paddingHorizontal: 16,
+    borderBottomWidth: 0.5,
+    borderBottomColor: 'rgba(255,255,255,0.05)',
+  },
+  infoRowLast: {
+    borderBottomWidth: 0,
+  },
+  infoLabel: {
+    fontSize: 15,
+    fontWeight: '400',
+    color: '#fff',
+  },
+  infoValue: {
+    fontSize: 15,
+    fontWeight: '400',
+    color: 'rgba(235,235,245,0.6)',
+    textAlign: 'right',
+    flex: 1,
+    marginLeft: 16,
+  },
+  infoRowTotal: {
+    paddingTop: 16,
     borderTopWidth: 0.5,
     borderTopColor: 'rgba(255,255,255,0.1)',
   },
-  contactRowFirst: {
-    borderTopWidth: 0,
-    paddingTop: 0,
-  },
-  contactLabel: {
-    fontSize: 15,
-    color: 'rgba(255,255,255,0.6)',
-    fontWeight: '500',
-  },
-  contactActions: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  contactButton: {
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.2)',
-  },
-  contactButtonText: {
-    fontSize: 14,
-    color: '#fff',
+  infoLabelTotal: {
+    fontSize: 17,
     fontWeight: '600',
+    color: '#fff',
+  },
+  infoValueTotal: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#fff',
   },
 
+  // Items
   itemRow: {
     flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    paddingBottom: 12,
-    marginBottom: 12,
+    paddingVertical: 11,
+    paddingHorizontal: 16,
     borderBottomWidth: 0.5,
-    borderBottomColor: 'rgba(255,255,255,0.1)',
+    borderBottomColor: 'rgba(255,255,255,0.05)',
   },
   itemRowLast: {
     borderBottomWidth: 0,
-    paddingBottom: 0,
-    marginBottom: 0,
   },
   itemInfo: {
     flex: 1,
@@ -1204,68 +1308,13 @@ const styles = StyleSheet.create({
   },
   itemQuantity: {
     fontSize: 13,
-    color: 'rgba(255,255,255,0.6)',
+    color: 'rgba(235,235,245,0.6)',
+    fontWeight: '400',
   },
   itemPrice: {
     fontSize: 17,
     color: '#fff',
-    fontWeight: '700',
-  },
-
-  summaryRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: 8,
-  },
-  summaryLabel: {
-    fontSize: 15,
-    color: 'rgba(255,255,255,0.6)',
-  },
-  summaryValue: {
-    fontSize: 15,
-    color: '#fff',
-    fontWeight: '500',
-  },
-  totalRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingTop: 12,
-    marginTop: 8,
-    borderTopWidth: 0.5,
-    borderTopColor: 'rgba(255,255,255,0.2)',
-  },
-  totalLabel: {
-    fontSize: 17,
-    color: '#fff',
-    fontWeight: '700',
-  },
-  totalValue: {
-    fontSize: 19,
-    color: '#fff',
-    fontWeight: '700',
-  },
-
-  detailRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingBottom: 12,
-    marginBottom: 12,
-    borderBottomWidth: 0.5,
-    borderBottomColor: 'rgba(255,255,255,0.1)',
-  },
-  detailRowLast: {
-    borderBottomWidth: 0,
-    paddingBottom: 0,
-    marginBottom: 0,
-  },
-  detailLabel: {
-    fontSize: 15,
-    color: 'rgba(255,255,255,0.6)',
-  },
-  detailValue: {
-    fontSize: 15,
-    color: '#fff',
-    fontWeight: '500',
+    fontWeight: '600',
   },
 
   successOverlay: {

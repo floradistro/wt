@@ -28,16 +28,36 @@ interface AuditsViewProps {
   onCreatePress: () => void
   headerOpacity: Animated.Value
   vendorLogo?: string | null
+  selectedLocationIds?: string[]
 }
 
-export function AuditsView({ onCreatePress, headerOpacity, vendorLogo }: AuditsViewProps) {
-  const { adjustments, loading } = useInventoryAdjustments()
+export function AuditsView({ onCreatePress, headerOpacity, vendorLogo, selectedLocationIds = [] }: AuditsViewProps) {
   const [filterType, setFilterType] = useState<AdjustmentType | 'all'>('all')
   const [expandedBatches, setExpandedBatches] = useState<Set<string>>(new Set())
 
+  // Memoize filters to prevent unnecessary re-fetches
+  const filters = useMemo(() => {
+    if (selectedLocationIds.length === 1) {
+      return { location_id: selectedLocationIds[0] }
+    }
+    return undefined
+  }, [selectedLocationIds])
+
+  const { adjustments, loading } = useInventoryAdjustments(filters)
+
+  // Filter adjustments by location BEFORE grouping (for multiple locations)
+  const locationFilteredAdjustments = useMemo(() => {
+    if (selectedLocationIds.length <= 1) {
+      // No client-side location filtering needed (0 = all, 1 = handled by hook)
+      return adjustments
+    }
+    // Multiple locations - filter client-side
+    return adjustments.filter(adj => adj.location_id && selectedLocationIds.includes(adj.location_id))
+  }, [adjustments, selectedLocationIds])
+
   // Group audit batches - adjustments with same reason starting with "Audit:" created within 60 seconds
   const groupedAdjustments = useMemo(() => {
-    const sorted = [...adjustments].sort((a, b) =>
+    const sorted = [...locationFilteredAdjustments].sort((a, b) =>
       new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     )
 
@@ -87,11 +107,14 @@ export function AuditsView({ onCreatePress, headerOpacity, vendorLogo }: AuditsV
     })
 
     return result
-  }, [adjustments])
+  }, [locationFilteredAdjustments])
 
-  // Filter adjustments and batches
+  // Filter by type only (location filtering already done before grouping)
   const filteredAdjustments = useMemo(() => {
-    if (filterType === 'all') return groupedAdjustments
+    if (filterType === 'all') {
+      return groupedAdjustments
+    }
+
     return groupedAdjustments.filter(item => {
       if ('type' in item && item.type === 'batch') {
         // For batches, check if all adjustments match the filter
