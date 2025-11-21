@@ -246,6 +246,15 @@ const POSProductCard = forwardRef<any, POSProductCardProps>(({ product, onAddToC
               {/* JOBS PRINCIPLE: Show starting price */}
               <Text style={styles.fromPrice}>From ${lowestPrice.toFixed(2)}</Text>
             </View>
+            {/* JOBS PRINCIPLE: Subtle inventory count - only show when low or for awareness */}
+            {inStock && (
+              <Text style={[
+                styles.inventoryCount,
+                (product.inventory_quantity || 0) <= 5 && styles.inventoryCountLow
+              ]}>
+                {product.inventory_quantity} in stock
+              </Text>
+            )}
           </View>
         </Animated.View>
       </TouchableOpacity>
@@ -480,6 +489,17 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: 'rgba(255,255,255,0.7)',
     letterSpacing: 0.5,
+  },
+  // JOBS PRINCIPLE: Subtle inventory indicator
+  inventoryCount: {
+    fontSize: 8,
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.4)',
+    letterSpacing: 0.3,
+    marginTop: 2,
+  },
+  inventoryCountLow: {
+    color: '#fbbf24', // Amber when low stock (≤5)
   },
 
   // Modal

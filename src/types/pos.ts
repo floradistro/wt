@@ -86,6 +86,7 @@ export interface CartItem {
   productName?: string
   productId: string
   inventoryId: string
+  availableInventory?: number // STEVE JOBS: Track inventory to prevent overselling
   // Staff discount fields
   manualDiscountType?: 'percentage' | 'amount'
   manualDiscountValue?: number

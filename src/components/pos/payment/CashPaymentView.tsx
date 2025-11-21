@@ -122,14 +122,8 @@ export function CashPaymentView({
           },
         })
 
-        // Show completion details briefly, then reset
-        await new Promise(resolve => setTimeout(resolve, 2000))
-
-        // Reset payment state for next transaction
-        setProcessing(false)
-        setPaymentStage('initializing')
-        setCompletionData(null)
-        setCashTendered('')
+        // Parent modal will show success animation and handle dismissal
+        // Keep processing state until modal fully closes (parent will reset on next open)
 
       } catch (saveError) {
         // CRITICAL: Sale save failed
@@ -184,11 +178,7 @@ export function CashPaymentView({
       {processing ? (
         <View style={styles.processingContainer}>
           <View style={styles.processingHeader}>
-            {paymentStage === 'complete' ? (
-              <Ionicons name="checkmark-circle" size={48} color="#10b981" />
-            ) : (
-              <ActivityIndicator size="large" color="#10b981" />
-            )}
+            <ActivityIndicator size="large" color="#10b981" />
           </View>
 
           <View style={styles.processingBody}>
@@ -203,17 +193,6 @@ export function CashPaymentView({
               {paymentStage === 'complete' && 'Complete ✓'}
               {paymentStage === 'error' && 'Error'}
             </Text>
-
-            {paymentStage === 'complete' && completionData && (
-              <View style={styles.completionDetails}>
-                <Text style={styles.completionLabel}>Order #{completionData.orderNumber}</Text>
-                {completionData.loyaltyPointsAdded !== undefined && completionData.loyaltyPointsAdded > 0 && (
-                  <Text style={styles.completionSubtext}>
-                    +{completionData.loyaltyPointsAdded} points earned
-                  </Text>
-                )}
-              </View>
-            )}
           </View>
         </View>
       ) : (

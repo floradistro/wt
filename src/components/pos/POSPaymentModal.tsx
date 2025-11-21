@@ -13,7 +13,8 @@ import { usePaymentProcessor } from '@/stores/payment-processor.store'
 import { CashPaymentView } from './payment/CashPaymentView'
 import { CardPaymentView } from './payment/CardPaymentView'
 import { SplitPaymentView } from './payment/SplitPaymentView'
-import type { PaymentModalProps, PaymentData } from './payment/PaymentTypes'
+import { SaleSuccessModal } from './SaleSuccessModal'
+import type { PaymentModalProps, PaymentData, SaleCompletionData } from './payment/PaymentTypes'
 
 function POSPaymentModal({
   visible,
@@ -29,6 +30,8 @@ function POSPaymentModal({
   registerId,
 }: PaymentModalProps) {
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card' | 'split'>('cash')
+  const [showSuccessModal, setShowSuccessModal] = useState(false)
+  const [completionData, setCompletionData] = useState<SaleCompletionData | null>(null)
   const { width, height } = useWindowDimensions()
   const isLandscape = width > height
 
@@ -62,6 +65,9 @@ function POSPaymentModal({
       slideAnim.setValue(height)
       fadeAnim.setValue(0)
       setPaymentMethod('cash')
+      // Reset success modal state when payment modal closes
+      setShowSuccessModal(false)
+      setCompletionData(null)
     }
   }, [visible, height])
 
@@ -77,7 +83,25 @@ function POSPaymentModal({
 
   const handlePaymentComplete = async (paymentData: PaymentData) => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
-    return await onPaymentComplete(paymentData)
+    const saleData = await onPaymentComplete(paymentData)
+
+    // Show Apple-style success modal
+    setCompletionData(saleData)
+    setShowSuccessModal(true)
+
+    return saleData
+  }
+
+  const handleSuccessModalDismiss = () => {
+    // Hide success modal first
+    setShowSuccessModal(false)
+
+    // Wait a moment for the success modal's fade out animation
+    // Then close the payment modal smoothly
+    setTimeout(() => {
+      setCompletionData(null)
+      onCancel()
+    }, 300) // Give 300ms for any exit animations
   }
 
   return (
@@ -308,6 +332,13 @@ function POSPaymentModal({
           </View>
         </LiquidGlassView>
       </Animated.View>
+
+      {/* Apple-style success modal */}
+      <SaleSuccessModal
+        visible={showSuccessModal}
+        completionData={completionData}
+        onDismiss={handleSuccessModalDismiss}
+      />
     </Modal>
   )
 }

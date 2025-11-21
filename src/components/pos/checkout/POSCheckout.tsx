@@ -420,6 +420,7 @@ export function POSCheckout({
         cardLast4: paymentData.cardLast4,
         itemCount,
         processorName: currentProcessor?.processor_name,
+        changeGiven: paymentData.changeGiven,
         loyaltyPointsAdded,
         loyaltyPointsRedeemed: loyaltyPointsToRedeem || undefined,
       }
@@ -440,10 +441,7 @@ export function POSCheckout({
       setSelectedCustomer(null)
       resetLoyalty()
 
-      // Close modal after brief delay to show completion (payment views show for 2s)
-      setTimeout(() => {
-        closeModal()
-      }, 2500)
+      // Note: Payment modal will auto-close via SaleSuccessModal's onDismiss after 2.5s
 
       // Mark transaction as successful
       // transaction.setStatus('ok')

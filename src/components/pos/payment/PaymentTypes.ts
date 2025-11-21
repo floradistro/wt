@@ -41,6 +41,7 @@ export interface SaleCompletionData {
   cardLast4?: string
   itemCount: number
   processorName?: string
+  changeGiven?: number
   loyaltyPointsAdded?: number
   loyaltyPointsRedeemed?: number
 }
