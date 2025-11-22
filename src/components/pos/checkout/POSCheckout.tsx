@@ -30,7 +30,7 @@ import { useCampaigns } from '@/hooks/useCampaigns'
 import { usePaymentProcessor } from '@/stores/payment-processor.store'
 import { useAuthStore } from '@/stores/auth.store'
 import { useCartItems, useCartTotals, cartActions } from '@/stores/cart.store'
-import { useSelectedDiscountId, checkoutUIActions } from '@/stores/checkout-ui.store'
+import { useSelectedDiscountId, useActiveModal, checkoutUIActions } from '@/stores/checkout-ui.store'
 import { paymentActions } from '@/stores/payment.store'
 import { taxActions } from '@/stores/tax.store'
 import { usePOSSession, posSessionActions } from '@/stores/posSession.store'
@@ -90,9 +90,10 @@ export function POSCheckout() {
   // ========================================
   // MODALS (ZERO PROP DRILLING - from checkout-ui store)
   // ========================================
+  const activeModal = useActiveModal() // This is reactive - component re-renders when it changes
   const openModal = checkoutUIActions.openModal
   const closeModal = checkoutUIActions.closeModal
-  const isModalOpen = checkoutUIActions.isModalOpen
+  const isModalOpen = useCallback((id: string) => activeModal === id, [activeModal])
 
   // ========================================
   // CART STATE (for payment processing)

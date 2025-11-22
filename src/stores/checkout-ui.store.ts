@@ -141,7 +141,7 @@ export const checkoutUIActions = {
   get setShowDiscountSelector() { return useCheckoutUIStore.getState().setShowDiscountSelector },
   get openModal() { return useCheckoutUIStore.getState().openModal },
   get closeModal() { return useCheckoutUIStore.getState().closeModal },
-  // isModalOpen needs to be a function that reads current state
+  // isModalOpen is still available for non-reactive checks if needed
   isModalOpen: (id: string) => useCheckoutUIStore.getState().activeModal === id,
   get reset() { return useCheckoutUIStore.getState().reset },
 }
