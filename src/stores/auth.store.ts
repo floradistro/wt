@@ -1,8 +1,13 @@
 import { create } from 'zustand'
+import { useShallow } from 'zustand/react/shallow'
 import type { Session, User } from '@supabase/supabase-js'
 import { AuthService } from '../features/auth/services/auth.service'
 import { useLocationFilter } from './location-filter.store'
 import { usePOSSessionStore } from './posSession.store'
+import { useCartStore } from './cart.store'
+import { usePaymentStore } from './payment.store'
+import { useTaxStore } from './tax.store'
+import { useCheckoutUIStore } from './checkout-ui.store'
 import { logger } from '@/utils/logger'
 
 interface AuthState {
@@ -73,6 +78,10 @@ export const useAuthStore = create<AuthState>((set, _get) => ({
       // Reset all stores on logout (Apple principle: Clean slate)
       useLocationFilter.getState().reset()
       usePOSSessionStore.getState().reset()
+      useCartStore.getState().reset()
+      usePaymentStore.getState().resetPayment()
+      useTaxStore.getState().reset()
+      useCheckoutUIStore.getState().reset()
 
       set({
         user: null,
@@ -144,20 +153,25 @@ export const useAuthStore = create<AuthState>((set, _get) => ({
 }))
 
 // Selector hooks for better performance
+// ✅ CRITICAL: Use useShallow to prevent new object on every render
 export const useAuth = () => {
-  const user = useAuthStore((state) => state.user)
-  const session = useAuthStore((state) => state.session)
-  const isLoading = useAuthStore((state) => state.isLoading)
-  const error = useAuthStore((state) => state.error)
-
-  return { user, session, isLoading, error }
+  return useAuthStore(
+    useShallow((state) => ({
+      user: state.user,
+      session: state.session,
+      isLoading: state.isLoading,
+      error: state.error,
+    }))
+  )
 }
 
-export const useAuthActions = () => {
-  const login = useAuthStore((state) => state.login)
-  const logout = useAuthStore((state) => state.logout)
-  const restoreSession = useAuthStore((state) => state.restoreSession)
-  const clearError = useAuthStore((state) => state.clearError)
-
-  return { login, logout, restoreSession, clearError }
+// Export auth actions as plain object (not a hook!)
+export const authActions = {
+  get login() { return useAuthStore.getState().login },
+  get logout() { return useAuthStore.getState().logout },
+  get restoreSession() { return useAuthStore.getState().restoreSession },
+  get clearError() { return useAuthStore.getState().clearError },
 }
+
+// Legacy hook for backward compatibility
+export const useAuthActions = () => authActions

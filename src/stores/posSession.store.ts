@@ -12,6 +12,7 @@
  */
 
 import { create } from 'zustand';
+import { useShallow } from 'zustand/react/shallow';
 import type { SessionInfo, Vendor, Location } from '@/types/pos';
 import { supabase } from '@/lib/supabase/client';
 import * as Haptics from 'expo-haptics';
@@ -315,24 +316,31 @@ export const usePOSSessionStore = create<POSSessionState>((set, get) => ({
 
 /**
  * Selectors for cleaner component usage
+ * ✅ CRITICAL: Use useShallow to prevent new object on every render
  */
-export const usePOSSession = () => usePOSSessionStore((state) => ({
-  sessionInfo: state.sessionInfo,
-  vendor: state.vendor,
-  customUserId: state.customUserId,
-  sessionData: state.sessionData,
-  loading: state.loading,
-  error: state.error,
-}));
+export const usePOSSession = () => usePOSSessionStore(
+  useShallow((state) => ({
+    sessionInfo: state.sessionInfo,
+    vendor: state.vendor,
+    customUserId: state.customUserId,
+    sessionData: state.sessionData,
+    loading: state.loading,
+    error: state.error,
+  }))
+);
 
-export const usePOSSessionActions = () => usePOSSessionStore((state) => ({
-  loadVendorAndLocations: state.loadVendorAndLocations,
-  selectLocation: state.selectLocation,
-  selectRegister: state.selectRegister,
-  openCashDrawer: state.openCashDrawer,
-  closeCashDrawer: state.closeCashDrawer,
-  clearSession: state.clearSession,
-  reset: state.reset,
-}));
+// Export POS session actions as plain object (not a hook!)
+export const posSessionActions = {
+  get loadVendorAndLocations() { return usePOSSessionStore.getState().loadVendorAndLocations },
+  get selectLocation() { return usePOSSessionStore.getState().selectLocation },
+  get selectRegister() { return usePOSSessionStore.getState().selectRegister },
+  get openCashDrawer() { return usePOSSessionStore.getState().openCashDrawer },
+  get closeCashDrawer() { return usePOSSessionStore.getState().closeCashDrawer },
+  get clearSession() { return usePOSSessionStore.getState().clearSession },
+  get reset() { return usePOSSessionStore.getState().reset },
+};
+
+// Legacy hook for backward compatibility
+export const usePOSSessionActions = () => posSessionActions;
 
 export const usePOSLocations = () => usePOSSessionStore((state) => state.locations);

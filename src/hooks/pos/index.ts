@@ -1,5 +1,5 @@
 // POS Hooks - Barrel Export
-export { useCart } from './useCart'
+// Note: useCart has been migrated to @/stores/cart.store (Zustand)
 export { useLoyaltyTransaction, useLoyalty } from './useLoyalty'
 export { useFilters } from './useFilters'
 export { useModalState } from './useModalState'

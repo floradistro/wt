@@ -17,8 +17,9 @@ import { View, StyleSheet, Animated } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { LiquidGlassView, isLiquidGlassSupported } from '@callstack/liquid-glass'
 import { useAuth } from '@/stores/auth.store'
+import { usePOSSessionStore } from '@/stores/posSession.store'
 import { startPaymentProcessorMonitoring, stopPaymentProcessorMonitoring } from '@/stores/payment-processor.store'
-import { useDockOffset } from '@/navigation/DashboardNavigator'
+import { useDockOffset } from '@/navigation/DockOffsetContext'
 import { layout } from '@/theme/layout'
 
 // New Refactored Components
@@ -28,8 +29,8 @@ import {
   POSCheckout,
 } from '@/components/pos'
 
-// Hooks - Need useCart at top level to share between components
-import { useCart } from '@/hooks/pos'
+// Hooks
+import { useCartActions } from '@/stores/cart.store'
 
 // Design System
 import { colors } from '@/theme'
@@ -61,9 +62,8 @@ function POSScreenComponent() {
   // Products state - needed by both POSProductBrowser and POSCheckout
   const [products, setProducts] = useState<Product[]>([])
 
-  // Cart state - lifted to parent to share between POSProductBrowser and POSCheckout
-  // This is the SINGLE source of truth for cart data
-  const cartHook = useCart()
+  // Cart actions - from global store (no prop drilling needed!)
+  const { addToCart } = useCartActions()
 
   // Animations
   const fadeAnim = useRef(new Animated.Value(0)).current
@@ -106,18 +106,31 @@ function POSScreenComponent() {
     newSessionData: { sessionNumber: string; totalSales: number; totalCash: number; openingCash: number },
     newCustomUserId: string
   ) => {
+    // Update local state (for POSScreen orchestration)
     setSessionInfo(newSessionInfo)
     setVendor(newVendor)
     _setSessionData(newSessionData)
     setCustomUserId(newCustomUserId)
+
+    // CRITICAL: Also populate global posSession store so POSCheckout can access it
+    usePOSSessionStore.setState({
+      sessionInfo: newSessionInfo,
+      vendor: newVendor,
+      customUserId: newCustomUserId,
+      sessionData: newSessionData,
+    })
   }, [])
 
   const handleSessionEnd = useCallback(() => {
+    // Clear local state
     setSessionInfo(null)
     setVendor(null)
     _setSessionData(null)
     setCustomUserId(null)
     setProducts([])
+
+    // CRITICAL: Also clear global posSession store
+    usePOSSessionStore.getState().clearSession()
   }, [])
 
   const handleProductsLoaded = useCallback((loadedProducts: Product[]) => {
@@ -125,9 +138,11 @@ function POSScreenComponent() {
   }, [])
 
   const handleAddToCart = useCallback((product: Product, tier?: PricingTier) => {
-    // Call the shared cart hook's addToCart function
-    cartHook.addToCart(product, tier)
-  }, [cartHook.addToCart])
+    // Call the cart store's addToCart function
+    addToCart(product, tier)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // addToCart is stable from zustand store, safe to omit from deps
+  }, [])
 
   // ========================================
   // RENDER
@@ -156,12 +171,7 @@ function POSScreenComponent() {
               style={[styles.cartContainer, !isLiquidGlassSupported && styles.cartContainerFallback]}
             >
               <POSCheckout
-                sessionInfo={sessionInfo}
-                vendor={vendor}
                 products={products}
-                customUserId={customUserId}
-                cartHook={cartHook}
-                onEndSession={handleSessionEnd}
                 onCheckoutComplete={() => {
                   // Optional: Reload products after checkout
                 }}
@@ -173,7 +183,6 @@ function POSScreenComponent() {
         {/* Right Column - Products */}
         <View style={styles.rightColumn}>
           <POSProductBrowser
-            sessionInfo={sessionInfo}
             onAddToCart={handleAddToCart}
             onProductsLoaded={handleProductsLoaded}
           />

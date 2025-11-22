@@ -24,6 +24,9 @@ import { POSProductGrid } from './POSProductGrid'
 // Hooks
 import { useFilters } from '@/hooks/pos'
 
+// Stores
+import { usePOSSession } from '@/stores/posSession.store'
+
 // Utilities
 import { transformInventoryToProducts, extractCategories } from '@/utils/product-transformers'
 
@@ -32,12 +35,16 @@ import type { Product, SessionInfo, PricingTier } from '@/types/pos'
 import { logger } from '@/utils/logger'
 
 interface POSProductBrowserProps {
-  sessionInfo: SessionInfo
   onAddToCart: (product: Product, tier?: PricingTier) => void
   onProductsLoaded?: (products: Product[]) => void
 }
 
-function POSProductBrowser({ sessionInfo, onAddToCart, onProductsLoaded }: POSProductBrowserProps) {
+function POSProductBrowser({ onAddToCart, onProductsLoaded }: POSProductBrowserProps) {
+  // ========================================
+  // STORES - Eliminate prop drilling
+  // ========================================
+  const { sessionInfo } = usePOSSession()
+
   // ========================================
   // STATE
   // ========================================
@@ -200,6 +207,12 @@ function POSProductBrowser({ sessionInfo, onAddToCart, onProductsLoaded }: POSPr
   // ========================================
   // RENDER
   // ========================================
+  // Guard: Ensure session data exists (after all hooks)
+  if (!sessionInfo) {
+    logger.warn('POSProductBrowser: Missing sessionInfo from store')
+    return null
+  }
+
   return (
     <View style={styles.container}>
       {/* Filters Dropdown - Dock style with liquid glass */}

@@ -6,12 +6,12 @@ import { useState, useRef, memo, forwardRef, useImperativeHandle } from 'react'
 
 const { width } = Dimensions.get('window')
 // Jobs Principle: 3-column grid accounting for cart sidebar
-// Layout matches Products/Settings: 375px cart + product area (spacing from cart's marginRight only)
-// Product area: 0px left padding (cart provides spacing) + cards + 20px right padding
+// Layout matches Products/Settings: 375px cart + product area
+// Product area: 8px left padding + cards + 20px right padding
 // Cards: 3 columns with 16px gaps between them
 const cartWidth = 375 // Match nav sidebar width exactly
-const productGridPadding = 20 // Only right padding (layout.containerMargin)
-const gapsBetweenCards = 16 * 2 // 2 gaps for 3 columns
+const productGridPadding = 8 + 20 // Left (8px) + right (20px) padding
+const gapsBetweenCards = 16 * 2 // 2 gaps for 3 columns (16px each)
 const totalUsedWidth = cartWidth + productGridPadding + gapsBetweenCards
 const cardWidth = (width - totalUsedWidth) / 3
 

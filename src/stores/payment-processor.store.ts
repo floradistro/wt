@@ -70,16 +70,10 @@ export const usePaymentProcessor = create<ProcessorStore>((set, get) => ({
 
   // Actions
   checkStatus: async (locationId?: string, registerId?: string) => {
-    // eslint-disable-next-line no-console
-    // eslint-disable-next-line no-console
-    console.log('🔍 checkStatus called', { locationId, registerId })
     const startTime = Date.now()
     const { isEnabled, locationId: storedLocationId, addActivityLog } = get()
     const targetLocationId = locationId || storedLocationId
 
-    // eslint-disable-next-line no-console
-    // eslint-disable-next-line no-console
-    console.log('🔍 checkStatus state:', { isEnabled, targetLocationId })
 
     Sentry.setContext('processor', {
       locationId: targetLocationId,
@@ -100,9 +94,6 @@ export const usePaymentProcessor = create<ProcessorStore>((set, get) => ({
 
     // If not enabled, mark as disconnected
     if (!isEnabled) {
-      // eslint-disable-next-line no-console
-      // eslint-disable-next-line no-console
-      console.log('🔍 Processor not enabled')
       set({
         status: 'disconnected',
         lastCheck: Date.now(),
@@ -112,9 +103,6 @@ export const usePaymentProcessor = create<ProcessorStore>((set, get) => ({
     }
 
     if (!targetLocationId) {
-      // eslint-disable-next-line no-console
-      // eslint-disable-next-line no-console
-      console.log('🔍 No location ID')
       set({
         status: 'disconnected',
         lastCheck: Date.now(),
@@ -124,9 +112,6 @@ export const usePaymentProcessor = create<ProcessorStore>((set, get) => ({
     }
 
     set({ status: 'checking' })
-    // eslint-disable-next-line no-console
-    // eslint-disable-next-line no-console
-    console.log('🔍 Status set to checking')
 
     try {
       // Query Supabase directly for processors (no external API)
@@ -145,19 +130,11 @@ export const usePaymentProcessor = create<ProcessorStore>((set, get) => ({
       const duration = Date.now() - startTime
 
       if (dbError) {
-        // eslint-disable-next-line no-console
-        console.error('🔍 Database error loading processors:', dbError)
         throw new Error(`Database error: ${dbError.message}`)
       }
 
-      // eslint-disable-next-line no-console
-      // eslint-disable-next-line no-console
-      console.log('🔍 Processors from database:', processors)
 
       if (!processors || processors.length === 0) {
-        // eslint-disable-next-line no-console
-        // eslint-disable-next-line no-console
-        console.log('🔍 No processors configured')
         addActivityLog('error', 'No processors configured for this location')
 
         set({
@@ -186,9 +163,6 @@ export const usePaymentProcessor = create<ProcessorStore>((set, get) => ({
       const onlineCount = results.filter((p: any) => p.is_live).length
       const totalCount = results.length
 
-      // eslint-disable-next-line no-console
-      // eslint-disable-next-line no-console
-      console.log('🔍 Processor status:', { currentProcessor, onlineCount, totalCount })
 
       if (currentProcessor && currentProcessor.is_live) {
         addActivityLog('success', `${currentProcessor.processor_name} ready`, {
@@ -228,8 +202,6 @@ export const usePaymentProcessor = create<ProcessorStore>((set, get) => ({
       const duration = Date.now() - startTime
       const errorMsg = error.message || 'Failed to check processor status'
 
-      // eslint-disable-next-line no-console
-      console.error('🔍 Error checking processor status:', error)
 
       addActivityLog('error', errorMsg, {
         is_live: false,
@@ -294,8 +266,6 @@ export const usePaymentProcessor = create<ProcessorStore>((set, get) => ({
       const duration = Date.now() - startTime
       const errorMsg = error.message || 'Validation failed'
 
-      // eslint-disable-next-line no-console
-      console.error('❌ Test validation error:', error)
       addActivityLog('error', errorMsg, {
         is_live: false,
         duration_ms: duration
@@ -306,39 +276,25 @@ export const usePaymentProcessor = create<ProcessorStore>((set, get) => ({
   },
 
   setEnabled: (enabled: boolean) => {
-    set({ isEnabled: enabled })
-    // Immediately check status when enabled
-    if (enabled) {
-      const { locationId } = get()
-      if (locationId) {
-        get().checkStatus(locationId)
-      }
-    } else {
-      set({
-        status: 'disconnected',
-        errorMessage: 'Payment processor disabled'
-      })
-    }
+    // ✅ ONLY set the value - don't trigger side effects
+    // The monitoring function handles calling checkStatus
+    set({
+      isEnabled: enabled,
+      status: enabled ? 'checking' : 'disconnected',
+      errorMessage: enabled ? null : 'Payment processor disabled'
+    })
   },
 
   setLocationId: (locationId: string | null) => {
+    // ✅ ONLY set the value - don't trigger side effects
+    // The monitoring function handles calling checkStatus
     set({ locationId })
-    // Auto-check when location changes
-    if (locationId && get().isEnabled) {
-      const { registerId } = get()
-      get().checkStatus(locationId, registerId || undefined)
-    }
   },
 
   setRegisterId: (registerId: string | null) => {
+    // ✅ ONLY set the value - don't trigger side effects
+    // The monitoring function handles calling checkStatus
     set({ registerId })
-    // Auto-check when register changes
-    if (registerId && get().isEnabled) {
-      const { locationId } = get()
-      if (locationId) {
-        get().checkStatus(locationId, registerId)
-      }
-    }
   },
 
   addActivityLog: (type: ActivityLog['type'], message: string, metadata?: Partial<ActivityLog>) => {
@@ -382,13 +338,7 @@ function getCheckInterval(consecutiveFailures: number): number {
 }
 
 export function startPaymentProcessorMonitoring(locationId?: string, registerId?: string) {
-  // eslint-disable-next-line no-console
-  // eslint-disable-next-line no-console
-  console.log('🔌 Starting payment processor monitoring', { locationId, registerId })
   if (statusCheckInterval) {
-    // eslint-disable-next-line no-console
-    // eslint-disable-next-line no-console
-    console.log('🔌 Monitoring already running, stopping existing')
     clearTimeout(statusCheckInterval)
     statusCheckInterval = null
   }
@@ -406,19 +356,9 @@ export function startPaymentProcessorMonitoring(locationId?: string, registerId?
   const targetLocationId = locationId || storedLocationId
   const targetRegisterId = registerId || storedRegisterId
 
-  // eslint-disable-next-line no-console
-  // eslint-disable-next-line no-console
-  console.log('🔌 Target IDs:', { targetLocationId, targetRegisterId })
 
   if (targetLocationId) {
-    // eslint-disable-next-line no-console
-    // eslint-disable-next-line no-console
-    console.log('🔌 Running initial processor check')
     usePaymentProcessor.getState().checkStatus(targetLocationId, targetRegisterId || undefined)
-  } else {
-    // eslint-disable-next-line no-console
-    // eslint-disable-next-line no-console
-    console.log('🔌 No location ID - skipping check')
   }
 
   // Schedule next check with adaptive interval
@@ -426,20 +366,8 @@ export function startPaymentProcessorMonitoring(locationId?: string, registerId?
     const { isEnabled, locationId: currentLocationId, registerId: currentRegisterId, consecutiveFailures } = usePaymentProcessor.getState()
     const interval = getCheckInterval(consecutiveFailures)
 
-    // eslint-disable-next-line no-console
-    // eslint-disable-next-line no-console
-    console.log('🔌 Scheduling next check:', {
-      interval: `${interval/1000}s`,
-      consecutiveFailures,
-      isEnabled,
-      currentLocationId
-    })
-
     statusCheckInterval = setTimeout(async () => {
       if (isEnabled && currentLocationId) {
-        // eslint-disable-next-line no-console
-        // eslint-disable-next-line no-console
-        console.log('🔌 Executing periodic check')
         await usePaymentProcessor.getState().checkStatus(currentLocationId, currentRegisterId || undefined)
         // Schedule next check after this one completes
         scheduleNextCheck()

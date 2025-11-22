@@ -1,92 +1,148 @@
+/**
+ * POSCart Component (REFACTORED)
+ * Apple Engineering Standard: Reduced prop drilling via store usage
+ *
+ * BEFORE: 25+ props (15+ callback handlers)
+ * AFTER: 11 props (focused on data/orchestration)
+ *
+ * Changes:
+ * - Uses cart.store for cart data and actions
+ * - Uses checkout-ui.store for UI state (discounting, tier selector, discount selector)
+ * - Uses useCampaigns() for active discounts
+ * - Uses useModalState() for opening modals
+ *
+ * Remaining props are for:
+ * - Loyalty state (managed by parent's useLoyalty hook)
+ * - Customer state (managed by parent's customer selection)
+ * - Complex orchestration callbacks
+ */
+
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions } from 'react-native'
-import { memo, useState, useRef } from 'react'
+import { memo, useRef, useMemo, useCallback } from 'react'
 import { LiquidGlassView, isLiquidGlassSupported } from '@callstack/liquid-glass'
 import Slider from '@react-native-community/slider'
 import * as Haptics from 'expo-haptics'
-import type { CartItem, Customer, LoyaltyProgram, Product, PricingTier } from '@/types/pos'
+import type { Customer, LoyaltyProgram, Product } from '@/types/pos'
 import { POSCartItem } from './POSCartItem'
 import { POSTotalsSection } from './POSTotalsSection'
 import { POSProductCard } from '../POSProductCard'
 import { layout } from '@/theme/layout'
 
+// Stores
+import { useCartItems, cartActions, useCartTotals, useDiscountingItemId } from '@/stores/cart.store'
+import {
+  useSelectedDiscountId,
+  useTierSelectorProductId,
+  useShowDiscountSelector,
+  checkoutUIActions,
+} from '@/stores/checkout-ui.store'
+
+// Hooks
+import { useCampaigns } from '@/hooks/useCampaigns'
+
 const { width: _width } = Dimensions.get('window')
 
 interface POSCartProps {
-  cart: CartItem[]
-  subtotal: number
-  taxAmount: number
-  total: number
-  itemCount: number
-  taxRate: number
+  // Customer & Loyalty (from parent's useLoyalty hook)
   selectedCustomer: Customer | null
   loyaltyPointsToRedeem: number
   loyaltyProgram: LoyaltyProgram | null
   loyaltyDiscountAmount: number
-  discountingItemId: string | null
-  // Discount props
-  activeDiscounts?: any[]
-  selectedDiscountId?: string | null
-  onSelectDiscount?: (id: string | null) => void
-  discountAmount?: number
-  // Handlers
-  onAddItem: (productId: string) => void
-  onRemoveItem: (productId: string) => void
-  onChangeTier: (oldItemId: string, product: Product, newTier: PricingTier) => void
-  onApplyDiscount: (productId: string, type: 'percentage' | 'amount', value: number) => void
-  onRemoveDiscount: (productId: string) => void
+  maxRedeemablePoints: number
+
+  // Data needed for tier selector
+  products: Product[]
+
+  // Orchestration callbacks (complex multi-store operations)
   onSelectCustomer: () => void
   onClearCustomer: () => void
   onSetLoyaltyPoints: (points: number) => void
   onCheckout: () => void
-  onClearCart: () => void
-  onStartDiscounting: (productId: string) => void
-  onCancelDiscounting: () => void
   onEndSession: () => void
-  maxRedeemablePoints: number
-  products: Product[]
+
+  // Tax display (could be from tax.store later)
+  taxRate: number
 }
 
 function POSCart({
-  cart,
-  subtotal,
-  taxAmount,
-  total,
-  taxRate,
   selectedCustomer,
   loyaltyPointsToRedeem,
   loyaltyProgram,
   loyaltyDiscountAmount,
-  discountingItemId,
-  activeDiscounts = [],
-  selectedDiscountId,
-  onSelectDiscount,
-  discountAmount = 0,
-  onAddItem,
-  onRemoveItem,
-  onChangeTier,
-  onApplyDiscount,
-  onRemoveDiscount,
+  maxRedeemablePoints,
+  products,
   onSelectCustomer,
   onClearCustomer,
   onSetLoyaltyPoints,
   onCheckout,
-  onClearCart,
-  onStartDiscounting,
-  onCancelDiscounting,
   onEndSession,
-  maxRedeemablePoints,
-  products,
+  taxRate,
 }: POSCartProps) {
-  const [tierSelectorProductId, setTierSelectorProductId] = useState<string | null>(null)
-  const [showDiscountSelector, setShowDiscountSelector] = useState(false)
+  // ========================================
+  // STORES - Cart Data
+  // ========================================
+  const cart = useCartItems()
+  const { subtotal, itemCount } = useCartTotals()
+  const discountingItemId = useDiscountingItemId()
+
+  // ========================================
+  // STORES - Checkout UI State
+  // ========================================
+  const selectedDiscountId = useSelectedDiscountId()
+  const tierSelectorProductId = useTierSelectorProductId()
+  const showDiscountSelector = useShowDiscountSelector()
+
+  // ========================================
+  // HOOKS - Discounts
+  // ========================================
+  const { campaigns: discounts } = useCampaigns()
+  const activeDiscounts = useMemo(() => discounts.filter(d => d.is_active), [discounts])
+
+  // ========================================
+  // REFS
+  // ========================================
   const productCardRef = useRef<any>(null)
 
-  const selectedDiscount = activeDiscounts.find(d => d.id === selectedDiscountId)
+  // ========================================
+  // COMPUTED VALUES
+  // ========================================
+  const selectedDiscount = useMemo(
+    () => activeDiscounts.find(d => d.id === selectedDiscountId) || null,
+    [activeDiscounts, selectedDiscountId]
+  )
+
+  const discountAmount = useMemo(() => {
+    if (!selectedDiscount) return 0
+
+    const subtotalAfterLoyalty = Math.max(0, subtotal - loyaltyDiscountAmount)
+
+    if (selectedDiscount.discount_type === 'percentage') {
+      return subtotalAfterLoyalty * (selectedDiscount.discount_value / 100)
+    } else {
+      return Math.min(selectedDiscount.discount_value, subtotalAfterLoyalty)
+    }
+  }, [selectedDiscount, subtotal, loyaltyDiscountAmount])
+
+  const subtotalAfterLoyalty = Math.max(0, subtotal - loyaltyDiscountAmount)
+  const subtotalAfterDiscount = Math.max(0, subtotalAfterLoyalty - discountAmount)
+  const taxAmount = subtotalAfterDiscount * taxRate
+  const total = subtotalAfterDiscount + taxAmount
 
   // Find the product for the tier selector
   const tierSelectorProduct = tierSelectorProductId
     ? products.find(p => p.id === tierSelectorProductId)
     : null
+
+  // ========================================
+  // HANDLERS (MEMOIZED to prevent re-render loops)
+  // ========================================
+  const handleClearCart = useCallback(() => {
+    cartActions.clearCart()
+    cartActions.setDiscountingItemId(null)
+    checkoutUIActions.setSelectedDiscountId(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Store actions are stable from zustand, safe to omit from deps
+  }, [])
 
   return (
     <View style={styles.cartCard}>
@@ -105,10 +161,7 @@ function POSCart({
             ]}
           >
             <TouchableOpacity
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                onSelectCustomer()
-              }}
+              onPress={onSelectCustomer}
               style={styles.customerPillButtonPressable}
               activeOpacity={0.7}
               accessibilityRole="button"
@@ -129,10 +182,7 @@ function POSCart({
             ]}
           >
             <TouchableOpacity
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                onSelectCustomer()
-              }}
+              onPress={onSelectCustomer}
               style={styles.customerPillPressable}
               activeOpacity={0.8}
               accessibilityRole="button"
@@ -188,7 +238,7 @@ function POSCart({
                 <TouchableOpacity
                   onPress={() => {
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                    setShowDiscountSelector(!showDiscountSelector)
+                    checkoutUIActions.setShowDiscountSelector(!showDiscountSelector)
                   }}
                   style={styles.customerPillButtonPressable}
                   activeOpacity={0.7}
@@ -211,7 +261,7 @@ function POSCart({
                 <TouchableOpacity
                   onPress={() => {
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                    setShowDiscountSelector(!showDiscountSelector)
+                    checkoutUIActions.setShowDiscountSelector(!showDiscountSelector)
                   }}
                   style={styles.customerPillPressable}
                   activeOpacity={0.8}
@@ -229,8 +279,8 @@ function POSCart({
                       onPress={(e) => {
                         e.stopPropagation()
                         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                        onSelectDiscount?.(null)
-                        setShowDiscountSelector(false)
+                        checkoutUIActions.setSelectedDiscountId(null)
+                        checkoutUIActions.setShowDiscountSelector(false)
                       }}
                       style={styles.customerPillClearButton}
                       activeOpacity={0.6}
@@ -252,22 +302,22 @@ function POSCart({
                     colorScheme="dark"
                     interactive
                     style={[
-                      styles.discountOption,
-                      !isLiquidGlassSupported && styles.discountOptionFallback
+                      styles.discountItem,
+                      !isLiquidGlassSupported && styles.discountItemFallback
                     ]}
                   >
                     <TouchableOpacity
                       onPress={() => {
                         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                        onSelectDiscount?.(discount.id)
-                        setShowDiscountSelector(false)
+                        checkoutUIActions.setSelectedDiscountId(discount.id)
+                        checkoutUIActions.setShowDiscountSelector(false)
                       }}
-                      style={styles.discountOptionPressable}
-                      activeOpacity={0.7}
+                      style={styles.discountItemPressable}
+                      activeOpacity={0.8}
                     >
-                      <View style={styles.discountOptionContent}>
-                        <Text style={styles.discountOptionName}>{discount.name}</Text>
-                        <Text style={styles.discountBadge}>{discount.badge_text}</Text>
+                      <View style={styles.discountItemContent}>
+                        <Text style={styles.discountItemName}>{discount.name}</Text>
+                        <Text style={styles.discountItemBadge}>{discount.badge_text}</Text>
                       </View>
                     </TouchableOpacity>
                   </LiquidGlassView>
@@ -277,12 +327,13 @@ function POSCart({
           </>
         )}
 
-        {/* Action Buttons Row */}
+        {/* Clear Cart Button */}
         {cart.length > 0 && (
-          <View style={styles.actionRow}>
+          <View style={styles.headerActions}>
             <LiquidGlassView
               effect="regular"
               colorScheme="dark"
+              tintColor="rgba(255,255,255,0.05)"
               interactive
               style={[
                 styles.actionButton,
@@ -290,12 +341,15 @@ function POSCart({
               ]}
             >
               <TouchableOpacity
-                onPress={onClearCart}
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+                  handleClearCart()
+                }}
                 style={styles.actionButtonPressable}
                 activeOpacity={0.7}
                 accessibilityRole="button"
                 accessibilityLabel="Clear cart"
-                accessibilityHint={`Removes all ${cart.length} ${cart.length === 1 ? 'item' : 'items'} from cart`}
+                accessibilityHint="Removes all items from cart"
               >
                 <Text style={styles.actionButtonText}>Clear Cart</Text>
               </TouchableOpacity>
@@ -327,12 +381,12 @@ function POSCart({
               <POSCartItem
                 key={item.id}
                 item={item}
-                onAdd={() => onAddItem(item.id)}
-                onRemove={() => onRemoveItem(item.id)}
+                onAdd={() => cartActions.updateQuantity(item.id, 1)}
+                onRemove={() => cartActions.updateQuantity(item.id, -1)}
                 onOpenTierSelector={
                   hasTiers && product
                     ? () => {
-                        setTierSelectorProductId(product.id)
+                        checkoutUIActions.setTierSelectorProductId(product.id)
                         // Trigger the product card modal to open
                         setTimeout(() => {
                           if (productCardRef.current?.openPricingModal) {
@@ -342,11 +396,11 @@ function POSCart({
                       }
                     : undefined
                 }
-                onApplyDiscount={(type, value) => onApplyDiscount(item.id, type, value)}
-                onRemoveDiscount={() => onRemoveDiscount(item.id)}
+                onApplyDiscount={(type, value) => cartActions.applyManualDiscount(item.id, type, value)}
+                onRemoveDiscount={() => cartActions.removeManualDiscount(item.id)}
                 isDiscounting={discountingItemId === item.id}
-                onStartDiscounting={() => onStartDiscounting(item.id)}
-                onCancelDiscounting={onCancelDiscounting}
+                onStartDiscounting={() => cartActions.setDiscountingItemId(item.id)}
+                onCancelDiscounting={() => cartActions.setDiscountingItemId(null)}
               />
             )
           })
@@ -481,10 +535,10 @@ function POSCart({
                 // Find the cart item with this product ID
                 const cartItem = cart.find(item => item.productId === tierSelectorProductId)
                 if (cartItem) {
-                  onChangeTier(cartItem.id, product, tier)
+                  cartActions.changeTier(cartItem.id, product, tier)
                 }
               }
-              setTierSelectorProductId(null)
+              checkoutUIActions.setTierSelectorProductId(null)
             }}
           />
         </View>
@@ -493,151 +547,196 @@ function POSCart({
   )
 }
 
-const POSCartMemo = memo(POSCart)
+// Memoize with comparison function to prevent unnecessary re-renders
+const POSCartMemo = memo(POSCart, (prevProps, nextProps) => {
+  // Only re-render if these props change
+  return (
+    prevProps.selectedCustomer?.id === nextProps.selectedCustomer?.id &&
+    prevProps.selectedCustomer?.loyalty_points === nextProps.selectedCustomer?.loyalty_points &&
+    prevProps.loyaltyPointsToRedeem === nextProps.loyaltyPointsToRedeem &&
+    prevProps.loyaltyProgram?.id === nextProps.loyaltyProgram?.id &&
+    prevProps.loyaltyDiscountAmount === nextProps.loyaltyDiscountAmount &&
+    prevProps.maxRedeemablePoints === nextProps.maxRedeemablePoints &&
+    prevProps.products === nextProps.products &&
+    prevProps.onSelectCustomer === nextProps.onSelectCustomer &&
+    prevProps.onClearCustomer === nextProps.onClearCustomer &&
+    prevProps.onSetLoyaltyPoints === nextProps.onSetLoyaltyPoints &&
+    prevProps.onCheckout === nextProps.onCheckout &&
+    prevProps.onEndSession === nextProps.onEndSession &&
+    prevProps.taxRate === nextProps.taxRate
+  )
+})
+
 export { POSCartMemo as POSCart }
 
 const styles = StyleSheet.create({
-  // Cart container - glass effect provided by parent
   cartCard: {
     flex: 1,
-  },
-
-  // Perfectly Simple Cart Header - Ultra-minimal padding
-  cartHeader: {
-    paddingHorizontal: 8, // Ultra-minimal to match container margins
-    paddingTop: 8, // Ultra-minimal to match container margins
-    paddingBottom: 12,
-    gap: 12,
-  },
-
-  // Customer Pill Button (when no customer selected) - Liquid Glass
-  customerPillButton: {
-    borderRadius: 24,
-    borderCurve: 'continuous',
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    borderRadius: 16,
     overflow: 'hidden',
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.15)',
+  },
+  cartHeader: {
+    padding: 12,
+    gap: 8,
+  },
+  customerPillButton: {
+    borderRadius: 20,
+    overflow: 'hidden',
+    minHeight: 44,
   },
   customerPillButtonFallback: {
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: 'rgba(255,255,255,0.05)',
   },
   customerPillButtonPressable: {
-    height: 48,
-    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    minHeight: 44,
     justifyContent: 'center',
   },
   customerPillText: {
     fontSize: 15,
     fontWeight: '600',
     color: 'rgba(255,255,255,0.9)',
-    letterSpacing: -0.2,
+    textAlign: 'center',
   },
-
-  // Customer Pill (when customer selected) - Liquid Glass with regular effect
   customerPill: {
-    borderRadius: 24,
-    borderCurve: 'continuous',
+    borderRadius: 20,
     overflow: 'hidden',
-    borderWidth: 0,
+    minHeight: 44,
   },
   customerPillFallback: {
-    backgroundColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: 'rgba(255,255,255,0.08)',
   },
   customerPillPressable: {
-    height: 48,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    minHeight: 44,
+    justifyContent: 'center',
   },
   customerPillContent: {
-    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingLeft: 20,
-    paddingRight: 6,
+    justifyContent: 'space-between',
     gap: 12,
   },
   customerPillTextContainer: {
     flex: 1,
-    gap: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   customerPillName: {
-    fontSize: 17,
+    fontSize: 14,
     fontWeight: '600',
     color: '#fff',
-    letterSpacing: -0.4,
+    flex: 1,
   },
   customerPillPoints: {
-    fontSize: 13,
-    fontWeight: '400',
+    fontSize: 12,
+    fontWeight: '500',
     color: 'rgba(255,255,255,0.6)',
-    letterSpacing: 0,
   },
   customerPillClearButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
+    width: 24,
+    height: 24,
+    borderRadius: 12,
     backgroundColor: 'rgba(255,255,255,0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   customerPillClearText: {
-    fontSize: 22,
-    fontWeight: '400',
-    color: 'rgba(255,255,255,0.8)',
-    letterSpacing: 0,
+    fontSize: 18,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.6)',
+    lineHeight: 20,
   },
-
-  // Action Row - Pills Layout
-  actionRow: {
+  discountList: {
+    gap: 6,
+    marginTop: 4,
+  },
+  discountItem: {
+    borderRadius: 16,
+    overflow: 'hidden',
+    minHeight: 40,
+  },
+  discountItemFallback: {
+    backgroundColor: 'rgba(255,255,255,0.05)',
+  },
+  discountItemPressable: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    minHeight: 40,
+    justifyContent: 'center',
+  },
+  discountItemContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  discountItemName: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: '#fff',
+    flex: 1,
+  },
+  discountItemBadge: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.6)',
+  },
+  headerActions: {
     flexDirection: 'row',
     gap: 8,
   },
-
-  // Action Button - Liquid Glass Pill
   actionButton: {
     flex: 1,
-    borderRadius: 100,
-    borderCurve: 'continuous',
+    borderRadius: 16,
     overflow: 'hidden',
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.15)',
+    minHeight: 40,
   },
   actionButtonFallback: {
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: 'rgba(255,255,255,0.05)',
   },
   actionButtonPressable: {
-    height: 44,
-    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    minHeight: 40,
     justifyContent: 'center',
   },
   actionButtonText: {
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: '600',
     color: 'rgba(255,255,255,0.9)',
-    letterSpacing: 0,
+    textAlign: 'center',
   },
-
   cartItems: {
     flex: 1,
   },
   emptyCart: {
-    paddingVertical: 60,
+    flex: 1,
+    justifyContent: 'center',
     alignItems: 'center',
-    gap: 8,
+    paddingVertical: 60,
   },
   emptyCartText: {
-    fontSize: 15,
-    fontWeight: '400',
+    fontSize: 16,
+    fontWeight: '600',
     color: 'rgba(255,255,255,0.4)',
-    letterSpacing: -0.2,
+    marginBottom: 4,
   },
   emptyCartSubtext: {
     fontSize: 13,
-    fontWeight: '400',
     color: 'rgba(255,255,255,0.25)',
-    letterSpacing: 0,
+  },
+  cartDivider: {
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    marginHorizontal: 12,
   },
   loyaltySection: {
-    paddingHorizontal: 8, // Match cart header padding
-    paddingVertical: layout.cardPadding,
+    padding: 16,
     gap: 12,
   },
   loyaltySectionHeader: {
@@ -646,35 +745,30 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   loyaltySectionTitle: {
-    fontSize: 11,
+    fontSize: 13,
     fontWeight: '600',
     color: 'rgba(255,255,255,0.7)',
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
   },
   loyaltySectionAvailable: {
-    fontSize: 11,
-    fontWeight: '400',
+    fontSize: 12,
+    fontWeight: '500',
     color: 'rgba(255,255,255,0.5)',
-    letterSpacing: 0,
   },
   loyaltyValueDisplay: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingTop: 4,
+    paddingHorizontal: 4,
   },
   loyaltyPointsText: {
-    fontSize: 13,
-    fontWeight: '400',
-    color: 'rgba(255,255,255,0.7)',
-    letterSpacing: 0,
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#fff',
   },
   loyaltyDiscountValue: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#10b981',
-    letterSpacing: -0.2,
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#4ade80',
   },
   loyaltySlider: {
     width: '100%',
@@ -686,97 +780,36 @@ const styles = StyleSheet.create({
   },
   loyaltyButtonClear: {
     flex: 1,
-    paddingVertical: 10,
+    paddingVertical: 8,
+    borderRadius: 8,
     backgroundColor: 'rgba(255,255,255,0.05)',
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
     alignItems: 'center',
   },
   loyaltyButtonClearText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.6)',
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
-  },
-  loyaltyButtonMax: {
-    flex: 1,
-    paddingVertical: 10,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
-    alignItems: 'center',
-  },
-  loyaltyButtonMaxText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.9)',
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
-  },
-  endSessionFooter: {
-    marginTop: layout.cardPadding,
-    marginHorizontal: layout.cardPadding,
-    marginBottom: 8,
-    height: 48,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 24,
-    backgroundColor: 'rgba(255,255,255,0.02)',
-    borderWidth: 0,
-  },
-  endSessionFooterText: {
-    fontSize: 11,
-    fontWeight: '400',
-    color: 'rgba(255,255,255,0.4)',
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
-  },
-
-  // Discount Selector
-  discountList: {
-    gap: 12,
-  },
-  discountOption: {
-    borderRadius: 24,
-    borderCurve: 'continuous',
-    overflow: 'hidden',
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.15)',
-  },
-  discountOptionFallback: {
-    backgroundColor: 'rgba(255,255,255,0.08)',
-  },
-  discountOptionPressable: {
-    height: 48,
-    paddingHorizontal: 20,
-    justifyContent: 'center',
-  },
-  discountOptionContent: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  discountOptionName: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.9)',
-    letterSpacing: -0.2,
-    flex: 1,
-  },
-  discountBadge: {
     fontSize: 13,
     fontWeight: '600',
     color: 'rgba(255,255,255,0.6)',
-    letterSpacing: 0,
-    marginLeft: 12,
   },
-  // iOS 26 Divider - Hairline
-  cartDivider: {
-    height: 0.33,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    marginHorizontal: layout.containerMargin,
+  loyaltyButtonMax: {
+    flex: 1,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: 'rgba(74, 222, 128, 0.15)',
+    alignItems: 'center',
+  },
+  loyaltyButtonMaxText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#4ade80',
+  },
+  endSessionFooter: {
+    paddingVertical: 12,
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.2)',
+  },
+  endSessionFooterText: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.4)',
   },
 })

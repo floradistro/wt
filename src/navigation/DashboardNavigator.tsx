@@ -1,4 +1,4 @@
-import { useState, createContext, useContext } from 'react'
+import { useState } from 'react'
 import { View, StyleSheet, useWindowDimensions } from 'react-native'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { Dock } from '../components/Dock'
@@ -8,19 +8,11 @@ import { OrdersScreen } from '@/screens/OrdersScreen'
 import { CustomersScreen } from '@/screens/CustomersScreen'
 import { SettingsScreen } from '@/screens/SettingsScreen'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
+import { DockOffsetContext } from './DockOffsetContext'
 import { layout } from '@/theme/layout'
 import { device } from '@/theme'
 
 const screens = [POSScreen, ProductsScreen, OrdersScreen, CustomersScreen, SettingsScreen]
-
-// Minimal context - only for POS setup override
-const DockOffsetContext = createContext<{
-  setFullWidth: (isFullWidth: boolean) => void
-}>({
-  setFullWidth: () => {}
-})
-
-export const useDockOffset = () => useContext(DockOffsetContext)
 
 export function DashboardNavigator() {
   const [activeTab, setActiveTab] = useState(0)

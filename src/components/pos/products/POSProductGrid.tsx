@@ -114,8 +114,8 @@ function POSProductGrid({
   const contentContainerStyle = useMemo(() => ({
     paddingTop: 72, // Space for floating search bar
     paddingBottom: Math.max(layout.dockHeight, insets.bottom + 16),
-    paddingLeft: 8,
-    paddingRight: 8,
+    paddingLeft: 8, // Left padding to match cart's marginRight
+    paddingRight: 20, // layout.containerMargin
   }), [insets.bottom])
 
   // ========================================
@@ -240,12 +240,12 @@ const styles = StyleSheet.create({
   },
   // Column wrapper for 3-column grid
   columnWrapper: {
-    gap: layout.cardPadding,
+    gap: 16, // Horizontal spacing between columns (layout.cardPadding)
     paddingHorizontal: 0,
-    marginBottom: layout.cardPadding, // Vertical gap between rows
   },
   // Wrapper for each product card (flex: 1 for equal width)
   productCardWrapper: {
     flex: 1,
+    marginBottom: 16, // Vertical spacing between rows (layout.cardPadding)
   },
 })

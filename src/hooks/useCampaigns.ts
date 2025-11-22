@@ -110,7 +110,9 @@ export function useCampaigns() {
       logger.debug('[useCampaigns] Cleaning up real-time subscription')
       supabase.removeChannel(channel)
     }
-  }, [user?.id, loadCampaigns])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // loadCampaigns is called inside the subscription callback, doesn't need to be in deps
+  }, [user?.id])
 
   async function createCampaign(campaignData: {
     name: string

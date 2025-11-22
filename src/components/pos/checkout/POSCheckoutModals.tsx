@@ -26,11 +26,10 @@ import POSPaymentModal from '../POSPaymentModal'
 import { CloseCashDrawerModal } from '../CloseCashDrawerModal'
 import { ErrorModal } from '@/components/ErrorModal'
 
-interface POSCheckoutModalsProps {
-  // Vendor & Session
-  vendor: Vendor
-  sessionInfo: SessionInfo
+// Stores
+import { usePOSSession } from '@/stores/posSession.store'
 
+interface POSCheckoutModalsProps {
   // Modal visibility state
   isModalOpen: (id: any) => boolean
   closeModal: () => void
@@ -81,8 +80,6 @@ interface POSCheckoutModalsProps {
 }
 
 export function POSCheckoutModals({
-  vendor,
-  sessionInfo,
   isModalOpen,
   closeModal,
   scannedDataForNewCustomer,
@@ -113,6 +110,16 @@ export function POSCheckoutModals({
   errorModal,
   onCloseErrorModal,
 }: POSCheckoutModalsProps) {
+  // ========================================
+  // STORES - Eliminate prop drilling
+  // ========================================
+  const { vendor, sessionInfo } = usePOSSession()
+
+  // Guard: Ensure session data exists
+  if (!vendor || !sessionInfo) {
+    return null
+  }
+
   return (
     <>
       {/* Error Modal */}
