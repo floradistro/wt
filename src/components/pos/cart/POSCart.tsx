@@ -508,10 +508,11 @@ function POSCart() {
             maxRedeemablePoints={maxRedeemablePoints}
             onSetLoyaltyPoints={loyaltyActions.setPointsToRedeem}
             onCheckout={() => {
+              if (cart.length === 0) return
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
               checkoutUIActions.openModal('payment')
             }}
-            disabled={false}
+            disabled={cart.length === 0}
           />
         </>
       )}

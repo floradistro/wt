@@ -24,7 +24,6 @@ import { POSCart } from '../cart/POSCart'
 import { POSCheckoutModals } from './POSCheckoutModals'
 
 // Hooks
-import { useModalState } from '@/hooks/pos'
 import { useCampaigns } from '@/hooks/useCampaigns'
 
 // Stores (ZERO PROP DRILLING)
@@ -89,9 +88,11 @@ export function POSCheckout() {
   const products = useProducts()
 
   // ========================================
-  // MODALS
+  // MODALS (ZERO PROP DRILLING - from checkout-ui store)
   // ========================================
-  const { openModal, closeModal, isModalOpen } = useModalState()
+  const openModal = checkoutUIActions.openModal
+  const closeModal = checkoutUIActions.closeModal
+  const isModalOpen = checkoutUIActions.isModalOpen
 
   // ========================================
   // CART STATE (for payment processing)

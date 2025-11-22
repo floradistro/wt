@@ -92,10 +92,11 @@ export const useCheckoutUIStore = create<CheckoutUIState>()(
       /**
        * Check if a specific modal is open
        * ANTI-LOOP: Pure function - no setState
+       * Note: This is a method in the store, but it can't use get() when called externally
+       * So we export a separate function below that uses getState()
        */
       isModalOpen: (id: string) => {
-        const state = get()
-        return state.activeModal === id
+        return get().activeModal === id
       },
 
       /**
@@ -140,7 +141,8 @@ export const checkoutUIActions = {
   get setShowDiscountSelector() { return useCheckoutUIStore.getState().setShowDiscountSelector },
   get openModal() { return useCheckoutUIStore.getState().openModal },
   get closeModal() { return useCheckoutUIStore.getState().closeModal },
-  get isModalOpen() { return useCheckoutUIStore.getState().isModalOpen },
+  // isModalOpen needs to be a function that reads current state
+  isModalOpen: (id: string) => useCheckoutUIStore.getState().activeModal === id,
   get reset() { return useCheckoutUIStore.getState().reset },
 }
 
