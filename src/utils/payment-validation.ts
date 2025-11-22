@@ -6,7 +6,6 @@
  */
 
 import type { PaymentData } from '@/components/pos/payment'
-import { logger } from '@/utils/logger'
 
 /**
  * Validates that payment data comes from a real processor, not mock data
@@ -51,7 +50,7 @@ export function validateRealPaymentData(paymentData: PaymentData): void {
 
   // Validation for card payments (future extension - not needed for Edge Function architecture)
   if (paymentData.authorizationCode && paymentData.cardLast4 === '4242' && __DEV__) {
-    logger.warn(
+    console.warn(
       '⚠️ WARNING: Card ending in 4242 detected. This is a common test card. ' +
       'Ensure you are using real payment processing in production.'
     )
@@ -159,7 +158,7 @@ export function checkForMockPaymentCode(): void {
 
   // This is a compile-time check - we can't actually scan source code at runtime
   // But we can log a reminder for developers
-  logger.debug(
+  console.log(
     '✅ Payment Validation: Ensure no mock payment code exists:\n' +
     '   - No "AUTH${Date.now()}" patterns\n' +
     '   - No "TXN${Date.now()}" patterns\n' +
@@ -191,5 +190,5 @@ export function validatePaymentEnvironment(): void {
     )
   }
 
-  logger.debug(`✅ Payment Environment: API URL = ${apiUrl}`)
+  console.log(`✅ Payment Environment: API URL = ${apiUrl}`)
 }

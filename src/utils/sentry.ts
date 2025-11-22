@@ -5,7 +5,6 @@
 
 import * as Sentry from '@sentry/react-native'
 import Constants from 'expo-constants'
-import { logger } from '@/utils/logger'
 
 /**
  * Initialize Sentry
@@ -17,8 +16,8 @@ export function initializeSentry() {
 
   if (!dsn) {
     if (__DEV__) {
-      logger.warn('[Sentry] DSN not configured. Sentry will not be initialized.')
-      logger.warn('[Sentry] Add EXPO_PUBLIC_SENTRY_DSN to your .env file')
+      console.warn('[Sentry] DSN not configured. Sentry will not be initialized.')
+      console.warn('[Sentry] Add EXPO_PUBLIC_SENTRY_DSN to your .env file')
     }
     return
   }
@@ -96,7 +95,7 @@ export function initializeSentry() {
   Sentry.setTag('app_version', Constants.expoConfig?.version || '1.0.0')
 
   if (__DEV__) {
-    logger.debug('[Sentry] Initialized successfully')
+    console.log('[Sentry] Initialized successfully')
   }
 }
 

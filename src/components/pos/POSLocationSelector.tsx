@@ -149,6 +149,7 @@ function LocationCard({
 
 function POSLocationSelector({ locations, vendorLogo, vendorName, onLocationSelected, onCancel }: POSLocationSelectorProps) {
   const fadeAnim = useRef(new Animated.Value(0)).current
+  const pulseAnim = useRef(new Animated.Value(1)).current
 
   useEffect(() => {
     Animated.timing(fadeAnim, {
@@ -158,16 +159,28 @@ function POSLocationSelector({ locations, vendorLogo, vendorName, onLocationSele
     }).start()
   }, [])
 
-  if (locations.length === 0) {
-    return (
-      <SafeAreaView style={styles.container} edges={['top', 'left', 'right', 'bottom']}>
-        <View style={styles.emptyContainer}>
-          <Text style={styles.emptyText}>No locations available</Text>
-          <Text style={styles.emptySubtext}>Contact support to configure your locations</Text>
-        </View>
-      </SafeAreaView>
-    )
-  }
+  // Apple Standard: Show skeleton while loading, not empty state
+  const showingSkeleton = locations.length === 0
+
+  // Apple Standard: Subtle pulse animation for skeleton cards
+  useEffect(() => {
+    if (showingSkeleton) {
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulseAnim, {
+            toValue: 0.6,
+            duration: 1000,
+            useNativeDriver: true,
+          }),
+          Animated.timing(pulseAnim, {
+            toValue: 1,
+            duration: 1000,
+            useNativeDriver: true,
+          }),
+        ])
+      ).start()
+    }
+  }, [showingSkeleton])
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right', 'bottom']}>
@@ -190,15 +203,29 @@ function POSLocationSelector({ locations, vendorLogo, vendorName, onLocationSele
 
         {/* Grid */}
         <View style={styles.grid}>
-          {locations.map((location, index) => (
-            <LocationCard
-              key={location.id}
-              location={location}
-              index={index}
-              vendorLogo={vendorLogo}
-              onPress={() => onLocationSelected(location.id, location.name)}
-            />
-          ))}
+          {showingSkeleton ? (
+            // Apple Standard: Show skeleton cards while loading (structure first, content later)
+            [1, 2, 3, 4].map((_, index) => (
+              <Animated.View
+                key={`skeleton-${index}`}
+                style={[styles.cardContainer, { opacity: pulseAnim }]}
+              >
+                <View style={[styles.card, styles.skeletonCard]}>
+                  <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} />
+                </View>
+              </Animated.View>
+            ))
+          ) : (
+            locations.map((location, index) => (
+              <LocationCard
+                key={location.id}
+                location={location}
+                index={index}
+                vendorLogo={vendorLogo}
+                onPress={() => onLocationSelected(location.id, location.name)}
+              />
+            ))
+          )}
         </View>
       </Animated.View>
     </SafeAreaView>
@@ -331,6 +358,10 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.5)',
     letterSpacing: -0.1,
     textAlign: 'center',
+  },
+  // Apple Standard: Skeleton loading state (more visible, with pulse animation)
+  skeletonCard: {
+    opacity: 0.5, // Increased from 0.3 for better visibility
   },
   // Primary badge
   primaryBadge: {

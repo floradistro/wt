@@ -282,8 +282,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 6, // Ultra-minimal iOS-style spacing (6px)
-    paddingVertical: layout.cardPadding,
+    paddingHorizontal: layout.containerMargin,
+    paddingVertical: layout.containerMargin,
   },
   backButton: {
     paddingVertical: 4,
@@ -329,9 +329,9 @@ const styles = StyleSheet.create({
     letterSpacing: -0.2,
   },
   headerCardContainer: {
-    marginHorizontal: 6, // Ultra-minimal iOS-style spacing (6px)
-    marginTop: layout.sectionSpacing,
-    marginBottom: layout.sectionSpacing,
+    marginHorizontal: layout.containerMargin,
+    marginTop: layout.containerMargin,
+    marginBottom: layout.containerMargin,
   },
   headerCardGlass: {
     borderRadius: radius.xxl,
@@ -345,8 +345,8 @@ const styles = StyleSheet.create({
   headerCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: layout.cardPadding,
-    gap: layout.cardPadding,
+    padding: layout.containerMargin,
+    gap: layout.containerMargin,
   },
   headerIcon: {
     width: 60,
@@ -405,8 +405,8 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   section: {
-    marginHorizontal: 6, // Ultra-minimal iOS-style spacing (6px)
-    marginBottom: layout.sectionSpacing,
+    marginHorizontal: layout.containerMargin,
+    marginBottom: layout.containerMargin,
   },
   sectionTitle: {
     fontSize: 11,
@@ -415,7 +415,6 @@ const styles = StyleSheet.create({
     letterSpacing: 0.6,
     textTransform: 'uppercase',
     marginBottom: 8,
-    paddingHorizontal: layout.cardPadding,
   },
   cardGlass: {
     borderRadius: radius.xxl,
@@ -430,7 +429,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: layout.rowPaddingVertical,
-    paddingHorizontal: layout.rowPaddingHorizontal,
+    paddingHorizontal: layout.containerMargin,
   },
   statItem: {
     flex: 1,
@@ -453,7 +452,7 @@ const styles = StyleSheet.create({
     color: 'rgba(235,235,245,0.6)',
   },
   descriptionContainer: {
-    padding: 16,
+    padding: layout.containerMargin,
   },
   descriptionText: {
     fontSize: 15,
@@ -480,7 +479,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingVertical: layout.rowPaddingVertical,
-    paddingHorizontal: layout.rowPaddingHorizontal,
+    paddingHorizontal: layout.containerMargin,
     minHeight: layout.minTouchTarget,
   },
   rowLabel: {

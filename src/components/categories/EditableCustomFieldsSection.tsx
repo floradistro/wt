@@ -348,7 +348,7 @@ export function EditableCustomFieldsSection({
 
 const styles = StyleSheet.create({
   section: {
-    marginHorizontal: 6, // Ultra-minimal iOS-style spacing (6px)
+    marginHorizontal: layout.containerMargin, // Handles own horizontal spacing
     marginBottom: layout.sectionSpacing,
   },
   sectionTitle: {
@@ -358,7 +358,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.6,
     textTransform: 'uppercase',
     marginBottom: 8,
-    paddingHorizontal: layout.cardPadding,
+    paddingHorizontal: 0, // No padding - inherits parent margin
   },
   cardGlass: {
     borderRadius: radius.xxl,

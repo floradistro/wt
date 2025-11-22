@@ -423,8 +423,8 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   cardWrapper: {
-    paddingHorizontal: layout.contentHorizontal,
-    marginBottom: layout.cardPadding,
+    paddingHorizontal: layout.containerMargin,
+    marginBottom: layout.containerMargin,
   },
   titleSectionContainer: {
     backgroundColor: 'rgba(255,255,255,0.08)',

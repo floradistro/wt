@@ -1,8 +1,8 @@
 import { supabase, isSupabaseReady } from '@/lib/supabase/client'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import type { Session, User } from '@supabase/supabase-js'
-import { logger } from '@/utils/logger'
 
+// Auth service for managing user authentication
 export interface AuthResponse {
   session: Session | null
   user: User | null

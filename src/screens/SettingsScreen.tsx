@@ -113,7 +113,7 @@ interface SettingsCategory {
   title: string
   icon: React.ComponentType<{ color: string }>
   badge?: number
-  renderDetail: () => JSX.Element
+  renderDetail: () => React.JSX.Element
 }
 
 /**
@@ -175,10 +175,10 @@ function SettingsScreen() {
   // Categories configuration
   const categories: SettingsCategory[] = useMemo(() => [
     { 
-      id: 'account', 
-      title: userName, 
-      icon: UserIcon, 
-      renderDetail: () => <AccountDetail user={user} headerOpacity={accountHeaderOpacity} vendorLogo={vendorLogo} /> 
+      id: 'account',
+      title: userName,
+      icon: UserIcon,
+      renderDetail: () => <AccountDetail user={user!} headerOpacity={accountHeaderOpacity} vendorLogo={vendorLogo} /> 
     },
     {
       id: 'locations',
@@ -306,7 +306,7 @@ function SettingsScreen() {
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.layout}>
         <NavSidebar
-          width={375}
+          width={layout.sidebarWidth}
           searchValue={searchQuery}
           onSearchChange={setSearchQuery}
           items={navItems}
@@ -338,7 +338,7 @@ function SettingsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: colors.background.primary,
   },
   layout: {
     flex: 1,
@@ -346,7 +346,7 @@ const styles = StyleSheet.create({
   },
   detailPanel: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: colors.background.primary,
   },
   footerWrapper: {
     padding: spacing.md,
@@ -361,7 +361,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   signOutText: {
-    ...typography.bodyMediumBold,
+    ...typography.body,
+    fontWeight: '600',
     color: '#FF3B30',
   },
   

@@ -190,9 +190,6 @@ function POSProductGrid({
       // Show 12 items immediately on mount (4 rows x 3 columns)
       initialNumToRender={12}
 
-      // Don't wait for interaction to start rendering
-      waitForInteraction={false}
-
       // Accessibility
       accessible={false}
       accessibilityLabel={`Product grid with ${products.length} products`}

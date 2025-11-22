@@ -7,6 +7,12 @@ import { supabase } from '@/lib/supabase/client'
 import type { Customer } from '@/services/customers.service'
 import type { AAMVAData } from '@/lib/id-scanner/aamva-parser'
 import { normalizePhone, normalizeEmail } from './data-normalization'
+import type { PostgrestError } from '@supabase/supabase-js'
+
+type SupabaseQueryResult<T> = {
+  data: T[] | null
+  error: PostgrestError | null
+}
 
 export type MatchConfidence = 'exact' | 'high' | 'medium' | 'low'
 
@@ -47,7 +53,7 @@ export async function findPotentialDuplicates(params: {
   // Query timeout wrapper with error logging
   const QUERY_TIMEOUT = 5000 // 5 seconds
   const queryWithTimeout = async <T>(
-    promise: Promise<T>,
+    promise: Promise<T> | PromiseLike<T>,
     queryName: string
   ): Promise<T | null> => {
     const timeoutPromise = new Promise<null>((resolve) =>
@@ -71,22 +77,22 @@ export async function findPotentialDuplicates(params: {
   // LEVEL 1: Driver's License Number (100% match - EXACT)
   // Return immediately if found - this is definitive
   if (params.driversLicenseNumber) {
-    const result = await queryWithTimeout(
+    const result = await queryWithTimeout<SupabaseQueryResult<Customer>>(
       supabase
         .from('customers')
         .select('*')
         .eq('drivers_license_number', params.driversLicenseNumber)
         .eq('is_active', true)
-        .limit(1),
+        .limit(1) as unknown as Promise<SupabaseQueryResult<Customer>>,
       'license_lookup'
     )
 
     if (result?.data && result.data.length > 0) {
       const duration = performance.now() - startTime
-      console.log(`[Customer Deduplication] Exact match found via license in ${duration.toFixed(0)}ms`)
+      // console.log(`[Customer Deduplication] Exact match found via license in ${duration.toFixed(0)}ms`)
 
       matches.push({
-        customer: result.data[0],
+        customer: result.data[0] as Customer,
         confidence: 'exact',
         confidenceScore: 100,
         matchedFields: ['drivers_license_number'],
@@ -103,17 +109,17 @@ export async function findPotentialDuplicates(params: {
   // LEVEL 2: Phone + DOB (95% match - HIGH)
   if (normalizedPhone && params.dateOfBirth) {
     parallelQueries.push(
-      queryWithTimeout(
+      queryWithTimeout<SupabaseQueryResult<Customer>>(
         supabase
           .from('customers')
           .select('*')
           .eq('phone', normalizedPhone)
           .eq('date_of_birth', params.dateOfBirth)
           .eq('is_active', true)
-          .limit(5),
+          .limit(5) as unknown as Promise<SupabaseQueryResult<Customer>>,
         'phone_dob_lookup'
       ).then(result => ({
-        matches: (result?.data || []).map(customer => ({
+        matches: (result?.data || []).map((customer: Customer) => ({
           customer,
           confidence: 'high' as MatchConfidence,
           confidenceScore: 95,
@@ -128,16 +134,16 @@ export async function findPotentialDuplicates(params: {
   // LEVEL 3: Email (90% match - HIGH)
   if (normalizedEmail && !normalizedEmail.includes('@walk-in.local') && !normalizedEmail.includes('@alpine.local')) {
     parallelQueries.push(
-      queryWithTimeout(
+      queryWithTimeout<SupabaseQueryResult<Customer>>(
         supabase
           .from('customers')
           .select('*')
           .eq('email', normalizedEmail)
           .eq('is_active', true)
-          .limit(5),
+          .limit(5) as unknown as Promise<SupabaseQueryResult<Customer>>,
         'email_lookup'
       ).then(result => ({
-        matches: (result?.data || []).map(customer => ({
+        matches: (result?.data || []).map((customer: Customer) => ({
           customer,
           confidence: 'high' as MatchConfidence,
           confidenceScore: 90,
@@ -165,8 +171,8 @@ export async function findPotentialDuplicates(params: {
     }
 
     parallelQueries.push(
-      queryWithTimeout(query, 'name_dob_lookup').then(result => ({
-        matches: (result?.data || []).map(customer => ({
+      queryWithTimeout<SupabaseQueryResult<Customer>>(query as unknown as Promise<SupabaseQueryResult<Customer>>, 'name_dob_lookup').then(result => ({
+        matches: (result?.data || []).map((customer: Customer) => ({
           customer,
           confidence: 'high' as MatchConfidence,
           confidenceScore: 85,
@@ -192,8 +198,8 @@ export async function findPotentialDuplicates(params: {
     }
 
     parallelQueries.push(
-      queryWithTimeout(query, 'phone_lookup').then(result => ({
-        matches: (result?.data || []).map(customer => ({
+      queryWithTimeout<SupabaseQueryResult<Customer>>(query as unknown as Promise<SupabaseQueryResult<Customer>>, 'phone_lookup').then(result => ({
+        matches: (result?.data || []).map((customer: Customer) => ({
           customer,
           confidence: 'medium' as MatchConfidence,
           confidenceScore: 75,
@@ -220,8 +226,8 @@ export async function findPotentialDuplicates(params: {
     }
 
     parallelQueries.push(
-      queryWithTimeout(query, 'name_lookup').then(result => ({
-        matches: (result?.data || []).map(customer => ({
+      queryWithTimeout<SupabaseQueryResult<Customer>>(query as unknown as Promise<SupabaseQueryResult<Customer>>, 'name_lookup').then(result => ({
+        matches: (result?.data || []).map((customer: Customer) => ({
           customer,
           confidence: 'medium' as MatchConfidence,
           confidenceScore: 60,
@@ -252,10 +258,10 @@ export async function findPotentialDuplicates(params: {
 
   // Performance logging
   const duration = performance.now() - startTime
-  console.log(
-    `[Customer Deduplication] Found ${sortedMatches.length} potential matches in ${duration.toFixed(0)}ms`,
-    sortedMatches.length > 0 ? `(highest: ${sortedMatches[0].confidenceScore}%)` : ''
-  )
+  // console.log(
+  //   `[Customer Deduplication] Found ${sortedMatches.length} potential matches in ${duration.toFixed(0)}ms`,
+  //   sortedMatches.length > 0 ? `(highest: ${sortedMatches[0].confidenceScore}%)` : ''
+  // )
 
   return sortedMatches
 }

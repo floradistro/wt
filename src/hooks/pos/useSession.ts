@@ -62,8 +62,11 @@ export function useSession(): UseSessionReturn {
 
       if (userError || !userData) throw userError || new Error('User record not found')
 
-      const vendorData = userData.vendors as Vendor
-      setVendor(vendorData)
+      const vendors = userData.vendors as Array<{ id: string; store_name: string; logo_url: string | null }> | null
+      const vendorData = vendors && vendors.length > 0 ? vendors[0] : null
+      if (!vendorData) throw new Error('No vendor found for user')
+
+      setVendor(vendorData as Vendor)
       setCustomUserId(userData.id)
 
       // Check if user is admin

@@ -4,6 +4,7 @@
  */
 
 import { View, Text, StyleSheet, ScrollView, Pressable, Animated, Image } from "react-native"
+import { detailCommonStyles } from "./detailCommon.styles"
 import { useState } from "react"
 import { LiquidGlassView, LiquidGlassContainerView, isLiquidGlassSupported } from "@callstack/liquid-glass"
 import { LinearGradient } from "expo-linear-gradient"
@@ -216,49 +217,7 @@ function LocationsDetail({
 }
 
 const styles = StyleSheet.create({
-  detailContainer: {
-    flex: 1,
-  },
-  fixedHeader: {
-    position: 'absolute',
-    top: layout.headerTop,
-    left: 0,
-    right: 0,
-    height: layout.searchBarHeight,
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 20,
-  },
-  fixedHeaderTitle: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: '#fff',
-    letterSpacing: -0.2,
-  },
-  fadeGradient: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: 80,
-    zIndex: 10,
-  },
-  detailScroll: {
-    flex: 1,
-  },
-  cardWrapper: {
-    marginLeft: layout.contentLeft,
-    marginRight: layout.contentHorizontal,
-    marginVertical: layout.contentVertical,
-  },
-  titleSectionContainer: {
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderRadius: radius.xxl,
-    borderCurve: 'continuous',
-    padding: spacing.lg,
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.12)',
-  },
+  ...detailCommonStyles,
   titleWithLogo: {
     flexDirection: 'row',
     alignItems: 'center',

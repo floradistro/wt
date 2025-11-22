@@ -89,8 +89,7 @@ export const customersStyles = StyleSheet.create({
     flex: 1,
   },
   cardWrapper: {
-    marginLeft: layout.contentLeft, // 8px - combines with nav 8px margin for 16px total
-    marginRight: layout.contentHorizontal, // 16px - equal spacing on right
+    paddingHorizontal: layout.containerMargin, // 8px - matches NavSidebar edge spacing
     marginVertical: layout.contentVertical,
   },
   customersCardGlass: {
@@ -160,7 +159,7 @@ export const customersStyles = StyleSheet.create({
   },
   sectionHeader: {
     paddingVertical: 4,
-    paddingHorizontal: 20,
+    paddingHorizontal: layout.containerMargin, // 8px - consistent minimal spacing
     backgroundColor: '#000',
     marginTop: 12,
   },
@@ -236,7 +235,7 @@ export const customersStyles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: layout.contentHorizontal, // 16px equal padding on detail panels
+    paddingHorizontal: layout.containerMargin, // 8px - consistent minimal spacing
     paddingVertical: 16,
     borderBottomWidth: 0.5,
     borderBottomColor: colors.border.subtle,
@@ -289,7 +288,7 @@ export const customersStyles = StyleSheet.create({
   },
   detailContent: {
     flex: 1,
-    paddingHorizontal: layout.contentHorizontal, // 16px equal padding on detail panels
+    paddingHorizontal: layout.containerMargin, // 8px - consistent minimal spacing
   },
   detailAvatarSection: {
     alignItems: 'center',

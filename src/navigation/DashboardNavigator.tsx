@@ -1,7 +1,7 @@
 import { useState, createContext, useContext } from 'react'
 import { View, StyleSheet, useWindowDimensions } from 'react-native'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
-import { Dock } from '@/components/Dock'
+import { Dock } from '../components/Dock'
 import { POSScreen } from '@/screens/POSScreen'
 import { ProductsScreen } from '@/screens/ProductsScreen'
 import { OrdersScreen } from '@/screens/OrdersScreen'

@@ -1,7 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import Constants from 'expo-constants'
-import { logger } from '@/utils/logger'
 
 // Get environment variables
 const supabaseUrl = Constants.expoConfig?.extra?.supabaseUrl || process.env.EXPO_PUBLIC_SUPABASE_URL
@@ -16,7 +15,7 @@ const isSupabaseConfigured =
 
 if (!isSupabaseConfigured) {
   if (__DEV__) {
-    logger.warn('Supabase not configured. Add credentials to .env file.', {
+    console.warn('Supabase not configured. Add credentials to .env file.', {
       supabaseUrl: supabaseUrl || 'missing',
       hasAnonKey: !!supabaseAnonKey
     })
@@ -30,7 +29,7 @@ const AsyncStorageAdapter = {
       const value = await AsyncStorage.getItem(key)
       return value
     } catch (error) {
-      logger.error('AsyncStorage getItem error:', error)
+      console.error('AsyncStorage getItem error:', error)
       return null
     }
   },
@@ -38,14 +37,14 @@ const AsyncStorageAdapter = {
     try {
       await AsyncStorage.setItem(key, value)
     } catch (error) {
-      logger.error('AsyncStorage setItem error:', error)
+      console.error('AsyncStorage setItem error:', error)
     }
   },
   removeItem: async (key: string) => {
     try {
       await AsyncStorage.removeItem(key)
     } catch (error) {
-      logger.error('AsyncStorage removeItem error:', error)
+      console.error('AsyncStorage removeItem error:', error)
     }
   },
 }

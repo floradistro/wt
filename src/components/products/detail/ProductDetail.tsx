@@ -412,8 +412,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: layout.contentHorizontal,
-    paddingVertical: layout.cardPadding,
+    paddingHorizontal: layout.containerMargin,
+    paddingVertical: layout.containerMargin,
     borderBottomWidth: 0.5,
     borderBottomColor: 'rgba(255,255,255,0.1)',
   },
@@ -461,9 +461,9 @@ const styles = StyleSheet.create({
     letterSpacing: -0.2,
   },
   headerCardContainer: {
-    marginHorizontal: layout.contentHorizontal,
-    marginTop: layout.sectionSpacing,
-    marginBottom: layout.sectionSpacing,
+    marginHorizontal: layout.containerMargin,
+    marginTop: layout.containerMargin,
+    marginBottom: layout.containerMargin,
   },
   headerCardGlass: {
     borderRadius: radius.xxl,
@@ -474,8 +474,8 @@ const styles = StyleSheet.create({
   headerCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: layout.cardPadding,
-    gap: layout.cardPadding,
+    padding: layout.containerMargin,
+    gap: layout.containerMargin,
   },
   headerIcon: {
     width: 60,
@@ -541,8 +541,8 @@ const styles = StyleSheet.create({
     color: '#34c759',
   },
   section: {
-    marginHorizontal: layout.contentHorizontal,
-    marginBottom: layout.sectionSpacing,
+    marginHorizontal: layout.containerMargin,
+    marginBottom: layout.containerMargin,
   },
   sectionTitle: {
     fontSize: 11,
@@ -551,7 +551,6 @@ const styles = StyleSheet.create({
     letterSpacing: 0.6,
     textTransform: 'uppercase',
     marginBottom: 8,
-    paddingHorizontal: layout.cardPadding,
   },
   cardGlass: {
     borderRadius: radius.xxl,
@@ -564,7 +563,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingVertical: layout.rowPaddingVertical,
-    paddingHorizontal: layout.rowPaddingHorizontal,
+    paddingHorizontal: layout.containerMargin,
     minHeight: layout.minTouchTarget,
     borderBottomWidth: 0.5,
     borderBottomColor: 'rgba(255,255,255,0.05)',
@@ -593,7 +592,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingVertical: 12,
-    paddingHorizontal: 16,
+    paddingHorizontal: layout.containerMargin,
   },
   inventoryTotal: {
     fontSize: 20,
@@ -613,7 +612,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingVertical: 10,
-    paddingHorizontal: 16,
+    paddingHorizontal: layout.containerMargin,
     gap: 16,
   },
   inventoryLocationInfo: {

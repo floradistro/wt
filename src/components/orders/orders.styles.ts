@@ -123,10 +123,9 @@ export const ordersStyles = StyleSheet.create({
     paddingRight: 0, // No padding - cardWrapper handles spacing
   },
 
-  // Card Wrapper - iOS-style spacing
+  // Card Wrapper - Minimal iOS-style spacing
   cardWrapper: {
-    marginLeft: layout.contentLeft, // 8px - combines with nav 8px margin for 16px total
-    marginRight: layout.contentHorizontal, // 16px - equal spacing on right
+    paddingHorizontal: layout.containerMargin, // 8px - matches NavSidebar edge spacing
     marginBottom: 8,
   },
   ordersCardGlass: {
@@ -138,7 +137,7 @@ export const ordersStyles = StyleSheet.create({
 
   // Section Headers
   sectionHeader: {
-    paddingHorizontal: 22,
+    paddingHorizontal: layout.containerMargin, // 8px - consistent with all spacing
     paddingVertical: 12,
     backgroundColor: '#000',
   },
@@ -301,8 +300,8 @@ export const ordersStyles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: layout.contentHorizontal, // 16px equal padding on detail panels
-    paddingVertical: layout.cardPadding,
+    paddingHorizontal: layout.containerMargin, // 8px - consistent minimal spacing
+    paddingVertical: layout.containerMargin,
     borderBottomWidth: 0.5,
     borderBottomColor: 'rgba(255,255,255,0.1)',
   },
@@ -316,7 +315,7 @@ export const ordersStyles = StyleSheet.create({
     letterSpacing: -0.2,
   },
   headerCardContainer: {
-    marginHorizontal: layout.contentHorizontal, // 16px equal padding on detail panels
+    marginHorizontal: layout.containerMargin, // 8px - consistent minimal spacing
     marginTop: layout.sectionSpacing,
     marginBottom: layout.sectionSpacing,
   },
@@ -329,8 +328,8 @@ export const ordersStyles = StyleSheet.create({
   headerCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: layout.cardPadding,
-    gap: layout.cardPadding,
+    padding: layout.containerMargin,
+    gap: layout.containerMargin,
   },
   headerIcon: {
     width: 60,
@@ -371,7 +370,7 @@ export const ordersStyles = StyleSheet.create({
 
   // SECTIONS
   section: {
-    marginHorizontal: layout.contentHorizontal, // 16px equal padding on detail panels
+    marginHorizontal: layout.containerMargin, // 8px - consistent minimal spacing
     marginBottom: layout.sectionSpacing,
   },
   sectionTitle: {
@@ -381,7 +380,7 @@ export const ordersStyles = StyleSheet.create({
     letterSpacing: 0.6,
     textTransform: 'uppercase',
     marginBottom: 8,
-    paddingHorizontal: layout.cardPadding,
+    paddingHorizontal: 0, // No padding - inherits section margin
   },
   cardGlass: {
     borderRadius: radius.xxl,

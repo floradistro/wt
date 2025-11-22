@@ -12,6 +12,7 @@ import { colors, typography, spacing, radius } from '@/theme/tokens'
 import { layout } from '@/theme/layout'
 import { runAllSentryTests, quickSentryTest } from '@/utils/test-sentry'
 import { DetailRow } from './DetailRow'
+import { detailCommonStyles } from './detailCommon.styles'
 
 interface DeveloperToolsDetailProps {
   headerOpacity: Animated.Value
@@ -190,46 +191,7 @@ export function DeveloperToolsDetail({ headerOpacity, vendorLogo }: DeveloperToo
 }
 
 const styles = StyleSheet.create({
-  detailContainer: {
-    flex: 1,
-    backgroundColor: colors.background.primary,
-  },
-  fixedHeader: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: layout.contentStartTop,
-    backgroundColor: 'rgba(0,0,0,0.95)',
-    justifyContent: 'flex-end',
-    paddingBottom: 12,
-    paddingHorizontal: layout.contentHorizontal,
-    zIndex: 10,
-    borderBottomWidth: 0.5,
-    borderBottomColor: 'rgba(235,235,245,0.1)',
-  },
-  fixedHeaderTitle: {
-    ...typography.title2,
-    color: colors.text.primary,
-  },
-  fadeGradient: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: layout.contentStartTop + 20,
-    zIndex: 5,
-  },
-  detailScroll: {
-    flex: 1,
-  },
-  cardWrapper: {
-    paddingHorizontal: layout.contentHorizontal,
-    marginBottom: spacing.md,
-  },
-  titleSectionContainer: {
-    marginBottom: spacing.md,
-  },
+  ...detailCommonStyles,
   titleWithLogo: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -252,7 +214,8 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.05)',
   },
   cardInner: {
-    padding: spacing.lg,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
   },
   cardTitle: {
     ...typography.headline,

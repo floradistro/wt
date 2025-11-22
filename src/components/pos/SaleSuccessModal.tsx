@@ -95,7 +95,7 @@ export function SaleSuccessModal({
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
 
         // Satisfying success sound (subtle but rewarding)
-        console.log('🎵 SaleSuccessModal: Triggering sale completion sound...')
+        // console.log('🎵 SaleSuccessModal: Triggering sale completion sound...')
         playSaleCompletionSound()
 
         Animated.parallel([

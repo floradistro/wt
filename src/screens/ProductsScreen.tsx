@@ -33,7 +33,7 @@ import {
   CreateAuditModal,
 } from '@/components/products'
 import { NavSidebar, type NavItem } from '@/components/NavSidebar'
-import { CategoryDetail, CategoryModal, CustomFieldModal, FieldVisibilityModal, PricingTemplateModal } from '@/components/categories'
+import { CategoryDetail, CategoryModal, CustomFieldModal, PricingTemplateModal } from '@/components/categories'
 import { PurchaseOrderDetail, CreatePOModal, ReceivePOModal } from '@/components/purchase-orders'
 import { LocationSelector } from '@/components/LocationSelector'
 import type { FilterOption, ActiveFilter } from '@/components/shared'
@@ -74,7 +74,6 @@ function ProductsScreenComponent() {
   // Modal states
   const [showCategoryModal, setShowCategoryModal] = useState(false)
   const [showFieldModal, setShowFieldModal] = useState(false)
-  const [showVisibilityModal, setShowVisibilityModal] = useState(false)
   const [showPricingModal, setShowPricingModal] = useState(false)
   const [showLocationSelector, setShowLocationSelector] = useState(false)
   const [showCreatePOModal, setShowCreatePOModal] = useState(false)
@@ -265,6 +264,13 @@ function ProductsScreenComponent() {
     },
   ], [allProducts.length, lowStockCount, outOfStockCount, poStats.pending])
 
+  // Clear selections when switching nav sections
+  useEffect(() => {
+    setSelectedProduct(null)
+    setSelectedCategoryId(null)
+    setSelectedPurchaseOrder(null)
+  }, [activeNav])
+
   // Animate when product/category/PO is selected/deselected
   useEffect(() => {
     const shouldSlide = activeNav === 'categories'
@@ -292,7 +298,7 @@ function ProductsScreenComponent() {
 
   const detailTranslateX = slideAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: [contentWidth, contentWidth / 2],
+    outputRange: [contentWidth, 0],
   })
 
   // ========================================
@@ -303,28 +309,22 @@ function ProductsScreenComponent() {
       <View style={styles.layout}>
         {/* LEFT: Navigation Sidebar */}
         <NavSidebar
+          width={layout.sidebarWidth}
           items={navItems}
-          activeId={activeNav}
-          onSelect={(id) => setActiveNav(id as NavSection)}
-          searchQuery={navSearchQuery}
+          activeItemId={activeNav}
+          onItemPress={(id: string) => setActiveNav(id as NavSection)}
+          searchValue={navSearchQuery}
           onSearchChange={setNavSearchQuery}
           vendorLogo={vendorLogo}
           vendorName={vendorName}
-          onLocationPress={() => setShowLocationSelector(true)}
-          locationFilterActive={selectedLocationIds.length > 0}
-          selectedLocationCount={selectedLocationIds.length}
+          userName={user?.email || 'User'}
+          onUserProfilePress={() => setShowLocationSelector(true)}
+          selectedLocationNames={selectedLocationNames}
         />
 
         {/* RIGHT: Content Area */}
         <View style={styles.contentArea}>
-          <Animated.View
-            style={[
-              styles.productsList,
-              {
-                transform: [{ translateX: listTranslateX }],
-              },
-            ]}
-          >
+          <View style={styles.productsList}>
             {/* CATEGORIES VIEW */}
             {activeNav === 'categories' && (
               <CategoriesView
@@ -375,17 +375,20 @@ function ProductsScreenComponent() {
                 onAddProduct={() => setShowCreateProductModal(true)}
               />
             )}
-          </Animated.View>
+          </View>
 
           {/* DETAIL PANEL */}
-          <Animated.View
-            style={[
-              styles.detailPanel,
-              {
-                transform: [{ translateX: detailTranslateX }],
-              },
-            ]}
-          >
+          {((activeNav === 'categories' && selectedCategoryId) ||
+            (activeNav === 'purchase-orders' && selectedPurchaseOrder) ||
+            ((activeNav === 'all' || activeNav === 'low-stock' || activeNav === 'out-of-stock') && selectedProduct)) && (
+            <Animated.View
+              style={[
+                styles.detailPanel,
+                {
+                  transform: [{ translateX: detailTranslateX }],
+                },
+              ]}
+            >
             {activeNav === 'purchase-orders' && selectedPurchaseOrder ? (
               <PurchaseOrderDetail
                 purchaseOrder={selectedPurchaseOrder}
@@ -405,14 +408,21 @@ function ProductsScreenComponent() {
                 onReceive={() => setShowReceivePOModal(true)}
               />
             ) : activeNav === 'categories' && selectedCategoryId ? (
-              <CategoryDetail
-                categoryId={selectedCategoryId}
-                onBack={() => setSelectedCategoryId(null)}
-                onCategoryUpdated={handleCategoryUpdated}
-                onManageFields={() => setShowFieldModal(true)}
-                onManageVisibility={() => setShowVisibilityModal(true)}
-                onManagePricing={() => setShowPricingModal(true)}
-              />
+              (() => {
+                const category = categories.find(c => c.id === selectedCategoryId)
+                if (!category) return null
+                const fieldsCount = allFields.filter(f => f.category_id === selectedCategoryId).length
+                const templatesCount = allTemplates.filter(t => t.category_id === selectedCategoryId).length
+                return (
+                  <CategoryDetail
+                    category={category}
+                    onBack={() => setSelectedCategoryId(null)}
+                    onCategoryUpdated={handleCategoryUpdated}
+                    fieldsCount={fieldsCount}
+                    templatesCount={templatesCount}
+                  />
+                )
+              })()
             ) : selectedProduct ? (
               <ProductDetail
                 product={selectedProduct}
@@ -420,7 +430,8 @@ function ProductsScreenComponent() {
                 onProductUpdated={handleProductUpdated}
               />
             ) : null}
-          </Animated.View>
+            </Animated.View>
+          )}
         </View>
       </View>
 
@@ -437,24 +448,19 @@ function ProductsScreenComponent() {
 
       <CustomFieldModal
         visible={showFieldModal}
-        categoryId={selectedCategoryId}
+        categoryId={selectedCategoryId || ''}
         onClose={() => setShowFieldModal(false)}
         onSaved={handleCategoryUpdated}
       />
 
-      <FieldVisibilityModal
-        visible={showVisibilityModal}
-        categoryId={selectedCategoryId}
-        onClose={() => setShowVisibilityModal(false)}
-        onSaved={handleCategoryUpdated}
-      />
-
-      <PricingTemplateModal
-        visible={showPricingModal}
-        categoryId={selectedCategoryId}
-        onClose={() => setShowPricingModal(false)}
-        onSaved={handleCategoryUpdated}
-      />
+      {selectedCategoryId && (
+        <PricingTemplateModal
+          visible={showPricingModal}
+          categoryId={selectedCategoryId}
+          onClose={() => setShowPricingModal(false)}
+          onSaved={handleCategoryUpdated}
+        />
+      )}
 
       <LocationSelector
         visible={showLocationSelector}
@@ -466,6 +472,7 @@ function ProductsScreenComponent() {
 
       <CreatePOModal
         visible={showCreatePOModal}
+        vendorId={vendorId}
         onClose={() => setShowCreatePOModal(false)}
         onCreated={() => {
           reloadPurchaseOrders()
@@ -540,17 +547,15 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   productsList: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+    flex: 1,
   },
   detailPanel: {
     position: 'absolute',
     top: 0,
-    left: 0,
     right: 0,
     bottom: 0,
+    width: '100%',
+    backgroundColor: '#000',
+    zIndex: 10,
   },
 })

@@ -350,8 +350,8 @@ const styles = StyleSheet.create({
     letterSpacing: -0.2,
   },
   cardWrapper: {
-    marginHorizontal: 6,
-    marginVertical: layout.contentVertical,
+    marginHorizontal: layout.containerMargin,
+    marginVertical: layout.containerMargin,
   },
   posCardGlass: {
     borderRadius: radius.xxl,

@@ -12,7 +12,7 @@ export interface UseCartReturn {
   addToCart: (product: Product, tier?: PricingTier) => void
   updateQuantity: (productId: string, delta: number) => void
   changeTier: (oldItemId: string, product: Product, newTier: PricingTier) => void
-  applyManualDiscount: (itemId: string, discountAmount: number) => void
+  applyManualDiscount: (productId: string, type: 'percentage' | 'amount', value: number) => void
   removeManualDiscount: (itemId: string) => void
   clearCart: () => void
   setDiscountingItemId: (itemId: string | null) => void

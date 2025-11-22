@@ -42,7 +42,7 @@ function POSSessionSetup({ user, onSessionReady }: POSSessionSetupProps) {
   const [loading, setLoading] = useState(true)
 
   // Modals
-  const { openModal, closeModal, isModalOpen } = useModalState()
+  const { openModal, closeModal, isModalOpen, activeModal } = useModalState()
 
   // Load vendor and locations on mount
   useEffect(() => {
@@ -60,16 +60,67 @@ function POSSessionSetup({ user, onSessionReady }: POSSessionSetupProps) {
       const userStart = Date.now()
       const { data: userData, error: userError } = await supabase
         .from('users')
-        .select('id, role, vendor_id, vendors(id, store_name)')
+        .select('id, role, vendor_id, vendors(id, store_name, logo_url)')
         .eq('auth_user_id', user.id)
         .maybeSingle()
-      logger.debug(`[POSSessionSetup] ✅ User query took ${Date.now() - userStart}ms`)
 
-      if (userError || !userData) throw userError || new Error('User record not found')
+      const userTime = Date.now() - userStart
+      logger.debug(`[POSSessionSetup] ⏱️ User query: ${userTime}ms`)
+      logger.debug(`[POSSessionSetup] 🔍 User data:`, JSON.stringify(userData, null, 2))
 
-      const vendorData = userData.vendors as Vendor
-      // Set vendor without logo first for faster initial render
-      setVendor({ ...vendorData, logo_url: null })
+      if (userError || !userData) {
+        logger.error('[POSSessionSetup] ❌ User query failed:', userError)
+        throw userError || new Error('User record not found')
+      }
+
+      // Extract vendor from join (might be object or array depending on relationship)
+      const vendors = userData.vendors
+      logger.debug(`[POSSessionSetup] 🔍 Vendors from join:`, JSON.stringify(vendors, null, 2))
+
+      let vendorData: { id: string; store_name: string; logo_url?: string | null } | null = null
+
+      if (vendors) {
+        if (Array.isArray(vendors)) {
+          vendorData = vendors.length > 0 ? vendors[0] : null
+        } else {
+          vendorData = vendors as { id: string; store_name: string; logo_url?: string | null }
+        }
+      }
+
+      // Fallback: If vendor join failed, fetch separately using vendor_id
+      if (!vendorData && userData.vendor_id) {
+        logger.debug(`[POSSessionSetup] ⚠️ Vendor join failed, fetching separately for vendor_id: ${userData.vendor_id}`)
+        const vendorStart = Date.now()
+        const { data: vendorFallback, error: vendorError } = await supabase
+          .from('vendors')
+          .select('id, store_name, logo_url')
+          .eq('id', userData.vendor_id)
+          .single()
+
+        const vendorTime = Date.now() - vendorStart
+        logger.debug(`[POSSessionSetup] ⏱️ Vendor fallback query: ${vendorTime}ms`)
+
+        if (!vendorError && vendorFallback) {
+          vendorData = vendorFallback
+          logger.debug('[POSSessionSetup] ✅ Vendor loaded via fallback')
+        } else {
+          logger.error('[POSSessionSetup] ❌ Vendor fallback failed:', vendorError)
+        }
+      }
+
+      if (!vendorData) {
+        logger.error('[POSSessionSetup] ❌ No vendor data found. User object:', userData)
+        throw new Error('No vendor found for user')
+      }
+
+      logger.debug('[POSSessionSetup] ✅ Vendor loaded:', vendorData)
+
+      // Set vendor with logo if available
+      setVendor({
+        id: vendorData.id,
+        store_name: vendorData.store_name,
+        logo_url: vendorData.logo_url ?? null,
+      })
       setCustomUserId(userData.id)
 
       const isAdmin = ['vendor_owner', 'vendor_admin'].includes(userData.role)

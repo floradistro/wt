@@ -187,17 +187,56 @@ function POSRegisterSelector({
   }, [])
 
   useEffect(() => {
+    logger.debug('[POSRegisterSelector] 🔌 Setting up Realtime subscription for location:', locationId)
     loadRegisters()
 
-    // Poll for register updates every 3 seconds
-    const interval = setInterval(loadRegisters, 3000)
-    return () => clearInterval(interval)
+    // Apple Standard: Realtime subscription instead of polling
+    const channel = supabase
+      .channel(`registers-location-${locationId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'pos_sessions',
+        },
+        (payload) => {
+          logger.debug('[POSRegisterSelector] 🔄 Realtime event received:', {
+            eventType: payload.eventType,
+            table: payload.table,
+            schema: payload.schema,
+            new: payload.new,
+            old: payload.old,
+          })
+          logger.debug('[POSRegisterSelector] 🔁 Reloading registers due to session change...')
+          loadRegisters()
+        }
+      )
+      .subscribe((status, err) => {
+        if (status === 'SUBSCRIBED') {
+          logger.debug('[POSRegisterSelector] ✅ Realtime subscribed successfully')
+        } else if (status === 'CLOSED') {
+          logger.debug('[POSRegisterSelector] ⏹️ Realtime subscription closed')
+        } else if (status === 'CHANNEL_ERROR') {
+          logger.error('[POSRegisterSelector] ❌ Realtime subscription error:', err)
+        } else {
+          logger.debug('[POSRegisterSelector] 📡 Realtime subscription status:', status)
+        }
+      })
+
+    return () => {
+      logger.debug('[POSRegisterSelector] 🔌 Cleaning up Realtime subscription')
+      supabase.removeChannel(channel)
+    }
   }, [locationId])
 
   const loadRegisters = async () => {
     if (!locationId) return
 
+    const startTime = Date.now()
+
     try {
+      // Fetch registers
       const { data: registersData, error: registersError } = await supabase
         .from('pos_registers')
         .select('id, register_number, register_name, device_name, status')
@@ -206,9 +245,20 @@ function POSRegisterSelector({
         .order('register_number')
 
       if (registersError) {
-        logger.error('Error loading registers:', registersError)
+        logger.error('[POSRegisterSelector] ❌ Error loading registers:', registersError)
         throw registersError
       }
+
+      if (!registersData || registersData.length === 0) {
+        setRegisters([])
+        setLoading(false)
+        return
+      }
+
+      // CRITICAL FIX: Filter sessions at DB level + add 24-hour cutoff
+      const registerIds = registersData.map(r => r.id)
+      const twentyFourHoursAgo = new Date()
+      twentyFourHoursAgo.setHours(twentyFourHoursAgo.getHours() - 24)
 
       const { data: sessionsData, error: sessionsError } = await supabase
         .from('pos_sessions')
@@ -223,18 +273,39 @@ function POSRegisterSelector({
             last_name
           )
         `)
+        .in('register_id', registerIds)  // ✅ Only THIS location's registers
         .eq('status', 'open')
-        .in('register_id', (registersData || []).map(r => r.id))
+        .gte('opened_at', twentyFourHoursAgo.toISOString())  // ✅ No stale sessions
 
       if (sessionsError) {
-        logger.error('Error loading sessions:', sessionsError)
+        logger.error('[POSRegisterSelector] ⚠️ Error loading sessions:', sessionsError)
       }
 
-      const registersWithSessions = (registersData || []).map(register => {
-        const session = sessionsData?.find(s => s.register_id === register.id)
+      logger.debug(`[POSRegisterSelector] ✅ Loaded ${registersData.length} registers, ${sessionsData?.length || 0} active sessions in ${Date.now() - startTime}ms`)
+
+      // Detailed session logging
+      if (sessionsData && sessionsData.length > 0) {
+        sessionsData.forEach(session => {
+          const users = session.users as Array<{ first_name: string; last_name: string }> | null
+          const user = users && users.length > 0 ? users[0] : null
+          const userName = user ? `${user.first_name} ${user.last_name}`.trim() : 'Unknown User'
+          logger.debug(`[POSRegisterSelector] 📊 Active session on register ${session.register_id}:`, {
+            sessionId: session.id,
+            sessionNumber: session.session_number,
+            userName,
+            openedAt: session.opened_at,
+          })
+        })
+      } else {
+        logger.debug('[POSRegisterSelector] 📊 No active sessions found for this location')
+      }
+
+      const registersWithSessions = registersData.map(register => {
+        const session = (sessionsData || []).find(s => s.register_id === register.id)
 
         if (session) {
-          const user = session.users as { first_name: string; last_name: string } | null
+          const users = session.users as Array<{ first_name: string; last_name: string }> | null
+          const user = users && users.length > 0 ? users[0] : null
           const userName = user ? `${user.first_name} ${user.last_name}`.trim() : 'Unknown User'
 
           return {

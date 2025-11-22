@@ -13,23 +13,23 @@ export const detailCommonStyles = StyleSheet.create({
   },
   fixedHeader: {
     position: 'absolute',
-    top: layout.headerTop,
+    top: layout.headerTop, // Standardized - matches all views (8px)
     left: 0,
     right: 0,
-    height: layout.searchBarHeight,
+    height: layout.searchBarHeight, // Standardized search bar height (48px)
     alignItems: 'center',
     justifyContent: 'center',
-    zIndex: 20,
+    zIndex: 20, // Above fade gradient
   },
   fixedHeaderTitle: {
     fontSize: 17,
     fontWeight: '600',
-    color: '#fff',
+    color: colors.text.primary,
     letterSpacing: -0.2,
   },
   fixedHeaderButton: {
     position: 'absolute',
-    right: layout.cardPadding,
+    right: layout.containerMargin, // 8px - consistent minimal spacing
     width: 32,
     height: 32,
     borderRadius: 16,
@@ -55,9 +55,8 @@ export const detailCommonStyles = StyleSheet.create({
     flex: 1,
   },
   cardWrapper: {
-    marginLeft: layout.contentLeft,
-    marginRight: layout.contentHorizontal,
-    marginVertical: layout.contentVertical,
+    paddingHorizontal: layout.containerMargin, // 8px - matches NavSidebar edge spacing
+    marginVertical: layout.contentVertical, // 20px vertical spacing
   },
   titleSectionContainer: {
     backgroundColor: 'rgba(255,255,255,0.08)',

@@ -11,8 +11,7 @@ import * as Haptics from 'expo-haptics'
 import { colors, spacing, radius } from '@/theme/tokens'
 import { supabase } from '@/lib/supabase/client'
 import { logger } from '@/utils/logger'
-import { receiveItems } from '@/services/purchase-orders.service'
-import type { PurchaseOrder, ItemCondition } from '@/services/purchase-orders.service'
+import { receiveItems, type PurchaseOrder, type ItemCondition } from '@/services/purchase-orders.service'
 
 interface ReceivePOModalProps {
   visible: boolean

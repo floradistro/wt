@@ -473,8 +473,8 @@ const styles = StyleSheet.create({
     letterSpacing: -0.5,
   },
   cardWrapper: {
-    marginHorizontal: 6, // Ultra-minimal iOS-style spacing (6px)
-    marginVertical: layout.contentVertical,
+    marginHorizontal: layout.containerMargin,
+    marginVertical: layout.containerMargin,
   },
   addButton: {
     paddingHorizontal: spacing.md,
@@ -502,7 +502,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   filtersContent: {
-    paddingHorizontal: 6, // Match cardWrapper margin
+    paddingHorizontal: layout.containerMargin,
     paddingBottom: spacing.sm,
     gap: spacing.xs,
   },
@@ -567,7 +567,7 @@ const styles = StyleSheet.create({
   },
   dateGroup: {
     marginBottom: spacing.lg,
-    marginHorizontal: 6, // Ultra-minimal iOS-style spacing matching Products
+    marginHorizontal: layout.containerMargin,
   },
   dateHeader: {
     fontSize: 11,
@@ -576,7 +576,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.6,
     textTransform: 'uppercase',
     marginBottom: spacing.xs,
-    paddingHorizontal: layout.cardPadding,
+    paddingHorizontal: 0, // No padding - inherits from dateGroup margin
   },
   card: {
     backgroundColor: 'rgba(255,255,255,0.05)',

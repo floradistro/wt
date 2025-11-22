@@ -152,7 +152,7 @@ function POSAddCustomerModal({
 
     try {
       // Use customers service (handles normalization, unique email generation, etc.)
-      const newCustomer = await createCustomer({
+      const serviceCustomer = await createCustomer({
         first_name: firstName.trim(),
         middle_name: middleName.trim() || undefined,
         last_name: lastName.trim(),
@@ -166,9 +166,23 @@ function POSAddCustomerModal({
         vendor_id: vendorId,
       })
 
+      // Convert service Customer to POS Customer type
+      const posCustomer: Customer = {
+        id: serviceCustomer.id,
+        first_name: serviceCustomer.first_name || '',
+        last_name: serviceCustomer.last_name || '',
+        email: serviceCustomer.email || '',
+        phone: serviceCustomer.phone || null,
+        display_name: serviceCustomer.full_name || `${serviceCustomer.first_name} ${serviceCustomer.last_name}`,
+        date_of_birth: dobTrimmed || null,
+        loyalty_points: serviceCustomer.loyalty_points || 0,
+        loyalty_tier: 'bronze', // Default tier for new customers
+        vendor_customer_number: serviceCustomer.id.slice(0, 8).toUpperCase(),
+      }
+
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
       resetForm()
-      onCustomerCreated(newCustomer)
+      onCustomerCreated(posCustomer)
     } catch (error) {
       logger.error('Create customer error:', error)
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)

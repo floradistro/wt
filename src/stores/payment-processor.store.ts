@@ -1,7 +1,6 @@
 import { create } from 'zustand'
 import { useAuthStore } from './auth.store'
 import { Sentry } from '@/utils/sentry'
-import { logger } from '@/utils/logger'
 import { supabase } from '@/lib/supabase/client'
 
 export type ProcessorStatus = 'connected' | 'disconnected' | 'error' | 'checking'
@@ -71,12 +70,12 @@ export const usePaymentProcessor = create<ProcessorStore>((set, get) => ({
 
   // Actions
   checkStatus: async (locationId?: string, registerId?: string) => {
-    logger.debug('🔍 checkStatus called', { locationId, registerId })
+    console.log('🔍 checkStatus called', { locationId, registerId })
     const startTime = Date.now()
     const { isEnabled, locationId: storedLocationId, addActivityLog } = get()
     const targetLocationId = locationId || storedLocationId
 
-    logger.debug('🔍 checkStatus state:', { isEnabled, targetLocationId })
+    console.log('🔍 checkStatus state:', { isEnabled, targetLocationId })
 
     Sentry.setContext('processor', {
       locationId: targetLocationId,
@@ -97,7 +96,7 @@ export const usePaymentProcessor = create<ProcessorStore>((set, get) => ({
 
     // If not enabled, mark as disconnected
     if (!isEnabled) {
-      logger.debug('🔍 Processor not enabled')
+      console.log('🔍 Processor not enabled')
       set({
         status: 'disconnected',
         lastCheck: Date.now(),
@@ -107,7 +106,7 @@ export const usePaymentProcessor = create<ProcessorStore>((set, get) => ({
     }
 
     if (!targetLocationId) {
-      logger.debug('🔍 No location ID')
+      console.log('🔍 No location ID')
       set({
         status: 'disconnected',
         lastCheck: Date.now(),
@@ -117,7 +116,7 @@ export const usePaymentProcessor = create<ProcessorStore>((set, get) => ({
     }
 
     set({ status: 'checking' })
-    logger.debug('🔍 Status set to checking')
+    console.log('🔍 Status set to checking')
 
     try {
       // Query Supabase directly for processors (no external API)
@@ -136,14 +135,14 @@ export const usePaymentProcessor = create<ProcessorStore>((set, get) => ({
       const duration = Date.now() - startTime
 
       if (dbError) {
-        logger.error('🔍 Database error loading processors:', dbError)
+        console.error('🔍 Database error loading processors:', dbError)
         throw new Error(`Database error: ${dbError.message}`)
       }
 
-      logger.debug('🔍 Processors from database:', processors)
+      console.log('🔍 Processors from database:', processors)
 
       if (!processors || processors.length === 0) {
-        logger.debug('🔍 No processors configured')
+        console.log('🔍 No processors configured')
         addActivityLog('error', 'No processors configured for this location')
 
         set({
@@ -172,7 +171,7 @@ export const usePaymentProcessor = create<ProcessorStore>((set, get) => ({
       const onlineCount = results.filter((p: any) => p.is_live).length
       const totalCount = results.length
 
-      logger.debug('🔍 Processor status:', { currentProcessor, onlineCount, totalCount })
+      console.log('🔍 Processor status:', { currentProcessor, onlineCount, totalCount })
 
       if (currentProcessor && currentProcessor.is_live) {
         addActivityLog('success', `${currentProcessor.processor_name} ready`, {
@@ -212,7 +211,7 @@ export const usePaymentProcessor = create<ProcessorStore>((set, get) => ({
       const duration = Date.now() - startTime
       const errorMsg = error.message || 'Failed to check processor status'
 
-      logger.error('🔍 Error checking processor status:', error)
+      console.error('🔍 Error checking processor status:', error)
 
       addActivityLog('error', errorMsg, {
         is_live: false,
@@ -277,7 +276,7 @@ export const usePaymentProcessor = create<ProcessorStore>((set, get) => ({
       const duration = Date.now() - startTime
       const errorMsg = error.message || 'Validation failed'
 
-      logger.error('❌ Test validation error:', error)
+      console.error('❌ Test validation error:', error)
       addActivityLog('error', errorMsg, {
         is_live: false,
         duration_ms: duration
@@ -364,9 +363,9 @@ function getCheckInterval(consecutiveFailures: number): number {
 }
 
 export function startPaymentProcessorMonitoring(locationId?: string, registerId?: string) {
-  logger.debug('🔌 Starting payment processor monitoring', { locationId, registerId })
+  console.log('🔌 Starting payment processor monitoring', { locationId, registerId })
   if (statusCheckInterval) {
-    logger.debug('🔌 Monitoring already running, stopping existing')
+    console.log('🔌 Monitoring already running, stopping existing')
     clearTimeout(statusCheckInterval)
     statusCheckInterval = null
   }
@@ -384,13 +383,13 @@ export function startPaymentProcessorMonitoring(locationId?: string, registerId?
   const targetLocationId = locationId || storedLocationId
   const targetRegisterId = registerId || storedRegisterId
 
-  logger.debug('🔌 Target IDs:', { targetLocationId, targetRegisterId })
+  console.log('🔌 Target IDs:', { targetLocationId, targetRegisterId })
 
   if (targetLocationId) {
-    logger.debug('🔌 Running initial processor check')
+    console.log('🔌 Running initial processor check')
     usePaymentProcessor.getState().checkStatus(targetLocationId, targetRegisterId || undefined)
   } else {
-    logger.debug('🔌 No location ID - skipping check')
+    console.log('🔌 No location ID - skipping check')
   }
 
   // Schedule next check with adaptive interval
@@ -398,7 +397,7 @@ export function startPaymentProcessorMonitoring(locationId?: string, registerId?
     const { isEnabled, locationId: currentLocationId, registerId: currentRegisterId, consecutiveFailures } = usePaymentProcessor.getState()
     const interval = getCheckInterval(consecutiveFailures)
 
-    logger.debug('🔌 Scheduling next check:', {
+    console.log('🔌 Scheduling next check:', {
       interval: `${interval/1000}s`,
       consecutiveFailures,
       isEnabled,
@@ -407,7 +406,7 @@ export function startPaymentProcessorMonitoring(locationId?: string, registerId?
 
     statusCheckInterval = setTimeout(async () => {
       if (isEnabled && currentLocationId) {
-        logger.debug('🔌 Executing periodic check')
+        console.log('🔌 Executing periodic check')
         await usePaymentProcessor.getState().checkStatus(currentLocationId, currentRegisterId || undefined)
         // Schedule next check after this one completes
         scheduleNextCheck()

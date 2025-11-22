@@ -1114,8 +1114,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#000',
   },
   header: {
-    paddingHorizontal: layout.contentHorizontal,
-    paddingTop: layout.cardPadding,
+    paddingHorizontal: layout.containerMargin,
+    paddingTop: layout.containerMargin,
     paddingBottom: 16,
   },
   backButton: {
@@ -1129,7 +1129,7 @@ const styles = StyleSheet.create({
 
   // Hero Header
   heroSection: {
-    marginHorizontal: layout.contentHorizontal,
+    marginHorizontal: layout.containerMargin,
     marginBottom: 24,
     backgroundColor: 'rgba(118,118,128,0.24)',
     borderRadius: 10,
@@ -1183,7 +1183,7 @@ const styles = StyleSheet.create({
   },
 
   primaryActionContainer: {
-    paddingHorizontal: layout.contentHorizontal,
+    paddingHorizontal: layout.containerMargin,
     marginBottom: 32,
     gap: 12,
   },
@@ -1233,12 +1233,12 @@ const styles = StyleSheet.create({
     letterSpacing: 0.8,
     textTransform: 'uppercase',
     marginBottom: 8,
-    paddingHorizontal: layout.contentHorizontal,
+    paddingHorizontal: layout.containerMargin,
   },
 
   // Unified Info Card Pattern (iOS Settings Style)
   infoCard: {
-    marginHorizontal: layout.contentHorizontal,
+    marginHorizontal: layout.containerMargin,
     backgroundColor: 'rgba(118,118,128,0.24)',
     borderRadius: 10,
     overflow: 'hidden',

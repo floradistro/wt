@@ -31,9 +31,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import * as Haptics from 'expo-haptics'
 import { memo, useRef, useEffect, useState, useCallback } from 'react'
 import { Camera, useCameraDevice } from 'react-native-vision-camera'
-import { calculateAge } from '@/lib/id-scanner/aamva-parser'
+import { calculateAge, type AAMVAData } from '@/lib/id-scanner/aamva-parser'
 import type { Customer } from '@/types/pos'
-import type { AAMVAData } from '@/lib/id-scanner/aamva-parser'
 
 // Hooks (REFACTORED)
 import { useCameraScanner } from '@/hooks/pos/useCameraScanner'

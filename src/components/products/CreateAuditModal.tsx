@@ -422,7 +422,7 @@ export function CreateAuditModal({ visible, onClose, onCreated }: CreateAuditMod
     } finally {
       setIsSubmitting(false)
     }
-  }, [selectedLocationId, auditEntries, auditReason, vendorId, onCreated, handleClose, clearDraft])
+  }, [selectedLocationId, auditEntries, auditReason, vendorId, onCreated, clearDraft])
 
   const handleClose = useCallback(() => {
     // Clear all timeouts

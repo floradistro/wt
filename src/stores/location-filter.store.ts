@@ -8,7 +8,6 @@
  */
 
 import { create } from 'zustand'
-import { logger } from '@/utils/logger'
 
 interface LocationFilterState {
   selectedLocationIds: string[]
@@ -29,7 +28,7 @@ export const useLocationFilter = create<LocationFilterState>((set, get) => ({
    * Set selected location IDs
    */
   setSelectedLocationIds: (ids: string[]) => {
-    logger.info('[LocationFilter] Setting selected locations', { ids })
+    console.log('[LocationFilter] Setting selected locations', { ids })
     set({ selectedLocationIds: ids })
   },
 
@@ -37,7 +36,7 @@ export const useLocationFilter = create<LocationFilterState>((set, get) => ({
    * Clear all location filters (show all locations)
    */
   clearLocationFilter: () => {
-    logger.info('[LocationFilter] Clearing location filter')
+    console.log('[LocationFilter] Clearing location filter')
     set({ selectedLocationIds: [] })
   },
 
@@ -50,13 +49,13 @@ export const useLocationFilter = create<LocationFilterState>((set, get) => ({
 
     // Only initialize once
     if (isInitialized) {
-      logger.info('[LocationFilter] Already initialized, skipping', {
+      console.log('[LocationFilter] Already initialized, skipping', {
         currentSelection: get().selectedLocationIds
       })
       return
     }
 
-    logger.info('[LocationFilter] Initializing from user locations', {
+    console.log('[LocationFilter] Initializing from user locations', {
       userLocationIds,
       isAdmin
     })
@@ -68,7 +67,7 @@ export const useLocationFilter = create<LocationFilterState>((set, get) => ({
         selectedLocationIds: userLocationIds,
         isInitialized: true,
       })
-      logger.info('[LocationFilter] Auto-selected staff user locations', {
+      console.log('[LocationFilter] Auto-selected staff user locations', {
         selectedLocationIds: userLocationIds
       })
     } else {
@@ -76,7 +75,7 @@ export const useLocationFilter = create<LocationFilterState>((set, get) => ({
         selectedLocationIds: [],
         isInitialized: true,
       })
-      logger.info('[LocationFilter] Admin user - no auto-filter')
+      console.log('[LocationFilter] Admin user - no auto-filter')
     }
   },
 
@@ -84,7 +83,7 @@ export const useLocationFilter = create<LocationFilterState>((set, get) => ({
    * Reset the store (for logout, etc.)
    */
   reset: () => {
-    logger.info('[LocationFilter] Resetting store')
+    console.log('[LocationFilter] Resetting store')
     set({
       selectedLocationIds: [],
       isInitialized: false,

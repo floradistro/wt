@@ -13,8 +13,7 @@ export const campaignsStyles = StyleSheet.create({
 
   // Component-specific overrides/customizations
   cardWrapper: {
-    marginLeft: 16,
-    marginRight: 16,
+    paddingHorizontal: layout.containerMargin,
     marginVertical: 6,
   },
   configValue: {

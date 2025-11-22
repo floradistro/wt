@@ -21,7 +21,7 @@ interface AdjustInventoryModalProps {
   locationId?: string
   locationName?: string
   onClose: () => void
-  onAdjusted: (result?: { quantity_after: number; product_total_stock: number }) => void
+  onAdjusted: (result?: { quantity_after: number; product_total_stock?: number }) => void
   onLocationChange?: (locationId: string, locationName: string) => void
 }
 
@@ -189,7 +189,6 @@ export function AdjustInventoryModal({
       // Pass result back for optimistic UI update
       onAdjusted(result ? {
         quantity_after: result.quantity_after,
-        product_total_stock: result.product_total_stock
       } : undefined)
 
       onClose()

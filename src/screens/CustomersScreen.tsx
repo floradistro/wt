@@ -333,6 +333,8 @@ function CustomersScreenComponent() {
           searchValue={searchQuery}
           onSearchChange={setSearchQuery}
           searchPlaceholder="Search customers..."
+          vendorLogo={vendorLogo}
+          userName={user?.email || 'User'}
         />
 
         {/* CENTER & RIGHT CONTENT */}

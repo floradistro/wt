@@ -1,10 +1,23 @@
+/**
+ * useLoyaltyTransaction - POS Loyalty Transaction Hook
+ *
+ * Apple Engineering: Renamed from useLoyalty to clarify scope
+ * This hook manages loyalty point redemption during checkout
+ * For loyalty program CRUD operations, use hooks/useLoyalty.ts
+ */
+
 import { useState, useEffect, useCallback } from 'react'
 import type { LoyaltyProgram, Customer } from '@/types/pos'
 import { loyaltyService } from '@/services'
 import { logger } from '@/utils/logger'
 import { supabase } from '@/lib/supabase/client'
 
-export function useLoyalty(vendorId: string | null, selectedCustomer: Customer | null) {
+/**
+ * Manages loyalty points during a POS transaction
+ * @param vendorId - Current vendor ID
+ * @param selectedCustomer - Customer making the purchase
+ */
+export function useLoyaltyTransaction(vendorId: string | null, selectedCustomer: Customer | null) {
   const [loyaltyProgram, setLoyaltyProgram] = useState<LoyaltyProgram | null>(null)
   const [loyaltyPointsToRedeem, setLoyaltyPointsToRedeem] = useState(0)
 
@@ -33,7 +46,7 @@ export function useLoyalty(vendorId: string | null, selectedCustomer: Customer |
   useEffect(() => {
     if (!vendorId) return
 
-    logger.debug('[useLoyalty] Setting up real-time subscription')
+    logger.debug('[useLoyaltyTransaction] Setting up real-time subscription')
 
     // Subscribe to loyalty_programs changes
     const channel = supabase
@@ -47,7 +60,7 @@ export function useLoyalty(vendorId: string | null, selectedCustomer: Customer |
           filter: `vendor_id=eq.${vendorId}`,
         },
         (payload) => {
-          logger.debug('[useLoyalty] Real-time update:', payload)
+          logger.debug('[useLoyaltyTransaction] Real-time update:', payload)
           // Reload loyalty program when any change occurs
           loadLoyaltyProgram()
         }
@@ -55,7 +68,7 @@ export function useLoyalty(vendorId: string | null, selectedCustomer: Customer |
       .subscribe()
 
     return () => {
-      logger.debug('[useLoyalty] Cleaning up real-time subscription')
+      logger.debug('[useLoyaltyTransaction] Cleaning up real-time subscription')
       supabase.removeChannel(channel)
     }
   }, [vendorId, loadLoyaltyProgram])
@@ -108,3 +121,6 @@ export function useLoyalty(vendorId: string | null, selectedCustomer: Customer |
     loyaltyDiscountAmount,
   }
 }
+
+// Export both names for backwards compatibility
+export const useLoyalty = useLoyaltyTransaction
