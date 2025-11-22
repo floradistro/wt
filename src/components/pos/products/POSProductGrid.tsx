@@ -87,6 +87,7 @@ function POSProductGrid({
   // ========================================
   // EMPTY STATE
   // ========================================
+  // eslint-disable-next-line
   const renderEmptyComponent = useCallback(() => (
     <View
       style={styles.emptyProductsContainer}
