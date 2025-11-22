@@ -24,8 +24,9 @@ import { POSProductGrid } from './POSProductGrid'
 // Hooks
 import { useFilters } from '@/hooks/pos'
 
-// Stores
+// Stores (ZERO PROP DRILLING)
 import { usePOSSession } from '@/stores/posSession.store'
+import { productsActions, useProductsState } from '@/stores/products.store'
 
 // Utilities
 import { transformInventoryToProducts, extractCategories } from '@/utils/product-transformers'
@@ -41,16 +42,14 @@ interface POSProductBrowserProps {
 
 function POSProductBrowser({ onAddToCart, onProductsLoaded }: POSProductBrowserProps) {
   // ========================================
-  // STORES - Eliminate prop drilling
+  // STORES - ZERO PROP DRILLING
   // ========================================
   const { sessionInfo } = usePOSSession()
+  const { products, categories, loading: storeLoading } = useProductsState()
 
   // ========================================
   // STATE
   // ========================================
-  const [products, setProducts] = useState<Product[]>([])
-  const [categories, setCategories] = useState<string[]>(['All'])
-  const [loading, setLoading] = useState(true)
   const [showCategoryDropdown, setShowCategoryDropdown] = useState(false)
 
   // Animations
@@ -81,7 +80,8 @@ function POSProductBrowser({ onAddToCart, onProductsLoaded }: POSProductBrowserP
   // ========================================
   useEffect(() => {
     if (sessionInfo?.locationId) {
-      loadProducts()
+      // Load products into global store (ZERO PROP DRILLING)
+      productsActions.loadProducts(sessionInfo.locationId)
     }
   }, [sessionInfo?.locationId])
 
@@ -118,69 +118,8 @@ function POSProductBrowser({ onAddToCart, onProductsLoaded }: POSProductBrowserP
     }
   }, [showCategoryDropdown])
 
-  // ========================================
-  // DATA LOADING
-  // ========================================
-  const loadProducts = async () => {
-    if (!sessionInfo?.locationId) return
-
-    try {
-      setLoading(true)
-
-      const { data: inventoryData, error } = await supabase
-        .from('inventory')
-        .select(`
-          id,
-          product_id,
-          quantity,
-          reserved_quantity,
-          available_quantity,
-          products (
-            id,
-            name,
-            regular_price,
-            featured_image,
-            description,
-            short_description,
-            custom_fields,
-            pricing_data,
-            vendor_id,
-            primary_category:categories!primary_category_id(id, name),
-            product_categories (
-              categories (
-                name
-              )
-            ),
-            vendors (
-              id,
-              store_name,
-              logo_url
-            )
-          )
-        `)
-        .eq('location_id', sessionInfo.locationId)
-        .gt('quantity', 0)
-
-      if (error) throw error
-
-      // Jobs Principle: Using our transformer utility
-      const transformedProducts = transformInventoryToProducts(inventoryData || [])
-      setProducts(transformedProducts)
-
-      // Notify parent component
-      if (onProductsLoaded) {
-        onProductsLoaded(transformedProducts)
-      }
-
-      // Jobs Principle: Using our category extractor
-      const uniqueCategories = extractCategories(transformedProducts)
-      setCategories(uniqueCategories)
-    } catch (error) {
-      logger.error('Error loading products:', error)
-    } finally {
-      setLoading(false)
-    }
-  }
+  // Products are now loaded directly in products.store (ZERO PROP DRILLING)
+  // No local loading function needed!
 
   // ========================================
   // HANDLERS
@@ -434,7 +373,7 @@ function POSProductBrowser({ onAddToCart, onProductsLoaded }: POSProductBrowserP
       {/* Product Grid */}
       <POSProductGrid
         products={filteredProducts}
-        loading={loading}
+        loading={storeLoading}
         onAddToCart={onAddToCart}
         activeFilters={{
           category: filters.category,

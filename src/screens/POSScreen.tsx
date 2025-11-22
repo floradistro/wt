@@ -19,6 +19,9 @@ import { LiquidGlassView, isLiquidGlassSupported } from '@callstack/liquid-glass
 import { useAuth } from '@/stores/auth.store'
 import { usePOSSessionStore } from '@/stores/posSession.store'
 import { startPaymentProcessorMonitoring, stopPaymentProcessorMonitoring } from '@/stores/payment-processor.store'
+import { customerActions } from '@/stores/customer.store'
+import { loyaltyActions, startLoyaltyRealtimeMonitoring, stopLoyaltyRealtimeMonitoring } from '@/stores/loyalty.store'
+import { productsActions } from '@/stores/products.store'
 import { useDockOffset } from '@/navigation/DockOffsetContext'
 import { layout } from '@/theme/layout'
 
@@ -119,6 +122,14 @@ function POSScreenComponent() {
       customUserId: newCustomUserId,
       sessionData: newSessionData,
     })
+
+    // CRITICAL: Initialize customer, loyalty stores with vendorId (ZERO PROP DRILLING)
+    customerActions.setVendorId(newVendor.id)
+    loyaltyActions.setVendorId(newVendor.id)
+    loyaltyActions.loadLoyaltyProgram(newVendor.id)
+
+    // Start loyalty realtime monitoring
+    startLoyaltyRealtimeMonitoring(newVendor.id)
   }, [])
 
   const handleSessionEnd = useCallback(() => {
@@ -131,10 +142,22 @@ function POSScreenComponent() {
 
     // CRITICAL: Also clear global posSession store
     usePOSSessionStore.getState().clearSession()
+
+    // CRITICAL: Reset customer, loyalty, products stores (ZERO PROP DRILLING)
+    customerActions.reset()
+    loyaltyActions.resetLoyalty()
+    productsActions.reset()
+
+    // Stop loyalty realtime monitoring
+    stopLoyaltyRealtimeMonitoring()
   }, [])
 
   const handleProductsLoaded = useCallback((loadedProducts: Product[]) => {
+    // Update local state (for POSScreen orchestration - can be removed later)
     setProducts(loadedProducts)
+
+    // TODO: Products are now loaded directly in products.store by POSProductBrowser
+    // This callback can be removed once POSProductBrowser is updated
   }, [])
 
   const handleAddToCart = useCallback((product: Product, tier?: PricingTier) => {
@@ -170,12 +193,8 @@ function POSScreenComponent() {
               colorScheme="dark"
               style={[styles.cartContainer, !isLiquidGlassSupported && styles.cartContainerFallback]}
             >
-              <POSCheckout
-                products={products}
-                onCheckoutComplete={() => {
-                  // Optional: Reload products after checkout
-                }}
-              />
+              {/* ZERO PROP DRILLING ✅ */}
+              <POSCheckout />
             </LiquidGlassView>
           )}
         </View>

@@ -1,20 +1,18 @@
 /**
- * POSCart Component (REFACTORED)
- * Apple Engineering Standard: Reduced prop drilling via store usage
+ * POSCart Component (ZERO PROP DRILLING)
+ * Apple Engineering Standard: Complete elimination of prop drilling
  *
  * BEFORE: 25+ props (15+ callback handlers)
- * AFTER: 11 props (focused on data/orchestration)
+ * AFTER: 0 props ✅
  *
- * Changes:
- * - Uses cart.store for cart data and actions
- * - Uses checkout-ui.store for UI state (discounting, tier selector, discount selector)
- * - Uses useCampaigns() for active discounts
- * - Uses useModalState() for opening modals
- *
- * Remaining props are for:
- * - Loyalty state (managed by parent's useLoyalty hook)
- * - Customer state (managed by parent's customer selection)
- * - Complex orchestration callbacks
+ * ALL state now from stores:
+ * - cart.store: Cart data and actions
+ * - customer.store: Customer selection
+ * - loyalty.store: Loyalty points and rewards
+ * - products.store: Product catalog
+ * - checkout-ui.store: Modal orchestration and UI state
+ * - tax.store: Tax calculations
+ * - posSession.store: Session management
  */
 
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions } from 'react-native'
@@ -22,13 +20,12 @@ import { memo, useRef, useMemo, useCallback } from 'react'
 import { LiquidGlassView, isLiquidGlassSupported } from '@callstack/liquid-glass'
 import Slider from '@react-native-community/slider'
 import * as Haptics from 'expo-haptics'
-import type { Customer, LoyaltyProgram, Product } from '@/types/pos'
 import { POSCartItem } from './POSCartItem'
 import { POSTotalsSection } from './POSTotalsSection'
 import { POSProductCard } from '../POSProductCard'
 import { layout } from '@/theme/layout'
 
-// Stores
+// Stores (ZERO PROP DRILLING)
 import { useCartItems, cartActions, useCartTotals, useDiscountingItemId } from '@/stores/cart.store'
 import {
   useSelectedDiscountId,
@@ -36,58 +33,43 @@ import {
   useShowDiscountSelector,
   checkoutUIActions,
 } from '@/stores/checkout-ui.store'
+import { useSelectedCustomer, customerActions } from '@/stores/customer.store'
+import { useLoyaltyState, loyaltyActions } from '@/stores/loyalty.store'
+import { useProducts } from '@/stores/products.store'
+import { taxActions } from '@/stores/tax.store'
+import { posSessionActions, usePOSSession } from '@/stores/posSession.store'
 
 // Hooks
 import { useCampaigns } from '@/hooks/useCampaigns'
 
 const { width: _width } = Dimensions.get('window')
 
-interface POSCartProps {
-  // Customer & Loyalty (from parent's useLoyalty hook)
-  selectedCustomer: Customer | null
-  loyaltyPointsToRedeem: number
-  loyaltyProgram: LoyaltyProgram | null
-  loyaltyDiscountAmount: number
-  maxRedeemablePoints: number
-
-  // Data needed for tier selector
-  products: Product[]
-
-  // Orchestration callbacks (complex multi-store operations)
-  onSelectCustomer: () => void
-  onClearCustomer: () => void
-  onSetLoyaltyPoints: (points: number) => void
-  onCheckout: () => void
-  onEndSession: () => void
-
-  // Tax display (could be from tax.store later)
-  taxRate: number
-}
-
-function POSCart({
-  selectedCustomer,
-  loyaltyPointsToRedeem,
-  loyaltyProgram,
-  loyaltyDiscountAmount,
-  maxRedeemablePoints,
-  products,
-  onSelectCustomer,
-  onClearCustomer,
-  onSetLoyaltyPoints,
-  onCheckout,
-  onEndSession,
-  taxRate,
-}: POSCartProps) {
+// ========================================
+// ZERO PROP DRILLING COMPONENT ✅
+// ========================================
+function POSCart() {
   // ========================================
-  // STORES - Cart Data
+  // STORES - All state from Zustand (ZERO PROP DRILLING)
   // ========================================
+  // Cart
   const cart = useCartItems()
   const { subtotal, itemCount } = useCartTotals()
   const discountingItemId = useDiscountingItemId()
 
-  // ========================================
-  // STORES - Checkout UI State
-  // ========================================
+  // Customer
+  const selectedCustomer = useSelectedCustomer()
+
+  // Loyalty
+  const { loyaltyProgram, pointsToRedeem } = useLoyaltyState()
+  const loyaltyDiscountAmount = loyaltyActions.getDiscountAmount()
+
+  // Products
+  const products = useProducts()
+
+  // Session (for locationId to calculate tax)
+  const { sessionInfo } = usePOSSession()
+
+  // Checkout UI
   const selectedDiscountId = useSelectedDiscountId()
   const tierSelectorProductId = useTierSelectorProductId()
   const showDiscountSelector = useShowDiscountSelector()
@@ -125,8 +107,23 @@ function POSCart({
 
   const subtotalAfterLoyalty = Math.max(0, subtotal - loyaltyDiscountAmount)
   const subtotalAfterDiscount = Math.max(0, subtotalAfterLoyalty - discountAmount)
-  const taxAmount = subtotalAfterDiscount * taxRate
+
+  // Tax calculation from tax.store (ANTI-LOOP: uses locationId from sessionInfo)
+  const { taxAmount, taxRate } = useMemo(() => {
+    if (!sessionInfo?.locationId) {
+      return { taxAmount: 0, taxRate: 0.08 }
+    }
+    return taxActions.calculateTax(subtotalAfterDiscount, sessionInfo.locationId)
+  }, [subtotalAfterDiscount, sessionInfo?.locationId])
+
   const total = subtotalAfterDiscount + taxAmount
+
+  // Max redeemable points calculation
+  const maxRedeemablePoints = useMemo(() => {
+    if (!selectedCustomer) return 0
+    const maxFromSubtotal = loyaltyActions.getMaxRedeemablePoints(subtotal)
+    return Math.min(selectedCustomer.loyalty_points, maxFromSubtotal)
+  }, [selectedCustomer, subtotal])
 
   // Find the product for the tier selector
   const tierSelectorProduct = tierSelectorProductId
@@ -161,7 +158,10 @@ function POSCart({
             ]}
           >
             <TouchableOpacity
-              onPress={onSelectCustomer}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                checkoutUIActions.openModal('customerSelector')
+              }}
               style={styles.customerPillButtonPressable}
               activeOpacity={0.7}
               accessibilityRole="button"
@@ -182,7 +182,10 @@ function POSCart({
             ]}
           >
             <TouchableOpacity
-              onPress={onSelectCustomer}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                checkoutUIActions.openModal('customerSelector')
+              }}
               style={styles.customerPillPressable}
               activeOpacity={0.8}
               accessibilityRole="button"
@@ -206,7 +209,8 @@ function POSCart({
                 onPress={(e) => {
                   e.stopPropagation()
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                  onClearCustomer()
+                  customerActions.clearCustomer()
+                  loyaltyActions.resetLoyalty()
                 }}
                 style={styles.customerPillClearButton}
                 activeOpacity={0.6}
@@ -425,10 +429,10 @@ function POSCart({
                 </Text>
               </View>
 
-              {loyaltyPointsToRedeem > 0 && (
+              {pointsToRedeem > 0 && (
                 <View style={styles.loyaltyValueDisplay}>
                   <Text style={styles.loyaltyPointsText}>
-                    {loyaltyPointsToRedeem} {loyaltyPointsToRedeem === 1 ? 'point' : 'points'}
+                    {pointsToRedeem} {pointsToRedeem === 1 ? 'point' : 'points'}
                   </Text>
                   <Text style={styles.loyaltyDiscountValue}>
                     -${loyaltyDiscountAmount.toFixed(2)}
@@ -441,8 +445,8 @@ function POSCart({
                 minimumValue={0}
                 maximumValue={maxRedeemablePoints}
                 step={1}
-                value={loyaltyPointsToRedeem}
-                onValueChange={onSetLoyaltyPoints}
+                value={pointsToRedeem}
+                onValueChange={loyaltyActions.setPointsToRedeem}
                 minimumTrackTintColor="rgba(255,255,255,0.3)"
                 maximumTrackTintColor="rgba(255,255,255,0.1)"
                 thumbTintColor="#fff"
@@ -450,8 +454,8 @@ function POSCart({
                 accessibilityValue={{
                   min: 0,
                   max: maxRedeemablePoints,
-                  now: loyaltyPointsToRedeem,
-                  text: `${loyaltyPointsToRedeem} points, ${loyaltyDiscountAmount.toFixed(2)} dollars off`
+                  now: pointsToRedeem,
+                  text: `${pointsToRedeem} points, ${loyaltyDiscountAmount.toFixed(2)} dollars off`
                 }}
                 accessibilityHint={`Slide to redeem loyalty points. Maximum ${maxRedeemablePoints} points available`}
               />
@@ -460,7 +464,7 @@ function POSCart({
                 <TouchableOpacity
                   onPress={() => {
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                    onSetLoyaltyPoints(0)
+                    loyaltyActions.setPointsToRedeem(0)
                   }}
                   style={styles.loyaltyButtonClear}
                   accessibilityRole="button"
@@ -472,7 +476,7 @@ function POSCart({
                 <TouchableOpacity
                   onPress={() => {
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                    onSetLoyaltyPoints(maxRedeemablePoints)
+                    loyaltyActions.setPointsToRedeem(maxRedeemablePoints)
                   }}
                   style={styles.loyaltyButtonMax}
                   accessibilityRole="button"
@@ -500,10 +504,13 @@ function POSCart({
             total={total}
             selectedCustomer={selectedCustomer}
             loyaltyProgram={loyaltyProgram}
-            loyaltyPointsToRedeem={loyaltyPointsToRedeem}
+            loyaltyPointsToRedeem={pointsToRedeem}
             maxRedeemablePoints={maxRedeemablePoints}
-            onSetLoyaltyPoints={onSetLoyaltyPoints}
-            onCheckout={onCheckout}
+            onSetLoyaltyPoints={loyaltyActions.setPointsToRedeem}
+            onCheckout={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+              checkoutUIActions.openModal('payment')
+            }}
             disabled={false}
           />
         </>
@@ -511,7 +518,7 @@ function POSCart({
 
       {/* Jobs Principle: End Session - Bottom of cart, subtle, out of the way */}
       <TouchableOpacity
-        onPress={onEndSession}
+        onPress={() => posSessionActions.prepareEndSession()}
         style={styles.endSessionFooter}
         accessibilityRole="button"
         accessibilityLabel="End session"
@@ -547,25 +554,9 @@ function POSCart({
   )
 }
 
-// Memoize with comparison function to prevent unnecessary re-renders
-const POSCartMemo = memo(POSCart, (prevProps, nextProps) => {
-  // Only re-render if these props change
-  return (
-    prevProps.selectedCustomer?.id === nextProps.selectedCustomer?.id &&
-    prevProps.selectedCustomer?.loyalty_points === nextProps.selectedCustomer?.loyalty_points &&
-    prevProps.loyaltyPointsToRedeem === nextProps.loyaltyPointsToRedeem &&
-    prevProps.loyaltyProgram?.id === nextProps.loyaltyProgram?.id &&
-    prevProps.loyaltyDiscountAmount === nextProps.loyaltyDiscountAmount &&
-    prevProps.maxRedeemablePoints === nextProps.maxRedeemablePoints &&
-    prevProps.products === nextProps.products &&
-    prevProps.onSelectCustomer === nextProps.onSelectCustomer &&
-    prevProps.onClearCustomer === nextProps.onClearCustomer &&
-    prevProps.onSetLoyaltyPoints === nextProps.onSetLoyaltyPoints &&
-    prevProps.onCheckout === nextProps.onCheckout &&
-    prevProps.onEndSession === nextProps.onEndSession &&
-    prevProps.taxRate === nextProps.taxRate
-  )
-})
+// ✅ ZERO PROP DRILLING: Simple memo, no prop comparison needed
+// Component re-renders only when store values it subscribes to change
+const POSCartMemo = memo(POSCart)
 
 export { POSCartMemo as POSCart }
 

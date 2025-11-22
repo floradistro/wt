@@ -45,6 +45,7 @@ interface POSSessionState {
     registerName: string
   ) => Promise<{ needsCashDrawer: boolean; registerId?: string; registerName?: string } | void>;
   openCashDrawer: (openingCash: number, notes: string) => Promise<void>;
+  prepareEndSession: () => Promise<void>;
   closeCashDrawer: (closingCash: number, notes: string) => Promise<void>;
   clearSession: () => void;
   reset: () => void;
@@ -263,6 +264,57 @@ export const usePOSSessionStore = create<POSSessionState>((set, get) => ({
   },
 
   /**
+   * Prepare to end session - load session data and open modal
+   * ANTI-LOOP: Simple async action, no circular dependencies
+   */
+  prepareEndSession: async () => {
+    const { sessionInfo } = get();
+
+    if (!sessionInfo?.sessionId) {
+      logger.error('[END SESSION] No session ID found!');
+      return;
+    }
+
+    try {
+      logger.debug('[END SESSION] Loading session data for ID:', sessionInfo.sessionId);
+
+      const { data: session, error } = await supabase
+        .from('pos_sessions')
+        .select('session_number, total_sales, total_cash, opening_cash')
+        .eq('id', sessionInfo.sessionId)
+        .single();
+
+      if (error || !session) {
+        logger.error('[END SESSION] Error loading session data:', error);
+        return;
+      }
+
+      logger.debug('[END SESSION] Session data loaded:', session);
+
+      // Store session data for modal
+      set({
+        sessionData: {
+          sessionNumber: session.session_number,
+          totalSales: session.total_sales || 0,
+          totalCash: session.total_cash || 0,
+          openingCash: session.opening_cash || 0,
+        },
+      });
+
+      // Import checkoutUIActions to open modal
+      // NOTE: This is safe because we're importing actions, not creating subscriptions
+      const { checkoutUIActions } = await import('./checkout-ui.store');
+
+      logger.debug('[END SESSION] Opening close drawer modal');
+      checkoutUIActions.openModal('cashDrawerClose');
+
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    } catch (error) {
+      logger.error('[END SESSION] Error in prepareEndSession:', error);
+    }
+  },
+
+  /**
    * Close cash drawer and end session
    */
   closeCashDrawer: async (closingCash: number, notes: string) => {
@@ -335,6 +387,7 @@ export const posSessionActions = {
   get selectLocation() { return usePOSSessionStore.getState().selectLocation },
   get selectRegister() { return usePOSSessionStore.getState().selectRegister },
   get openCashDrawer() { return usePOSSessionStore.getState().openCashDrawer },
+  get prepareEndSession() { return usePOSSessionStore.getState().prepareEndSession },
   get closeCashDrawer() { return usePOSSessionStore.getState().closeCashDrawer },
   get clearSession() { return usePOSSessionStore.getState().clearSession },
   get reset() { return usePOSSessionStore.getState().reset },

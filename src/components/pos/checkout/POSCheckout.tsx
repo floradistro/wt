@@ -24,31 +24,30 @@ import { POSCart } from '../cart/POSCart'
 import { POSCheckoutModals } from './POSCheckoutModals'
 
 // Hooks
-import { useLoyalty, useModalState } from '@/hooks/pos'
-import { useCustomerSelection } from '@/hooks/pos/useCustomerSelection'
+import { useModalState } from '@/hooks/pos'
 import { useCampaigns } from '@/hooks/useCampaigns'
+
+// Stores (ZERO PROP DRILLING)
 import { usePaymentProcessor } from '@/stores/payment-processor.store'
 import { useAuthStore } from '@/stores/auth.store'
 import { useCartItems, useCartTotals, cartActions } from '@/stores/cart.store'
-import { useSelectedDiscountId } from '@/stores/checkout-ui.store'
+import { useSelectedDiscountId, checkoutUIActions } from '@/stores/checkout-ui.store'
 import { paymentActions } from '@/stores/payment.store'
 import { taxActions } from '@/stores/tax.store'
 import { usePOSSession, posSessionActions } from '@/stores/posSession.store'
+import { useCustomerState, customerActions } from '@/stores/customer.store'
+import { useLoyaltyState, loyaltyActions } from '@/stores/loyalty.store'
+import { useProducts } from '@/stores/products.store'
 
 // Types
 import type { Vendor, Product, SessionInfo, CartItem } from '@/types/pos'
 import type { PaymentData, SaleCompletionData } from '@/components/pos/payment'
 import type { AAMVAData } from '@/lib/id-scanner/aamva-parser'
 
-interface POSCheckoutProps {
-  products: Product[]
-  onCheckoutComplete?: () => void
-}
-
-export function POSCheckout({
-  products,
-  onCheckoutComplete,
-}: POSCheckoutProps) {
+// ========================================
+// ZERO PROP DRILLING COMPONENT ✅
+// ========================================
+export function POSCheckout() {
   // ========================================
   // STATE
   // ========================================
@@ -80,22 +79,14 @@ export function POSCheckout({
   const authSession = useAuthStore((state) => state.session)
 
   // ========================================
-  // HOOKS - Customer Selection (REFACTORED)
+  // STORES - Customer & Loyalty (ZERO PROP DRILLING)
   // ========================================
-  const {
-    selectedCustomer,
-    scannedDataForNewCustomer,
-    customerMatches,
-    setSelectedCustomer,
-    handleClearCustomer,
-    handleCustomerSelected,
-    handleScannedDataReceived,
-    clearScannedData,
-    handleCustomerMatchesFound,
-    clearCustomerMatches,
-    findMatchingCustomer,
-    createCustomerMatch,
-  } = useCustomerSelection(vendor?.id || '')
+  const { selectedCustomer, scannedData: scannedDataForNewCustomer, matches: customerMatches } = useCustomerState()
+  const { loyaltyProgram, pointsToRedeem: loyaltyPointsToRedeem } = useLoyaltyState()
+  const loyaltyDiscountAmount = loyaltyActions.getDiscountAmount()
+
+  // Products
+  const products = useProducts()
 
   // ========================================
   // MODALS
@@ -108,15 +99,6 @@ export function POSCheckout({
   const cart = useCartItems()
   const { subtotal, itemCount } = useCartTotals()
   const selectedDiscountId = useSelectedDiscountId()
-
-  const {
-    loyaltyProgram,
-    loyaltyPointsToRedeem,
-    setLoyaltyPointsToRedeem,
-    resetLoyalty,
-    getMaxRedeemablePoints,
-    loyaltyDiscountAmount,
-  } = useLoyalty(vendor?.id || null, selectedCustomer)
 
   // Get active discounts
   const { campaigns: discounts } = useCampaigns()
@@ -176,24 +158,24 @@ export function POSCheckout({
   }, [total, loyaltyProgram, selectedCustomer])
 
   // ========================================
-  // HANDLERS - Customer Selection (REFACTORED)
+  // HANDLERS - Customer Selection (ZERO PROP DRILLING)
   // ========================================
   const handleNoMatchFoundWithData = useCallback(async (data: AAMVAData) => {
-    handleScannedDataReceived(data)
+    customerActions.setScannedData(data)
 
-    const { customer, matchType } = await findMatchingCustomer(data)
+    const { customer, matchType } = await customerActions.findMatchingCustomer(data)
 
     if (customer && matchType) {
-      const match = createCustomerMatch(customer, matchType)
+      const match = customerActions.createCustomerMatch(customer, matchType)
 
       if (matchType === 'exact') {
         // Exact match - show confirmation
-        handleCustomerMatchesFound([match])
+        customerActions.setCustomerMatches([match])
         closeModal()
         openModal('customerMatch')
       } else {
         // High confidence - show confirmation
-        handleCustomerMatchesFound([match])
+        customerActions.setCustomerMatches([match])
         closeModal()
         openModal('customerMatch')
       }
@@ -203,10 +185,6 @@ export function POSCheckout({
       openModal('addCustomer')
     }
   }, [
-    handleScannedDataReceived,
-    findMatchingCustomer,
-    createCustomerMatch,
-    handleCustomerMatchesFound,
     closeModal,
     openModal,
   ])
@@ -302,13 +280,8 @@ export function POSCheckout({
           // This prevents re-render lag during the animation
           setTimeout(() => {
             cartActions.clearCart()
-            setSelectedCustomer(null)
-            resetLoyalty()
-
-            // Notify parent
-            if (onCheckoutComplete) {
-              onCheckoutComplete()
-            }
+            customerActions.clearCustomer()
+            loyaltyActions.resetLoyalty()
           }, 100)
         },
       })
@@ -333,9 +306,9 @@ export function POSCheckout({
 
   // Override handleClearCustomer to also reset loyalty
   const handleClearCustomerWithLoyalty = useCallback(() => {
-    handleClearCustomer()
-    resetLoyalty()
-  }, [handleClearCustomer, resetLoyalty])
+    customerActions.clearCustomer()
+    loyaltyActions.resetLoyalty()
+  }, [])
 
   const handleCloseDrawerSubmit = async (closingCash: number, notes: string) => {
     try {
@@ -344,7 +317,7 @@ export function POSCheckout({
 
       closeModal()
       cartActions.clearCart()
-      resetLoyalty()
+      loyaltyActions.resetLoyalty()
     } catch (error) {
       logger.error('Error closing session:', error)
       // Error handling already done in store (haptics, etc.)
@@ -373,14 +346,14 @@ export function POSCheckout({
         scannedDataForNewCustomer={scannedDataForNewCustomer}
         customerMatches={customerMatches}
         selectedCustomer={selectedCustomer}
-        onCustomerSelected={handleCustomerSelected}
+        onCustomerSelected={customerActions.selectCustomer}
         onNoMatchFoundWithData={handleNoMatchFoundWithData}
         onOpenAddCustomer={() => openModal('addCustomer')}
         onOpenCustomerMatch={() => openModal('customerMatch')}
         onOpenCustomerSelector={() => openModal('customerSelector')}
-        onClearScannedData={clearScannedData}
-        onClearCustomerMatches={clearCustomerMatches}
-        onSetCustomerMatches={handleCustomerMatchesFound}
+        onClearScannedData={customerActions.clearScannedData}
+        onClearCustomerMatches={customerActions.clearCustomerMatches}
+        onSetCustomerMatches={customerActions.setCustomerMatches}
         total={total}
         subtotal={subtotal}
         taxAmount={taxAmount}
@@ -389,9 +362,13 @@ export function POSCheckout({
         loyaltyPointsEarned={loyaltyPointsEarned}
         itemCount={itemCount}
         loyaltyProgram={loyaltyProgram}
-        getMaxRedeemablePoints={getMaxRedeemablePoints}
+        getMaxRedeemablePoints={(subtotal: number) => {
+          if (!selectedCustomer) return 0
+          const maxFromSubtotal = loyaltyActions.getMaxRedeemablePoints(subtotal)
+          return Math.min(selectedCustomer.loyalty_points, maxFromSubtotal)
+        }}
         onPaymentComplete={handlePaymentComplete}
-        onApplyLoyaltyPoints={setLoyaltyPointsToRedeem}
+        onApplyLoyaltyPoints={loyaltyActions.setPointsToRedeem}
         sessionData={sessionData}
         onCloseDrawerSubmit={handleCloseDrawerSubmit}
         onCloseDrawerCancel={handleCloseDrawerCancel}
@@ -399,21 +376,8 @@ export function POSCheckout({
         onCloseErrorModal={() => setErrorModal({ visible: false, title: '', message: '' })}
       />
 
-      {/* Cart Display - Minimal Props (from 30+ to 12) */}
-      <POSCart
-        selectedCustomer={selectedCustomer}
-        loyaltyPointsToRedeem={loyaltyPointsToRedeem}
-        loyaltyProgram={loyaltyProgram}
-        loyaltyDiscountAmount={loyaltyDiscountAmount}
-        maxRedeemablePoints={getMaxRedeemablePoints(subtotal)}
-        products={products}
-        onSelectCustomer={handleSelectCustomer}
-        onClearCustomer={handleClearCustomerWithLoyalty}
-        onSetLoyaltyPoints={setLoyaltyPointsToRedeem}
-        onCheckout={handleCheckout}
-        onEndSession={handleEndSessionClick}
-        taxRate={taxRate}
-      />
+      {/* Cart Display - ZERO PROPS ✅ */}
+      <POSCart />
     </View>
   )
 }
