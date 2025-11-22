@@ -420,7 +420,7 @@ function POSProductBrowser({ sessionInfo, onAddToCart, onProductsLoaded }: POSPr
 
       {/* Product Grid */}
       <POSProductGrid
-        products={filteredProducts as any}
+        products={filteredProducts}
         loading={loading}
         onAddToCart={onAddToCart}
         activeFilters={{
@@ -463,9 +463,9 @@ const styles = StyleSheet.create({
   },
   filterDropdownWrapper: {
     position: 'absolute',
-    top: 72,
-    left: 0, // No left padding - spacing comes from cart's marginRight
-    right: layout.containerMargin,
+    top: 56, // Just below search bar (8px top + 48px bar)
+    left: 8, // Match product grid left padding
+    right: 8, // Ultra-minimal to match cart margins
     zIndex: 1000,
   },
   filterDropdownContainer: {

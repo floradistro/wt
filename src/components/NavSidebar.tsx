@@ -430,10 +430,10 @@ const styles = StyleSheet.create({
   },
   sidebarContainer: {
     flex: 1,
-    marginLeft: 8, // Ultra-minimal iOS-style left padding
-    marginRight: layout.containerMargin,
-    marginTop: layout.containerMargin,
-    marginBottom: layout.containerMargin,
+    marginLeft: 8, // Ultra-minimal iOS-style padding
+    marginRight: 8, // Match left - ultra-minimal (same as cart)
+    marginTop: 8, // Match left - ultra-minimal (same as cart)
+    marginBottom: 8, // Match left - ultra-minimal (same as cart)
     borderRadius: layout.containerRadius,
     borderCurve: 'continuous',
     overflow: 'hidden',
@@ -454,7 +454,7 @@ const styles = StyleSheet.create({
     paddingBottom: 24,
   },
   searchSpacer: {
-    height: 76, // Height of fixed search bar (48px + padding)
+    height: 68, // Height of fixed search bar (8px top + 48px bar + 12px bottom)
   },
   searchSpacerWithPills: {
     height: 132, // Extra height when filter pills are shown
@@ -462,7 +462,7 @@ const styles = StyleSheet.create({
 
   // User Profile Section
   userProfileWrapper: {
-    paddingHorizontal: layout.cardPadding,
+    paddingHorizontal: 8, // Ultra-minimal to match cart header
     marginBottom: 12,
   },
   userProfileCard: {
@@ -532,8 +532,8 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
-    paddingHorizontal: layout.cardPadding,
-    paddingTop: layout.cardPadding,
+    paddingHorizontal: 8, // Ultra-minimal to match cart header
+    paddingTop: 8, // Ultra-minimal to match cart header
     paddingBottom: 12,
     zIndex: 999,
     elevation: 999, // Android elevation
@@ -611,7 +611,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   navItemWrapper: {
-    paddingHorizontal: layout.cardPadding,
+    paddingHorizontal: 8, // Ultra-minimal to match cart header
   },
   navItemPill: {
     borderRadius: layout.pillRadius,

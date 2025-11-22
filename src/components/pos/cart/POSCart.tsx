@@ -23,6 +23,12 @@ interface POSCartProps {
   loyaltyProgram: LoyaltyProgram | null
   loyaltyDiscountAmount: number
   discountingItemId: string | null
+  // Discount props
+  activeDiscounts?: any[]
+  selectedDiscountId?: string | null
+  onSelectDiscount?: (id: string | null) => void
+  discountAmount?: number
+  // Handlers
   onAddItem: (productId: string) => void
   onRemoveItem: (productId: string) => void
   onChangeTier: (oldItemId: string, product: Product, newTier: PricingTier) => void
@@ -51,6 +57,10 @@ function POSCart({
   loyaltyProgram,
   loyaltyDiscountAmount,
   discountingItemId,
+  activeDiscounts = [],
+  selectedDiscountId,
+  onSelectDiscount,
+  discountAmount = 0,
   onAddItem,
   onRemoveItem,
   onChangeTier,
@@ -68,7 +78,10 @@ function POSCart({
   products,
 }: POSCartProps) {
   const [tierSelectorProductId, setTierSelectorProductId] = useState<string | null>(null)
+  const [showDiscountSelector, setShowDiscountSelector] = useState(false)
   const productCardRef = useRef<any>(null)
+
+  const selectedDiscount = activeDiscounts.find(d => d.id === selectedDiscountId)
 
   // Find the product for the tier selector
   const tierSelectorProduct = tierSelectorProductId
@@ -156,6 +169,112 @@ function POSCart({
             </View>
             </TouchableOpacity>
           </LiquidGlassView>
+        )}
+
+        {/* Discount Selector */}
+        {cart.length > 0 && activeDiscounts.length > 0 && (
+          <>
+            {!selectedDiscount ? (
+              <LiquidGlassView
+                effect="regular"
+                colorScheme="dark"
+                tintColor="rgba(255,255,255,0.05)"
+                interactive
+                style={[
+                  styles.customerPillButton,
+                  !isLiquidGlassSupported && styles.customerPillButtonFallback
+                ]}
+              >
+                <TouchableOpacity
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                    setShowDiscountSelector(!showDiscountSelector)
+                  }}
+                  style={styles.customerPillButtonPressable}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.customerPillText}>
+                    {showDiscountSelector ? 'Hide Discounts' : 'Apply Discount'}
+                  </Text>
+                </TouchableOpacity>
+              </LiquidGlassView>
+            ) : (
+              <LiquidGlassView
+                effect="regular"
+                colorScheme="dark"
+                interactive
+                style={[
+                  styles.customerPill,
+                  !isLiquidGlassSupported && styles.customerPillFallback
+                ]}
+              >
+                <TouchableOpacity
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                    setShowDiscountSelector(!showDiscountSelector)
+                  }}
+                  style={styles.customerPillPressable}
+                  activeOpacity={0.8}
+                >
+                  <View style={styles.customerPillContent}>
+                    <View style={styles.customerPillTextContainer}>
+                      <Text style={styles.customerPillName} numberOfLines={1}>
+                        {selectedDiscount.name}
+                      </Text>
+                      <Text style={styles.customerPillPoints}>
+                        {selectedDiscount.badge_text}
+                      </Text>
+                    </View>
+                    <TouchableOpacity
+                      onPress={(e) => {
+                        e.stopPropagation()
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                        onSelectDiscount?.(null)
+                        setShowDiscountSelector(false)
+                      }}
+                      style={styles.customerPillClearButton}
+                      activeOpacity={0.6}
+                    >
+                      <Text style={styles.customerPillClearText}>×</Text>
+                    </TouchableOpacity>
+                  </View>
+                </TouchableOpacity>
+              </LiquidGlassView>
+            )}
+
+            {/* Discount List */}
+            {showDiscountSelector && (
+              <View style={styles.discountList}>
+                {activeDiscounts.map(discount => (
+                  <LiquidGlassView
+                    key={discount.id}
+                    effect="regular"
+                    colorScheme="dark"
+                    interactive
+                    style={[
+                      styles.discountOption,
+                      !isLiquidGlassSupported && styles.discountOptionFallback
+                    ]}
+                  >
+                    <TouchableOpacity
+                      onPress={() => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                        onSelectDiscount?.(discount.id)
+                        setShowDiscountSelector(false)
+                      }}
+                      style={styles.discountOptionPressable}
+                      activeOpacity={0.7}
+                    >
+                      <View style={styles.discountOptionContent}>
+                        <Text style={styles.discountOptionName}>{discount.name}</Text>
+                        <Text style={styles.discountBadge}>{discount.badge_text}</Text>
+                      </View>
+                    </TouchableOpacity>
+                  </LiquidGlassView>
+                ))}
+              </View>
+            )}
+          </>
         )}
 
         {/* Action Buttons Row */}
@@ -320,6 +439,8 @@ function POSCart({
           <POSTotalsSection
             subtotal={subtotal}
             loyaltyDiscountAmount={loyaltyDiscountAmount}
+            discountAmount={discountAmount}
+            selectedDiscount={selectedDiscount}
             taxAmount={taxAmount}
             taxRate={taxRate}
             total={total}
@@ -381,10 +502,10 @@ const styles = StyleSheet.create({
     flex: 1,
   },
 
-  // Perfectly Simple Cart Header
+  // Perfectly Simple Cart Header - Ultra-minimal padding
   cartHeader: {
-    paddingHorizontal: layout.cardPadding,
-    paddingTop: layout.cardPadding,
+    paddingHorizontal: 8, // Ultra-minimal to match container margins
+    paddingTop: 8, // Ultra-minimal to match container margins
     paddingBottom: 12,
     gap: 12,
   },
@@ -515,7 +636,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0,
   },
   loyaltySection: {
-    paddingHorizontal: layout.containerMargin,
+    paddingHorizontal: 8, // Match cart header padding
     paddingVertical: layout.cardPadding,
     gap: 12,
   },
@@ -612,6 +733,45 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.4)',
     textTransform: 'uppercase',
     letterSpacing: 0.6,
+  },
+
+  // Discount Selector
+  discountList: {
+    gap: 12,
+  },
+  discountOption: {
+    borderRadius: 24,
+    borderCurve: 'continuous',
+    overflow: 'hidden',
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.15)',
+  },
+  discountOptionFallback: {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  discountOptionPressable: {
+    height: 48,
+    paddingHorizontal: 20,
+    justifyContent: 'center',
+  },
+  discountOptionContent: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  discountOptionName: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.9)',
+    letterSpacing: -0.2,
+    flex: 1,
+  },
+  discountBadge: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.6)',
+    letterSpacing: 0,
+    marginLeft: 12,
   },
   // iOS 26 Divider - Hairline
   cartDivider: {

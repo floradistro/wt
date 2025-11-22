@@ -3,7 +3,7 @@
  * Beautiful centered grid with vendor logos
  */
 
-import { View, Text, StyleSheet, TouchableOpacity, Animated, Dimensions, Image } from 'react-native'
+import { View, Text, StyleSheet, TouchableOpacity, Pressable, Animated, Dimensions, Image } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { BlurView } from 'expo-blur'
 import * as Haptics from 'expo-haptics'
@@ -26,6 +26,7 @@ interface POSLocationSelectorProps {
   vendorLogo?: string | null
   vendorName?: string
   onLocationSelected: (locationId: string, locationName: string) => void
+  onCancel?: () => void
 }
 
 function LocationCard({
@@ -146,7 +147,7 @@ function LocationCard({
   )
 }
 
-function POSLocationSelector({ locations, vendorLogo, vendorName, onLocationSelected }: POSLocationSelectorProps) {
+function POSLocationSelector({ locations, vendorLogo, vendorName, onLocationSelected, onCancel }: POSLocationSelectorProps) {
   const fadeAnim = useRef(new Animated.Value(0)).current
 
   useEffect(() => {
@@ -173,10 +174,18 @@ function POSLocationSelector({ locations, vendorLogo, vendorName, onLocationSele
       <Animated.View style={[styles.content, { opacity: fadeAnim }]}>
         {/* Header */}
         <View style={styles.header}>
-          <Text style={styles.headerTitle}>Select Location</Text>
-          {vendorName && (
-            <Text style={styles.headerSubtitle}>{vendorName}</Text>
+          {onCancel && (
+            <Pressable onPress={onCancel} style={styles.cancelButton}>
+              <Text style={styles.cancelButtonText}>Cancel</Text>
+            </Pressable>
           )}
+          <View style={styles.headerTitleContainer}>
+            <Text style={styles.headerTitle}>Select Location</Text>
+            {vendorName && (
+              <Text style={styles.headerSubtitle}>{vendorName}</Text>
+            )}
+          </View>
+          {onCancel && <View style={styles.headerSpacer} />}
         </View>
 
         {/* Grid */}
@@ -211,9 +220,29 @@ const styles = StyleSheet.create({
   },
   // Header
   header: {
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
     marginBottom: isTablet ? 48 : 32,
-    paddingTop: isTablet ? 40 : 30,
+    paddingTop: isTablet ? 20 : 10,
+    paddingHorizontal: isTablet ? 20 : 10,
+  },
+  cancelButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+    minWidth: 70,
+  },
+  cancelButtonText: {
+    fontSize: 17,
+    color: '#007AFF',
+    fontWeight: '400',
+  },
+  headerSpacer: {
+    width: 70,
+  },
+  headerTitleContainer: {
+    alignItems: 'center',
+    flex: 1,
   },
   headerTitle: {
     fontSize: isTablet ? 34 : 28,
@@ -221,12 +250,14 @@ const styles = StyleSheet.create({
     color: '#fff',
     letterSpacing: -0.5,
     marginBottom: 8,
+    textAlign: 'center',
   },
   headerSubtitle: {
     fontSize: isTablet ? 15 : 13,
     fontWeight: '500',
     color: 'rgba(255,255,255,0.5)',
     letterSpacing: -0.2,
+    textAlign: 'center',
   },
   // Grid
   grid: {

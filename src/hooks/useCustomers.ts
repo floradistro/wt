@@ -181,6 +181,29 @@ export function useCustomers(options: UseCustomersOptions = {}) {
   )
 
   /**
+   * Delete customer (soft delete)
+   */
+  const deleteCustomer = useCallback(
+    async (customerId: string) => {
+      try {
+        setLoading(true)
+        setError(null)
+        await customersService.deleteCustomer(customerId)
+
+        // Remove from local state
+        setCustomers((prev) => prev.filter((customer) => customer.id !== customerId))
+      } catch (err) {
+        setError(err as Error)
+        logger.error('Failed to delete customer:', err)
+        throw err
+      } finally {
+        setLoading(false)
+      }
+    },
+    []
+  )
+
+  /**
    * Refresh customers
    */
   const refresh = useCallback(() => {
@@ -208,6 +231,7 @@ export function useCustomers(options: UseCustomersOptions = {}) {
     createCustomer,
     updateCustomer,
     updateLoyaltyPoints,
+    deleteCustomer,
     refresh,
   }
 }

@@ -112,7 +112,7 @@ export function PurchaseOrderDetail({
   return (
     <ScrollView
       style={styles.container}
-      contentContainerStyle={{ paddingBottom: layout.dockHeight, paddingRight: layout.containerMargin }}
+      contentContainerStyle={{ paddingBottom: layout.dockHeight, paddingRight: 0 }}
       showsVerticalScrollIndicator={true}
       indicatorStyle="white"
       scrollIndicatorInsets={{ right: 2, bottom: layout.dockHeight }}

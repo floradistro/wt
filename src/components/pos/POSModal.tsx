@@ -195,7 +195,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   overlayFallback: {
-    backgroundColor: 'rgba(0,0,0,0.85)',
+    backgroundColor: 'rgba(0,0,0,0.95)',
   },
   keyboardView: {
     flex: 1,
@@ -211,7 +211,7 @@ const styles = StyleSheet.create({
   },
   modalContent: {
     borderRadius: radius.xxl,
-    borderCurve: 'continuous' as any,
+    borderCurve: 'continuous',
     overflow: 'hidden',
   },
   modalContentFallback: {

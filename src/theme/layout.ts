@@ -10,9 +10,17 @@ export const layout = {
   // Container Margins (iPad Settings pattern)
   containerMargin: 20, // iOS Settings-style l/r padding
 
-  // Content Margins
-  contentHorizontal: 40,
+  // Content Margins - Apple-optimized spacing
+  contentHorizontal: 16, // Right side content padding (from content to screen edge)
+  contentLeft: 8, // Left side content padding (nav has 8px margin, so 8+8=16px total)
   contentVertical: 20,
+
+  // Standardized header positioning - MUST be identical across all views
+  headerTop: 8, // Fixed header and search bar top position
+  searchBarHeight: 48, // Search bar height
+  searchBarBottomGap: 12, // Gap below search bar
+  contentStartTop: 68, // Where content starts (8 + 48 + 12)
+  fadeGradientHeight: 80, // Fade gradient covers search area + extra for effect
 
   // Card/Glass Containers
   cardPadding: 16,

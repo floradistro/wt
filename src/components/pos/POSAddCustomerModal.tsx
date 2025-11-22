@@ -23,21 +23,11 @@ import * as Haptics from 'expo-haptics'
 import { memo, useState, useEffect } from 'react'
 import DateTimePicker from '@react-native-community/datetimepicker'
 import { colors, spacing, radius, borderWidth } from '@/theme/tokens'
-import { supabase } from '@/lib/supabase/client'
 import type { Customer } from '@/types/pos'
 import type { AAMVAData } from '@/lib/id-scanner/aamva-parser'
 import { POSModal } from './POSModal'
 import { logger } from '@/utils/logger'
-import {
-  normalizeName,
-  normalizeEmail,
-  normalizePhone,
-  normalizeCity,
-  normalizeState,
-  normalizePostalCode,
-  normalizeAddress,
-} from '@/utils/data-normalization'
-import { findPotentialDuplicates, type CustomerMatch } from '@/utils/customer-deduplication'
+import { createCustomer } from '@/services/customers.service'
 
 const { width } = Dimensions.get('window')
 const isTablet = width > 600
@@ -58,12 +48,7 @@ function POSAddCustomerModal({
   onClose,
 }: POSAddCustomerModalProps) {
   const [creating, setCreating] = useState(false)
-  const [checking, setChecking] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [duplicateWarning, setDuplicateWarning] = useState<{
-    matches: CustomerMatch[]
-    message: string
-  } | null>(null)
 
   // Form state
   const [firstName, setFirstName] = useState('')
@@ -146,6 +131,7 @@ function POSAddCustomerModal({
   }
 
   const handleCreate = async () => {
+    // Validation
     if (!firstName.trim() || !lastName.trim()) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
       setError('First name and last name are required')
@@ -160,91 +146,25 @@ function POSAddCustomerModal({
       return
     }
 
-    // Normalize all data first
-    const normalizedFirstName = normalizeName(firstName) || ''
-    const normalizedMiddleName = normalizeName(middleName)
-    const normalizedLastName = normalizeName(lastName) || ''
-    const normalizedPhone = normalizePhone(phone)
-    const normalizedEmail = normalizeEmail(email)
-
-    // CHECK FOR DUPLICATES FIRST
-    setChecking(true)
+    setCreating(true)
     setError(null)
-    setDuplicateWarning(null)
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
 
     try {
-      const duplicates = await findPotentialDuplicates({
-        firstName: normalizedFirstName,
-        lastName: normalizedLastName,
-        phone: normalizedPhone || undefined,
-        email: normalizedEmail || undefined,
-        dateOfBirth: dobTrimmed || undefined,
-        vendorId,
+      // Use customers service (handles normalization, unique email generation, etc.)
+      const newCustomer = await createCustomer({
+        first_name: firstName.trim(),
+        middle_name: middleName.trim() || undefined,
+        last_name: lastName.trim(),
+        email: email.trim() || undefined,
+        phone: phone.trim() || undefined,
+        date_of_birth: dobTrimmed || undefined,
+        street_address: address.trim() || undefined,
+        city: city.trim() || undefined,
+        state: state.trim() || undefined,
+        postal_code: postalCode.trim() || undefined,
+        vendor_id: vendorId,
       })
-
-      // EXACT or HIGH confidence match - BLOCK creation
-      if (duplicates.length > 0 && (duplicates[0].confidence === 'exact' || duplicates[0].confidence === 'high')) {
-        setChecking(false)
-        setDuplicateWarning({
-          matches: duplicates,
-          message: `${duplicates[0].reason}. This customer already exists!`,
-        })
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
-        return
-      }
-
-      // MEDIUM confidence - show warning but allow creation
-      if (duplicates.length > 0 && duplicates[0].confidence === 'medium' && !duplicateWarning) {
-        setChecking(false)
-        setDuplicateWarning({
-          matches: duplicates,
-          message: `Warning: Found ${duplicates.length} similar customer(s). Click CREATE again to proceed anyway.`,
-        })
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning)
-        return
-      }
-
-      setChecking(false)
-      setCreating(true)
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
-
-      const uniqueEmail = normalizedEmail ||
-        `${normalizedFirstName.toLowerCase()}.${normalizedLastName.toLowerCase()}.${Date.now()}@walk-in.local`
-
-      // Insert directly into Supabase with NORMALIZED data
-      const { data: newCustomer, error: insertError} = await supabase
-        .from('customers')
-        .insert({
-          first_name: normalizedFirstName,
-          middle_name: normalizedMiddleName,
-          last_name: normalizedLastName,
-          email: uniqueEmail,
-          phone: normalizedPhone,
-          date_of_birth: dobTrimmed || null,
-          street_address: normalizeAddress(address),
-          city: normalizeCity(city),
-          state: normalizeState(state),
-          postal_code: normalizePostalCode(postalCode),
-          loyalty_points: 0,
-          total_spent: 0,
-          total_orders: 0,
-          is_active: true,
-          vendor_id: vendorId,
-        })
-        .select()
-        .single()
-
-      if (insertError) {
-        let errorMessage = insertError.message
-        if (errorMessage.includes('duplicate') && errorMessage.includes('email')) {
-          errorMessage = 'This email is already registered. Please use a different email or leave it blank.'
-        }
-        throw new Error(errorMessage)
-      }
-
-      if (!newCustomer) {
-        throw new Error('Failed to create customer')
-      }
 
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
       resetForm()
@@ -253,7 +173,8 @@ function POSAddCustomerModal({
       logger.error('Create customer error:', error)
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
       setError(error instanceof Error ? error.message : 'Failed to create customer')
-      setCreating(false)
+    } finally {
+      setCreating(false) // ALWAYS reset creating state
     }
   }
 
@@ -480,63 +401,6 @@ function POSAddCustomerModal({
         </View>
       </View>
 
-      {/* Duplicate Warning */}
-      {duplicateWarning && (
-        <LiquidGlassView
-          effect="regular"
-          colorScheme="dark"
-          tintColor="rgba(245,158,11,0.1)"
-          style={[
-            styles.warningAlert,
-            !isLiquidGlassSupported && styles.warningAlertFallback,
-          ]}
-          accessible={true}
-          accessibilityRole="alert"
-          accessibilityLabel={`Warning: ${duplicateWarning.message}`}
-          accessibilityLiveRegion="assertive"
-        >
-          <Text style={styles.warningAlertTitle} accessible={false}>⚠️ DUPLICATE FOUND</Text>
-          <Text style={styles.warningAlertText}>{duplicateWarning.message}</Text>
-          {duplicateWarning.matches[0] && (
-            <View style={styles.duplicateCustomerCard}>
-              <Text style={styles.duplicateCustomerName}>
-                {duplicateWarning.matches[0].customer.first_name} {duplicateWarning.matches[0].customer.last_name}
-              </Text>
-              {duplicateWarning.matches[0].customer.phone && (
-                <Text style={styles.duplicateCustomerDetail}>📱 {duplicateWarning.matches[0].customer.phone}</Text>
-              )}
-              {duplicateWarning.matches[0].customer.email && !duplicateWarning.matches[0].customer.email.includes('@walk-in.local') && (
-                <Text style={styles.duplicateCustomerDetail}>✉️ {duplicateWarning.matches[0].customer.email}</Text>
-              )}
-              <TouchableOpacity
-                style={styles.useExistingButton}
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
-                  const serviceCustomer = duplicateWarning.matches[0].customer
-                  // Map service Customer to POS Customer type
-                  const posCustomer: Customer = {
-                    id: serviceCustomer.id,
-                    first_name: serviceCustomer.first_name || '',
-                    last_name: serviceCustomer.last_name || '',
-                    email: serviceCustomer.email || '',
-                    phone: serviceCustomer.phone || null,
-                    display_name: serviceCustomer.full_name || null,
-                    date_of_birth: null,
-                    loyalty_points: serviceCustomer.loyalty_points || 0,
-                    loyalty_tier: 'standard',
-                    vendor_customer_number: serviceCustomer.id.substring(0, 8).toUpperCase(),
-                  }
-                  onCustomerCreated(posCustomer)
-                }}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.useExistingButtonText}>USE THIS CUSTOMER</Text>
-              </TouchableOpacity>
-            </View>
-          )}
-        </LiquidGlassView>
-      )}
-
       {/* Error Display */}
       {error && (
         <LiquidGlassView
@@ -596,14 +460,14 @@ function POSAddCustomerModal({
             style={styles.submitButtonInner}
             onPress={handleCreate}
             activeOpacity={0.7}
-            disabled={creating || checking}
+            disabled={creating}
             accessibilityRole="button"
-            accessibilityLabel={creating ? 'Creating customer' : checking ? 'Checking for duplicates' : 'Create customer'}
+            accessibilityLabel={creating ? 'Creating customer' : 'Create customer'}
             accessibilityHint="Save the new customer profile"
-            accessibilityState={{ disabled: creating || checking, busy: creating || checking }}
+            accessibilityState={{ disabled: creating, busy: creating }}
           >
             <Text style={styles.submitButtonText}>
-              {checking ? 'CHECKING...' : creating ? 'CREATING...' : 'CREATE CUSTOMER'}
+              {creating ? 'CREATING...' : 'CREATE CUSTOMER'}
             </Text>
           </TouchableOpacity>
         </LiquidGlassView>
@@ -734,7 +598,7 @@ const styles = StyleSheet.create({
   },
   section: {
     borderRadius: radius.lg,
-    borderCurve: 'continuous' as any,
+    borderCurve: 'continuous',
     padding: spacing.md,
     overflow: 'hidden',
   },
@@ -808,7 +672,7 @@ const styles = StyleSheet.create({
   },
   datePickerCard: {
     borderRadius: radius.xxl,
-    borderCurve: 'continuous' as any,
+    borderCurve: 'continuous',
     overflow: 'hidden',
     paddingHorizontal: spacing.xl,
     paddingTop: spacing.xl,
@@ -854,7 +718,7 @@ const styles = StyleSheet.create({
   },
   datePickerDoneButton: {
     borderRadius: radius.lg,
-    borderCurve: 'continuous' as any,
+    borderCurve: 'continuous',
     overflow: 'hidden',
     backgroundColor: 'rgba(59,130,246,0.3)',
     marginTop: spacing.md,
@@ -884,7 +748,7 @@ const styles = StyleSheet.create({
     marginHorizontal: spacing.xl,
     marginBottom: spacing.sm,
     borderRadius: radius.lg,
-    borderCurve: 'continuous' as any,
+    borderCurve: 'continuous',
     padding: spacing.md,
     overflow: 'hidden',
     borderWidth: borderWidth.regular,
@@ -917,7 +781,7 @@ const styles = StyleSheet.create({
   cancelButton: {
     flex: 1,
     borderRadius: radius.lg,
-    borderCurve: 'continuous' as any,
+    borderCurve: 'continuous',
     overflow: 'hidden',
   },
   cancelButtonFallback: {
@@ -936,7 +800,7 @@ const styles = StyleSheet.create({
   submitButton: {
     flex: 1,
     borderRadius: radius.lg,
-    borderCurve: 'continuous' as any,
+    borderCurve: 'continuous',
     overflow: 'hidden',
     backgroundColor: 'rgba(59,130,246,0.3)',
   },
@@ -960,7 +824,7 @@ const styles = StyleSheet.create({
     marginHorizontal: spacing.xl,
     marginBottom: spacing.sm,
     borderRadius: radius.lg,
-    borderCurve: 'continuous' as any,
+    borderCurve: 'continuous',
     padding: spacing.md,
     overflow: 'hidden',
     borderWidth: borderWidth.regular,

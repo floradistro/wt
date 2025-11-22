@@ -34,6 +34,9 @@ export function LocationSelector({
   // Get context-aware item label
   const itemLabel = context === 'orders' ? 'orders' : 'products'
 
+  // Safe defaults for undefined userLocations
+  const safeUserLocations = userLocations || []
+
   useEffect(() => {
     if (visible) {
       setTempSelection(selectedLocationIds)
@@ -106,7 +109,7 @@ export function LocationSelector({
                   <View style={styles.locationInfo}>
                     <Text style={styles.locationName}>All Locations</Text>
                     <Text style={styles.locationSubtext}>
-                      Show {itemLabel} from all {userLocations.length} location{userLocations.length !== 1 ? 's' : ''}
+                      Show {itemLabel} from all {safeUserLocations.length} location{safeUserLocations.length !== 1 ? 's' : ''}
                     </Text>
                   </View>
                   <View style={[styles.checkbox, isAllSelected && styles.checkboxActive]}>
@@ -120,9 +123,9 @@ export function LocationSelector({
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>LOCATIONS</Text>
               <View style={styles.cardGlass}>
-                {userLocations.map((userLocation, index) => {
+                {safeUserLocations.map((userLocation, index) => {
                   const isSelected = tempSelection.includes(userLocation.location.id)
-                  const isLast = index === userLocations.length - 1
+                  const isLast = index === safeUserLocations.length - 1
                   const address = [
                     userLocation.location.address_line1,
                     userLocation.location.city,

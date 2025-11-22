@@ -13,6 +13,7 @@ import { supabase } from '@/lib/supabase/client'
 import { logger } from '@/utils/logger'
 import { useCategories } from '@/hooks/useCategories'
 import { usePricingTemplates } from '@/hooks/usePricingTemplates'
+import { createProduct, createProductsBulk } from '@/services/products.service'
 
 type CreateMode = 'single' | 'bulk'
 
@@ -168,7 +169,6 @@ export function CreateProductModal({
       setIsSubmitting(true)
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy)
 
-      const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
       const template = templates.find(t => t.id === selectedTemplateId)
       if (!template) throw new Error('Template not found')
 
@@ -177,7 +177,7 @@ export function CreateProductModal({
         tiers: template.default_tiers.map(tier => ({
           id: tier.id,
           label: tier.label,
-          quantity: tier.qty,
+          qty: tier.qty,
           unit: tier.unit,
           price: tier.price || 0,
           enabled: true,
@@ -188,25 +188,20 @@ export function CreateProductModal({
         updated_at: new Date().toISOString(),
       }
 
-      const { data, error: insertError } = await supabase
-        .from('products')
-        .insert({
-          vendor_id: vendorId,
-          name: name.trim(),
-          slug,
-          type: 'simple',
-          status: 'published',
-          primary_category_id: selectedCategoryId,
-          pricing_data: pricingData,
-          stock_status: 'instock',
-          featured: false,
-        })
-        .select()
-        .single()
+      // Use atomic product creation with automatic slug generation
+      const result = await createProduct({
+        vendor_id: vendorId,
+        name: name.trim(),
+        category_id: selectedCategoryId,
+        pricing_data: pricingData,
+        type: 'simple',
+        status: 'published',
+        stock_status: 'instock',
+        featured: false,
+      })
 
-      if (insertError) throw insertError
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
-      onCreated(data.id)
+      onCreated(result.product_id)
       onClose()
     } catch (err) {
       logger.error('Failed to create product', { error: err })
@@ -237,90 +232,65 @@ export function CreateProductModal({
       const template = templates.find(t => t.id === selectedTemplateId)
       if (!template) throw new Error('Template not found')
 
-      let localSuccessCount = 0
-      let localFailCount = 0
-
       setProgress({
         current: 0,
         total: parsedProducts.length,
-        currentProduct: '',
+        currentProduct: 'Preparing bulk creation...',
       })
 
-      // Submit products one by one
-      for (let i = 0; i < parsedProducts.length; i++) {
-        const productName = parsedProducts[i]
-
-        setProgress({
-          current: i + 1,
-          total: parsedProducts.length,
-          currentProduct: productName,
-        })
-
-        try {
-          const slug = productName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
-
-          const pricingData = {
-            mode: 'tiered' as const,
-            tiers: template.default_tiers.map(tier => ({
-              id: tier.id,
-              label: tier.label,
-              quantity: tier.qty,
-              unit: tier.unit,
-              price: tier.price || 0,
-              enabled: true,
-              sort_order: tier.sort_order,
-            })),
-            template_id: template.id,
-            template_name: template.name,
-            updated_at: new Date().toISOString(),
-          }
-
-          const { error: insertError } = await supabase
-            .from('products')
-            .insert({
-              vendor_id: vendorId,
-              name: productName.trim(),
-              slug,
-              type: 'simple',
-              status: 'published',
-              primary_category_id: selectedCategoryId,
-              pricing_data: pricingData,
-              stock_status: 'instock',
-              featured: false,
-            })
-
-          if (insertError) {
-            logger.error('Failed to create product', { error: insertError, productName })
-            localFailCount++
-          } else {
-            localSuccessCount++
-          }
-        } catch (err) {
-          logger.error('Failed to create product', { error: err, productName })
-          localFailCount++
-        }
-
-        setSuccessCount(localSuccessCount)
-        setFailCount(localFailCount)
-
-        // Small delay between products
-        if (i < parsedProducts.length - 1) {
-          await new Promise(resolve => setTimeout(resolve, 100))
-        }
+      const pricingData = {
+        mode: 'tiered' as const,
+        tiers: template.default_tiers.map(tier => ({
+          id: tier.id,
+          label: tier.label,
+          qty: tier.qty,
+          unit: tier.unit,
+          price: tier.price || 0,
+          enabled: true,
+          sort_order: tier.sort_order,
+        })),
+        template_id: template.id,
+        template_name: template.name,
+        updated_at: new Date().toISOString(),
       }
 
-      if (localFailCount === 0) {
+      // Use atomic bulk creation - all-or-nothing transaction
+      const result = await createProductsBulk({
+        vendor_id: vendorId,
+        products: parsedProducts.map(name => ({
+          name: name.trim(),
+          type: 'simple',
+          status: 'published',
+          stock_status: 'instock',
+          featured: false,
+        })),
+        category_id: selectedCategoryId,
+        pricing_data: pricingData,
+      })
+
+      setSuccessCount(result.products_created)
+      setFailCount(result.products_skipped)
+
+      setProgress({
+        current: parsedProducts.length,
+        total: parsedProducts.length,
+        currentProduct: 'Complete!',
+      })
+
+      if (result.products_skipped === 0) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
         setTimeout(() => {
           onCreated()
           onClose()
         }, 1500)
-      } else if (localSuccessCount > 0) {
+      } else if (result.products_created > 0) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning)
-        setError(`Created ${localSuccessCount} products, ${localFailCount} failed`)
+        setError(
+          `Created ${result.products_created} products, ${result.products_skipped} skipped (duplicates or empty names)`
+        )
       } else {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
-        setError('All products failed to create. Please try again.')
+        setError('All products were skipped. Please check for duplicates or empty names.')
       }
     } catch (err) {
       logger.error('Bulk add failed', { error: err })

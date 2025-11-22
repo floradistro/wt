@@ -1,0 +1,190 @@
+/**
+ * useCameraScanner Hook
+ * Jobs Principle: Manage camera lifecycle and ID scanning
+ *
+ * Extracted from POSUnifiedCustomerSelector to improve maintainability
+ * Handles:
+ * - Camera permissions
+ * - Camera lifecycle (mount/unmount)
+ * - Barcode scanning
+ * - ID parsing and age verification
+ * - Focus functionality
+ */
+
+import { useState, useEffect, useRef, useCallback } from 'react'
+import { Camera, useCodeScanner } from 'react-native-vision-camera'
+import * as Haptics from 'expo-haptics'
+import { parseAAMVABarcode, isLegalAge, calculateAge, type AAMVAData } from '@/lib/id-scanner/aamva-parser'
+import { playSuccessBeep, playRejectionTone } from '@/lib/id-scanner/audio'
+import { logger } from '@/utils/logger'
+
+export function useCameraScanner(onScanComplete: (data: AAMVAData) => void) {
+  // ========================================
+  // STATE
+  // ========================================
+  const [hasPermission, setHasPermission] = useState(false)
+  const [isScanning, setIsScanning] = useState(true)
+  const [isProcessing, setIsProcessing] = useState(false)
+  const [cameraActive, setCameraActive] = useState(true)
+  const [scanMessage, setScanMessage] = useState('')
+  const [parsedData, setParsedData] = useState<AAMVAData | null>(null)
+  const [cameraKey, setCameraKey] = useState(0)
+  const [focusPoint, setFocusPoint] = useState<{ x: number; y: number } | null>(null)
+
+  const lastScannedCode = useRef<string | null>(null)
+
+  // ========================================
+  // CAMERA PERMISSIONS
+  // ========================================
+  const requestCameraPermission = async () => {
+    const permission = await Camera.requestCameraPermission()
+    setHasPermission(permission === 'granted')
+  }
+
+  useEffect(() => {
+    requestCameraPermission()
+  }, [])
+
+  // ========================================
+  // BARCODE SCANNING
+  // ========================================
+  const handleBarcodeScan = async (barcodeData: string) => {
+    try {
+      const data = parseAAMVABarcode(barcodeData)
+
+      // Age verification FIRST
+      if (data.dateOfBirth) {
+        const age = calculateAge(data.dateOfBirth)
+        const legal = isLegalAge(data.dateOfBirth)
+
+        if (!legal && age !== undefined) {
+          setScanMessage(`UNDER 21 - Age ${age}`)
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
+          playRejectionTone()
+
+          // Reset scanner after brief display
+          setTimeout(() => {
+            setScanMessage('')
+            lastScannedCode.current = null
+            setIsScanning(true)
+            setIsProcessing(false)
+          }, 1500)
+          return
+        }
+      }
+
+      // Show parsed data and trigger callback
+      setParsedData(data)
+      onScanComplete(data)
+    } catch (error) {
+      logger.error('Scan error:', error)
+      resetScanner()
+    }
+  }
+
+  // System-optimized scanner callback - zero overhead
+  const handleCodeScanned = useCallback(
+    (codes: any[]) => {
+      if (!isScanning || isProcessing || codes.length === 0) return
+
+      const code = codes[0]
+      if (!code.value) return
+
+      // DEBOUNCE: Ignore if same code was just scanned
+      if (lastScannedCode.current === code.value) return
+      lastScannedCode.current = code.value
+
+      // STOP scanning immediately to prevent spam
+      setIsScanning(false)
+      setIsProcessing(true)
+
+      // Immediate haptic + beep
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+      playSuccessBeep()
+
+      // Process instantly
+      handleBarcodeScan(code.value!)
+    },
+    [isScanning, isProcessing, onScanComplete]
+  )
+
+  const codeScanner = useCodeScanner({
+    codeTypes: ['pdf-417'],
+    onCodeScanned: handleCodeScanned,
+  })
+
+  // ========================================
+  // CAMERA FOCUS
+  // ========================================
+  const handleCameraPress = useCallback((event: any, cameraRef: React.RefObject<Camera | null>) => {
+    if (!cameraActive || isProcessing || parsedData) return
+
+    const { locationX, locationY } = event.nativeEvent
+
+    // Set focus point for visual feedback
+    setFocusPoint({ x: locationX, y: locationY })
+
+    // Haptic feedback
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+
+    // Focus camera at point
+    if (cameraRef.current) {
+      cameraRef.current.focus({ x: locationX, y: locationY })
+    }
+
+    // Clear focus point after animation
+    setTimeout(() => {
+      setFocusPoint(null)
+    }, 800)
+  }, [cameraActive, isProcessing, parsedData])
+
+  // ========================================
+  // CAMERA LIFECYCLE
+  // ========================================
+  const resetScanner = () => {
+    // Step 1: Unmount camera
+    setCameraActive(false)
+
+    // Step 2: Reset all state
+    lastScannedCode.current = null
+    setParsedData(null)
+    setIsProcessing(false)
+
+    // Step 3: Remount camera after brief delay for clean reset
+    setTimeout(() => {
+      setCameraKey((prev) => prev + 1)
+      setCameraActive(true)
+      setIsScanning(true)
+    }, 50)
+  }
+
+  const resetAll = () => {
+    setCameraActive(true)
+    setIsScanning(true)
+    setIsProcessing(false)
+    setScanMessage('')
+    setParsedData(null)
+    lastScannedCode.current = null
+    setFocusPoint(null)
+  }
+
+  return {
+    // State
+    hasPermission,
+    isScanning,
+    isProcessing,
+    cameraActive,
+    scanMessage,
+    parsedData,
+    cameraKey,
+    focusPoint,
+    codeScanner,
+
+    // Actions
+    resetScanner,
+    resetAll,
+    handleCameraPress,
+    setScanMessage,
+    setParsedData,
+  }
+}

@@ -209,10 +209,10 @@ export function AuditsView({ onCreatePress, headerOpacity, vendorLogo, selectedL
   return (
     <ScrollView
       style={styles.content}
-      contentContainerStyle={{ paddingTop: 100, paddingBottom: layout.dockHeight, paddingRight: layout.containerMargin }}
+      contentContainerStyle={{ paddingTop: layout.contentStartTop, paddingBottom: layout.dockHeight, paddingRight: 0 }}
       showsVerticalScrollIndicator={true}
       indicatorStyle="white"
-      scrollIndicatorInsets={{ right: 2, top: 100, bottom: layout.dockHeight }}
+      scrollIndicatorInsets={{ right: 2, top: layout.contentStartTop, bottom: layout.dockHeight }}
       onScroll={(e) => {
         const offsetY = e.nativeEvent.contentOffset.y
         const threshold = 40

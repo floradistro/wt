@@ -234,7 +234,7 @@ function POSRegisterSelector({
         const session = sessionsData?.find(s => s.register_id === register.id)
 
         if (session) {
-          const user = session.users as any
+          const user = session.users as { first_name: string; last_name: string } | null
           const userName = user ? `${user.first_name} ${user.last_name}`.trim() : 'Unknown User'
 
           return {

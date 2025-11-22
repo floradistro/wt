@@ -18,7 +18,6 @@ export { POSModal } from './POSModal'
 // Payment
 export { default as POSPaymentModal } from './POSPaymentModal'
 export { PaymentProcessorStatus } from './PaymentProcessorStatus'
-export { default as POSSaleSuccessModal } from './POSSaleSuccessModal'
 
 // Products (Legacy - maintained for grid compatibility)
 export { POSProductCard } from './POSProductCard'

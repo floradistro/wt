@@ -117,7 +117,7 @@ export function CategoryModal({
   }
 
   // Get available parent categories (excluding self and children in edit mode)
-  const availableParents = categories.filter(c => {
+  const availableParents = (categories || []).filter(c => {
     if (!isEditMode) return true
     // Can't select self or own children as parent
     return c.id !== category.id && c.parent_id !== category.id

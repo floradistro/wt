@@ -56,6 +56,7 @@ export async function getCustomerLoyaltyBalance(customerId: string): Promise<num
     .from('customers')
     .select('loyalty_points')
     .eq('id', customerId)
+    .eq('is_active', true) // Only lookup active customers
     .single()
 
   if (error) {

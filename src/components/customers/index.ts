@@ -4,3 +4,5 @@
  */
 
 export { EditCustomerModal } from './EditCustomerModal'
+export * from './list'
+export * from './detail'

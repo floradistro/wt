@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import type { LoyaltyProgram, Customer } from '@/types/pos'
 import { loyaltyService } from '@/services'
 import { logger } from '@/utils/logger'
+import { supabase } from '@/lib/supabase/client'
 
 export function useLoyalty(vendorId: string | null, selectedCustomer: Customer | null) {
   const [loyaltyProgram, setLoyaltyProgram] = useState<LoyaltyProgram | null>(null)
@@ -10,23 +11,54 @@ export function useLoyalty(vendorId: string | null, selectedCustomer: Customer |
   /**
    * Load loyalty program settings from Supabase
    */
-  useEffect(() => {
-    const loadLoyaltyProgram = async () => {
-      if (!vendorId) {
-        return
-      }
-
-      try {
-        const program = await loyaltyService.getLoyaltyProgram(vendorId)
-        setLoyaltyProgram(program)
-      } catch (error) {
-        // Silently fail - loyalty is optional
-        logger.error('Failed to load loyalty program:', error)
-      }
+  const loadLoyaltyProgram = useCallback(async () => {
+    if (!vendorId) {
+      return
     }
 
-    loadLoyaltyProgram()
+    try {
+      const program = await loyaltyService.getLoyaltyProgram(vendorId)
+      setLoyaltyProgram(program)
+    } catch (error) {
+      // Silently fail - loyalty is optional
+      logger.error('Failed to load loyalty program:', error)
+    }
   }, [vendorId])
+
+  useEffect(() => {
+    loadLoyaltyProgram()
+  }, [loadLoyaltyProgram])
+
+  // Real-time subscription for instant updates
+  useEffect(() => {
+    if (!vendorId) return
+
+    logger.debug('[useLoyalty] Setting up real-time subscription')
+
+    // Subscribe to loyalty_programs changes
+    const channel = supabase
+      .channel('loyalty-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*', // Listen to INSERT, UPDATE, DELETE
+          schema: 'public',
+          table: 'loyalty_programs',
+          filter: `vendor_id=eq.${vendorId}`,
+        },
+        (payload) => {
+          logger.debug('[useLoyalty] Real-time update:', payload)
+          // Reload loyalty program when any change occurs
+          loadLoyaltyProgram()
+        }
+      )
+      .subscribe()
+
+    return () => {
+      logger.debug('[useLoyalty] Cleaning up real-time subscription')
+      supabase.removeChannel(channel)
+    }
+  }, [vendorId, loadLoyaltyProgram])
 
   /**
    * Reset loyalty points when customer changes

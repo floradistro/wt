@@ -67,7 +67,7 @@ function POSSessionSetup({ user, onSessionReady }: POSSessionSetupProps) {
 
       if (userError || !userData) throw userError || new Error('User record not found')
 
-      const vendorData = userData.vendors as any
+      const vendorData = userData.vendors as Vendor
       // Set vendor without logo first for faster initial render
       setVendor({ ...vendorData, logo_url: null })
       setCustomUserId(userData.id)

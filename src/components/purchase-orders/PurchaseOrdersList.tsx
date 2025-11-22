@@ -147,8 +147,8 @@ export function PurchaseOrdersList({
       <ScrollView
         showsVerticalScrollIndicator={true}
         indicatorStyle="white"
-        scrollIndicatorInsets={{ right: 2, top: 100, bottom: layout.dockHeight }}
-        contentContainerStyle={{ paddingTop: 100, paddingBottom: layout.dockHeight, paddingRight: layout.containerMargin }}
+        scrollIndicatorInsets={{ right: 2, top: layout.contentStartTop, bottom: layout.dockHeight }}
+        contentContainerStyle={{ paddingTop: layout.contentStartTop, paddingBottom: layout.dockHeight, paddingRight: 0 }}
         onScroll={(e) => {
           const offsetY = e.nativeEvent.contentOffset.y
           const threshold = 40

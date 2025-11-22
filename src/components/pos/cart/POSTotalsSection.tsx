@@ -8,6 +8,8 @@ import { Button } from '@/theme'
 interface POSTotalsSectionProps {
   subtotal: number
   loyaltyDiscountAmount: number
+  discountAmount?: number
+  selectedDiscount?: any
   taxAmount: number
   taxRate: number
   total: number
@@ -23,6 +25,8 @@ interface POSTotalsSectionProps {
 function POSTotalsSection({
   subtotal,
   loyaltyDiscountAmount,
+  discountAmount = 0,
+  selectedDiscount,
   taxAmount,
   taxRate,
   total,
@@ -163,6 +167,16 @@ function POSTotalsSection({
             <Text style={[styles.totalLabel, styles.loyaltyLabel]}>Loyalty Discount</Text>
             <Text style={[styles.totalValue, styles.loyaltyValue]}>
               -${loyaltyDiscountAmount.toFixed(2)}
+            </Text>
+          </View>
+        )}
+
+        {/* Show discount if active */}
+        {discountAmount > 0 && selectedDiscount && (
+          <View style={styles.totalRow} accessible={false}>
+            <Text style={[styles.totalLabel, styles.loyaltyLabel]}>{selectedDiscount.name}</Text>
+            <Text style={[styles.totalValue, styles.loyaltyValue]}>
+              -${discountAmount.toFixed(2)}
             </Text>
           </View>
         )}

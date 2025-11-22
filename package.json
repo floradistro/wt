@@ -24,7 +24,8 @@
     "@expo/vector-icons": "^15.0.3",
     "@react-native-async-storage/async-storage": "^2.2.0",
     "@react-native-community/datetimepicker": "^8.4.4",
-    "@react-native-community/slider": "5.0.1",
+    "@react-native-community/slider": "^5.0.1",
+    "@react-native-picker/picker": "^2.11.1",
     "@sentry/react-native": "~7.2.0",
     "@shopify/react-native-skia": "2.2.12",
     "@supabase/supabase-js": "^2.81.1",
@@ -32,6 +33,7 @@
     "expo-av": "~16.0.7",
     "expo-blur": "~15.0.7",
     "expo-camera": "~17.0.9",
+    "expo-crypto": "~15.0.7",
     "expo-haptics": "~15.0.7",
     "expo-linear-gradient": "~15.0.7",
     "expo-splash-screen": "~31.0.11",
@@ -45,6 +47,8 @@
     "zustand": "^5.0.8"
   },
   "devDependencies": {
+    "@react-native-community/cli": "^20.0.2",
+    "@react-native/metro-config": "^0.82.1",
     "@testing-library/jest-native": "^5.4.3",
     "@testing-library/react-native": "^13.3.3",
     "@types/jest": "^30.0.0",

@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, TextInput, TouchableOpacity } from 'react-native'
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator } from 'react-native'
 import { memo, type ReactNode } from 'react'
 import { LiquidGlassView, isLiquidGlassSupported } from '@callstack/liquid-glass'
 import * as Haptics from 'expo-haptics'
@@ -11,6 +11,10 @@ interface POSSearchBarProps {
   onFilterPress: () => void
   onClearFilters: () => void
   children?: ReactNode
+  /** Show loading indicator while searching */
+  isSearching?: boolean
+  /** Placeholder text for search input */
+  placeholder?: string
 }
 
 function POSSearchBar({
@@ -20,7 +24,14 @@ function POSSearchBar({
   onFilterPress,
   onClearFilters,
   children,
+  isSearching = false,
+  placeholder = 'Search products...',
 }: POSSearchBarProps) {
+  const handleClearSearch = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    onSearchChange('')
+  }
+
   return (
     <View style={styles.searchHeaderFloating}>
       <View style={styles.unifiedSearchBar}>
@@ -95,17 +106,49 @@ function POSSearchBar({
             </LiquidGlassView>
           )}
 
+          {/* Search Icon - Left of input */}
+          <View style={styles.searchIconContainer}>
+            <View style={styles.searchIconCircle} />
+            <View style={styles.searchIconHandle} />
+          </View>
+
           {/* Search Input - Fills remaining space */}
           <TextInput
             style={styles.unifiedSearchInput}
-            placeholder="Search products..."
+            placeholder={placeholder}
             placeholderTextColor="rgba(255,255,255,0.3)"
             value={searchQuery}
             onChangeText={onSearchChange}
             accessibilityLabel="Search products"
             accessibilityHint="Type to filter products by name or category"
             accessibilityRole="search"
+            autoCapitalize="none"
+            autoCorrect={false}
+            clearButtonMode="never" // We'll handle clear button ourselves
           />
+
+          {/* Loading Indicator - Shows while searching */}
+          {isSearching && (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="small" color="rgba(255,255,255,0.6)" />
+            </View>
+          )}
+
+          {/* Clear Search Button - Shows when there's text */}
+          {searchQuery.length > 0 && !isSearching && (
+            <TouchableOpacity
+              onPress={handleClearSearch}
+              style={styles.clearSearchButton}
+              activeOpacity={0.6}
+              accessibilityRole="button"
+              accessibilityLabel="Clear search"
+              accessibilityHint="Remove search text"
+            >
+              <View style={styles.clearSearchIcon}>
+                <Text style={styles.clearSearchText}>×</Text>
+              </View>
+            </TouchableOpacity>
+          )}
         </LiquidGlassView>
       </View>
       {children}
@@ -119,9 +162,9 @@ export { POSSearchBarMemo as POSSearchBar }
 const styles = StyleSheet.create({
   searchHeaderFloating: {
     position: 'absolute',
-    top: layout.cardPadding,
-    left: 0, // No left padding - spacing comes from cart's marginRight
-    right: layout.containerMargin,
+    top: 8, // Ultra-minimal to match cart margins
+    left: 8, // Match product grid left padding
+    right: 8, // Ultra-minimal to match cart margins
     zIndex: 10,
   },
   unifiedSearchBar: {
@@ -212,8 +255,63 @@ const styles = StyleSheet.create({
     fontWeight: '400',
     color: '#fff',
     letterSpacing: -0.2,
-    paddingLeft: 12,
-    paddingRight: 20,
+    paddingLeft: 4,
+    paddingRight: 8,
     zIndex: 1,
+  },
+  // Search Icon (magnifying glass)
+  searchIconContainer: {
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 4,
+  },
+  searchIconCircle: {
+    width: 11,
+    height: 11,
+    borderRadius: 5.5,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.4)',
+  },
+  searchIconHandle: {
+    position: 'absolute',
+    width: 5,
+    height: 1.5,
+    backgroundColor: 'rgba(255,255,255,0.4)',
+    borderRadius: 1,
+    transform: [{ rotate: '45deg' }],
+    top: 19,
+    left: 20,
+  },
+  // Loading Indicator
+  loadingContainer: {
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 6,
+  },
+  // Clear Search Button
+  clearSearchButton: {
+    width: 24,
+    height: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  clearSearchIcon: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  clearSearchText: {
+    fontSize: 14,
+    fontWeight: '400',
+    color: 'rgba(255,255,255,0.7)',
+    marginTop: -2,
   },
 })

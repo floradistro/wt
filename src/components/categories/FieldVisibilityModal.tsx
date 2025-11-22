@@ -66,7 +66,12 @@ export function FieldVisibilityModal({
   onClose,
   onSaved,
 }: FieldVisibilityModalProps) {
-  const [config, setConfig] = useState<FieldVisibilityConfig>(initialConfig)
+  const [config, setConfig] = useState<FieldVisibilityConfig>(initialConfig || {
+    shop: true,
+    product_page: true,
+    pos: true,
+    tv_menu: true,
+  })
   const [saving, setSaving] = useState(false)
 
   const toggleContext = (key: keyof FieldVisibilityConfig) => {

@@ -125,99 +125,164 @@ export async function fetchInventoryAdjustments(
 
 /**
  * Create a new inventory adjustment and update inventory quantity
+ * Uses atomic database function to prevent race conditions and ensure consistency
  */
 export async function createInventoryAdjustment(
   vendorId: string,
   input: CreateAdjustmentInput
 ): Promise<{ data: InventoryAdjustment | null; error: any }> {
   try {
-    // First, get current inventory quantity
-    const { data: inventoryData, error: inventoryError } = await supabase
-      .from('inventory')
-      .select('quantity')
-      .eq('product_id', input.product_id)
-      .eq('location_id', input.location_id)
-      .single();
-
-    if (inventoryError) {
-      logger.error('Error fetching current inventory:', inventoryError);
-      return { data: null, error: inventoryError };
-    }
-
-    const currentQuantity = inventoryData?.quantity || 0;
-    const newQuantity = currentQuantity + input.quantity_change;
-
-    if (newQuantity < 0) {
-      const error = new Error('Adjustment would result in negative inventory');
-      logger.error('Invalid adjustment:', error);
-      return { data: null, error };
-    }
-
     // Get current user
     const { data: { user } } = await supabase.auth.getUser();
 
-    // Create the adjustment record
-    const { data: adjustmentData, error: adjustmentError } = await supabase
+    // Generate idempotency key for safe retries
+    const idempotencyKey = `adj-${input.product_id}-${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
+
+    // Call atomic database function
+    const { data: result, error: rpcError } = await supabase.rpc(
+      'process_inventory_adjustment',
+      {
+        p_vendor_id: vendorId,
+        p_product_id: input.product_id,
+        p_location_id: input.location_id,
+        p_adjustment_type: input.adjustment_type,
+        p_quantity_change: input.quantity_change,
+        p_reason: input.reason,
+        p_notes: input.notes || null,
+        p_reference_id: input.reference_id || null,
+        p_reference_type: input.reference_type || null,
+        p_created_by: user?.id || null,
+        p_idempotency_key: idempotencyKey,
+      }
+    );
+
+    if (rpcError) {
+      logger.error('Error creating adjustment:', rpcError);
+      return { data: null, error: rpcError };
+    }
+
+    if (!result || result.length === 0) {
+      const error = new Error('No result returned from adjustment function');
+      logger.error('Invalid adjustment result:', error);
+      return { data: null, error };
+    }
+
+    const adjustmentResult = result[0];
+
+    // Fetch the full adjustment record with joined data for UI
+    const { data: adjustmentData, error: fetchError } = await supabase
       .from('inventory_adjustments')
-      .insert({
-        vendor_id: vendorId,
-        product_id: input.product_id,
-        location_id: input.location_id,
-        adjustment_type: input.adjustment_type,
-        quantity_before: currentQuantity,
-        quantity_after: newQuantity,
-        quantity_change: input.quantity_change,
-        reason: input.reason,
-        notes: input.notes,
-        reference_id: input.reference_id,
-        reference_type: input.reference_type,
-        created_by: user?.id,
-      })
       .select(`
         *,
         product:products(id, name, sku),
         location:locations(id, name)
       `)
+      .eq('id', adjustmentResult.adjustment_id)
       .single();
 
-    if (adjustmentError) {
-      logger.error('Error creating adjustment:', adjustmentError);
-      return { data: null, error: adjustmentError };
+    if (fetchError) {
+      logger.error('Error fetching adjustment details:', fetchError);
+      return { data: null, error: fetchError };
     }
 
-    // Update inventory quantity (available_quantity is a generated column)
-    const { error: updateError } = await supabase
-      .from('inventory')
-      .update({
-        quantity: newQuantity
-      })
-      .eq('product_id', input.product_id)
-      .eq('location_id', input.location_id);
+    logger.info('Inventory adjustment created successfully:', adjustmentResult.adjustment_id, {
+      quantity_before: adjustmentResult.quantity_before,
+      quantity_after: adjustmentResult.quantity_after,
+      product_total_stock: adjustmentResult.product_total_stock,
+    });
 
-    if (updateError) {
-      logger.error('Error updating inventory:', updateError);
-      return { data: null, error: updateError };
-    }
-
-    // Also update product total_stock if exists
-    const { data: allInventory } = await supabase
-      .from('inventory')
-      .select('quantity')
-      .eq('product_id', input.product_id);
-
-    if (allInventory) {
-      const totalStock = allInventory.reduce((sum, inv) => sum + (inv.quantity || 0), 0);
-      await supabase
-        .from('products')
-        .update({ stock_quantity: totalStock })
-        .eq('id', input.product_id);
-    }
-
-    logger.info('Inventory adjustment created successfully:', adjustmentData.id);
     return { data: adjustmentData as InventoryAdjustment, error: null };
   } catch (error) {
     logger.error('Error in createInventoryAdjustment:', error);
     return { data: null, error };
+  }
+}
+
+/**
+ * Create multiple inventory adjustments atomically in a single transaction
+ * Much faster than creating adjustments one by one - perfect for audits
+ */
+export async function createBulkInventoryAdjustments(
+  vendorId: string,
+  adjustments: CreateAdjustmentInput[],
+  batchIdempotencyKey?: string
+) {
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+
+    // Generate batch idempotency key if not provided
+    const idempotencyKey = batchIdempotencyKey || `bulk-${vendorId}-${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
+
+    // Format adjustments for the bulk function
+    const formattedAdjustments = adjustments.map(adj => ({
+      product_id: adj.product_id,
+      location_id: adj.location_id,
+      adjustment_type: adj.adjustment_type,
+      quantity_change: adj.quantity_change,
+      reason: adj.reason,
+      notes: adj.notes || null,
+      idempotency_key: `${idempotencyKey}-${adj.product_id}-${adj.location_id}`,
+    }));
+
+    logger.info('Creating bulk inventory adjustments', {
+      count: adjustments.length,
+      batchId: idempotencyKey,
+    });
+
+    // Call bulk RPC function
+    const { data: results, error: rpcError } = await supabase.rpc(
+      'process_bulk_inventory_adjustments',
+      {
+        p_vendor_id: vendorId,
+        p_adjustments: formattedAdjustments, // Don't stringify - let PostgREST handle JSON conversion
+        p_idempotency_key: idempotencyKey,
+      }
+    );
+
+    if (rpcError) {
+      logger.error('Error in bulk adjustment RPC:', rpcError);
+      logger.error('RPC Error Details:', JSON.stringify({
+        message: rpcError.message,
+        code: rpcError.code,
+        details: rpcError.details,
+        hint: rpcError.hint,
+      }, null, 2));
+      return { data: null, error: rpcError, results: [] };
+    }
+
+    // Count successes and failures
+    const successCount = results?.filter((r: any) => r.success).length || 0;
+    const failureCount = results?.filter((r: any) => !r.success).length || 0;
+    const failures = results?.filter((r: any) => !r.success) || [];
+
+    logger.info('Bulk inventory adjustments completed', {
+      total: adjustments.length,
+      succeeded: successCount,
+      failed: failureCount,
+      batchId: idempotencyKey,
+    });
+
+    // Log individual failures for debugging
+    if (failures.length > 0) {
+      logger.error('Bulk adjustment failures:', JSON.stringify(failures.map((f: any) => ({
+        product_id: f.product_id,
+        error: f.error_message,
+      })), null, 2));
+    }
+
+    return {
+      data: {
+        batchId: idempotencyKey,
+        total: adjustments.length,
+        succeeded: successCount,
+        failed: failureCount,
+      },
+      error: null,
+      results: results || [],
+    };
+  } catch (error) {
+    logger.error('Error in createBulkInventoryAdjustments:', error);
+    return { data: null, error, results: [] };
   }
 }
 

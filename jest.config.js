@@ -1,6 +1,6 @@
 module.exports = {
-  preset: 'react-native',
   setupFilesAfterEnv: ['@testing-library/jest-native/extend-expect'],
+  setupFiles: ['./jest.setup.js'],
   transformIgnorePatterns: [
     'node_modules/(?!(react-native|@react-native|expo|@expo|@callstack|@supabase|zustand)/)',
   ],
@@ -16,4 +16,5 @@ module.exports = {
     '!src/**/*.d.ts',
     '!src/**/*.stories.{ts,tsx}',
   ],
+  testEnvironment: 'node',
 }

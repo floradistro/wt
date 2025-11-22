@@ -330,7 +330,7 @@ const styles = StyleSheet.create({
   },
   exactMatchCard: {
     borderRadius: radius.lg,
-    borderCurve: 'continuous' as any,
+    borderCurve: 'continuous',
     padding: spacing.xxxl,
     overflow: 'hidden',
     alignItems: 'center',
@@ -417,7 +417,7 @@ const styles = StyleSheet.create({
   },
   matchCard: {
     borderRadius: radius.lg,
-    borderCurve: 'continuous' as any,
+    borderCurve: 'continuous',
     overflow: 'hidden',
   },
   matchCardFallback: {
@@ -480,7 +480,7 @@ const styles = StyleSheet.create({
   actionButton: {
     flex: 1,
     borderRadius: radius.lg,
-    borderCurve: 'continuous' as any,
+    borderCurve: 'continuous',
     overflow: 'hidden',
   },
   actionButtonFallback: {

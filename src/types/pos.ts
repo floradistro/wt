@@ -9,6 +9,15 @@ export interface Vendor {
   logo_url: string | null
 }
 
+export interface User {
+  id: string
+  first_name: string
+  last_name: string
+  email: string
+  role?: string
+  vendors?: Vendor | Vendor[]
+}
+
 export interface Customer {
   id: string
   first_name: string
@@ -87,6 +96,11 @@ export interface CartItem {
   productId: string
   inventoryId: string
   availableInventory?: number // STEVE JOBS: Track inventory to prevent overselling
+  // Product identification fields
+  sku?: string
+  productSku?: string
+  tierName?: string
+  tier?: string
   // Staff discount fields
   manualDiscountType?: 'percentage' | 'amount'
   manualDiscountValue?: number

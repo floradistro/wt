@@ -286,91 +286,79 @@ export async function createPurchaseOrder(
       }
     }
 
-    // Extract items, tax, shipping from params (to avoid inserting old column names)
+    // Extract items, tax, shipping from params
     const { items, tax, shipping, ...poData } = params
 
-    // Calculate totals
-    const subtotal = items.reduce((sum, item) => sum + item.quantity * item.unit_price, 0)
     const taxAmount = tax || 0
     const shippingCost = shipping || 0
-    const total = subtotal + taxAmount + shippingCost
 
-    const poNumber = await generatePONumber()
+    // Generate idempotency key for safe retries
+    const idempotencyKey = `po-${vendorId}-${Date.now()}-${Math.random().toString(36).substring(2, 15)}`
 
-    const insertData = {
-      ...poData,
-      vendor_id: vendorId,
-      po_number: poNumber,
-      status: 'draft' as const,
-      subtotal,
-      tax_amount: taxAmount,
-      shipping_cost: shippingCost,
-      total_amount: total,
-    }
+    const itemsJson = JSON.stringify(items)
 
     logger.info('Creating purchase order', {
       poType: params.po_type,
       itemCount: items.length,
-      total,
-      poNumber,
+      idempotencyKey,
+      itemsJson, // Log the JSON being sent
     })
 
     // Set Sentry context
     logger.setContext('purchase_order_create', {
       po_type: params.po_type,
       item_count: items.length,
-      total_amount: total,
     })
 
-    // 1. Create the purchase order
-    const { data: po, error: poError } = await supabase
-      .from('purchase_orders')
-      .insert(insertData)
-      .select()
-      .single()
+    // Call atomic database function to create PO + items in single transaction
+    const { data: result, error: rpcError } = await supabase.rpc('create_purchase_order_atomic', {
+      p_vendor_id: vendorId,
+      p_po_type: params.po_type,
+      p_items: itemsJson, // Function accepts TEXT and parses as JSONB internally
+      p_supplier_id: params.supplier_id || null,
+      p_wholesale_customer_id: params.wholesale_customer_id || null,
+      p_location_id: params.location_id || null,
+      p_expected_delivery_date: params.expected_delivery_date || null,
+      p_notes: params.notes || null,
+      p_tax_amount: taxAmount,
+      p_shipping_cost: shippingCost,
+      p_idempotency_key: idempotencyKey,
+    })
 
-    if (poError) {
+    if (rpcError) {
       logger.error('Failed to create purchase order', {
-        error: poError,
-        errorMessage: poError.message,
-        errorDetails: poError.details,
-        errorHint: poError.hint,
-        errorCode: poError.code,
+        error: rpcError,
+        errorMessage: rpcError.message,
+        errorDetails: rpcError.details,
+        errorHint: rpcError.hint,
+        errorCode: rpcError.code,
       })
-      throw new Error(`Failed to create purchase order: ${poError.message}`)
+      throw new Error(`Failed to create purchase order: ${rpcError.message}`)
     }
 
-    logger.info('Purchase order created', { poId: po.id, poNumber: po.po_number })
+    if (!result || result.length === 0) {
+      throw new Error('No result returned from PO creation function')
+    }
 
-    // 2. Create purchase order items
-    if (items.length > 0) {
-      const poItems = items.map((item) => ({
-        purchase_order_id: po.id,
-        product_id: item.product_id,
-        quantity: item.quantity,
-        received_quantity: 0,
-        unit_price: item.unit_price,
-        subtotal: item.quantity * item.unit_price,
-      }))
+    const poResult = result[0]
 
-      const { error: itemsError } = await supabase.from('purchase_order_items').insert(poItems)
+    logger.info('Purchase order created atomically', {
+      poId: poResult.po_id,
+      poNumber: poResult.po_number,
+      itemsCreated: poResult.items_created,
+      total: poResult.total_amount,
+    })
 
-      if (itemsError) {
-        // Rollback: delete the PO
-        logger.warn('Rolling back PO creation due to item insert failure', { poId: po.id })
-        await supabase.from('purchase_orders').delete().eq('id', po.id)
+    // Fetch the full PO record with joined data for return
+    const { data: po, error: fetchError } = await supabase
+      .from('purchase_orders')
+      .select()
+      .eq('id', poResult.po_id)
+      .single()
 
-        logger.error('Failed to create purchase order items', {
-          error: itemsError,
-          errorMessage: itemsError.message,
-          errorDetails: itemsError.details,
-          errorHint: itemsError.hint,
-          errorCode: itemsError.code,
-        })
-        throw new Error(`Failed to create purchase order items: ${itemsError.message}`)
-      }
-
-      logger.info('Purchase order items created', { poId: po.id, itemCount: items.length })
+    if (fetchError) {
+      logger.error('Failed to fetch created purchase order', { error: fetchError })
+      throw new Error(`Failed to fetch purchase order: ${fetchError.message}`)
     }
 
     span.finish()

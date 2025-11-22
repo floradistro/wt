@@ -21,7 +21,8 @@ interface AdjustInventoryModalProps {
   locationId?: string
   locationName?: string
   onClose: () => void
-  onAdjusted: () => void
+  onAdjusted: (result?: { quantity_after: number; product_total_stock: number }) => void
+  onLocationChange?: (locationId: string, locationName: string) => void
 }
 
 const ADJUSTMENT_TYPES: { value: AdjustmentType; label: string; description: string; quickReasons: string[] }[] = [
@@ -78,22 +79,33 @@ const ADJUSTMENT_TYPES: { value: AdjustmentType; label: string; description: str
 export function AdjustInventoryModal({
   visible,
   product,
-  locationId,
-  locationName,
+  locationId: initialLocationId,
+  locationName: initialLocationName,
   onClose,
   onAdjusted,
+  onLocationChange,
 }: AdjustInventoryModalProps) {
-  const { createAdjustment } = useProductAdjustments(product?.id, locationId)
+  const [selectedLocationId, setSelectedLocationId] = useState(initialLocationId)
+  const [selectedLocationName, setSelectedLocationName] = useState(initialLocationName)
+
+  const { createAdjustment } = useProductAdjustments(product?.id, selectedLocationId)
   const [adjustmentType, setAdjustmentType] = useState<AdjustmentType>('count_correction')
   const [quantityChange, setQuantityChange] = useState('')
   const [reason, setReason] = useState('')
   const [notes, setNotes] = useState('')
   const [saving, setSaving] = useState(false)
   const [showTypePicker, setShowTypePicker] = useState(false)
+  const [showLocationPicker, setShowLocationPicker] = useState(false)
   const [showCustomReason, setShowCustomReason] = useState(false)
 
+  // Sync local state with props
+  useEffect(() => {
+    setSelectedLocationId(initialLocationId)
+    setSelectedLocationName(initialLocationName)
+  }, [initialLocationId, initialLocationName])
+
   // Get current inventory for this location
-  const currentInventory = product?.inventory?.find(inv => inv.location_id === locationId)
+  const currentInventory = product?.inventory?.find(inv => inv.location_id === selectedLocationId)
   const currentQuantity = currentInventory?.quantity || 0
 
   // Calculate new quantity
@@ -108,6 +120,7 @@ export function AdjustInventoryModal({
       setReason('')
       setNotes('')
       setShowCustomReason(false)
+      setShowLocationPicker(false)
     }
   }, [visible])
 
@@ -143,7 +156,7 @@ export function AdjustInventoryModal({
   }
 
   const handleSave = async () => {
-    if (!product || !locationId) {
+    if (!product || !selectedLocationId) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
       return
     }
@@ -162,9 +175,9 @@ export function AdjustInventoryModal({
       setSaving(true)
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy)
 
-      await createAdjustment({
+      const result = await createAdjustment({
         product_id: product.id,
-        location_id: locationId,
+        location_id: selectedLocationId,
         adjustment_type: adjustmentType,
         quantity_change: quantityChangeNum,
         reason: reason.trim(),
@@ -172,13 +185,29 @@ export function AdjustInventoryModal({
       })
 
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
-      onAdjusted()
+
+      // Pass result back for optimistic UI update
+      onAdjusted(result ? {
+        quantity_after: result.quantity_after,
+        product_total_stock: result.product_total_stock
+      } : undefined)
+
       onClose()
     } catch (error) {
       logger.error('Failed to create adjustment', { error })
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
     } finally {
       setSaving(false)
+    }
+  }
+
+  const handleLocationChange = (invLocationId: string, invLocationName: string) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    setSelectedLocationId(invLocationId)
+    setSelectedLocationName(invLocationName)
+    setShowLocationPicker(false)
+    if (onLocationChange) {
+      onLocationChange(invLocationId, invLocationName)
     }
   }
 
@@ -224,11 +253,50 @@ export function AdjustInventoryModal({
               <View style={styles.card}>
                 <Text style={styles.productName}>{product?.name || 'Unknown'}</Text>
                 <Text style={styles.productSKU}>{product?.sku || 'No SKU'}</Text>
-                {locationName && (
-                  <Text style={styles.productLocation}>Location: {locationName}</Text>
-                )}
               </View>
             </View>
+
+            {/* Location Picker */}
+            {product?.inventory && product.inventory.length > 1 && (
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>LOCATION</Text>
+                <Pressable
+                  style={styles.picker}
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                    setShowLocationPicker(!showLocationPicker)
+                  }}
+                >
+                  <View>
+                    <Text style={styles.pickerLabel}>{selectedLocationName || 'Select Location'}</Text>
+                    <Text style={styles.pickerDescription}>Current: {currentQuantity}g in stock</Text>
+                  </View>
+                  <Text style={styles.chevron}>{showLocationPicker ? 'v' : '>'}</Text>
+                </Pressable>
+
+                {showLocationPicker && (
+                  <View style={styles.pickerOptions}>
+                    {product.inventory.map((inv, index) => (
+                      <Pressable
+                        key={inv.location_id}
+                        style={[
+                          styles.pickerOption,
+                          selectedLocationId === inv.location_id && styles.pickerOptionSelected,
+                          index === product.inventory!.length - 1 && styles.pickerOptionLast,
+                        ]}
+                        onPress={() => handleLocationChange(inv.location_id, inv.location_name)}
+                      >
+                        <View>
+                          <Text style={styles.pickerOptionLabel}>{inv.location_name}</Text>
+                          <Text style={styles.pickerOptionDescription}>{inv.quantity || 0}g in stock</Text>
+                        </View>
+                        {selectedLocationId === inv.location_id && <Text style={styles.checkmark}>✓</Text>}
+                      </Pressable>
+                    ))}
+                  </View>
+                )}
+              </View>
+            )}
 
             {/* Current & New Stock */}
             <View style={styles.section}>

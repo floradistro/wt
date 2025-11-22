@@ -1,8 +1,28 @@
 import { useState, useCallback, useMemo } from 'react'
 import * as Haptics from 'expo-haptics'
 import type { CartItem, Product, PricingTier } from '@/types/pos'
+import { logger } from '@/utils/logger'
 
-export function useCart() {
+export interface UseCartReturn {
+  // State
+  cart: CartItem[]
+  discountingItemId: string | null
+
+  // Actions
+  addToCart: (product: Product, tier?: PricingTier) => void
+  updateQuantity: (productId: string, delta: number) => void
+  changeTier: (oldItemId: string, product: Product, newTier: PricingTier) => void
+  applyManualDiscount: (itemId: string, discountAmount: number) => void
+  removeManualDiscount: (itemId: string) => void
+  clearCart: () => void
+  setDiscountingItemId: (itemId: string | null) => void
+
+  // Computed
+  subtotal: number
+  itemCount: number
+}
+
+export function useCart(): UseCartReturn {
   const [cart, setCart] = useState<CartItem[]>([])
   const [discountingItemId, setDiscountingItemId] = useState<string | null>(null)
 
@@ -25,7 +45,11 @@ export function useCart() {
       if (existing) {
         // Would this addition exceed inventory?
         if (existing.quantity + 1 > availableInventory) {
-          console.log(`⚠️ Cannot add more ${product.name} - only ${availableInventory} in stock, already have ${existing.quantity} in cart`)
+          logger.warn('Cannot add more to cart - inventory limit', {
+            product: product.name,
+            availableInventory,
+            currentQuantity: existing.quantity
+          })
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning)
           return prevCart // Don't add, return cart unchanged
         }
@@ -36,7 +60,7 @@ export function useCart() {
 
       // New item - check if we have at least 1 in stock
       if (availableInventory < 1) {
-        console.log(`⚠️ Cannot add ${product.name} - out of stock`)
+        logger.warn('Cannot add product - out of stock', { product: product.name })
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning)
         return prevCart // Don't add
       }
@@ -72,7 +96,10 @@ export function useCart() {
             // STEVE JOBS: Check inventory when increasing quantity
             if (delta > 0 && item.availableInventory !== undefined) {
               if (newQuantity > item.availableInventory) {
-                console.log(`⚠️ Cannot increase quantity - only ${item.availableInventory} available`)
+                logger.warn('Cannot increase quantity - inventory limit', {
+                  item: item.name,
+                  availableInventory: item.availableInventory
+                })
                 Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning)
                 return item // Don't change quantity
               }

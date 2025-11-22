@@ -205,10 +205,10 @@ const styles = StyleSheet.create({
   },
   cartContainer: {
     flex: 1,
-    marginLeft: 8, // Ultra-minimal iOS-style left padding (same as NavSidebar)
-    marginRight: layout.containerMargin,
-    marginTop: layout.containerMargin,
-    marginBottom: layout.containerMargin,
+    marginLeft: 8, // Ultra-minimal iOS-style padding
+    marginRight: 8, // Match left - ultra-minimal
+    marginTop: 8, // Match left - ultra-minimal
+    marginBottom: 8, // Match left - ultra-minimal
     borderRadius: layout.containerRadius,
     borderCurve: 'continuous',
     overflow: 'hidden',

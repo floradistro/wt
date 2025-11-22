@@ -136,6 +136,7 @@ export function useInventoryAdjustments(filters?: AdjustmentFilters) {
     loading,
     error,
     stats,
+    vendorId,
     loadAdjustments,
     loadStats,
     createAdjustment,

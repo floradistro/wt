@@ -6,6 +6,8 @@
  */
 
 import { supabase } from '@/lib/supabase/client'
+import * as Crypto from 'expo-crypto'
+import { logger } from '@/utils/logger'
 
 export interface Product {
   id: string
@@ -267,6 +269,151 @@ export async function getLowStockProducts(
   return data || []
 }
 
+// ============================================================================
+// ATOMIC PRODUCT CREATION (Apple-Quality Implementation)
+// ============================================================================
+
+export interface CreateProductParams {
+  vendor_id: string
+  name: string
+  category_id: string
+  pricing_data: any
+  sku?: string
+  description?: string
+  type?: 'simple' | 'variable'
+  status?: 'published' | 'draft'
+  stock_status?: 'instock' | 'outofstock' | 'onbackorder'
+  featured?: boolean
+  initial_inventory?: Array<{
+    location_id: string
+    quantity: number
+  }>
+}
+
+export interface CreateProductResult {
+  product_id: string
+  product_name: string
+  slug: string
+  inventory_created: number
+}
+
+export interface CreateProductsBulkParams {
+  vendor_id: string
+  products: Array<{
+    name: string
+    sku?: string
+    description?: string
+    type?: string
+    status?: string
+    stock_status?: string
+    featured?: boolean
+  }>
+  category_id: string
+  pricing_data: any
+}
+
+export interface CreateProductsBulkResult {
+  products_created: number
+  products_skipped: number
+  product_ids: string[]
+}
+
+/**
+ * Create a single product atomically with idempotency
+ *
+ * Features:
+ * - Idempotent (safe retries)
+ * - Automatic unique slug generation
+ * - Optional initial inventory creation
+ * - All-or-nothing transaction
+ */
+export async function createProduct(
+  params: CreateProductParams
+): Promise<CreateProductResult> {
+  const idempotencyKey = `product-${Crypto.randomUUID()}`
+
+  const { data, error: rpcError } = await supabase.rpc('create_product_atomic', {
+    p_vendor_id: params.vendor_id,
+    p_name: params.name,
+    p_category_id: params.category_id,
+    p_pricing_data: params.pricing_data,
+    p_sku: params.sku || null,
+    p_description: params.description || null,
+    p_type: params.type || 'simple',
+    p_status: params.status || 'published',
+    p_stock_status: params.stock_status || 'instock',
+    p_featured: params.featured || false,
+    p_initial_inventory: params.initial_inventory
+      ? JSON.stringify(params.initial_inventory)
+      : null,
+    p_idempotency_key: idempotencyKey,
+  })
+
+  if (rpcError) {
+    logger.error('Failed to create product', { error: rpcError.message, productName: params.name })
+    throw new Error(rpcError.message || 'Failed to create product')
+  }
+
+  if (!data || data.length === 0) {
+    throw new Error('No data returned from product creation')
+  }
+
+  const result = data[0] as CreateProductResult
+  logger.info('Product created successfully', {
+    productId: result.product_id,
+    name: result.product_name,
+    slug: result.slug,
+    inventoryCreated: result.inventory_created,
+  })
+
+  return result
+}
+
+/**
+ * Create multiple products atomically in a single transaction
+ *
+ * Features:
+ * - Idempotent batch creation (safe retries)
+ * - Skips duplicates based on product name
+ * - All-or-nothing operation
+ * - Automatic slug generation for each product
+ */
+export async function createProductsBulk(
+  params: CreateProductsBulkParams
+): Promise<CreateProductsBulkResult> {
+  const idempotencyKey = `products-bulk-${Crypto.randomUUID()}`
+  const productsJson = JSON.stringify(params.products)
+
+  const { data, error: rpcError } = await supabase.rpc('create_products_bulk', {
+    p_vendor_id: params.vendor_id,
+    p_products: productsJson,
+    p_category_id: params.category_id,
+    p_pricing_data: params.pricing_data,
+    p_idempotency_key: idempotencyKey,
+  })
+
+  if (rpcError) {
+    logger.error('Failed to create products in bulk', {
+      error: rpcError.message,
+      productCount: params.products.length,
+    })
+    throw new Error(rpcError.message || 'Failed to create products in bulk')
+  }
+
+  if (!data || data.length === 0) {
+    throw new Error('No data returned from bulk product creation')
+  }
+
+  const result = data[0] as CreateProductsBulkResult
+  logger.info('Products created successfully in bulk', {
+    created: result.products_created,
+    skipped: result.products_skipped,
+    productIds: result.product_ids,
+  })
+
+  return result
+}
+
 /**
  * Export service object
  */
@@ -281,4 +428,6 @@ export const productsService = {
   getProductInventory,
   checkInventoryAvailability,
   getLowStockProducts,
+  createProduct,
+  createProductsBulk,
 }

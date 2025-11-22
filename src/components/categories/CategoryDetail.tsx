@@ -90,7 +90,7 @@ export function CategoryDetail({
   return (
     <ScrollView
       style={styles.detail}
-      contentContainerStyle={{ paddingBottom: layout.dockHeight, paddingRight: layout.containerMargin }}
+      contentContainerStyle={{ paddingBottom: layout.dockHeight, paddingRight: 0 }}
       showsVerticalScrollIndicator={true}
       indicatorStyle="white"
       scrollIndicatorInsets={{ right: 2, bottom: layout.dockHeight }}

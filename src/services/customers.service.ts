@@ -7,6 +7,7 @@
 
 import { supabase } from '@/lib/supabase/client'
 import { normalizePhone, normalizeEmail } from '@/utils/data-normalization'
+import { logger } from '@/utils/logger'
 
 export interface Customer {
   id: string
@@ -36,16 +37,23 @@ export interface CustomerWithOrders extends Customer {
  * Get all customers
  * Smart search across ALL fields with NO LIMITS
  * Searches: first_name, last_name, middle_name, display_name, email, phone
+ * Only returns active customers by default (is_active = true)
  */
 export async function getCustomers(params?: {
   limit?: number
   searchTerm?: string
   vendorId?: string
+  includeInactive?: boolean
 }): Promise<Customer[]> {
   let query = supabase
     .from('customers')
     .select('*')
     .order('created_at', { ascending: false })
+
+  // Filter active customers only (unless explicitly requested)
+  if (!params?.includeInactive) {
+    query = query.eq('is_active', true)
+  }
 
   if (params?.vendorId) {
     query = query.eq('vendor_id', params.vendorId)
@@ -53,9 +61,25 @@ export async function getCustomers(params?: {
 
   if (params?.searchTerm) {
     const term = params.searchTerm.trim()
-    query = query.or(
-      `first_name.ilike.%${term}%,last_name.ilike.%${term}%,middle_name.ilike.%${term}%,display_name.ilike.%${term}%,email.ilike.%${term}%,phone.ilike.%${term}%`
-    )
+    // Normalize phone number for better search matching
+    const normalizedPhone = normalizePhone(term)
+
+    // Build search conditions
+    const searchConditions = [
+      `first_name.ilike.%${term}%`,
+      `last_name.ilike.%${term}%`,
+      `middle_name.ilike.%${term}%`,
+      `display_name.ilike.%${term}%`,
+      `email.ilike.%${term}%`,
+      `phone.ilike.%${term}%`,
+    ]
+
+    // Add normalized phone search if applicable
+    if (normalizedPhone && normalizedPhone !== term) {
+      searchConditions.push(`phone.ilike.%${normalizedPhone}%`)
+    }
+
+    query = query.or(searchConditions.join(','))
   }
 
   // Override Supabase default limit (1000) to get ALL customers from vendor
@@ -72,13 +96,20 @@ export async function getCustomers(params?: {
 
 /**
  * Get customer by ID
+ * Only returns active customers by default (is_active = true)
  */
-export async function getCustomerById(customerId: string): Promise<Customer> {
-  const { data, error } = await supabase
+export async function getCustomerById(customerId: string, includeInactive = false): Promise<Customer> {
+  let query = supabase
     .from('customers')
     .select('*')
     .eq('id', customerId)
-    .single()
+
+  // Filter active only unless explicitly requested
+  if (!includeInactive) {
+    query = query.eq('is_active', true)
+  }
+
+  const { data, error } = await query.single()
 
   if (error) {
     throw new Error(`Failed to fetch customer: ${error.message}`)
@@ -89,6 +120,7 @@ export async function getCustomerById(customerId: string): Promise<Customer> {
 
 /**
  * Get customer by phone number (for POS lookup)
+ * Only returns active customers (is_active = true)
  */
 export async function getCustomerByPhone(phone: string, vendorId?: string): Promise<Customer | null> {
   // Normalize phone number using centralized utility
@@ -99,6 +131,7 @@ export async function getCustomerByPhone(phone: string, vendorId?: string): Prom
     .from('customers')
     .select('*')
     .eq('phone', normalized)
+    .eq('is_active', true) // Only active customers
 
   if (vendorId) {
     query = query.eq('vendor_id', vendorId)
@@ -119,12 +152,14 @@ export async function getCustomerByPhone(phone: string, vendorId?: string): Prom
 
 /**
  * Get customer by email
+ * Only returns active customers (is_active = true)
  */
 export async function getCustomerByEmail(email: string, vendorId?: string): Promise<Customer | null> {
   let query = supabase
     .from('customers')
     .select('*')
     .eq('email', email.toLowerCase())
+    .eq('is_active', true) // Only active customers
 
   if (vendorId) {
     query = query.eq('vendor_id', vendorId)
@@ -143,10 +178,11 @@ export async function getCustomerByEmail(email: string, vendorId?: string): Prom
 }
 
 /**
- * Search customers (for POS)
+ * Search customers (for POS and Customer Screen)
  * Smart search across ALL fields with NO LIMITS
  * Searches: first_name, last_name, middle_name, display_name, email, phone
  * Phone numbers are normalized (formatting removed) for better matching
+ * Only returns active customers (is_active = true)
  */
 export async function searchCustomers(
   searchTerm: string,
@@ -154,31 +190,40 @@ export async function searchCustomers(
   vendorId?: string
 ): Promise<Customer[]> {
   const term = searchTerm.trim()
+  if (!term) return []
 
   // Normalize phone numbers using centralized utility
-  const normalizedPhone = normalizePhone(term) || term
-  const isPhoneSearch = /^\d+$/.test(normalizedPhone) && normalizedPhone.length >= 3
+  const normalizedPhone = normalizePhone(term)
+  const isPhoneSearch = /^\d+$/.test(normalizedPhone || term) && (normalizedPhone?.length || term.length) >= 3
 
-  let searchConditions = `first_name.ilike.%${term}%,last_name.ilike.%${term}%,middle_name.ilike.%${term}%,display_name.ilike.%${term}%,email.ilike.%${term}%`
+  // Build comprehensive search conditions
+  const searchConditions = [
+    `first_name.ilike.%${term}%`,
+    `last_name.ilike.%${term}%`,
+    `middle_name.ilike.%${term}%`,
+    `display_name.ilike.%${term}%`,
+    `email.ilike.%${term}%`,
+  ]
 
   // Add phone search with normalized number for better matching
-  if (isPhoneSearch) {
-    searchConditions += `,phone.ilike.%${normalizedPhone}%`
+  if (isPhoneSearch && normalizedPhone) {
+    searchConditions.push(`phone.ilike.%${normalizedPhone}%`)
   } else {
-    searchConditions += `,phone.ilike.%${term}%`
+    searchConditions.push(`phone.ilike.%${term}%`)
   }
 
   let query = supabase
     .from('customers')
     .select('*')
+    .eq('is_active', true) // Only active customers
 
   if (vendorId) {
     query = query.eq('vendor_id', vendorId)
   }
 
   query = query
-    .or(searchConditions)
-    .order('created_at', { ascending: false })
+    .or(searchConditions.join(','))
+    .order('total_spent', { ascending: false }) // Sort by best customers first
     .limit(100000) // Very high limit to ensure we get ALL customers (Supabase default is only 1000)
 
   const { data, error } = await query
@@ -191,48 +236,111 @@ export async function searchCustomers(
 }
 
 /**
- * Create new customer
+ * Create new customer using atomic database function
+ * Features:
+ * - Idempotency (retry-safe)
+ * - Duplicate detection (checks email/phone)
+ * - Automatic walk-in email generation
+ * - Data normalization at DB level
+ * - Race condition protection
  */
 export async function createCustomer(params: {
   email?: string
   phone?: string
   first_name?: string
   last_name?: string
+  middle_name?: string
+  date_of_birth?: string
+  street_address?: string
+  city?: string
+  state?: string
+  postal_code?: string
   vendor_id?: string
+  idempotency_key?: string
 }): Promise<Customer> {
-  // Normalize data
-  const customerData: Partial<Customer> & { loyalty_points: number; total_spent: number; total_orders: number } = {
-    ...params,
-    loyalty_points: 0,
-    total_spent: 0,
-    total_orders: 0,
+  // Validate required fields
+  if (!params.first_name?.trim() || !params.last_name?.trim()) {
+    throw new Error('First name and last name are required')
   }
 
-  if (params.email) {
-    customerData.email = normalizeEmail(params.email) || undefined
+  if (!params.vendor_id) {
+    throw new Error('Vendor ID is required')
   }
 
-  if (params.phone) {
-    // Normalize phone using centralized utility
-    customerData.phone = normalizePhone(params.phone) || undefined
-  }
+  // Call atomic database function
+  logger.debug('Calling create_customer_safe RPC', {
+    vendorId: params.vendor_id,
+    firstName: params.first_name,
+    lastName: params.last_name,
+    hasEmail: !!params.email,
+    hasPhone: !!params.phone,
+    hasIdempotencyKey: !!params.idempotency_key,
+  })
 
-  // Generate full_name if not provided
-  if (params.first_name && params.last_name) {
-    customerData.full_name = `${params.first_name} ${params.last_name}`
-  }
+  const { data, error } = await supabase.rpc('create_customer_safe', {
+    p_vendor_id: params.vendor_id,
+    p_first_name: params.first_name,
+    p_last_name: params.last_name,
+    p_email: params.email || null,
+    p_phone: params.phone || null,
+    p_middle_name: params.middle_name || null,
+    p_date_of_birth: params.date_of_birth || null,
+    p_street_address: params.street_address || null,
+    p_city: params.city || null,
+    p_state: params.state || null,
+    p_postal_code: params.postal_code || null,
+    p_idempotency_key: params.idempotency_key || null,
+  })
 
-  const { data, error } = await supabase
-    .from('customers')
-    .insert(customerData)
-    .select()
-    .single()
+  logger.debug('create_customer_safe returned', {
+    hasData: !!data,
+    dataLength: data?.length,
+    hasError: !!error,
+  })
 
   if (error) {
     throw new Error(`Failed to create customer: ${error.message}`)
   }
 
-  return data
+  // Verify function returned data
+  if (!data || data.length === 0) {
+    throw new Error('Failed to create customer: no data returned')
+  }
+
+  const result = data[0]
+
+  logger.debug('Customer creation result', {
+    customerId: result.customer_id,
+    created: result.created,
+    duplicateFound: result.duplicate_found,
+    success: result.success,
+  })
+
+  // Check if operation succeeded
+  if (!result.success) {
+    throw new Error('Failed to create customer: operation did not complete')
+  }
+
+  // Fetch the full customer record
+  const { data: customer, error: fetchError } = await supabase
+    .from('customers')
+    .select('*')
+    .eq('id', result.customer_id)
+    .eq('is_active', true)
+    .single()
+
+  if (fetchError || !customer) {
+    throw new Error(`Failed to fetch created customer: ${fetchError?.message || 'Not found'}`)
+  }
+
+  logger.debug('Customer fetched successfully', {
+    customerId: customer.id,
+    email: customer.email,
+    phone: customer.phone,
+    isWalkIn: customer.email?.includes('@walk-in.local'),
+  })
+
+  return customer
 }
 
 /**
@@ -278,6 +386,7 @@ export async function updateCustomerLoyaltyPoints(
 
 /**
  * Get customer with recent orders
+ * Only returns active customers (is_active = true)
  */
 export async function getCustomerWithOrders(customerId: string): Promise<CustomerWithOrders> {
   const { data, error } = await supabase
@@ -294,6 +403,7 @@ export async function getCustomerWithOrders(customerId: string): Promise<Custome
     `
     )
     .eq('id', customerId)
+    .eq('is_active', true) // Only active customers
     .single()
 
   if (error) {
@@ -312,11 +422,13 @@ export async function getCustomerWithOrders(customerId: string): Promise<Custome
 
 /**
  * Get top customers by spending
+ * Only returns active customers (is_active = true)
  */
 export async function getTopCustomers(limit = 10): Promise<Customer[]> {
   const { data, error } = await supabase
     .from('customers')
     .select('*')
+    .eq('is_active', true) // Only active customers
     .order('total_spent', { ascending: false })
     .limit(limit)
 
@@ -325,6 +437,45 @@ export async function getTopCustomers(limit = 10): Promise<Customer[]> {
   }
 
   return data || []
+}
+
+/**
+ * Delete customer (soft delete - marks as inactive)
+ * Preserves data integrity by keeping historical records
+ * Anonymizes email/phone to free unique constraints for recreation
+ * Uses atomic database function with:
+ * - Idempotency (safe to retry)
+ * - Row-level locking (prevents race conditions)
+ * - SECURITY DEFINER (bypasses RLS on audit tables)
+ */
+export async function deleteCustomer(customerId: string, vendorId?: string): Promise<void> {
+  // If vendorId is not provided, get it from the current user context
+  if (!vendorId) {
+    const { data: userData } = await supabase
+      .from('users')
+      .select('vendor_id')
+      .eq('auth_user_id', (await supabase.auth.getUser()).data.user?.id)
+      .single()
+
+    if (!userData?.vendor_id) {
+      throw new Error('Failed to determine vendor ID for customer deletion')
+    }
+    vendorId = userData.vendor_id
+  }
+
+  const { data, error } = await supabase.rpc('delete_customer_safe', {
+    p_customer_id: customerId,
+    p_vendor_id: vendorId,
+  })
+
+  if (error) {
+    throw new Error(`Failed to delete customer: ${error.message}`)
+  }
+
+  // Verify deletion succeeded
+  if (!data || data.length === 0 || !data[0].success) {
+    throw new Error(`Failed to delete customer: operation did not complete`)
+  }
 }
 
 /**
@@ -341,4 +492,5 @@ export const customersService = {
   updateCustomerLoyaltyPoints,
   getCustomerWithOrders,
   getTopCustomers,
+  deleteCustomer,
 }

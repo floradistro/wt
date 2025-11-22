@@ -62,7 +62,7 @@ export function useSession(): UseSessionReturn {
 
       if (userError || !userData) throw userError || new Error('User record not found')
 
-      const vendorData = userData.vendors as any
+      const vendorData = userData.vendors as Vendor
       setVendor(vendorData)
       setCustomUserId(userData.id)
 

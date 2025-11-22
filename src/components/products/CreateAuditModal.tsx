@@ -4,15 +4,17 @@
  * "Simplicity is the ultimate sophistication" - Leonardo da Vinci (Jobs' favorite)
  */
 
-import React, { useState, useMemo, useCallback } from 'react'
+import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { View, Text, StyleSheet, Modal, Pressable, ActivityIndicator, TextInput, ScrollView, useWindowDimensions, Alert } from 'react-native'
 import { BlurView } from 'expo-blur'
 import * as Haptics from 'expo-haptics'
+import AsyncStorage from '@react-native-async-storage/async-storage'
 import { colors, spacing, radius, typography } from '@/theme/tokens'
 import { useProducts, type Product } from '@/hooks/useProducts'
 import { useUserLocations } from '@/hooks/useUserLocations'
 import { useCategories } from '@/hooks/useCategories'
 import { useInventoryAdjustments } from '@/hooks/useInventoryAdjustments'
+import { createBulkInventoryAdjustments } from '@/services/inventory-adjustments.service'
 import { logger } from '@/utils/logger'
 
 interface CreateAuditModalProps {
@@ -35,7 +37,7 @@ export function CreateAuditModal({ visible, onClose, onCreated }: CreateAuditMod
   const { products } = useProducts()
   const { locations } = useUserLocations()
   const { categories } = useCategories()
-  const { createAdjustment } = useInventoryAdjustments()
+  const { createAdjustment, vendorId } = useInventoryAdjustments()
 
   const [selectedLocationId, setSelectedLocationId] = useState('')
   const [selectedCategoryIds, setSelectedCategoryIds] = useState<string[]>([])
@@ -46,6 +48,98 @@ export function CreateAuditModal({ visible, onClose, onCreated }: CreateAuditMod
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [auditEntries, setAuditEntries] = useState<Map<string, AuditEntry>>(new Map())
   const [auditReason, setAuditReason] = useState('')
+  const [draftRestored, setDraftRestored] = useState(false)
+  const [lastSaved, setLastSaved] = useState<Date | null>(null)
+  const [locationsWithDrafts, setLocationsWithDrafts] = useState<Set<string>>(new Set())
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const isRestoringRef = useRef(false)
+  const restoreTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+
+  // Auto-draft storage key (location-specific)
+  const getDraftKey = useCallback((locationId: string) => {
+    return `audit-draft-${vendorId}-${locationId}`
+  }, [vendorId])
+
+  // Save draft to AsyncStorage
+  const saveDraft = useCallback(async () => {
+    if (!selectedLocationId || auditEntries.size === 0) return
+
+    try {
+      const draft = {
+        locationId: selectedLocationId,
+        categoryIds: selectedCategoryIds,
+        reason: auditReason,
+        entries: Array.from(auditEntries.entries()).map(([id, entry]) => ({
+          productId: id,
+          productName: entry.product.name,
+          productSku: entry.product.sku,
+          currentQuantity: entry.currentQuantity,
+          auditedQuantity: entry.auditedQuantity,
+          difference: entry.difference,
+        })),
+        timestamp: Date.now(),
+      }
+
+      await AsyncStorage.setItem(getDraftKey(selectedLocationId), JSON.stringify(draft))
+      setLastSaved(new Date())
+
+      // Add to drafts set
+      setLocationsWithDrafts(prev => {
+        const updated = new Set(prev)
+        updated.add(selectedLocationId)
+        return updated
+      })
+
+      logger.info('Audit draft auto-saved', {
+        locationId: selectedLocationId,
+        entryCount: auditEntries.size
+      })
+    } catch (err) {
+      logger.error('Failed to save audit draft:', err)
+    }
+  }, [selectedLocationId, selectedCategoryIds, auditReason, auditEntries, getDraftKey])
+
+  // Load draft from AsyncStorage
+  const loadDraft = useCallback(async (locationId: string) => {
+    try {
+      const draftJson = await AsyncStorage.getItem(getDraftKey(locationId))
+      if (!draftJson) return null
+
+      const draft = JSON.parse(draftJson)
+
+      // Check if draft is recent (within 7 days)
+      const age = Date.now() - draft.timestamp
+      if (age > 7 * 24 * 60 * 60 * 1000) {
+        await AsyncStorage.removeItem(getDraftKey(locationId))
+        return null
+      }
+
+      return draft
+    } catch (err) {
+      logger.error('Failed to load audit draft:', err)
+      return null
+    }
+  }, [getDraftKey])
+
+  // Clear draft from AsyncStorage
+  const clearDraft = useCallback(async (locationId?: string) => {
+    try {
+      const locId = locationId || selectedLocationId
+      const key = getDraftKey(locId)
+      await AsyncStorage.removeItem(key)
+
+      // Remove from drafts set
+      setLocationsWithDrafts(prev => {
+        const updated = new Set(prev)
+        updated.delete(locId)
+        return updated
+      })
+
+      logger.info('Audit draft cleared', { locationId: locId })
+    } catch (err) {
+      logger.error('Failed to clear audit draft:', err)
+    }
+  }, [selectedLocationId, getDraftKey])
 
   const modalStyle = useMemo(() => ({
     width: '95%' as const,
@@ -104,6 +198,126 @@ export function CreateAuditModal({ visible, onClose, onCreated }: CreateAuditMod
     return inventory?.quantity || 0
   }, [selectedLocationId])
 
+  // Scan for available drafts when modal opens
+  useEffect(() => {
+    if (!visible || !vendorId) return
+
+    const scanForDrafts = async () => {
+      try {
+        const draftsFound = new Set<string>()
+        for (const location of locations) {
+          const draft = await loadDraft(location.location.id)
+          if (draft) {
+            draftsFound.add(location.location.id)
+          }
+        }
+        setLocationsWithDrafts(draftsFound)
+      } catch (err) {
+        logger.error('Failed to scan for drafts:', err)
+      }
+    }
+
+    scanForDrafts()
+  }, [visible, vendorId, locations, loadDraft])
+
+  // Auto-restore draft when location is selected
+  useEffect(() => {
+    if (!selectedLocationId || isRestoringRef.current || !visible || products.length === 0) return
+
+    const restoreDraft = async () => {
+      isRestoringRef.current = true
+      try {
+        const draft = await loadDraft(selectedLocationId)
+        if (!draft || !draft.entries || draft.entries.length === 0) {
+          isRestoringRef.current = false
+          return
+        }
+
+        // Use requestAnimationFrame to prevent blocking
+        requestAnimationFrame(() => {
+          try {
+            // Restore category filters
+            if (draft.categoryIds?.length > 0) {
+              setSelectedCategoryIds(draft.categoryIds)
+            }
+
+            // Restore audit reason
+            if (draft.reason) {
+              setAuditReason(draft.reason)
+            }
+
+            // Restore audit entries (optimized)
+            const restoredEntries = new Map<string, AuditEntry>()
+            const productMap = new Map(products.map(p => [p.id, p]))
+
+            for (const entry of draft.entries) {
+              const product = productMap.get(entry.productId)
+              if (product) {
+                const currentQty = getCurrentQuantity(product)
+                restoredEntries.set(entry.productId, {
+                  product,
+                  currentQuantity: currentQty,
+                  auditedQuantity: entry.auditedQuantity,
+                  difference: parseFloat(entry.auditedQuantity) - currentQty,
+                })
+              }
+            }
+
+            setAuditEntries(restoredEntries)
+            setDraftRestored(true)
+
+            logger.info('Audit draft restored', {
+              locationId: selectedLocationId,
+              entryCount: restoredEntries.size,
+              age: Date.now() - draft.timestamp
+            })
+
+            // Show subtle feedback
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+
+            // Hide restored indicator after 3 seconds
+            if (restoreTimeoutRef.current) {
+              clearTimeout(restoreTimeoutRef.current)
+            }
+            restoreTimeoutRef.current = setTimeout(() => {
+              setDraftRestored(false)
+            }, 3000)
+          } catch (err) {
+            logger.error('Failed during draft restore animation frame:', err)
+          } finally {
+            isRestoringRef.current = false
+          }
+        })
+      } catch (err) {
+        logger.error('Failed to restore draft:', err)
+        isRestoringRef.current = false
+      }
+    }
+
+    restoreDraft()
+  }, [selectedLocationId, visible, loadDraft, products, getCurrentQuantity])
+
+  // Debounced auto-save when audit data changes
+  useEffect(() => {
+    if (isRestoringRef.current || !visible) return
+
+    // Clear previous timeout
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current)
+    }
+
+    // Save after 500ms of no changes
+    saveTimeoutRef.current = setTimeout(() => {
+      saveDraft()
+    }, 500)
+
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current)
+      }
+    }
+  }, [selectedLocationId, selectedCategoryIds, auditReason, auditEntries, visible, saveDraft])
+
   // Handle audited quantity input
   const handleAuditEntry = useCallback((product: Product, value: string) => {
     const currentQuantity = getCurrentQuantity(product)
@@ -153,29 +367,36 @@ export function CreateAuditModal({ visible, onClose, onCreated }: CreateAuditMod
     try {
       setIsSubmitting(true)
 
-      const entries = Array.from(auditEntries.values())
-      let successCount = 0
-      let errorCount = 0
-
-      // Create adjustments for each entry
-      for (const entry of entries) {
-        try {
-          await createAdjustment({
-            product_id: entry.product.id,
-            location_id: selectedLocationId,
-            adjustment_type: 'count_correction',
-            quantity_change: entry.difference,
-            reason: `Audit: ${auditReason}`,
-            notes: `Audited quantity: ${entry.auditedQuantity}g (was ${entry.currentQuantity}g)`,
-          })
-          successCount++
-        } catch (err) {
-          logger.error(`Failed to create adjustment for ${entry.product.name}:`, err)
-          errorCount++
-        }
+      if (!vendorId) {
+        throw new Error('No vendor found')
       }
 
+      const entries = Array.from(auditEntries.values())
+
+      // Use bulk atomic function for dramatic performance improvement
+      const { data, error, results } = await createBulkInventoryAdjustments(
+        vendorId,
+        entries.map(entry => ({
+          product_id: entry.product.id,
+          location_id: selectedLocationId,
+          adjustment_type: 'count_correction',
+          quantity_change: entry.difference,
+          reason: `Audit: ${auditReason}`,
+          notes: `Audited quantity: ${entry.auditedQuantity}g (was ${entry.currentQuantity}g)`,
+        }))
+      )
+
+      if (error) {
+        throw error
+      }
+
+      const successCount = data?.succeeded || 0
+      const errorCount = data?.failed || 0
+
       if (successCount > 0) {
+        // Clear the draft on successful completion
+        await clearDraft(selectedLocationId)
+
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
         Alert.alert(
           'Audit Complete',
@@ -196,13 +417,22 @@ export function CreateAuditModal({ visible, onClose, onCreated }: CreateAuditMod
 
     } catch (err) {
       logger.error('Failed to create audit:', err)
-      Alert.alert('Error', 'Failed to create audit adjustments')
+      const errorMessage = err instanceof Error ? err.message : 'Failed to create audit adjustments'
+      Alert.alert('Error', errorMessage)
     } finally {
       setIsSubmitting(false)
     }
-  }, [selectedLocationId, auditEntries, auditReason, createAdjustment, onCreated])
+  }, [selectedLocationId, auditEntries, auditReason, vendorId, onCreated, handleClose, clearDraft])
 
   const handleClose = useCallback(() => {
+    // Clear all timeouts
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current)
+    }
+    if (restoreTimeoutRef.current) {
+      clearTimeout(restoreTimeoutRef.current)
+    }
+
     setSelectedLocationId('')
     setSelectedCategoryIds([])
     setLocationSearchQuery('')
@@ -211,6 +441,8 @@ export function CreateAuditModal({ visible, onClose, onCreated }: CreateAuditMod
     setShowCategoryList(false)
     setAuditEntries(new Map())
     setAuditReason('')
+    setDraftRestored(false)
+    isRestoringRef.current = false
     onClose()
   }, [onClose])
 
@@ -241,6 +473,13 @@ export function CreateAuditModal({ visible, onClose, onCreated }: CreateAuditMod
               <Text style={styles.closeButtonText}>✕</Text>
             </Pressable>
           </View>
+
+          {/* Draft Restored Indicator */}
+          {draftRestored && (
+            <View style={styles.draftIndicator}>
+              <Text style={styles.draftIndicatorText}>✓ Draft restored</Text>
+            </View>
+          )}
 
           <ScrollView
             style={styles.scrollView}
@@ -295,10 +534,19 @@ export function CreateAuditModal({ visible, onClose, onCreated }: CreateAuditMod
                               setAuditEntries(new Map()) // Reset entries when location changes
                             }}
                           >
-                            <Text style={styles.dropdownItemText}>{location.name}</Text>
-                            {location.city && (
-                              <Text style={styles.dropdownItemSubtext}>{location.city}</Text>
-                            )}
+                            <View style={styles.locationItemContent}>
+                              <View style={styles.locationItemText}>
+                                <Text style={styles.dropdownItemText}>{location.name}</Text>
+                                {location.city && (
+                                  <Text style={styles.dropdownItemSubtext}>{location.city}</Text>
+                                )}
+                              </View>
+                              {locationsWithDrafts.has(location.id) && (
+                                <View style={styles.draftBadge}>
+                                  <Text style={styles.draftBadgeText}>Draft</Text>
+                                </View>
+                              )}
+                            </View>
                           </Pressable>
                         ))}
                       </ScrollView>
@@ -857,5 +1105,42 @@ const styles = StyleSheet.create({
     ...typography.buttonLarge,
     color: colors.text.primary,
     fontWeight: '600',
+  },
+  draftIndicator: {
+    backgroundColor: 'rgba(16,185,129,0.15)',
+    borderBottomWidth: 1,
+    borderBottomColor: colors.semantic.successBorder,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.xl,
+    alignItems: 'center',
+  },
+  draftIndicatorText: {
+    ...typography.footnote,
+    color: colors.semantic.success,
+    fontWeight: '600',
+  },
+  locationItemContent: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  locationItemText: {
+    flex: 1,
+  },
+  draftBadge: {
+    backgroundColor: 'rgba(16,185,129,0.15)',
+    borderWidth: 1,
+    borderColor: colors.semantic.successBorder,
+    borderRadius: 8,
+    paddingVertical: 3,
+    paddingHorizontal: 8,
+    marginLeft: spacing.sm,
+  },
+  draftBadgeText: {
+    ...typography.caption2,
+    color: colors.semantic.success,
+    fontWeight: '600',
+    letterSpacing: 0.3,
   },
 })

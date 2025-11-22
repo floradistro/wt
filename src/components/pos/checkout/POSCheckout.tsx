@@ -1,16 +1,19 @@
 /**
- * POSCheckout Component
- * Jobs Principle: One focused responsibility - Checkout process
+ * POSCheckout Component (REFACTORED)
+ * Jobs Principle: One focused responsibility - Checkout orchestration
  *
- * Handles:
+ * REFACTORED: Extracted customer selection and modal logic to improve maintainability
+ * Now handles:
  * - Cart display and management
- * - Customer selection
- * - Payment processing
- * - Success modal
- * - Loyalty points
+ * - Payment processing coordination
+ * - Checkout flow orchestration
+ *
+ * Extracted to:
+ * - useCustomerSelection hook (customer logic)
+ * - POSCheckoutModals component (modal UI)
  */
 
-import { useState, useCallback, useMemo, useRef } from 'react'
+import { useState, useCallback, useMemo } from 'react'
 import { View, StyleSheet } from 'react-native'
 import * as Haptics from 'expo-haptics'
 import Constants from 'expo-constants'
@@ -18,23 +21,21 @@ import { supabase } from '@/lib/supabase/client'
 import { validateRealPaymentData, normalizePaymentMethod, validatePaymentMethod } from '@/utils/payment-validation'
 import { Sentry } from '@/utils/sentry'
 import { logger } from '@/utils/logger'
-import { ErrorModal } from '@/components/ErrorModal'
 
 // POS Components
-import { POSUnifiedCustomerSelector } from '../POSUnifiedCustomerSelector'
-import { POSAddCustomerModal } from '../POSAddCustomerModal'
-import { POSCustomerMatchModal, type CustomerMatch } from '../POSCustomerMatchModal'
-import POSPaymentModal from '../POSPaymentModal'
 import { POSCart } from '../cart/POSCart'
-import { CloseCashDrawerModal } from '../CloseCashDrawerModal'
+import { POSCheckoutModals } from './POSCheckoutModals'
 
 // Hooks
 import { useLoyalty, useModalState } from '@/hooks/pos'
+import { useCustomerSelection } from '@/hooks/pos/useCustomerSelection'
+import { useCampaigns } from '@/hooks/useCampaigns'
 import { usePaymentProcessor } from '@/stores/payment-processor.store'
 import { useAuthStore } from '@/stores/auth.store'
+import type { UseCartReturn } from '@/hooks/pos/useCart'
 
 // Types
-import type { Vendor, Customer, Product, SessionInfo } from '@/types/pos'
+import type { Vendor, Product, SessionInfo, CartItem } from '@/types/pos'
 import type { PaymentData, SaleCompletionData } from '@/components/pos/payment'
 import type { AAMVAData } from '@/lib/id-scanner/aamva-parser'
 
@@ -43,7 +44,7 @@ interface POSCheckoutProps {
   vendor: Vendor
   products: Product[]
   customUserId: string
-  cartHook: any  // TODO: Fix type - actual useCart return doesn't match UseCartReturn
+  cartHook: UseCartReturn
   onEndSession: () => void
   onCheckoutComplete?: () => void
 }
@@ -60,9 +61,7 @@ export function POSCheckout({
   // ========================================
   // STATE
   // ========================================
-  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null)
-  const [scannedDataForNewCustomer, setScannedDataForNewCustomer] = useState<AAMVAData | null>(null)
-  const [customerMatches, setCustomerMatches] = useState<CustomerMatch[]>([])
+  const [selectedDiscountId, setSelectedDiscountId] = useState<string | null>(null)
   const [errorModal, setErrorModal] = useState<{
     visible: boolean
     title: string
@@ -88,14 +87,31 @@ export function POSCheckout({
   const authSession = useAuthStore((state) => state.session)
 
   // ========================================
+  // HOOKS - Customer Selection (REFACTORED)
+  // ========================================
+  const {
+    selectedCustomer,
+    scannedDataForNewCustomer,
+    customerMatches,
+    setSelectedCustomer,
+    handleClearCustomer,
+    handleCustomerSelected,
+    handleScannedDataReceived,
+    clearScannedData,
+    handleCustomerMatchesFound,
+    clearCustomerMatches,
+    findMatchingCustomer,
+    createCustomerMatch,
+  } = useCustomerSelection(vendor.id)
+
+  // ========================================
   // MODALS
   // ========================================
   const { openModal, closeModal, isModalOpen } = useModalState()
 
   // ========================================
-  // CART & LOYALTY
+  // CART, LOYALTY & DISCOUNTS
   // ========================================
-  // Use cart hook passed from parent (single source of truth)
   const {
     cart,
     discountingItemId,
@@ -119,13 +135,38 @@ export function POSCheckout({
     loyaltyDiscountAmount,
   } = useLoyalty(vendor?.id || null, selectedCustomer)
 
+  // Get active discounts
+  const { campaigns: discounts } = useCampaigns()
+  const activeDiscounts = useMemo(() =>
+    discounts.filter(d => d.is_active),
+    [discounts]
+  )
+
+  // Get selected discount
+  const selectedDiscount = useMemo(() =>
+    activeDiscounts.find(d => d.id === selectedDiscountId) || null,
+    [activeDiscounts, selectedDiscountId]
+  )
+
   // ========================================
   // CALCULATIONS
   // ========================================
   const subtotalAfterLoyalty = Math.max(0, subtotal - loyaltyDiscountAmount)
+
+  const discountAmount = useMemo(() => {
+    if (!selectedDiscount) return 0
+
+    if (selectedDiscount.discount_type === 'percentage') {
+      return subtotalAfterLoyalty * (selectedDiscount.discount_value / 100)
+    } else {
+      return Math.min(selectedDiscount.discount_value, subtotalAfterLoyalty)
+    }
+  }, [selectedDiscount, subtotalAfterLoyalty])
+
+  const subtotalAfterDiscount = Math.max(0, subtotalAfterLoyalty - discountAmount)
   const taxRate = sessionInfo?.taxRate || 0.08
-  const taxAmount = subtotalAfterLoyalty * taxRate
-  const total = subtotalAfterLoyalty + taxAmount
+  const taxAmount = subtotalAfterDiscount * taxRate
+  const total = subtotalAfterDiscount + taxAmount
 
   const loyaltyPointsEarned = useMemo(() => {
     if (!selectedCustomer) return 0
@@ -134,7 +175,43 @@ export function POSCheckout({
   }, [total, loyaltyProgram, selectedCustomer])
 
   // ========================================
-  // HANDLERS
+  // HANDLERS - Customer Selection (REFACTORED)
+  // ========================================
+  const handleNoMatchFoundWithData = useCallback(async (data: AAMVAData) => {
+    handleScannedDataReceived(data)
+
+    const { customer, matchType } = await findMatchingCustomer(data)
+
+    if (customer && matchType) {
+      const match = createCustomerMatch(customer, matchType)
+
+      if (matchType === 'exact') {
+        // Exact match - show confirmation
+        handleCustomerMatchesFound([match])
+        closeModal()
+        openModal('customerMatch')
+      } else {
+        // High confidence - show confirmation
+        handleCustomerMatchesFound([match])
+        closeModal()
+        openModal('customerMatch')
+      }
+    } else {
+      // No match found - go to add customer
+      closeModal()
+      openModal('addCustomer')
+    }
+  }, [
+    handleScannedDataReceived,
+    findMatchingCustomer,
+    createCustomerMatch,
+    handleCustomerMatchesFound,
+    closeModal,
+    openModal,
+  ])
+
+  // ========================================
+  // HANDLERS - Checkout Flow
   // ========================================
   const handleCheckout = useCallback(() => {
     if (cart.length === 0) return
@@ -143,6 +220,35 @@ export function POSCheckout({
     openModal('payment')
   }, [cart.length, openModal])
 
+  /**
+   * Two-Phase Commit Checkout Flow
+   *
+   * Processes payment and creates order using atomic database operations to ensure
+   * data consistency. Implements enterprise-grade error handling with Sentry tracking.
+   *
+   * **Architecture:** Serverless Edge Function with atomic inventory management
+   *
+   * **Process:**
+   * 1. Validate payment data (prevent mock payments in production)
+   * 2. Prepare order items with pricing, discounts, and inventory IDs
+   * 3. Call Edge Function (`process-checkout`) which atomically:
+   *    - Creates order record
+   *    - Deducts inventory
+   *    - Updates loyalty points
+   *    - Updates session totals
+   * 4. Show success animation + print receipt
+   *
+   * **Error Handling:**
+   * - All errors captured in Sentry with full context
+   * - Atomic rollback on any failure
+   * - User-friendly error messages
+   *
+   * @param paymentData - Validated payment information (card/cash)
+   * @returns Sale completion data with order ID, receipt, and loyalty info
+   * @throws {Error} If session info missing or Edge Function fails
+   *
+   * @see supabase/functions/process-checkout - Atomic checkout implementation
+   */
   const handlePaymentComplete = async (paymentData: PaymentData): Promise<SaleCompletionData> => {
     if (!sessionInfo || !vendor || !customUserId) {
       throw new Error('Missing session information')
@@ -189,7 +295,7 @@ export function POSCheckout({
       })
       validateRealPaymentData(paymentData)
 
-      const items = cart.map((item: any) => ({
+      const items = cart.map((item: CartItem) => ({
         productId: item.productId,
         productName: item.productName || item.name,
         productSku: item.sku || item.productSku || '',
@@ -198,7 +304,7 @@ export function POSCheckout({
         tierName: item.tierName || item.tier || '1 Unit',
         discountAmount: item.manualDiscountValue || 0,
         lineTotal: (item.adjustedPrice !== undefined ? item.adjustedPrice : item.price) * item.quantity,
-        inventoryId: item.inventoryId, // CRITICAL for inventory deduction
+        inventoryId: item.inventoryId,
       }))
 
       // Normalize payment method for database constraint
@@ -215,20 +321,6 @@ export function POSCheckout({
       })
       validatePaymentMethod(normalizedPaymentMethod)
 
-      // ========================================================================
-      // NEW ARCHITECTURE: Call Edge Function (Atomic Two-Phase Commit)
-      // ========================================================================
-      // This replaces the old pattern of:
-      // 1. Call payment processor
-      // 2. Then call create_pos_sale RPC
-      //
-      // New pattern:
-      // 1. Edge Function creates pending order
-      // 2. Edge Function processes payment
-      // 3. Edge Function completes order
-      // All atomic - if any step fails, everything rolls back
-      // ========================================================================
-
       Sentry.addBreadcrumb({
         category: 'checkout',
         message: 'Calling Edge Function: process-payment',
@@ -240,8 +332,7 @@ export function POSCheckout({
         },
       })
 
-      // Get FRESH session from Supabase (don't use cached session from store)
-      // This ensures we have a valid, non-expired token
+      // Get FRESH session from Supabase
       logger.debug('🔄 Refreshing session before payment...')
       const { data: { session: freshSession }, error: sessionError } = await supabase.auth.getSession()
 
@@ -261,18 +352,13 @@ export function POSCheckout({
         expiresAt: freshSession.expires_at,
       })
 
-      // Extract split payment amounts if present
-      const splitCash = paymentData.splitPayments?.find(p => p.method === 'cash')?.amount || null
-      const splitCard = paymentData.splitPayments?.find(p => p.method === 'card')?.amount || null
-
-      // Call Edge Function with 90s timeout (gives plenty of time for payment processor)
+      // Call Edge Function with 90s timeout
       const controller = new AbortController()
       const timeoutId = setTimeout(() => {
         logger.warn('⏱️ Edge Function timeout (90s) - aborting request')
         controller.abort()
       }, 90000)
 
-      // Log what we're sending to the Edge Function
       const edgeFunctionPayload = {
         vendorId: vendor.id,
         locationId: sessionInfo.locationId,
@@ -283,31 +369,25 @@ export function POSCheckout({
         taxAmount,
         total,
         paymentMethod: normalizedPaymentMethod,
-        tipAmount: 0, // TODO: Add tip support in UI
+        tipAmount: 0,
         customerId: selectedCustomer?.id || null,
         customerName: selectedCustomer
           ? `${selectedCustomer.first_name} ${selectedCustomer.last_name}`
           : 'Walk-In',
         loyaltyPointsRedeemed: loyaltyPointsToRedeem || 0,
         loyaltyDiscountAmount: loyaltyDiscountAmount || 0,
+        campaignDiscountAmount: discountAmount || 0,
+        campaignId: selectedDiscountId || null,
       }
 
       logger.debug('📤 Sending to Edge Function:', edgeFunctionPayload)
 
       const authHeader = `Bearer ${freshSession.access_token}`
-      logger.debug('🔑 Auth header:', {
-        hasToken: !!freshSession.access_token,
-        tokenLength: freshSession.access_token.length,
-        headerPreview: authHeader.substring(0, 30) + '...',
-      })
-
-      // Call Edge Function directly with fetch() to ensure headers are sent correctly
       const supabaseUrl = Constants.expoConfig?.extra?.supabaseUrl || process.env.EXPO_PUBLIC_SUPABASE_URL
       const supabaseAnonKey = Constants.expoConfig?.extra?.supabaseAnonKey || process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY
-
       const edgeFunctionUrl = `${supabaseUrl}/functions/v1/process-checkout`
 
-      logger.debug('🌐 Calling NEW Edge Function (enterprise-grade):', {
+      logger.debug('🌐 Calling Edge Function (enterprise-grade):', {
         url: edgeFunctionUrl,
         hasAuthHeader: !!authHeader,
         hasAnonKey: !!supabaseAnonKey,
@@ -330,14 +410,13 @@ export function POSCheckout({
       logger.debug('📨 Edge Function response:', {
         status: response.status,
         statusText: response.statusText,
-        body: responseText, // Log full response body
+        body: responseText,
       })
 
       let data: any = null
-      let edgeFunctionError: any = null
+      let edgeFunctionError: Error | null = null
 
       if (!response.ok) {
-        // Try to parse error response
         logger.error('❌ Edge Function HTTP Error:', {
           status: response.status,
           statusText: response.statusText,
@@ -351,7 +430,6 @@ export function POSCheckout({
           edgeFunctionError = new Error(`HTTP ${response.status}: ${response.statusText} - ${responseText}`)
         }
       } else {
-        // Parse success response
         try {
           data = JSON.parse(responseText)
         } catch (e) {
@@ -376,7 +454,6 @@ export function POSCheckout({
           data: data,
         })
 
-        // Try to extract more detailed error message
         const errorMessage = data?.error || edgeFunctionError.message || 'Payment processing failed'
         throw new Error(errorMessage)
       }
@@ -401,15 +478,12 @@ export function POSCheckout({
         },
       })
 
-      // Extract transaction details from Edge Function response
-      // Edge Function wraps response in { success: true, data: { ... } }
+      // Extract transaction details
       const orderNumber = data.data?.order?.order_number || data.data?.orderNumber || 'Unknown'
       const transactionNumber = `TXN-${orderNumber}`
+      const loyaltyPointsAdded = loyaltyPointsEarned
 
-      // Loyalty points are calculated by the Edge Function
-      const loyaltyPointsAdded = loyaltyPointsEarned // Use the calculated value from above
-
-      // Prepare completion data to return to payment modal
+      // Prepare completion data
       const completionData: SaleCompletionData = {
         orderNumber,
         transactionNumber,
@@ -441,28 +515,11 @@ export function POSCheckout({
       setSelectedCustomer(null)
       resetLoyalty()
 
-      // Note: Payment modal will auto-close via SaleSuccessModal's onDismiss after 2.5s
-
-      // Mark transaction as successful
-      // transaction.setStatus('ok')
-      // transaction.setTag('checkout.result', 'success')
-      // transaction.setTag('payment.method', normalizedPaymentMethod)
-      // transaction.setMeasurement('checkout.total', total, 'usd')
-      // transaction.setMeasurement('checkout.item_count', itemCount, 'none')
-      // if (loyaltyPointsAdded > 0) {
-      //   transaction.setMeasurement('loyalty.points_earned', loyaltyPointsAdded, 'none')
-      // }
-      // if (loyaltyPointsToRedeem > 0) {
-      //   transaction.setMeasurement('loyalty.points_redeemed', loyaltyPointsToRedeem, 'none')
-      // }
-      // transaction.finish()
-
-      // Notify parent if callback provided
+      // Notify parent
       if (onCheckoutComplete) {
         onCheckoutComplete()
       }
 
-      // Return completion data to payment modal
       return completionData
     } catch (error) {
       logger.error('Checkout error:', error)
@@ -476,11 +533,6 @@ export function POSCheckout({
           errorMessage: error instanceof Error ? error.message : 'Unknown error',
         },
       })
-
-      // Capture exception in Sentry
-      // transaction.setStatus('internal_error')
-      // transaction.setTag('checkout.result', 'failure')
-      // transaction.setTag('payment.method', paymentData.paymentMethod)
 
       Sentry.captureException(error, {
         level: 'error',
@@ -507,14 +559,9 @@ export function POSCheckout({
         },
       })
 
-      // transaction.finish()
-
-      // CRITICAL FIX: Close the payment modal to reset its state
-      // This prevents the UI from freezing when checkout fails
-      // The payment modal's processingCard state needs to be reset
+      // Close modal to reset state
       closeModal()
 
-      // Log error details for debugging intermittent issues
       const errorMessage = error instanceof Error ? error.message : 'Failed to process sale. Please try again or contact support.'
       const isTimeout = errorMessage.includes('timed out')
 
@@ -532,7 +579,6 @@ export function POSCheckout({
         message: errorMessage,
       })
 
-      // Re-throw error so payment views can handle it
       throw error
     }
   }
@@ -541,18 +587,10 @@ export function POSCheckout({
     clearCart()
     setSelectedCustomer(null)
     resetLoyalty()
-  }, [clearCart, resetLoyalty])
-
-  const handleClearCustomer = useCallback(() => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-    setSelectedCustomer(null)
-  }, [])
+  }, [clearCart, resetLoyalty, setSelectedCustomer])
 
   const handleEndSessionClick = async () => {
     logger.debug('[END SESSION] Button clicked in POSCheckout')
-    logger.debug('[END SESSION] sessionInfo:', sessionInfo)
-
-    // Immediate haptic feedback
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
 
     if (!sessionInfo?.sessionId) {
@@ -609,7 +647,7 @@ export function POSCheckout({
       closeModal()
       clearCart()
       resetLoyalty()
-      onEndSession() // Clear parent session state
+      onEndSession()
     } catch (error) {
       logger.error('Error closing session:', error)
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
@@ -623,245 +661,41 @@ export function POSCheckout({
   // ========================================
   // RENDER
   // ========================================
-  /**
-   * MODAL RENDERING PATTERN - Prevent Unmounting Issues
-   *
-   * CRITICAL: Modals must ALWAYS be rendered, never conditionally mounted.
-   * Use visible={} prop to control visibility, not conditional rendering.
-   *
-   * WHY: Conditionally mounting modals can cause them to unmount mid-interaction
-   * if the condition changes, breaking the user experience.
-   */
   return (
     <View style={styles.container}>
-      {/* Error Modal */}
-      <ErrorModal
-        visible={errorModal.visible}
-        title={errorModal.title}
-        message={errorModal.message}
-        onPrimaryPress={() => setErrorModal({ visible: false, title: '', message: '' })}
-        variant="error"
-      />
-
-      {/* Unified Customer Selector */}
-      {vendor && (
-        <POSUnifiedCustomerSelector
-          visible={isModalOpen('customerSelector')}
-          vendorId={vendor.id}
-          onCustomerSelected={(customer) => {
-            setSelectedCustomer(customer)
-            closeModal()
-          }}
-          onNoMatchFoundWithData={async (data: AAMVAData) => {
-            // Intelligent matching: Query Supabase directly and do fuzzy matching client-side
-            setScannedDataForNewCustomer(data)
-
-            try {
-              // Step 1: Try to find by license number (exact match)
-              let customer = null
-              let matchType: 'exact' | 'high' | null = null
-
-              if (data.licenseNumber) {
-                const { data: licenseMatch } = await supabase
-                  .from('customers')
-                  .select('*')
-                  .eq('drivers_license_number', data.licenseNumber)
-                  .single()
-
-                if (licenseMatch) {
-                  customer = licenseMatch
-                  matchType = 'exact'
-                }
-              }
-
-              // Step 2: Try exact name + DOB match
-              if (!customer && data.firstName && data.lastName && data.dateOfBirth) {
-                const { data: nameMatches } = await supabase
-                  .from('customers')
-                  .select('*')
-                  .eq('first_name', data.firstName)
-                  .eq('last_name', data.lastName)
-                  .eq('date_of_birth', data.dateOfBirth)
-
-                if (nameMatches && nameMatches.length > 0) {
-                  customer = nameMatches[0]
-                  matchType = 'high'
-                }
-              }
-
-              // Step 3: Fuzzy matching on name with same DOB
-              if (!customer && data.firstName && data.lastName && data.dateOfBirth) {
-                const { data: allCustomers } = await supabase
-                  .from('customers')
-                  .select('*')
-                  .eq('date_of_birth', data.dateOfBirth)
-
-                if (allCustomers && allCustomers.length > 0) {
-                  const firstName = data.firstName.toLowerCase().trim()
-                  const lastName = data.lastName.toLowerCase().trim()
-
-                  // Calculate similarity scores
-                  const scoredMatches = allCustomers.map((c) => {
-                    const cFirst = (c.first_name || '').toLowerCase().trim()
-                    const cLast = (c.last_name || '').toLowerCase().trim()
-                    let score = 0
-
-                    // Last name matching (most important)
-                    if (cLast === lastName) score += 50
-                    else if (cLast.startsWith(lastName) || lastName.startsWith(cLast)) score += 30
-                    else if (cLast.includes(lastName) || lastName.includes(cLast)) score += 20
-
-                    // First name matching
-                    if (cFirst === firstName) score += 30
-                    else if (cFirst.startsWith(firstName) || firstName.startsWith(cFirst)) score += 20
-                    else if (cFirst.includes(firstName) || firstName.includes(cFirst)) score += 10
-
-                    return { customer: c, score }
-                  })
-                  .filter(m => m.score >= 50) // Only strong matches
-                  .sort((a, b) => b.score - a.score)
-
-                  if (scoredMatches.length > 0) {
-                    customer = scoredMatches[0].customer
-                    matchType = 'high'
-                  }
-                }
-              }
-
-              // Step 4: Handle the result
-              if (customer && matchType) {
-                const match: CustomerMatch = {
-                  customer,
-                  confidence: matchType,
-                  confidenceScore: matchType === 'exact' ? 100 : 90,
-                  matchedFields: matchType === 'exact' ? ['license', 'name', 'dob'] : ['name', 'dob'],
-                  reason: matchType === 'exact'
-                    ? 'License number matched'
-                    : 'Name and date of birth matched',
-                }
-
-                if (matchType === 'exact') {
-                  // Exact match - auto-select with brief confirmation
-                  setCustomerMatches([match])
-                  closeModal()
-                  openModal('customerMatch')
-                } else {
-                  // High confidence - show confirmation
-                  setCustomerMatches([match])
-                  closeModal()
-                  openModal('customerMatch')
-                }
-              } else {
-                // No match found - go to add customer
-                closeModal()
-                openModal('addCustomer')
-              }
-            } catch (error) {
-              logger.error('Error matching customer:', error)
-              // On error, default to add customer modal
-              closeModal()
-              openModal('addCustomer')
-            }
-          }}
-          onAddCustomer={() => {
-            // Manual add: User clicked "Add New Customer" button
-            setScannedDataForNewCustomer(null) // No pre-filled data
-            closeModal() // Close customer selector
-            openModal('addCustomer') // Open add customer modal
-          }}
-          onClose={closeModal}
-        />
-      )}
-
-      {/* Customer Match Modal */}
-      <POSCustomerMatchModal
-        visible={isModalOpen('customerMatch')}
-        scannedData={scannedDataForNewCustomer}
-        matches={customerMatches}
-        onSelectCustomer={(customer) => {
-          setSelectedCustomer(customer)
-          setCustomerMatches([])
-          setScannedDataForNewCustomer(null)
-          closeModal()
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
-        }}
-        onCreateNew={() => {
-          // User wants to create new customer despite matches
-          setCustomerMatches([])
-          closeModal()
-          openModal('addCustomer')
-        }}
-        onSearchManually={() => {
-          // User wants to manually search
-          setCustomerMatches([])
-          setScannedDataForNewCustomer(null)
-          closeModal()
-          openModal('customerSelector')
-        }}
-        onClose={() => {
-          setCustomerMatches([])
-          setScannedDataForNewCustomer(null)
-          closeModal()
-        }}
-      />
-
-      {/* Add Customer Modal */}
-      {vendor && (
-        <POSAddCustomerModal
-          visible={isModalOpen('addCustomer')}
-          vendorId={vendor.id}
-          prefilledData={scannedDataForNewCustomer}
-          onCustomerCreated={(customer) => {
-            setSelectedCustomer(customer)
-            setScannedDataForNewCustomer(null)
-            closeModal()
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
-          }}
-          onClose={() => {
-            setScannedDataForNewCustomer(null)
-            closeModal()
-          }}
-        />
-      )}
-
-      {/* Payment Modal - Always rendered */}
-      <POSPaymentModal
-        visible={isModalOpen('payment')}
+      {/* All Modals - Extracted to POSCheckoutModals (REFACTORED) */}
+      <POSCheckoutModals
+        vendor={vendor}
+        sessionInfo={sessionInfo}
+        isModalOpen={isModalOpen}
+        closeModal={closeModal}
+        scannedDataForNewCustomer={scannedDataForNewCustomer}
+        customerMatches={customerMatches}
+        selectedCustomer={selectedCustomer}
+        onCustomerSelected={handleCustomerSelected}
+        onNoMatchFoundWithData={handleNoMatchFoundWithData}
+        onOpenAddCustomer={() => openModal('addCustomer')}
+        onOpenCustomerMatch={() => openModal('customerMatch')}
+        onOpenCustomerSelector={() => openModal('customerSelector')}
+        onClearScannedData={clearScannedData}
+        onClearCustomerMatches={clearCustomerMatches}
+        onSetCustomerMatches={handleCustomerMatchesFound}
         total={total}
         subtotal={subtotal}
         taxAmount={taxAmount}
         taxRate={taxRate}
-        taxName={sessionInfo?.taxName}
         loyaltyDiscountAmount={loyaltyDiscountAmount}
         loyaltyPointsEarned={loyaltyPointsEarned}
-        currentLoyaltyPoints={selectedCustomer?.loyalty_points || 0}
-        pointValue={loyaltyProgram?.point_value || 0.01}
-        maxRedeemablePoints={getMaxRedeemablePoints(subtotal)}
         itemCount={itemCount}
-        customerName={
-          selectedCustomer
-            ? selectedCustomer.display_name ||
-              `${selectedCustomer.first_name} ${selectedCustomer.last_name}`.trim() ||
-              selectedCustomer.email
-            : undefined
-        }
-        onApplyLoyaltyPoints={setLoyaltyPointsToRedeem}
+        loyaltyProgram={loyaltyProgram}
+        getMaxRedeemablePoints={getMaxRedeemablePoints}
         onPaymentComplete={handlePaymentComplete}
-        onCancel={closeModal}
-        hasPaymentProcessor={true}
-        locationId={sessionInfo?.locationId}
-        registerId={sessionInfo?.registerId}
-      />
-
-      {/* Close Cash Drawer Modal - Always rendered, visibility controlled by isModalOpen */}
-      <CloseCashDrawerModal
-        visible={isModalOpen('cashDrawerClose') && !!sessionData}
-        sessionNumber={sessionData?.sessionNumber || ''}
-        totalSales={sessionData?.totalSales || 0}
-        totalCash={sessionData?.totalCash || 0}
-        openingCash={sessionData?.openingCash || 0}
-        onSubmit={handleCloseDrawerSubmit}
-        onCancel={handleCloseDrawerCancel}
+        onApplyLoyaltyPoints={setLoyaltyPointsToRedeem}
+        sessionData={sessionData}
+        onCloseDrawerSubmit={handleCloseDrawerSubmit}
+        onCloseDrawerCancel={handleCloseDrawerCancel}
+        errorModal={errorModal}
+        onCloseErrorModal={() => setErrorModal({ visible: false, title: '', message: '' })}
       />
 
       {/* Cart Display */}
@@ -877,6 +711,10 @@ export function POSCheckout({
         loyaltyProgram={loyaltyProgram}
         loyaltyDiscountAmount={loyaltyDiscountAmount}
         discountingItemId={discountingItemId}
+        activeDiscounts={activeDiscounts}
+        selectedDiscountId={selectedDiscountId}
+        onSelectDiscount={setSelectedDiscountId}
+        discountAmount={discountAmount}
         onAddItem={(id) => updateQuantity(id, 1)}
         onRemoveItem={(id) => updateQuantity(id, -1)}
         onChangeTier={changeTier}

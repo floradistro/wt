@@ -1,17 +1,46 @@
-import { View, Text, StyleSheet, Modal, TouchableOpacity, TouchableWithoutFeedback, TextInput, FlatList, ActivityIndicator, Dimensions, Platform, Keyboard, Animated } from 'react-native'
+/**
+ * POSUnifiedCustomerSelector Component (REFACTORED)
+ * Jobs Principle: Orchestrate customer selection via ID scan or search
+ *
+ * REFACTORED: Extracted camera, search, and animation logic to improve maintainability
+ * Now handles:
+ * - UI orchestration
+ * - User interaction coordination
+ *
+ * Extracted to:
+ * - useCameraScanner hook (camera + ID scanning logic)
+ * - useCustomerSearch hook (search logic)
+ * - useCustomerSelectorAnimations hook (animation state)
+ */
+
+import {
+  View,
+  Text,
+  StyleSheet,
+  Modal,
+  TouchableOpacity,
+  TouchableWithoutFeedback,
+  TextInput,
+  FlatList,
+  ActivityIndicator,
+  Animated,
+} from 'react-native'
 import { BlurView } from 'expo-blur'
 import { LiquidGlassView, isLiquidGlassSupported } from '@callstack/liquid-glass'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import * as Haptics from 'expo-haptics'
-import { memo, useState, useEffect, useRef, useCallback } from 'react'
-import { Camera, useCameraDevice, useCodeScanner } from 'react-native-vision-camera'
-import { parseAAMVABarcode, isLegalAge, calculateAge, type AAMVAData } from '@/lib/id-scanner/aamva-parser'
-import { playSuccessBeep, playRejectionTone } from '@/lib/id-scanner/audio'
-import { supabase } from '@/lib/supabase/client'
+import { memo, useRef, useEffect, useState, useCallback } from 'react'
+import { Camera, useCameraDevice } from 'react-native-vision-camera'
+import { calculateAge } from '@/lib/id-scanner/aamva-parser'
 import type { Customer } from '@/types/pos'
-import { logger } from '@/utils/logger'
+import type { AAMVAData } from '@/lib/id-scanner/aamva-parser'
 
-const { height } = Dimensions.get('window')
+// Hooks (REFACTORED)
+import { useCameraScanner } from '@/hooks/pos/useCameraScanner'
+import { useCustomerSearch } from '@/hooks/pos/useCustomerSearch'
+import { useCustomerSelectorAnimations } from '@/hooks/pos/useCustomerSelectorAnimations'
+import { useRecentCustomers, type RecentCustomer } from '@/hooks/pos/useRecentCustomers'
+import { formatRelativeTime } from '@/utils/time'
 
 interface POSUnifiedCustomerSelectorProps {
   visible: boolean
@@ -31,367 +60,158 @@ function POSUnifiedCustomerSelector({
   onClose,
 }: POSUnifiedCustomerSelectorProps) {
   const insets = useSafeAreaInsets()
-  const [hasPermission, setHasPermission] = useState(false)
-  const [searchQuery, setSearchQuery] = useState('')
-  const [customers, setCustomers] = useState<Customer[]>([])
-  const [searching, setSearching] = useState(false)
-  const [isScanning, setIsScanning] = useState(true)
-  const [isProcessing, setIsProcessing] = useState(false)
-  const [cameraActive, setCameraActive] = useState(true) // Controls camera mount/unmount
-  const [scanMessage, setScanMessage] = useState('')
-  const [parsedData, setParsedData] = useState<AAMVAData | null>(null)
-  const [matchedCustomer, setMatchedCustomer] = useState<Customer | null>(null)
-  const [cameraKey, setCameraKey] = useState(0) // Force camera remount for fresh scans
-  const [focusPoint, setFocusPoint] = useState<{ x: number; y: number } | null>(null)
-  const searchInputRef = useRef<TextInput>(null)
-  const cameraRef = useRef<Camera>(null)
-  const lastScannedCode = useRef<string | null>(null)
-
-  // Animated values
-  const sheetBottomAnim = useRef(new Animated.Value(0)).current
-  const sheetHeightAnim = useRef(new Animated.Value(200)).current
-  const previewOpacity = useRef(new Animated.Value(0)).current
-  const checkmarkScale = useRef(new Animated.Value(0)).current
-  const loadingRotation = useRef(new Animated.Value(0)).current
-  const focusRingScale = useRef(new Animated.Value(0)).current
-  const focusRingOpacity = useRef(new Animated.Value(0)).current
-  const [keyboardHeight, setKeyboardHeight] = useState(0)
-
   const device = useCameraDevice('back')
+  const cameraRef = useRef<Camera>(null)
+  const searchInputRef = useRef<TextInput>(null)
+
+  // ========================================
+  // HOOKS - Camera Scanner (REFACTORED)
+  // ========================================
+  const {
+    hasPermission,
+    isScanning,
+    isProcessing,
+    cameraActive,
+    scanMessage,
+    parsedData,
+    cameraKey,
+    focusPoint,
+    codeScanner,
+    resetAll,
+    handleCameraPress,
+  } = useCameraScanner(onNoMatchFoundWithData)
+
+  // ========================================
+  // HOOKS - Customer Search (REFACTORED)
+  // ========================================
+  const {
+    searchQuery,
+    customers,
+    searching,
+    setSearchQuery,
+    clearSearch,
+  } = useCustomerSearch(vendorId)
+
+  // ========================================
+  // HOOKS - Recent Customers
+  // ========================================
+  const {
+    recentCustomers,
+    addRecentCustomer,
+    clearRecentCustomers,
+  } = useRecentCustomers(vendorId)
 
   // Smart mode: typing mode vs scanning mode
   const isTypingMode = searchQuery.length > 0
 
+  // ========================================
+  // FOCUS STATE - Immediate full screen on input tap
+  // ========================================
+  const [isSearchFocused, setIsSearchFocused] = useState(false)
+
+  // ========================================
+  // HOOKS - Animations (REFACTORED)
+  // ========================================
+  const {
+    sheetTranslateY,
+    previewOpacity,
+    checkmarkScale,
+    loadingRotation,
+    focusRingScale,
+    focusRingOpacity,
+    animateFocusRing,
+  } = useCustomerSelectorAnimations(
+    isTypingMode || isSearchFocused, // Full screen if typing OR focused
+    customers.length,
+    parsedData,
+    null
+  )
+
+
+  // ========================================
+  // EFFECTS
+  // ========================================
   useEffect(() => {
     if (visible) {
-      requestCameraPermission()
       // FULL RESET - everything back to initial state
-      setSearchQuery('')
-      setCustomers([])
-      setSearching(false)
-      setIsScanning(true)
-      setIsProcessing(false)
-      setCameraActive(true)
-      setScanMessage('')
-      setParsedData(null)
-      setMatchedCustomer(null)
-      setKeyboardHeight(0)
-      lastScannedCode.current = null
-      previewOpacity.setValue(0)
-      checkmarkScale.setValue(0)
-      sheetHeightAnim.setValue(200)
-      sheetBottomAnim.setValue(0)
+      resetAll()
+      clearSearch()
+      setIsSearchFocused(false)
     } else {
-      // Clean shutdown - unmount camera
-      setIsScanning(false)
-      setIsProcessing(false)
-      setCameraActive(false)
-      lastScannedCode.current = null
+      // Clean shutdown
+      resetAll()
+      setIsSearchFocused(false)
     }
   }, [visible])
 
-  // Keyboard listeners
-  useEffect(() => {
-    const keyboardWillShow = Keyboard.addListener(
-      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
-      (e) => {
-        setKeyboardHeight(e.endCoordinates.height)
-        Animated.spring(sheetBottomAnim, {
-          toValue: e.endCoordinates.height - insets.bottom,
-          useNativeDriver: false,
-          damping: 20,
-          stiffness: 200,
-        }).start()
-      }
-    )
+  // ========================================
+  // HANDLERS - Memoized to prevent re-renders
+  // ========================================
+  const handleCameraTap = useCallback((event: any) => {
+    handleCameraPress(event, cameraRef)
+    animateFocusRing()
+  }, [handleCameraPress, animateFocusRing])
 
-    const keyboardWillHide = Keyboard.addListener(
-      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
-      () => {
-        setKeyboardHeight(0)
-        Animated.spring(sheetBottomAnim, {
-          toValue: 0,
-          useNativeDriver: false,
-          damping: 20,
-          stiffness: 200,
-        }).start()
-      }
-    )
+  const handleSearchFocus = useCallback(() => {
+    // IMMEDIATELY go full screen when input is tapped
+    setIsSearchFocused(true)
+  }, [])
 
-    return () => {
-      keyboardWillShow.remove()
-      keyboardWillHide.remove()
-    }
-  }, [insets.bottom])
+  const handleSearchBlur = useCallback(() => {
+    setIsSearchFocused(false)
+  }, [])
 
-  // Loading spinner animation when searching
-  useEffect(() => {
-    if (parsedData && !matchedCustomer) {
-      // Start continuous rotation for loading
-      loadingRotation.setValue(0)
-      Animated.loop(
-        Animated.timing(loadingRotation, {
-          toValue: 1,
-          duration: 1000,
-          useNativeDriver: true,
-          easing: (t) => t, // Linear
-        })
-      ).start()
-    } else {
-      loadingRotation.setValue(0)
-    }
-  }, [parsedData, matchedCustomer])
-
-  // Animate checkmark when customer found
-  useEffect(() => {
-    if (matchedCustomer) {
-      Animated.spring(checkmarkScale, {
-        toValue: 1,
-        useNativeDriver: true,
-        damping: 12,
-        stiffness: 400,
-      }).start()
-    } else {
-      checkmarkScale.setValue(0)
-    }
-  }, [matchedCustomer])
-
-  // Smart sheet height animation based on typing mode
-  useEffect(() => {
-    const hasResults = customers.length > 0
-
-    let targetHeight: number
-    if (keyboardHeight > 0) {
-      // Keyboard is up - expand to fill available space
-      targetHeight = height - keyboardHeight + insets.bottom
-    } else if (isTypingMode || hasResults) {
-      // Typing or has results - go full screen
-      targetHeight = height
-    } else {
-      // Default compact mode
-      targetHeight = 200
-    }
-
-    Animated.spring(sheetHeightAnim, {
-      toValue: targetHeight,
-      useNativeDriver: false,
-      damping: 25,
-      stiffness: 180,
-    }).start()
-  }, [isTypingMode, customers.length, keyboardHeight, height, insets.bottom])
-
-  const requestCameraPermission = async () => {
-    const permission = await Camera.requestCameraPermission()
-    setHasPermission(permission === 'granted')
-  }
-
-  // System-optimized scanner callback - zero overhead
-  const handleCodeScanned = useCallback((codes: any[]) => {
-    if (!isScanning || isProcessing || codes.length === 0) return
-
-    const code = codes[0]
-    if (!code.value) return
-
-    // DEBOUNCE: Ignore if same code was just scanned
-    if (lastScannedCode.current === code.value) return
-    lastScannedCode.current = code.value
-
-    // STOP scanning immediately to prevent spam
-    setIsScanning(false)
-    setIsProcessing(true)
-
-    // Immediate haptic + beep
+  // Handle customer selection (with recent tracking)
+  const handleCustomerSelect = useCallback((customer: Customer) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-    playSuccessBeep()
+    addRecentCustomer(customer)
+    onCustomerSelected(customer)
+  }, [addRecentCustomer, onCustomerSelected])
 
-    // Process instantly
-    handleBarcodeScan(code.value!)
-  }, [isScanning, isProcessing])
+  // Memoize customer item rendering
+  const renderCustomerItem = useCallback(({ item, index, total, isRecent }: { item: Customer | RecentCustomer; index: number; total: number; isRecent?: boolean }) => {
+    const customerName =
+      item.display_name || `${item.first_name} ${item.last_name}`.trim() || item.email
 
-  const codeScanner = useCodeScanner({
-    codeTypes: ['pdf-417'],
-    onCodeScanned: handleCodeScanned,
-  })
+    const timestamp = isRecent && 'viewedAt' in item ? formatRelativeTime(item.viewedAt) : null
 
-  const handleBarcodeScan = async (barcodeData: string) => {
-    try {
-      const data = parseAAMVABarcode(barcodeData)
+    const accessibilityLabel =
+      item.loyalty_points > 0
+        ? `${customerName}, ${item.loyalty_points.toLocaleString()} loyalty points`
+        : customerName
 
-      // Age verification FIRST
-      if (data.dateOfBirth) {
-        const age = calculateAge(data.dateOfBirth)
-        const legal = isLegalAge(data.dateOfBirth)
-
-        if (!legal && age !== undefined) {
-          setScanMessage(`UNDER 21 - Age ${age}`)
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
-          playRejectionTone()
-
-          // Reset scanner after brief display
-          setTimeout(() => {
-            setScanMessage('')
-            lastScannedCode.current = null
-            setIsScanning(true)
-            setIsProcessing(false)
-          }, 1500)
-          return
-        }
-      }
-
-      // Show ONE unified card - starts with "Searching..."
-      setParsedData(data)
-      Animated.spring(previewOpacity, {
-        toValue: 1,
-        useNativeDriver: true,
-        damping: 20,
-        stiffness: 300,
-      }).start()
-
-      // Lookup customer and update SAME card
-      lookupCustomer(data)
-    } catch (error) {
-      logger.error('Scan error:', error)
-      resetScanner()
-    }
-  }
-
-  const lookupCustomer = async (scannedData: AAMVAData) => {
-    try {
-      // Quick exact match lookup using Supabase - filter by vendor
-      if (scannedData.firstName && scannedData.lastName) {
-        const { data: customers } = await supabase
-          .from('customers')
-          .select('*')
-          .eq('vendor_id', vendorId)
-          .ilike('first_name', scannedData.firstName)
-          .ilike('last_name', scannedData.lastName)
-          .limit(100000) // Search ALL customers for exact match
-
-        const exactMatch = customers?.find((c: any) =>
-          c.first_name?.toUpperCase() === scannedData.firstName?.toUpperCase() &&
-          c.last_name?.toUpperCase() === scannedData.lastName?.toUpperCase()
-        )
-
-        if (exactMatch) {
-          // Update SAME card to show match (smooth in-place update)
-          setMatchedCustomer(exactMatch)
-
-          // Auto-select after brief confirmation display
-          setTimeout(() => {
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
-            onCustomerSelected(exactMatch)
-          }, 500)
-          return
-        }
-      }
-
-      // No match - trigger intelligent matching flow
-      onNoMatchFoundWithData(scannedData)
-    } catch (error) {
-      logger.error('Lookup error:', error)
-      onNoMatchFoundWithData(scannedData)
-    }
-  }
-
-  // Tap to focus handler
-  const handleCameraPress = useCallback((event: any) => {
-    if (!cameraActive || isProcessing || parsedData) return
-
-    const { locationX, locationY } = event.nativeEvent
-
-    // Set focus point for camera
-    setFocusPoint({ x: locationX, y: locationY })
-
-    // Haptic feedback
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-
-    // Animate focus ring
-    focusRingScale.setValue(1.5)
-    focusRingOpacity.setValue(1)
-
-    Animated.parallel([
-      Animated.spring(focusRingScale, {
-        toValue: 1,
-        useNativeDriver: true,
-        damping: 15,
-        stiffness: 300,
-      }),
-      Animated.timing(focusRingOpacity, {
-        toValue: 0,
-        duration: 800,
-        useNativeDriver: true,
-      }),
-    ]).start(() => {
-      setFocusPoint(null)
-    })
-
-    // Focus camera at point
-    if (cameraRef.current) {
-      cameraRef.current.focus({ x: locationX, y: locationY })
-    }
-  }, [cameraActive, isProcessing, parsedData])
-
-  // Helper to reset scanner to ready state - fully unmounts and remounts camera
-  const resetScanner = () => {
-    // Step 1: Unmount camera
-    setCameraActive(false)
-
-    // Step 2: Reset all state
-    lastScannedCode.current = null
-    setParsedData(null)
-    setMatchedCustomer(null)
-    setIsProcessing(false)
-
-    // Step 3: Remount camera after brief delay for clean reset
-    setTimeout(() => {
-      setCameraKey(prev => prev + 1)
-      setCameraActive(true)
-      setIsScanning(true)
-    }, 50)
-  }
-
-  const handleSearch = async (query: string) => {
-    setSearchQuery(query)
-
-    if (!query.trim()) {
-      setCustomers([])
-      return
-    }
-
-    setSearching(true)
-    try {
-      // Smart search - Search ALL customers from this vendor across ALL fields, NO LIMITS
-      // Searches: first_name, last_name, email, phone, display_name, middle_name
-      const searchTerm = query.trim()
-
-      // Normalize phone numbers - remove formatting characters for phone search
-      const normalizedPhone = searchTerm.replace(/[\s\-\(\)\.]/g, '')
-      const isPhoneSearch = /^\d+$/.test(normalizedPhone) && normalizedPhone.length >= 3
-
-      let searchConditions = `first_name.ilike.%${searchTerm}%,last_name.ilike.%${searchTerm}%,middle_name.ilike.%${searchTerm}%,display_name.ilike.%${searchTerm}%,email.ilike.%${searchTerm}%`
-
-      // Add phone search with normalized number for better matching
-      if (isPhoneSearch) {
-        searchConditions += `,phone.ilike.%${normalizedPhone}%`
-      } else {
-        searchConditions += `,phone.ilike.%${searchTerm}%`
-      }
-
-      const { data: results } = await supabase
-        .from('customers')
-        .select('*')
-        .eq('vendor_id', vendorId)
-        .or(searchConditions)
-        .order('created_at', { ascending: false })
-        .limit(100000) // Very high limit to ensure we get ALL customers (Supabase default is only 1000)
-
-      setCustomers(results || [])
-    } catch (error) {
-      logger.error('Search error:', error)
-    } finally {
-      setSearching(false)
-    }
-  }
+    return (
+      <TouchableOpacity
+        onPress={() => handleCustomerSelect(item)}
+        style={[
+          styles.customerItem,
+          index === 0 && styles.customerItemFirst,
+          index === total - 1 && styles.customerItemLast,
+        ]}
+        activeOpacity={0.7}
+        accessible={true}
+        accessibilityRole="button"
+        accessibilityLabel={accessibilityLabel}
+        accessibilityHint="Double tap to select this customer"
+      >
+        <View style={styles.customerInfo}>
+          <Text style={styles.customerName}>{customerName}</Text>
+          {timestamp && (
+            <Text style={styles.customerTimestamp}>{timestamp}</Text>
+          )}
+        </View>
+        {item.loyalty_points > 0 && (
+          <Text
+            style={styles.customerPoints}
+            accessibilityElementsHidden={true}
+            importantForAccessibility="no"
+          >
+            {item.loyalty_points.toLocaleString()} pts
+          </Text>
+        )}
+      </TouchableOpacity>
+    )
+  }, [handleCustomerSelect])
 
   if (!visible) return null
 
@@ -402,11 +222,12 @@ function POSUnifiedCustomerSelector({
       presentationStyle="fullScreen"
       supportedOrientations={['portrait', 'landscape', 'landscape-left', 'landscape-right']}
       onRequestClose={onClose}
+      statusBarTranslucent
     >
       <View style={styles.container}>
-        {/* Full-screen Camera - Fully unmounts/remounts between scans */}
+        {/* Full-screen Camera */}
         {device && hasPermission && cameraActive && (
-          <TouchableWithoutFeedback onPress={handleCameraPress}>
+          <TouchableWithoutFeedback onPress={handleCameraTap}>
             <View style={StyleSheet.absoluteFill}>
               <Camera
                 ref={cameraRef}
@@ -427,7 +248,7 @@ function POSUnifiedCustomerSelector({
                       top: focusPoint.y - 40,
                       opacity: focusRingOpacity,
                       transform: [{ scale: focusRingScale }],
-                    }
+                    },
                   ]}
                 />
               )}
@@ -435,8 +256,8 @@ function POSUnifiedCustomerSelector({
           </TouchableWithoutFeedback>
         )}
 
-        {/* Manual Add Customer Button - Only show when camera is active */}
-        {!isTypingMode && isScanning && !isProcessing && !scanMessage && !parsedData && !matchedCustomer && onAddCustomer && (
+        {/* Manual Add Customer Button */}
+        {!isTypingMode && isScanning && !isProcessing && !scanMessage && !parsedData && onAddCustomer && (
           <View style={styles.scanLabelContainer}>
             <LiquidGlassView
               effect="regular"
@@ -480,101 +301,68 @@ function POSUnifiedCustomerSelector({
           </View>
         )}
 
-        {/* Unified Customer Card - Seamless content transition */}
+        {/* Unified Customer Card - Showing scan results */}
         {parsedData && (
           <Animated.View
-            style={[
-              styles.unifiedCard,
-              { opacity: previewOpacity }
-            ]}
+            style={[styles.unifiedCard, { opacity: previewOpacity }]}
             accessible={true}
             accessibilityRole="alert"
-            accessibilityLabel={
-              matchedCustomer
-                ? `Customer found: ${matchedCustomer.display_name || `${matchedCustomer.first_name} ${matchedCustomer.last_name}`.trim() || matchedCustomer.email}${matchedCustomer.loyalty_points > 0 ? `. ${matchedCustomer.loyalty_points} loyalty points` : ''}`
-                : `Searching for customer: ${parsedData.firstName} ${parsedData.lastName}${parsedData.dateOfBirth ? `, age ${calculateAge(parsedData.dateOfBirth)}` : ''}`
-            }
+            accessibilityLabel={`Searching for customer: ${parsedData.firstName} ${parsedData.lastName}${parsedData.dateOfBirth ? `, age ${calculateAge(parsedData.dateOfBirth)}` : ''}`}
             accessibilityLiveRegion="polite"
           >
             <BlurView intensity={80} tint="systemThickMaterialDark" style={StyleSheet.absoluteFill} accessible={false} />
             <View style={styles.cardContent} accessible={false}>
-              {/* Circle - Shows loading spinner, then checkmark */}
+              {/* Circle with loading spinner */}
               <View style={styles.checkmark}>
-                {/* Outline - always visible */}
                 <View style={styles.checkmarkOutline} />
-
-                {/* Loading spinner - visible when searching */}
-                {!matchedCustomer && (
-                  <Animated.View
-                    style={[
-                      styles.loadingSpinner,
-                      {
-                        transform: [{
-                          rotate: loadingRotation.interpolate({
-                            inputRange: [0, 1],
-                            outputRange: ['0deg', '360deg']
-                          })
-                        }]
-                      }
-                    ]}
-                  />
-                )}
-
-                {/* Checkmark fill - springs in when matched */}
                 <Animated.View
                   style={[
-                    styles.checkmarkFill,
+                    styles.loadingSpinner,
                     {
-                      opacity: matchedCustomer ? 1 : 0,
-                      transform: [{ scale: checkmarkScale }],
-                    }
+                      transform: [{
+                        rotate: loadingRotation.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: ['0deg', '360deg'],
+                        }),
+                      }],
+                    },
                   ]}
-                >
-                  <Text style={styles.checkmarkText}>✓</Text>
-                </Animated.View>
+                />
               </View>
 
-              {/* Name - Always same size */}
+              {/* Name */}
               <Text style={styles.cardName}>
-                {matchedCustomer
-                  ? (matchedCustomer.display_name ||
-                     `${matchedCustomer.first_name} ${matchedCustomer.last_name}`.trim() ||
-                     matchedCustomer.email)
-                  : `${parsedData.firstName} ${parsedData.lastName}`}
+                {`${parsedData.firstName} ${parsedData.lastName}`}
               </Text>
 
-              {/* Subtitle - Always takes space, content transitions */}
+              {/* Subtitle */}
               <Text style={styles.cardSubtitle}>
-                {matchedCustomer
-                  ? (matchedCustomer.loyalty_points > 0
-                      ? `${matchedCustomer.loyalty_points.toLocaleString()} points`
-                      : ' ')
-                  : (parsedData.dateOfBirth
-                      ? `Age ${calculateAge(parsedData.dateOfBirth)}`
-                      : ' ')}
+                {parsedData.dateOfBirth ? `Age ${calculateAge(parsedData.dateOfBirth)}` : ' '}
               </Text>
 
-              {/* Status - Always same position */}
-              <Text style={styles.cardStatus}>
-                {matchedCustomer ? 'Customer Found' : 'Searching...'}
-              </Text>
+              {/* Status */}
+              <Text style={styles.cardStatus}>Searching...</Text>
             </View>
           </Animated.View>
         )}
 
-        {/* Unified Customer List - True Edge to Edge */}
+        {/* Customer List Sheet - Slides up smoothly with native driver (60fps) */}
         <Animated.View
           style={[
             styles.listContainer,
             {
-              bottom: sheetBottomAnim,
-              height: sheetHeightAnim,
-            }
+              // Transform uses native driver for buttery smooth 60fps
+              transform: [{ translateY: sheetTranslateY }],
+            },
           ]}
         >
-          <BlurView intensity={95} tint="systemThickMaterialDark" style={StyleSheet.absoluteFill} />
+          <BlurView
+            intensity={95}
+            tint="systemThickMaterialDark"
+            style={StyleSheet.absoluteFill}
+          />
 
-          {/* Unified Header with Search and Done */}
+          {/* Header with Search and Done */}
           <View style={[styles.listHeader, { paddingTop: insets.top + 8 }]} accessible={false}>
             <TextInput
               ref={searchInputRef}
@@ -582,12 +370,16 @@ function POSUnifiedCustomerSelector({
               placeholder="Search name, email, or phone"
               placeholderTextColor="rgba(255,255,255,0.4)"
               value={searchQuery}
-              onChangeText={handleSearch}
+              onChangeText={setSearchQuery}
+              onFocus={handleSearchFocus}
+              onBlur={handleSearchBlur}
               autoCapitalize="none"
               autoCorrect={false}
               returnKeyType="search"
               autoFocus={false}
               keyboardType="default"
+              blurOnSubmit={false}
+              enablesReturnKeyAutomatically
               accessible={true}
               accessibilityLabel="Search customers"
               accessibilityHint="Type to search customers by name, email, or phone"
@@ -604,7 +396,7 @@ function POSUnifiedCustomerSelector({
             </TouchableOpacity>
           </View>
 
-          {/* Customer List - Grouped section with rounded container */}
+          {/* Customer List */}
           <View style={styles.listContent}>
             {searching ? (
               <View
@@ -620,49 +412,13 @@ function POSUnifiedCustomerSelector({
                 <FlatList
                   data={customers}
                   keyExtractor={(item) => item.id}
-                  renderItem={({ item, index }) => {
-                    const customerName = item.display_name || `${item.first_name} ${item.last_name}`.trim() || item.email
-                    const accessibilityLabel = item.loyalty_points > 0
-                      ? `${customerName}, ${item.loyalty_points.toLocaleString()} loyalty points`
-                      : customerName
-
-                    return (
-                      <TouchableOpacity
-                        onPress={() => {
-                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                          onCustomerSelected(item)
-                        }}
-                        style={[
-                          styles.customerItem,
-                          index === 0 && styles.customerItemFirst,
-                          index === customers.length - 1 && styles.customerItemLast,
-                        ]}
-                        activeOpacity={0.7}
-                        accessible={true}
-                        accessibilityRole="button"
-                        accessibilityLabel={accessibilityLabel}
-                        accessibilityHint="Double tap to select this customer"
-                      >
-                        <Text style={styles.customerName}>
-                          {customerName}
-                        </Text>
-                        {item.loyalty_points > 0 && (
-                          <Text style={styles.customerPoints} accessibilityElementsHidden={true} importantForAccessibility="no">
-                            {item.loyalty_points.toLocaleString()} pts
-                          </Text>
-                        )}
-                      </TouchableOpacity>
-                    )
-                  }}
+                  renderItem={({ item, index }) => renderCustomerItem({ item, index, total: customers.length })}
                   showsVerticalScrollIndicator={false}
                   keyboardShouldPersistTaps="handled"
-                  keyboardDismissMode="on-drag"
+                  keyboardDismissMode="interactive"
                   contentContainerStyle={{
-                    paddingBottom: Math.max(insets.bottom + keyboardHeight, 16),
+                    paddingBottom: Math.max(insets.bottom, 16),
                   }}
-                  removeClippedSubviews={true}
-                  maxToRenderPerBatch={10}
-                  windowSize={5}
                 />
               </View>
             ) : searchQuery.trim() ? (
@@ -673,6 +429,26 @@ function POSUnifiedCustomerSelector({
                 accessibilityLabel="No customers found"
               >
                 <Text style={styles.emptyText}>No customers found</Text>
+              </View>
+            ) : isSearchFocused && recentCustomers.length > 0 ? (
+              <View style={styles.customerListSection}>
+                <View style={styles.recentHeader}>
+                  <Text style={styles.recentLabel}>RECENT</Text>
+                  <TouchableOpacity onPress={clearRecentCustomers} style={styles.clearButton}>
+                    <Text style={styles.clearText}>Clear</Text>
+                  </TouchableOpacity>
+                </View>
+                <FlatList
+                  data={recentCustomers}
+                  keyExtractor={(item) => item.id}
+                  renderItem={({ item, index }) => renderCustomerItem({ item, index, total: recentCustomers.length, isRecent: true })}
+                  showsVerticalScrollIndicator={false}
+                  keyboardShouldPersistTaps="handled"
+                  keyboardDismissMode="interactive"
+                  contentContainerStyle={{
+                    paddingBottom: Math.max(insets.bottom, 16),
+                  }}
+                />
               </View>
             ) : null}
           </View>
@@ -685,6 +461,9 @@ function POSUnifiedCustomerSelector({
 const POSUnifiedCustomerSelectorMemo = memo(POSUnifiedCustomerSelector)
 export { POSUnifiedCustomerSelectorMemo as POSUnifiedCustomerSelector }
 
+// ========================================
+// STYLES
+// ========================================
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -702,17 +481,19 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
   },
 
-  // Unified List Container - True Edge to Edge with Rounded Top
+  // List Container - Always full screen, positioned with translateY
   listContainer: {
     position: 'absolute',
+    bottom: 0,
     left: 0,
     right: 0,
+    top: 0,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     overflow: 'hidden',
   },
 
-  // Unified Header with Search and Done
+  // List Header
   listHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -754,11 +535,36 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
 
-  // Customer List Section - Rounded container that clips scrolling content
+  // Customer List Section
   customerListSection: {
     flex: 1,
     borderRadius: 16,
     overflow: 'hidden',
+  },
+
+  // Recent Header
+  recentHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  recentLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: 'rgba(255,255,255,0.5)',
+    letterSpacing: 0.6,
+  },
+  clearButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  clearText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: 'rgba(255,60,60,0.95)',
+    letterSpacing: -0.2,
   },
 
   // Scan Label
@@ -771,7 +577,7 @@ const styles = StyleSheet.create({
     zIndex: 10,
   },
 
-  // Manual Add Customer Button (on scanner screen)
+  // Manual Add Customer Button
   manualAddButton: {
     borderRadius: 100,
     overflow: 'hidden',
@@ -815,7 +621,7 @@ const styles = StyleSheet.create({
     letterSpacing: -0.3,
   },
 
-  // Unified Card - Fixed size, seamless content transitions
+  // Unified Card - Scan result preview
   unifiedCard: {
     position: 'absolute',
     top: '36%',
@@ -836,7 +642,7 @@ const styles = StyleSheet.create({
     padding: 24,
     alignItems: 'center',
     gap: 6,
-    minHeight: 200, // Fixed height for consistent card size
+    minHeight: 200,
   },
   checkmark: {
     width: 48,
@@ -867,28 +673,13 @@ const styles = StyleSheet.create({
     borderBottomColor: 'rgba(255,255,255,0.3)',
     borderLeftColor: 'rgba(255,255,255,0.3)',
   },
-  checkmarkFill: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    borderWidth: 1.5,
-    borderColor: 'rgba(255,255,255,0.4)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  checkmarkText: {
-    fontSize: 24,
-    color: '#fff',
-    fontWeight: '600',
-  },
   cardName: {
     fontSize: 20,
     fontWeight: '600',
     color: '#fff',
     letterSpacing: -0.4,
     textAlign: 'center',
-    minHeight: 24, // Prevent layout shift
+    minHeight: 24,
   },
   cardSubtitle: {
     fontSize: 15,
@@ -896,7 +687,7 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.7)',
     letterSpacing: -0.2,
     textAlign: 'center',
-    minHeight: 20, // Prevent layout shift
+    minHeight: 20,
   },
   cardStatus: {
     fontSize: 10,
@@ -905,16 +696,17 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
     marginTop: 2,
     textTransform: 'uppercase',
-    minHeight: 14, // Prevent layout shift
+    minHeight: 14,
   },
 
-  // Customer List Items - iOS 26 Grouped List Style
+  // Customer List Items
   customerItem: {
-    height: 60,
+    minHeight: 60,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 20,
+    paddingVertical: 12,
     backgroundColor: 'rgba(255,255,255,0.08)',
     borderBottomWidth: 0.33,
     borderBottomColor: 'rgba(255,255,255,0.06)',
@@ -928,18 +720,28 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: 16,
     borderBottomWidth: 0,
   },
-  customerName: {
+  customerInfo: {
     flex: 1,
+    gap: 2,
+  },
+  customerName: {
     fontSize: 17,
     fontWeight: '400',
     color: '#fff',
     letterSpacing: -0.4,
+  },
+  customerTimestamp: {
+    fontSize: 13,
+    fontWeight: '400',
+    color: 'rgba(255,255,255,0.4)',
+    letterSpacing: -0.2,
   },
   customerPoints: {
     fontSize: 14,
     fontWeight: '500',
     color: 'rgba(100,200,255,0.95)',
     letterSpacing: -0.2,
+    marginLeft: 12,
   },
 
   // States
