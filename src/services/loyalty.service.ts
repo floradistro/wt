@@ -1,11 +1,11 @@
 /**
  * Loyalty Service
+ * Apple Engineering: One clear responsibility - Fetch loyalty program settings
  *
- * Handles all loyalty program operations using Supabase directly.
- * Replaces API calls to /api/vendor/loyalty/*
- *
- * NOTE: Database schema mismatches exist for loyalty program:
- * - is_enabled, max_points_per_transaction, min_points_to_redeem properties
+ * CLEANED UP: Removed all unused/orphaned functions
+ * - Server-side calculations now happen in edge function
+ * - Point updates handled by atomic database functions
+ * - This service ONLY fetches program configuration
  */
 
 import { supabase } from '@/lib/supabase/client'
@@ -20,9 +20,6 @@ export interface LoyaltyProgram {
   points_per_dollar: number // Points earned per dollar spent
   min_redemption_points?: number
   points_expiry_days?: number
-  allow_points_on_discounted_items?: boolean
-  points_on_tax?: boolean
-  tiers?: any // JSONB tier structure
   created_at: string
   updated_at: string
 }
@@ -30,8 +27,11 @@ export interface LoyaltyProgram {
 /**
  * Get loyalty program for a vendor
  *
- * The loyalty_programs table has RLS policy that checks app.current_vendor_id
- * if set, but also allows authenticated queries with vendor_id filter.
+ * This is the ONLY function needed from this service.
+ * All other loyalty operations happen server-side in:
+ * - Edge function: calculate_loyalty_points_to_earn (server-side calculation)
+ * - Edge function: update_customer_loyalty_points_atomic (server-side update)
+ * - Database function: adjust_customer_loyalty_points (manual adjustments)
  */
 export async function getLoyaltyProgram(vendorId: string): Promise<LoyaltyProgram | null> {
   const { data, error } = await supabase
@@ -39,7 +39,7 @@ export async function getLoyaltyProgram(vendorId: string): Promise<LoyaltyProgra
     .select('*')
     .eq('vendor_id', vendorId)
     .eq('is_active', true)
-    .maybeSingle() // Use maybeSingle instead of single to handle no results gracefully
+    .maybeSingle()
 
   if (error) {
     throw new Error(`Failed to load loyalty program: ${error.message}`)
@@ -50,13 +50,14 @@ export async function getLoyaltyProgram(vendorId: string): Promise<LoyaltyProgra
 
 /**
  * Get customer's loyalty points balance
+ * Used for displaying current balance in UI
  */
 export async function getCustomerLoyaltyBalance(customerId: string): Promise<number> {
-  const { data, error } = await supabase
+  const { data, error} = await supabase
     .from('customers')
     .select('loyalty_points')
     .eq('id', customerId)
-    .eq('is_active', true) // Only lookup active customers
+    .eq('is_active', true)
     .single()
 
   if (error) {
@@ -67,62 +68,14 @@ export async function getCustomerLoyaltyBalance(customerId: string): Promise<num
 }
 
 /**
- * Calculate points to earn from a purchase
- */
-export function calculatePointsToEarn(
-  subtotal: number,
-  loyaltyProgram: LoyaltyProgram | null
-): number {
-    // @ts-expect-error - LoyaltyProgram schema mismatch (is_enabled vs enabled)
-  if (!loyaltyProgram || !loyaltyProgram.is_enabled) {
-    return 0
-  }
-
-  return Math.floor(subtotal * loyaltyProgram.points_per_dollar)
-}
-
-/**
- * Calculate maximum redeemable points
- */
-export function calculateMaxRedeemablePoints(
-  subtotal: number,
-  customerPoints: number,
-  loyaltyProgram: LoyaltyProgram | null
-): number {
-  // @ts-expect-error - LoyaltyProgram schema mismatch
-  if (!loyaltyProgram || !loyaltyProgram.is_enabled) {
-    return 0
-  }
-
-  // Calculate max points based on subtotal
-  const maxPointsFromSubtotal = Math.floor(subtotal / loyaltyProgram.point_value)
-
-  // Apply program limits
-  let maxRedeemable = Math.min(customerPoints, maxPointsFromSubtotal)
-
-  // @ts-expect-error - LoyaltyProgram schema mismatch
-  if (loyaltyProgram.max_points_per_transaction) {
-    // @ts-expect-error - LoyaltyProgram schema mismatch
-    maxRedeemable = Math.min(maxRedeemable, loyaltyProgram.max_points_per_transaction)
-  }
-
-  // @ts-expect-error - LoyaltyProgram schema mismatch
-  if (loyaltyProgram.min_points_to_redeem && maxRedeemable < loyaltyProgram.min_points_to_redeem) {
-    return 0 // Not enough points to meet minimum
-  }
-
-  return maxRedeemable
-}
-
-/**
- * Calculate discount amount from points
+ * Calculate discount amount from points (client-side preview only)
+ * Server validates this calculation before applying
  */
 export function calculateLoyaltyDiscount(
   pointsToRedeem: number,
   loyaltyProgram: LoyaltyProgram | null
 ): number {
-  // @ts-expect-error - LoyaltyProgram schema mismatch
-  if (!loyaltyProgram || !loyaltyProgram.is_enabled) {
+  if (!loyaltyProgram || !loyaltyProgram.is_active) {
     return 0
   }
 
@@ -130,56 +83,10 @@ export function calculateLoyaltyDiscount(
 }
 
 /**
- * Record loyalty transaction (after order is created)
- *
- * Call this after successfully creating an order to update customer points.
- */
-export async function recordLoyaltyTransaction(params: {
-  customerId: string
-  orderId: string
-  pointsEarned: number
-  pointsRedeemed: number
-  orderTotal: number
-}): Promise<void> {
-  const { customerId, orderId, pointsEarned, pointsRedeemed, orderTotal } = params
-
-  // Insert loyalty transaction record
-  const { error: transactionError } = await supabase
-    .from('loyalty_transactions')
-    .insert({
-      customer_id: customerId,
-      order_id: orderId,
-      points_earned: pointsEarned,
-      points_redeemed: pointsRedeemed,
-      order_total: orderTotal,
-      transaction_type: pointsRedeemed > 0 ? 'redemption' : 'earning',
-    })
-
-  if (transactionError) {
-    throw new Error(`Failed to record loyalty transaction: ${transactionError.message}`)
-  }
-
-  // Update customer's loyalty points balance
-  const pointsChange = pointsEarned - pointsRedeemed
-
-  const { error: updateError } = await supabase.rpc('update_customer_loyalty_points', {
-    p_customer_id: customerId,
-    p_points_change: pointsChange,
-  })
-
-  if (updateError) {
-    throw new Error(`Failed to update customer loyalty points: ${updateError.message}`)
-  }
-}
-
-/**
- * Export a default service object for easier imports
+ * Export service object for easier imports
  */
 export const loyaltyService = {
   getLoyaltyProgram,
   getCustomerLoyaltyBalance,
-  calculatePointsToEarn,
-  calculateMaxRedeemablePoints,
   calculateLoyaltyDiscount,
-  recordLoyaltyTransaction,
 }

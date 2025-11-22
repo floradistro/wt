@@ -55,15 +55,7 @@ async function testLoyaltyService() {
       logTest('Get Loyalty Program', false, 'No loyalty program found')
     }
 
-    // Test: Calculate points to earn
-    const pointsToEarn = loyaltyService.calculatePointsToEarn(100, program)
-    logTest(
-      'Calculate Points to Earn',
-      pointsToEarn > 0,
-      `$100 order = ${pointsToEarn} points`
-    )
-
-    // Test: Calculate loyalty discount
+    // Test: Calculate loyalty discount (client-side preview)
     const discount = loyaltyService.calculateLoyaltyDiscount(100, program)
     logTest(
       'Calculate Loyalty Discount',
@@ -71,13 +63,8 @@ async function testLoyaltyService() {
       `100 points = $${discount.toFixed(2)} discount`
     )
 
-    // Test: Calculate max redeemable
-    const maxPoints = loyaltyService.calculateMaxRedeemablePoints(50, 200, program)
-    logTest(
-      'Calculate Max Redeemable',
-      maxPoints >= 0,
-      `$50 subtotal, 200 pts available = ${maxPoints} max redeemable`
-    )
+    // Note: Points calculation now happens server-side in edge function
+    console.log('  ℹ️  Point calculations now happen server-side for security')
   } catch (error) {
     logTest('Loyalty Service', false, 'Failed', error)
   }

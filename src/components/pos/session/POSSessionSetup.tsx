@@ -237,12 +237,17 @@ function POSSessionSetup({ user, onSessionReady }: POSSessionSetupProps) {
       const registerName = registerData?.register_name || 'Register'
       logger.debug('[POSSessionSetup] Register name:', registerName)
 
+      // CRITICAL FIX: Add 24-hour cutoff to prevent stale sessions from blocking cash drawer modal
+      const twentyFourHoursAgo = new Date()
+      twentyFourHoursAgo.setHours(twentyFourHoursAgo.getHours() - 24)
+
       const { data: activeSession } = await supabase
         .from('pos_sessions')
         .select('id, session_number')
         .eq('register_id', registerId)
         .eq('status', 'open')
-        .single()
+        .gte('opened_at', twentyFourHoursAgo.toISOString())  // ✅ Only sessions from last 24 hours
+        .maybeSingle()  // Use maybeSingle() instead of single() to handle no results gracefully
 
       logger.debug('[POSSessionSetup] Active session:', activeSession)
 
@@ -299,17 +304,24 @@ function POSSessionSetup({ user, onSessionReady }: POSSessionSetupProps) {
 
       if (error) throw error
 
+      // Handle array response (Supabase RPC sometimes wraps in array)
+      const sessionData = Array.isArray(data) ? data[0] : data
+
+      if (!sessionData?.id) {
+        throw new Error('Session created but no ID returned')
+      }
+
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
 
       const finalSessionInfo: SessionInfo = {
         ...sessionInfo!,
         registerId: selectedRegister.id,
         registerName: selectedRegister.name,
-        sessionId: data.id,
+        sessionId: sessionData.id,
       }
 
-      const sessionData: SessionData = {
-        sessionNumber: data.session_number || 'Unknown',
+      const sessionDataForParent: SessionData = {
+        sessionNumber: sessionData.session_number || 'Unknown',
         totalSales: 0,
         totalCash: 0,
         openingCash,
@@ -319,7 +331,7 @@ function POSSessionSetup({ user, onSessionReady }: POSSessionSetupProps) {
       setSelectedRegister(null)
 
       // Notify parent that session is ready
-      onSessionReady(finalSessionInfo, vendor, sessionData, customUserId!)
+      onSessionReady(finalSessionInfo, vendor, sessionDataForParent, customUserId!)
     } catch (error) {
       logger.error('Error in cash drawer submit:', error)
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)

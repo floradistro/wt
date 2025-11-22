@@ -8,6 +8,7 @@ import { View, Text, StyleSheet, TouchableOpacity } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { BlurView } from 'expo-blur'
 import * as Haptics from 'expo-haptics'
+import { Sentry } from '@/utils/sentry'
 import { colors, typography, spacing, radius } from '@/theme'
 
 interface Props {
@@ -38,6 +39,19 @@ export class ErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
     console.error('Error Boundary caught error:', error, errorInfo)
+
+    // Capture to Sentry with full context
+    Sentry.captureException(error, {
+      level: 'error',
+      contexts: {
+        react: {
+          componentStack: errorInfo.componentStack,
+        },
+      },
+      tags: {
+        errorBoundary: 'true',
+      },
+    })
   }
 
   resetError = () => {

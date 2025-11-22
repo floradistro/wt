@@ -481,7 +481,10 @@ export function POSCheckout({
       // Extract transaction details
       const orderNumber = data.data?.order?.order_number || data.data?.orderNumber || 'Unknown'
       const transactionNumber = `TXN-${orderNumber}`
-      const loyaltyPointsAdded = loyaltyPointsEarned
+
+      // Use server-calculated loyalty points (prevents client manipulation)
+      const serverLoyaltyEarned = data.data?.loyaltyPointsEarned || 0
+      const serverLoyaltyRedeemed = data.data?.loyaltyPointsRedeemed || 0
 
       // Prepare completion data
       const completionData: SaleCompletionData = {
@@ -495,8 +498,8 @@ export function POSCheckout({
         itemCount,
         processorName: currentProcessor?.processor_name,
         changeGiven: paymentData.changeGiven,
-        loyaltyPointsAdded,
-        loyaltyPointsRedeemed: loyaltyPointsToRedeem || undefined,
+        loyaltyPointsAdded: serverLoyaltyEarned,
+        loyaltyPointsRedeemed: serverLoyaltyRedeemed > 0 ? serverLoyaltyRedeemed : undefined,
       }
 
       Sentry.addBreadcrumb({

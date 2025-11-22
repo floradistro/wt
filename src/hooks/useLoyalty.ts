@@ -77,6 +77,36 @@ export function useLoyalty() {
     loadProgram()
   }, [loadProgram])
 
+  // Real-time subscription for instant updates across all devices
+  useEffect(() => {
+    if (!user?.email) return
+
+    logger.debug('[useLoyalty] Setting up real-time subscription for loyalty_programs')
+
+    // Subscribe to loyalty_programs changes for this user's vendor
+    const channel = supabase
+      .channel('loyalty-settings-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*', // Listen to INSERT, UPDATE, DELETE
+          schema: 'public',
+          table: 'loyalty_programs',
+        },
+        (payload) => {
+          logger.debug('[useLoyalty] Real-time update received:', payload)
+          // Reload program when any change occurs
+          loadProgram()
+        }
+      )
+      .subscribe()
+
+    return () => {
+      logger.debug('[useLoyalty] Cleaning up real-time subscription')
+      supabase.removeChannel(channel)
+    }
+  }, [user?.email, loadProgram])
+
   async function createProgram(programData: {
     name?: string
     points_per_dollar: number

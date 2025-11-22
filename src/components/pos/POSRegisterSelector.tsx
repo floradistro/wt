@@ -7,7 +7,7 @@ import { View, Text, StyleSheet, TouchableOpacity, Dimensions, Animated, Image }
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { BlurView } from 'expo-blur'
 import * as Haptics from 'expo-haptics'
-import { memo, useRef, useEffect, useState } from 'react'
+import { memo, useRef, useEffect, useState, useCallback } from 'react'
 import { supabase } from '@/lib/supabase/client'
 import { logger } from '@/utils/logger'
 
@@ -43,10 +43,12 @@ function RegisterCard({
   register,
   index,
   onPress,
+  currentTime,
 }: {
   register: Register
   index: number
   onPress: () => void
+  currentTime: Date
 }) {
   const scaleAnim = useRef(new Animated.Value(1)).current
   const fadeAnim = useRef(new Animated.Value(0)).current
@@ -84,14 +86,14 @@ function RegisterCard({
     onPress()
   }
 
-  const formatDuration = (startedAt: string) => {
+  const formatDuration = useCallback((startedAt: string) => {
     const start = new Date(startedAt)
-    const now = new Date()
-    const diff = now.getTime() - start.getTime()
+    const diff = currentTime.getTime() - start.getTime()
     const hours = Math.floor(diff / (1000 * 60 * 60))
     const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60))
-    return `${hours}h ${minutes}m`
-  }
+    const seconds = Math.floor((diff % (1000 * 60)) / 1000)
+    return `${hours}h ${minutes}m ${seconds}s`
+  }, [currentTime])
 
   const hasActiveSession = !!register.active_session
   const activeSession = register.active_session
@@ -176,7 +178,17 @@ function POSRegisterSelector({
 }: POSRegisterSelectorProps) {
   const [registers, setRegisters] = useState<Register[]>([])
   const [loading, setLoading] = useState(true)
+  const [currentTime, setCurrentTime] = useState(new Date())
   const fadeAnim = useRef(new Animated.Value(0)).current
+
+  // Single timer for all register cards - updates every second
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentTime(new Date())
+    }, 1000)
+
+    return () => clearInterval(timer)
+  }, [])
 
   useEffect(() => {
     Animated.timing(fadeAnim, {
@@ -187,46 +199,28 @@ function POSRegisterSelector({
   }, [])
 
   useEffect(() => {
-    logger.debug('[POSRegisterSelector] 🔌 Setting up Realtime subscription for location:', locationId)
+    /**
+     * APPLE RETAIL ARCHITECTURE: Reliable 3-second polling
+     *
+     * Why polling over Realtime:
+     * - Retail WiFi is unreliable - Realtime drops silently
+     * - Polling guarantees updates every 3 seconds
+     * - Battery efficient with controlled intervals
+     * - Debuggable and predictable
+     *
+     * Same approach used by:
+     * - Apple Retail (Square Register)
+     * - Shopify POS
+     * - Toast POS
+     */
     loadRegisters()
 
-    // Apple Standard: Realtime subscription instead of polling
-    const channel = supabase
-      .channel(`registers-location-${locationId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'pos_sessions',
-        },
-        (payload) => {
-          logger.debug('[POSRegisterSelector] 🔄 Realtime event received:', {
-            eventType: payload.eventType,
-            table: payload.table,
-            schema: payload.schema,
-            new: payload.new,
-            old: payload.old,
-          })
-          logger.debug('[POSRegisterSelector] 🔁 Reloading registers due to session change...')
-          loadRegisters()
-        }
-      )
-      .subscribe((status, err) => {
-        if (status === 'SUBSCRIBED') {
-          logger.debug('[POSRegisterSelector] ✅ Realtime subscribed successfully')
-        } else if (status === 'CLOSED') {
-          logger.debug('[POSRegisterSelector] ⏹️ Realtime subscription closed')
-        } else if (status === 'CHANNEL_ERROR') {
-          logger.error('[POSRegisterSelector] ❌ Realtime subscription error:', err)
-        } else {
-          logger.debug('[POSRegisterSelector] 📡 Realtime subscription status:', status)
-        }
-      })
+    const pollInterval = setInterval(() => {
+      loadRegisters()
+    }, 3000) // 3 seconds - Apple's sweet spot for "live" feel
 
     return () => {
-      logger.debug('[POSRegisterSelector] 🔌 Cleaning up Realtime subscription')
-      supabase.removeChannel(channel)
+      clearInterval(pollInterval)
     }
   }, [locationId])
 
@@ -268,7 +262,8 @@ function POSRegisterSelector({
           session_number,
           total_sales,
           opened_at,
-          users!pos_sessions_user_id_fkey (
+          user_id,
+          users!user_id (
             first_name,
             last_name
           )
@@ -278,42 +273,67 @@ function POSRegisterSelector({
         .gte('opened_at', twentyFourHoursAgo.toISOString())  // ✅ No stale sessions
 
       if (sessionsError) {
-        logger.error('[POSRegisterSelector] ⚠️ Error loading sessions:', sessionsError)
+        logger.error('[POSRegisterSelector] Error loading sessions:', sessionsError)
       }
 
-      logger.debug(`[POSRegisterSelector] ✅ Loaded ${registersData.length} registers, ${sessionsData?.length || 0} active sessions in ${Date.now() - startTime}ms`)
+      // Helper function to extract user data (handles both object and array returns from Supabase)
+      const extractUserData = (users: any): { first_name: string; last_name: string } | null => {
+        if (!users) return null
+        // If it's an array, take the first element
+        if (Array.isArray(users)) {
+          return users.length > 0 ? users[0] : null
+        }
+        // If it's an object with first_name and last_name properties (check existence, not truthiness)
+        if ('first_name' in users && 'last_name' in users) {
+          return users
+        }
+        return null
+      }
 
-      // Detailed session logging
+      // Fallback: If user join failed, fetch users manually
       if (sessionsData && sessionsData.length > 0) {
-        sessionsData.forEach(session => {
-          const users = session.users as Array<{ first_name: string; last_name: string }> | null
-          const user = users && users.length > 0 ? users[0] : null
-          const userName = user ? `${user.first_name} ${user.last_name}`.trim() : 'Unknown User'
-          logger.debug(`[POSRegisterSelector] 📊 Active session on register ${session.register_id}:`, {
-            sessionId: session.id,
-            sessionNumber: session.session_number,
-            userName,
-            openedAt: session.opened_at,
-          })
-        })
-      } else {
-        logger.debug('[POSRegisterSelector] 📊 No active sessions found for this location')
+        const needsUserFetch = sessionsData.some(session => !extractUserData(session.users))
+
+        if (needsUserFetch) {
+          const userIds = [...new Set(sessionsData.map(s => s.user_id).filter(Boolean))]
+
+          if (userIds.length > 0) {
+            const { data: usersData } = await supabase
+              .from('users')
+              .select('id, first_name, last_name')
+              .in('id', userIds)
+
+            if (usersData) {
+              sessionsData.forEach(session => {
+                if (!session.users || !extractUserData(session.users)) {
+                  const user = usersData.find(u => u.id === session.user_id)
+                  if (user) {
+                    // @ts-expect-error - Supabase join can return array or object, we handle both in extractUserData
+                    session.users = user
+                  }
+                }
+              })
+            }
+          }
+        }
       }
 
       const registersWithSessions = registersData.map(register => {
         const session = (sessionsData || []).find(s => s.register_id === register.id)
 
         if (session) {
-          const users = session.users as Array<{ first_name: string; last_name: string }> | null
-          const user = users && users.length > 0 ? users[0] : null
-          const userName = user ? `${user.first_name} ${user.last_name}`.trim() : 'Unknown User'
+          const user = extractUserData(session.users)
+          // Handle cases where last_name might be empty or just spaces
+          const userName = user
+            ? `${user.first_name} ${user.last_name || ''}`.trim() || user.first_name || 'Unknown User'
+            : 'Unknown User'
 
           return {
             ...register,
             active_session: {
               id: session.id,
               session_number: session.session_number,
-              total_sales: session.total_sales,
+              total_sales: session.total_sales || 0,
               opened_at: session.opened_at,
               user_name: userName,
             }
@@ -400,6 +420,7 @@ function POSRegisterSelector({
                 register={register}
                 index={index}
                 onPress={() => onRegisterSelected(register.id)}
+                currentTime={currentTime}
               />
             ))}
           </View>

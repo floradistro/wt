@@ -8,6 +8,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { customersService, type Customer, type CustomerWithOrders } from '@/services'
 import { logger } from '@/utils/logger'
+import { supabase } from '@/lib/supabase/client'
 
 // Re-export types for convenience
 export type { Customer, CustomerWithOrders }
@@ -217,6 +218,50 @@ export function useCustomers(options: UseCustomersOptions = {}) {
     }
   }, [autoLoad, loadCustomers])
 
+  // Real-time subscription for instant customer updates (loyalty points, etc.)
+  useEffect(() => {
+    logger.debug('[useCustomers] Setting up real-time subscription')
+
+    const channel = supabase
+      .channel('customers-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*', // INSERT, UPDATE, DELETE
+          schema: 'public',
+          table: 'customers',
+        },
+        (payload) => {
+          logger.debug('[useCustomers] Real-time update:', payload)
+
+          if (payload.eventType === 'UPDATE' && payload.new) {
+            // Update existing customer in state
+            setCustomers((prev) =>
+              prev.map((customer) =>
+                customer.id === (payload.new as Customer).id
+                  ? (payload.new as Customer)
+                  : customer
+              )
+            )
+          } else if (payload.eventType === 'INSERT' && payload.new) {
+            // Add new customer to state
+            setCustomers((prev) => [(payload.new as Customer), ...prev])
+          } else if (payload.eventType === 'DELETE' && payload.old) {
+            // Remove deleted customer from state
+            setCustomers((prev) =>
+              prev.filter((customer) => customer.id !== (payload.old as any).id)
+            )
+          }
+        }
+      )
+      .subscribe()
+
+    return () => {
+      logger.debug('[useCustomers] Cleaning up real-time subscription')
+      supabase.removeChannel(channel)
+    }
+  }, [])
+
   return {
     // State
     customers,
@@ -266,6 +311,37 @@ export function useCustomer(customerId: string | null) {
   useEffect(() => {
     loadCustomer()
   }, [loadCustomer])
+
+  // Real-time subscription for this specific customer
+  useEffect(() => {
+    if (!customerId) return
+
+    logger.debug('[useCustomer] Setting up real-time subscription for:', customerId)
+
+    const channel = supabase
+      .channel(`customer-${customerId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'customers',
+          filter: `id=eq.${customerId}`,
+        },
+        (payload) => {
+          logger.debug('[useCustomer] Real-time update for customer:', payload)
+          if (payload.new) {
+            setCustomer(payload.new as Customer)
+          }
+        }
+      )
+      .subscribe()
+
+    return () => {
+      logger.debug('[useCustomer] Cleaning up real-time subscription')
+      supabase.removeChannel(channel)
+    }
+  }, [customerId])
 
   return {
     customer,

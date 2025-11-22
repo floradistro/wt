@@ -372,11 +372,13 @@ export async function updateCustomer(
  */
 export async function updateCustomerLoyaltyPoints(
   customerId: string,
-  pointsChange: number
+  pointsChange: number,
+  reason: string = 'Manual adjustment'
 ): Promise<void> {
-  const { error } = await supabase.rpc('update_customer_loyalty_points', {
+  const { error } = await supabase.rpc('adjust_customer_loyalty_points', {
     p_customer_id: customerId,
     p_points_change: pointsChange,
+    p_reason: reason,
   })
 
   if (error) {

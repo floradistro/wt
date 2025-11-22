@@ -28,6 +28,7 @@ export const useLocationFilter = create<LocationFilterState>((set, get) => ({
    * Set selected location IDs
    */
   setSelectedLocationIds: (ids: string[]) => {
+    // eslint-disable-next-line no-console
     console.log('[LocationFilter] Setting selected locations', { ids })
     set({ selectedLocationIds: ids })
   },
@@ -36,6 +37,7 @@ export const useLocationFilter = create<LocationFilterState>((set, get) => ({
    * Clear all location filters (show all locations)
    */
   clearLocationFilter: () => {
+    // eslint-disable-next-line no-console
     console.log('[LocationFilter] Clearing location filter')
     set({ selectedLocationIds: [] })
   },
@@ -49,12 +51,14 @@ export const useLocationFilter = create<LocationFilterState>((set, get) => ({
 
     // Only initialize once
     if (isInitialized) {
+      // eslint-disable-next-line no-console
       console.log('[LocationFilter] Already initialized, skipping', {
         currentSelection: get().selectedLocationIds
       })
       return
     }
 
+    // eslint-disable-next-line no-console
     console.log('[LocationFilter] Initializing from user locations', {
       userLocationIds,
       isAdmin
@@ -67,6 +71,7 @@ export const useLocationFilter = create<LocationFilterState>((set, get) => ({
         selectedLocationIds: userLocationIds,
         isInitialized: true,
       })
+      // eslint-disable-next-line no-console
       console.log('[LocationFilter] Auto-selected staff user locations', {
         selectedLocationIds: userLocationIds
       })
@@ -75,6 +80,7 @@ export const useLocationFilter = create<LocationFilterState>((set, get) => ({
         selectedLocationIds: [],
         isInitialized: true,
       })
+      // eslint-disable-next-line no-console
       console.log('[LocationFilter] Admin user - no auto-filter')
     }
   },
@@ -83,6 +89,7 @@ export const useLocationFilter = create<LocationFilterState>((set, get) => ({
    * Reset the store (for logout, etc.)
    */
   reset: () => {
+    // eslint-disable-next-line no-console
     console.log('[LocationFilter] Resetting store')
     set({
       selectedLocationIds: [],

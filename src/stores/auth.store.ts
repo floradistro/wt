@@ -3,6 +3,7 @@ import type { Session, User } from '@supabase/supabase-js'
 import { AuthService } from '../features/auth/services/auth.service'
 import { useLocationFilter } from './location-filter.store'
 import { usePOSSessionStore } from './posSession.store'
+import { logger } from '@/utils/logger'
 
 interface AuthState {
   // State
@@ -36,6 +37,14 @@ export const useAuthStore = create<AuthState>((set, _get) => ({
 
       const { user, session } = await AuthService.login(email, password)
 
+      // Set Sentry user context for error tracking
+      if (user) {
+        logger.setUser({
+          id: user.id,
+          email: user.email,
+        })
+      }
+
       set({
         user,
         session,
@@ -57,6 +66,9 @@ export const useAuthStore = create<AuthState>((set, _get) => ({
       set({ isLoading: true, error: null })
 
       await AuthService.logout()
+
+      // Clear Sentry user context
+      logger.clearUser()
 
       // Reset all stores on logout (Apple principle: Clean slate)
       useLocationFilter.getState().reset()
@@ -84,6 +96,14 @@ export const useAuthStore = create<AuthState>((set, _get) => ({
 
       const { user, session } = await AuthService.restoreSession()
 
+      // Set Sentry user context if session restored
+      if (user) {
+        logger.setUser({
+          id: user.id,
+          email: user.email,
+        })
+      }
+
       set({
         user,
         session,
@@ -106,7 +126,18 @@ export const useAuthStore = create<AuthState>((set, _get) => ({
   clearError: () => set({ error: null }),
 
   // Set user (for external updates)
-  setUser: (user: User | null) => set({ user }),
+  setUser: (user: User | null) => {
+    // Update Sentry user context
+    if (user) {
+      logger.setUser({
+        id: user.id,
+        email: user.email,
+      })
+    } else {
+      logger.clearUser()
+    }
+    set({ user })
+  },
 
   // Set session (for external updates)
   setSession: (session: Session | null) => set({ session }),

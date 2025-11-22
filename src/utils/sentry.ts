@@ -93,10 +93,6 @@ export function initializeSentry() {
   // Set global tags
   Sentry.setTag('platform', Constants.platform?.ios ? 'ios' : 'android')
   Sentry.setTag('app_version', Constants.expoConfig?.version || '1.0.0')
-
-  if (__DEV__) {
-    console.log('[Sentry] Initialized successfully')
-  }
 }
 
 /**

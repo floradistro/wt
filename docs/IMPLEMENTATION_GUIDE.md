@@ -190,33 +190,20 @@ await customersService.updateCustomerLoyaltyPoints(customerId, 100) // Add 100 p
 ```typescript
 import { loyaltyService } from '@/services'
 
-// Get loyalty program
+// Get loyalty program settings
 const program = await loyaltyService.getLoyaltyProgram(vendorId)
 
-// Get customer's points balance
+// Get customer's current points balance
 const points = await loyaltyService.getCustomerLoyaltyBalance(customerId)
 
-// Calculate points to earn
-const pointsToEarn = loyaltyService.calculatePointsToEarn(subtotal, program)
-
-// Calculate max redeemable points
-const maxPoints = loyaltyService.calculateMaxRedeemablePoints(
-  subtotal,
-  customerPoints,
-  program
-)
-
-// Calculate discount from points
+// Calculate discount from points (client-side preview only)
 const discount = loyaltyService.calculateLoyaltyDiscount(pointsToRedeem, program)
 
-// Record loyalty transaction (after order created)
-await loyaltyService.recordLoyaltyTransaction({
-  customerId,
-  orderId,
-  pointsEarned: 50,
-  pointsRedeemed: 0,
-  orderTotal: 100.00,
-})
+// Note: Points calculation and updates now happen server-side in the
+// process-checkout edge function for security and atomicity.
+// The edge function calls:
+// - calculate_loyalty_points_to_earn() for server-side calculation
+// - update_customer_loyalty_points_atomic() for atomic updates
 ```
 
 ---

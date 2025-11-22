@@ -27,9 +27,12 @@
  * Flow:
  * 1. Validate request & check idempotency
  * 2. Create draft order
- * 3. Process payment (SPIN API)
- * 4. Finalize or rollback atomically
- * 5. Return result with audit trail
+ * 3. Reserve inventory
+ * 4. Process payment (SPIN API)
+ * 5. Finalize inventory holds
+ * 6. Update loyalty points (atomic)
+ * 7. Update session totals
+ * 8. Return result with audit trail
  *
  * ============================================================================
  */
@@ -1203,6 +1206,138 @@ serve(async (req) => {
     }
 
     // ========================================================================
+    // STEP 9.5: UPDATE LOYALTY POINTS (Atomic with transaction)
+    // ========================================================================
+    let loyaltyPointsEarned = 0
+    let loyaltyPointsRedeemed = body.loyaltyPointsRedeemed || 0
+
+    if (body.customerId && (body.loyaltyPointsRedeemed || body.subtotal > 0)) {
+      const loyaltySpan = transaction.startChild({
+        op: 'loyalty.update',
+        description: 'Update Loyalty Points',
+      })
+
+      try {
+        // Calculate points earned server-side using loyalty program rules
+        const pointsEarnedResult = await dbClient.queryObject(
+          `SELECT calculate_loyalty_points_to_earn($1, $2) as points_earned`,
+          [body.vendorId, body.subtotal]
+        )
+
+        loyaltyPointsEarned = (pointsEarnedResult.rows[0] as any)?.points_earned || 0
+        const pointsEarned = loyaltyPointsEarned
+
+        Sentry.addBreadcrumb({
+          category: 'loyalty',
+          message: 'Updating customer loyalty points',
+          level: 'info',
+          data: {
+            customerId: body.customerId,
+            pointsEarned,
+            pointsRedeemed: body.loyaltyPointsRedeemed || 0,
+            orderTotal: body.total,
+          },
+        })
+
+        // Atomically update loyalty points with row-level locking
+        await dbClient.queryObject(
+          `SELECT update_customer_loyalty_points_atomic($1, $2, $3, $4, $5)`,
+          [
+            body.customerId,
+            pointsEarned,
+            body.loyaltyPointsRedeemed || 0,
+            order.id,
+            body.total,
+          ]
+        )
+
+        console.log(`[${requestId}] Loyalty points updated successfully:`, {
+          pointsEarned,
+          pointsRedeemed: body.loyaltyPointsRedeemed || 0,
+          netChange: pointsEarned - (body.loyaltyPointsRedeemed || 0),
+        })
+
+        loyaltySpan.setStatus('ok')
+
+        Sentry.addBreadcrumb({
+          category: 'loyalty',
+          message: 'Loyalty points updated successfully',
+          level: 'info',
+          data: {
+            pointsEarned,
+            pointsRedeemed: body.loyaltyPointsRedeemed || 0,
+          },
+        })
+      } catch (error) {
+        console.error(`[${requestId}] Loyalty points update failed:`, error)
+        loyaltySpan.setStatus('unknown_error')
+
+        // CRITICAL: Loyalty points failure is logged but doesn't fail the transaction
+        // Payment already succeeded, inventory already deducted
+        // Log to reconciliation queue for manual fix
+        Sentry.captureException(error, {
+          level: 'error',
+          tags: {
+            operation: 'loyalty_update',
+            requestId,
+            orderId: order.id,
+            customerId: body.customerId,
+          },
+          contexts: {
+            loyalty: {
+              customerId: body.customerId,
+              orderId: order.id,
+              pointsRedeemed: body.loyaltyPointsRedeemed || 0,
+              orderTotal: body.total,
+              subtotal: body.subtotal,
+            },
+          },
+        })
+
+        // Try to log to reconciliation queue
+        try {
+          await dbClient.queryObject(
+            `INSERT INTO public.loyalty_reconciliation_queue (customer_id, order_id, points_earned, points_redeemed, order_total, error_message, created_at)
+             SELECT $1, $2,
+                    calculate_loyalty_points_to_earn($3, $4),
+                    $5,
+                    $6,
+                    $7,
+                    NOW()`,
+            [
+              body.customerId,
+              order.id,
+              body.vendorId,
+              body.subtotal,
+              body.loyaltyPointsRedeemed || 0,
+              body.total,
+              error instanceof Error ? error.message : 'Unknown error',
+            ]
+          )
+
+          Sentry.addBreadcrumb({
+            category: 'loyalty',
+            message: 'Loyalty failure logged to reconciliation queue',
+            level: 'warning',
+          })
+
+          console.log(`[${requestId}] Loyalty points failure logged to reconciliation queue`)
+        } catch (queueError) {
+          console.error(`[${requestId}] Failed to log to loyalty reconciliation queue:`, queueError)
+          Sentry.captureException(queueError, {
+            level: 'error',
+            tags: { operation: 'loyalty_reconciliation_queue', requestId },
+          })
+        }
+
+        // Don't fail the whole transaction - payment succeeded, inventory deducted
+        // Customer support can manually reconcile loyalty points
+      } finally {
+        loyaltySpan.finish()
+      }
+    }
+
+    // ========================================================================
     // STEP 10: UPDATE SESSION TOTALS (Direct SQL - bypasses PostgREST)
     // ========================================================================
     if (body.sessionId) {
@@ -1279,6 +1414,8 @@ serve(async (req) => {
       authorizationCode: paymentResult?.GeneralResponse.AuthCode,
       cardType: paymentResult?.CardData?.CardType,
       cardLastFour: paymentResult?.CardData?.Last4,
+      loyaltyPointsEarned: loyaltyPointsEarned,
+      loyaltyPointsRedeemed: loyaltyPointsRedeemed,
       message: 'Payment processed successfully',
     }, requestId, duration, allowedOrigin)
 

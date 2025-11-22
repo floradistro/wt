@@ -31,7 +31,10 @@ export function POSSessionActions({
   const { openModal, closeModal, isModalOpen } = useModalState()
 
   const handleEndSession = async () => {
-    if (!sessionInfo?.sessionId) return
+    if (!sessionInfo?.sessionId) {
+      logger.error('No session ID found')
+      return
+    }
 
     try {
       const { data: session, error } = await supabase
@@ -60,7 +63,10 @@ export function POSSessionActions({
   }
 
   const handleCloseDrawerSubmit = async (closingCash: number, notes: string) => {
-    if (!sessionInfo?.sessionId) return
+    if (!sessionInfo?.sessionId) {
+      logger.error('Cannot close - no session ID')
+      return
+    }
 
     try {
       const { data, error } = await supabase.rpc('close_pos_session', {
@@ -70,8 +76,8 @@ export function POSSessionActions({
       })
 
       if (error) throw error
-      if (!data.success) {
-        throw new Error(data.error || 'Failed to close session')
+      if (!data?.success) {
+        throw new Error(data?.error || 'Failed to close session')
       }
 
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)

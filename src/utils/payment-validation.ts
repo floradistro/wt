@@ -158,6 +158,7 @@ export function checkForMockPaymentCode(): void {
 
   // This is a compile-time check - we can't actually scan source code at runtime
   // But we can log a reminder for developers
+  // eslint-disable-next-line no-console
   console.log(
     '✅ Payment Validation: Ensure no mock payment code exists:\n' +
     '   - No "AUTH${Date.now()}" patterns\n' +
@@ -190,5 +191,6 @@ export function validatePaymentEnvironment(): void {
     )
   }
 
+  // eslint-disable-next-line no-console
   console.log(`✅ Payment Environment: API URL = ${apiUrl}`)
 }
