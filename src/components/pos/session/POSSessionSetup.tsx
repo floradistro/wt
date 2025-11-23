@@ -164,6 +164,17 @@ function POSSessionSetup({ user }: POSSessionSetupProps) {
     )
   }
 
+  // Show cash drawer modal if register selected but drawer not opened yet
+  if (sessionInfo && isModalOpen('cashDrawerOpen')) {
+    return (
+      <OpenCashDrawerModal
+        visible={true}
+        onSubmit={handleCashDrawerSubmit}
+        onCancel={handleCashDrawerCancel}
+      />
+    )
+  }
+
   // Session is ready - return null (POSScreen will show main interface)
   return null
 }
