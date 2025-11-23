@@ -135,7 +135,7 @@ function ProductsScreenComponent() {
         return (
           <ProductsListView
             products={allProducts}
-            loading={productsLoading}
+            isLoading={productsLoading}
             vendorLogo={vendor?.logo_url || null}
           />
         )

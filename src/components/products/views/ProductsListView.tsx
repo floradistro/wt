@@ -18,34 +18,68 @@ import { ProductItem } from '@/components/products/list/ProductItem'
 import { layout } from '@/theme/layout'
 import { colors, spacing, radius } from '@/theme/tokens'
 import type { Product } from '@/types/products'
+import { useProductsScreenStore } from '@/stores/products-list.store'
+import { useLocationFilter } from '@/stores/location-filter.store'
+import { useCategories } from '@/hooks/useCategories'
 
 interface ProductsListViewProps {
   products: Product[]
-  productSections: [string, Product[]][]
-  selectedProduct: Product | null
-  onProductSelect: (product: Product) => void
-  activeNav: 'all' | 'low-stock' | 'out-of-stock'
   vendorLogo?: string | null
   isLoading: boolean
-  selectedLocationIds: string[]
-  selectedLocationNames: string[]
-  categoryMap: Map<string, string>
-  onAddProduct: () => void
 }
 
 export function ProductsListView({
   products,
-  productSections,
-  selectedProduct,
-  onProductSelect,
-  activeNav,
   vendorLogo,
   isLoading,
-  selectedLocationIds,
-  selectedLocationNames,
-  categoryMap,
-  onAddProduct,
 }: ProductsListViewProps) {
+  // Read from stores
+  const activeNav = useProductsScreenStore(state => state.activeNav)
+  const selectedProduct = useProductsScreenStore(state => state.selectedProduct)
+  const selectProduct = useProductsScreenStore(state => state.selectProduct)
+  const openModal = useProductsScreenStore(state => state.openModal)
+  const { selectedLocationIds } = useLocationFilter()
+  const { categories } = useCategories({ includeGlobal: true, parentId: null })
+
+  // Compute category map
+  const categoryMap = useMemo(() => {
+    const map = new Map<string, string>()
+    categories.forEach(cat => map.set(cat.id, cat.name))
+    return map
+  }, [categories])
+
+  // Compute product sections (A-Z grouped)
+  const productSections = useMemo((): [string, Product[]][] => {
+    const grouped = products.reduce((acc, product) => {
+      const firstLetter = (product.name || '').charAt(0).toUpperCase()
+      const letter = /[A-Z]/.test(firstLetter) ? firstLetter : '#'
+      if (!acc[letter]) acc[letter] = []
+      acc[letter].push(product)
+      return acc
+    }, {} as Record<string, Product[]>)
+
+    return Object.entries(grouped).sort(([a], [b]) => {
+      if (a === '#') return 1
+      if (b === '#') return -1
+      return a.localeCompare(b)
+    })
+  }, [products])
+
+  // Handlers
+  const onProductSelect = useCallback((product: Product) => {
+    selectProduct(product)
+  }, [selectProduct])
+
+  const onAddProduct = useCallback(() => {
+    openModal('createProduct')
+  }, [openModal])
+
+  // Location names (simplified - just show count for now)
+  const selectedLocationNames = useMemo(() => {
+    return selectedLocationIds.length > 0
+      ? [`${selectedLocationIds.length} locations`]
+      : ['All locations']
+  }, [selectedLocationIds])
   // ========================================
   // SCROLL & HEADER STATE
   // ========================================
