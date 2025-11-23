@@ -192,12 +192,12 @@ function ProductsScreenComponent() {
         </View>
       </View>
 
-      {/* MODALS */}
-      <CreateProductModal />
-      <CreateAuditModal />
-      <CategoryModal />
-      <CreatePOModal />
-      <ReceivePOModal />
+      {/* MODALS - TODO: These need to be refactored to read from stores */}
+      {/* <CreateProductModal /> */}
+      {/* <CreateAuditModal /> */}
+      {/* <CategoryModal /> */}
+      {/* <CreatePOModal /> */}
+      {/* <ReceivePOModal /> */}
     </SafeAreaView>
   )
 }
