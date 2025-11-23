@@ -1,11 +1,6 @@
 /**
- * POSLocationSelector - Grid Layout - ZERO PROPS ✅
+ * POSLocationSelector - Grid Layout
  * Beautiful centered grid with vendor logos
- *
- * ZERO PROP DRILLING:
- * - No locations prop - reads from posSession.store
- * - No vendorLogo prop - reads from posSession.store
- * - No vendorName prop - reads from posSession.store
  */
 
 import { View, Text, StyleSheet, TouchableOpacity, Pressable, Animated, Dimensions, Image } from 'react-native'
@@ -13,7 +8,6 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { BlurView } from 'expo-blur'
 import * as Haptics from 'expo-haptics'
 import { memo, useRef, useEffect } from 'react'
-import { usePOSSessionStore } from '@/stores/posSession.store'
 
 const { width } = Dimensions.get('window')
 const isTablet = width > 600
@@ -28,6 +22,9 @@ interface Location {
 }
 
 interface POSLocationSelectorProps {
+  locations: Location[]
+  vendorLogo?: string | null
+  vendorName?: string
   onLocationSelected: (locationId: string, locationName: string) => void
   onCancel?: () => void
 }
@@ -75,11 +72,8 @@ function LocationCard({
   }
 
   const handlePress = () => {
-    console.log('🎯 [LocationCard] handlePress CALLED for location:', location.name)
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
-    console.log('🎯 [LocationCard] Calling onPress callback')
     onPress()
-    console.log('✅ [LocationCard] onPress callback completed')
   }
 
   const addressText = [location.city, location.state].filter(Boolean).join(', ')
@@ -153,15 +147,7 @@ function LocationCard({
   )
 }
 
-function POSLocationSelector({ onLocationSelected, onCancel }: POSLocationSelectorProps) {
-  // ========================================
-  // STORE - TRUE ZERO PROPS (read from environment)
-  // ========================================
-  const locations = usePOSSessionStore((state) => state.locations)
-  const vendor = usePOSSessionStore((state) => state.vendor)
-  const vendorLogo = vendor?.logo_url
-  const vendorName = vendor?.store_name
-
+function POSLocationSelector({ locations, vendorLogo, vendorName, onLocationSelected, onCancel }: POSLocationSelectorProps) {
   const fadeAnim = useRef(new Animated.Value(0)).current
   const pulseAnim = useRef(new Animated.Value(1)).current
 

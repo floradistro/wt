@@ -13,7 +13,7 @@ import { layout } from '@/theme/layout'
 import { runAllSentryTests, quickSentryTest } from '@/utils/test-sentry'
 import { DetailRow } from './DetailRow'
 import { detailCommonStyles } from './detailCommon.styles'
-import { posSessionActions } from '@/stores/posSession.store'
+import { usePOSSession } from '@/contexts/POSSessionContext'
 
 interface DeveloperToolsDetailProps {
   headerOpacity: Animated.Value
@@ -22,6 +22,7 @@ interface DeveloperToolsDetailProps {
 
 export function DeveloperToolsDetail({ headerOpacity, vendorLogo }: DeveloperToolsDetailProps) {
   const [isRunning, setIsRunning] = useState(false)
+  const { clearSession } = usePOSSession()
 
   const handleQuickTest = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
@@ -73,7 +74,7 @@ export function DeveloperToolsDetail({ headerOpacity, vendorLogo }: DeveloperToo
           style: 'destructive',
           onPress: () => {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
-            posSessionActions.clearSession()
+            clearSession()
             Alert.alert(
               'Session Cleared',
               'POS session has been reset. You can now start a new session.',

@@ -62,7 +62,7 @@ export interface PaymentModalProps {
   // - itemCount → cart.store
   // - customerName → customer.store
   // - hasPaymentProcessor → payment-processor.store
-  // - locationId, registerId → posSession.store
+  // - locationId, registerId → POSSessionContext
 }
 
 /**
@@ -72,7 +72,7 @@ export interface PaymentModalProps {
  * - total, subtotal → cart.store (useCartTotals)
  * - taxAmount, taxRate, taxName → tax.store (taxActions.calculateTax)
  * - itemCount → cart.store (useCartTotals)
- * - locationId → posSession.store (usePOSSession)
+ * - locationId → POSSessionContext (usePOSSession)
  * - currentProcessor, processorStatus → payment-processor.store (usePaymentProcessor)
  *
  * Only coordination callback remains:

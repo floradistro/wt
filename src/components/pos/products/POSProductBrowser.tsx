@@ -23,8 +23,10 @@ import { layout } from '@/theme/layout'
 import { POSSearchBar } from '../search/POSSearchBar'
 import { POSProductGrid } from './POSProductGrid'
 
+// Context - Zero prop drilling!
+import { usePOSSession } from '@/contexts/POSSessionContext'
+
 // Stores (ZERO PROP DRILLING - Apple Engineering Standard)
-import { usePOSSession } from '@/stores/posSession.store'
 import { productsActions, useProductsState } from '@/stores/products.store'
 import { useProductsStore } from '@/stores/products.store'
 import {
@@ -41,9 +43,13 @@ import { logger } from '@/utils/logger'
 
 function POSProductBrowser() {
   // ========================================
+  // CONTEXT - Zero prop drilling!
+  // ========================================
+  const { session } = usePOSSession()
+
+  // ========================================
   // STORES - ZERO PROP DRILLING (Apple Standard)
   // ========================================
-  const { sessionInfo } = usePOSSession()
   const { categories, loading: storeLoading } = useProductsState()
 
   // Read raw data from stores
@@ -89,10 +95,10 @@ function POSProductBrowser() {
   // ========================================
   // Load products into products.store
   useEffect(() => {
-    if (sessionInfo?.locationId) {
-      productsActions.loadProducts(sessionInfo.locationId)
+    if (session?.locationId) {
+      productsActions.loadProducts(session.locationId)
     }
-  }, [sessionInfo?.locationId])
+  }, [session?.locationId])
 
   // No need to sync products - filter store reads directly from products store! (Apple pattern)
 
@@ -155,8 +161,8 @@ function POSProductBrowser() {
   // RENDER
   // ========================================
   // Guard: Ensure session data exists (after all hooks)
-  if (!sessionInfo) {
-    logger.warn('POSProductBrowser: Missing sessionInfo from store')
+  if (!session) {
+    logger.warn('POSProductBrowser: Missing session from context')
     return null
   }
 

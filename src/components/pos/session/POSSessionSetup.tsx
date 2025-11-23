@@ -1,11 +1,11 @@
 /**
- * POSSessionSetup Component - Apple Engineering Standard ✅
+ * POSSessionSetup Component (REFACTORED - Context Architecture)
  * Jobs Principle: One focused responsibility - Session initialization
  *
- * ZERO PROPS (except user for auth):
- * - Reads/writes directly to posSession.store
- * - Uses checkoutUIActions for modal state
- * - No callbacks needed
+ * Uses:
+ * - AppAuthContext: vendor, locations (environmental auth data)
+ * - POSSessionContext: session management actions
+ * - Zustand stores: transient UI state
  *
  * Handles:
  * - Location selection
@@ -14,66 +14,41 @@
  * - Session creation
  */
 
-import { useState, useEffect, memo } from 'react'
+import { useState, memo } from 'react'
 import { View, StyleSheet } from 'react-native'
 import * as Haptics from 'expo-haptics'
 import { supabase } from '@/lib/supabase/client'
 import { POSLocationSelector } from '../POSLocationSelector'
 import { POSRegisterSelector } from '../POSRegisterSelector'
 import { OpenCashDrawerModal } from '../OpenCashDrawerModal'
-import { checkoutUIActions, useActiveModal, useCheckoutUIStore } from '@/stores/checkout-ui.store'
-import { usePOSSession, usePOSLocations, usePOSSessionStore } from '@/stores/posSession.store'
-import type { Vendor, Location } from '@/types/pos'
+import { useModalState } from '@/hooks/pos'
+import { useAppAuth } from '@/contexts/AppAuthContext'
+import { usePOSSession } from '@/contexts/POSSessionContext'
 import { logger } from '@/utils/logger'
 
-interface POSSessionSetupProps {
-  user: any
-}
+function POSSessionSetup() {
+  // Context - Environmental data (no prop drilling!)
+  const { vendor, locations } = useAppAuth()
+  const { session, selectLocation, selectRegister, openCashDrawer } = usePOSSession()
 
-function POSSessionSetup({ user }: POSSessionSetupProps) {
-  // ========================================
-  // STORES - Apple Engineering Standard (ZERO PROP DRILLING)
-  // ========================================
-  const { sessionInfo, vendor, locations, loading } = usePOSSession()
-  const activeModal = useActiveModal()
-  const storeLocations = usePOSLocations()
-
-  // ========================================
-  // LOCAL STATE (UI only - register selection)
-  // ========================================
+  // Local UI state
   const [selectedRegister, setSelectedRegister] = useState<{ id: string; name: string } | null>(null)
 
-  // ========================================
-  // EFFECTS - Load vendor and locations from store
-  // ========================================
+  // Modals
+  const { openModal, closeModal, isModalOpen } = useModalState()
 
-  useEffect(() => {
-    if (user?.id) {
-      // Call store action directly (Apple Standard - no local state needed!)
-      usePOSSessionStore.getState().loadVendorAndLocations(user.id)
-    }
-  }, [user?.id])
-
-  // ========================================
-  // HANDLERS - Use store actions (Apple Standard)
-  // ========================================
   const handleLocationSelected = async (locationId: string, locationName: string) => {
-    logger.debug('🎯 [POSSessionSetup] handleLocationSelected CALLED', { locationId, locationName })
-
-    // Call store action to select location (updates sessionInfo in store)
-    await usePOSSessionStore.getState().selectLocation(locationId, locationName)
-    logger.debug('✅ [POSSessionSetup] selectLocation completed')
-
-    // Open register selector modal
-    logger.debug('🎯 [POSSessionSetup] Opening register selector modal')
-    checkoutUIActions.openModal('registerSelector')
+    try {
+      await selectLocation(locationId, locationName)
+      openModal('registerSelector')
+    } catch (error) {
+      logger.error('[POSSessionSetup] Error selecting location:', error)
+    }
   }
 
   const handleRegisterSelected = async (registerId: string) => {
     try {
       logger.debug('[POSSessionSetup] Register selected:', registerId)
-
-      // Get register name
       const { data: registerData } = await supabase
         .from('pos_registers')
         .select('register_name')
@@ -83,18 +58,18 @@ function POSSessionSetup({ user }: POSSessionSetupProps) {
       const registerName = registerData?.register_name || 'Register'
       logger.debug('[POSSessionSetup] Register name:', registerName)
 
-      // Call store action to select register (checks for active session)
-      const result = await usePOSSessionStore.getState().selectRegister(registerId, registerName)
+      // Check if session already exists or needs cash drawer
+      const result = await selectRegister(registerId, registerName)
 
       if (result && result.needsCashDrawer) {
-        // No active session - open cash drawer modal
+        // Need to open cash drawer
         logger.debug('[POSSessionSetup] No active session - opening cash drawer modal')
         setSelectedRegister({ id: registerId, name: registerName })
-        checkoutUIActions.openModal('cashDrawerOpen')
+        openModal('cashDrawerOpen')
       } else {
-        // Session joined - close modal (sessionInfo updated in store)
-        logger.debug('[POSSessionSetup] Session joined')
-        checkoutUIActions.closeModal()
+        // Session joined - parent will handle navigation
+        logger.debug('[POSSessionSetup] Session joined successfully')
+        closeModal()
       }
     } catch (error) {
       logger.error('[POSSessionSetup] Error handling register selection:', error)
@@ -102,81 +77,96 @@ function POSSessionSetup({ user }: POSSessionSetupProps) {
   }
 
   const handleBackToLocationSelector = () => {
-    checkoutUIActions.closeModal()
-    // Clear session info from store
-    usePOSSessionStore.setState({ sessionInfo: null })
+    closeModal()
   }
 
   const handleCashDrawerSubmit = async (openingCash: number, notes: string) => {
-    try {
-      // Call store action to open cash drawer and create session
-      await usePOSSessionStore.getState().openCashDrawer(openingCash, notes)
+    if (!selectedRegister) return
 
-      // Close modal and clear local state
-      checkoutUIActions.closeModal()
+    try {
+      await openCashDrawer(openingCash, notes)
+
+      closeModal()
       setSelectedRegister(null)
 
-      // Session is now ready - sessionInfo updated in store!
-      logger.debug('[POSSessionSetup] Session created successfully')
+      // Session is now ready - parent will detect via context
+      logger.debug('[POSSessionSetup] Session opened successfully')
     } catch (error) {
-      logger.error('Error in cash drawer submit:', error)
+      logger.error('[POSSessionSetup] Error in cash drawer submit:', error)
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
     }
   }
 
   const handleCashDrawerCancel = () => {
-    checkoutUIActions.closeModal()
+    closeModal()
     setSelectedRegister(null)
   }
 
-  // ========================================
-  // RENDER
-  // ========================================
+  /**
+   * RENDER STRATEGY - Prevent Modal Unmounting
+   *
+   * CRITICAL: Always render modals at the top level, regardless of conditional logic.
+   * Modals should NEVER be inside conditional branches that could unmount them.
+   *
+   * WHY: If a modal is conditionally rendered and the condition changes while the modal
+   * is open, React will unmount the modal component, causing it to disappear.
+   *
+   * PATTERN:
+   * 1. Render modals at top level with visible={isModalOpen('modalName')}
+   * 2. Use conditional rendering for screen content only
+   * 3. Modal visibility is controlled by state, not by component mounting
+   */
 
-  // Helper: Check if modal is open (reactive)
-  const isModalOpen = (id: string) => activeModal === id
+  // Render the appropriate screen content
+  const renderScreen = () => {
+    logger.debug('[POSSessionSetup] renderScreen:', {
+      hasSession: !!session,
+      locationsCount: locations.length,
+      hasVendor: !!vendor
+    })
 
-  // Show location selector if no session info
-  if (!sessionInfo && !loading) {
-    return (
-      <POSLocationSelector
-        onLocationSelected={handleLocationSelected}
-      />
-    )
-  }
+    // Show location selector if no session
+    if (!session?.locationId) {
+      logger.debug('[POSSessionSetup] Rendering location selector')
+      return (
+        <POSLocationSelector
+          locations={locations}
+          onLocationSelected={handleLocationSelected}
+          vendorName={vendor?.store_name || ''}
+          vendorLogo={vendor?.logo_url}
+        />
+      )
+    }
 
-  // Show register selector if location selected
-  if (sessionInfo && isModalOpen('registerSelector')) {
-    return (
-      <>
+    // Show register selector if location selected
+    if (session.locationId && isModalOpen('registerSelector')) {
+      return (
         <POSRegisterSelector
+          locationId={session.locationId}
+          locationName={session.locationName}
+          vendorLogo={vendor?.logo_url}
           onRegisterSelected={handleRegisterSelected}
           onBackToLocationSelector={handleBackToLocationSelector}
         />
+      )
+    }
 
-        {/* ALWAYS RENDER MODALS - Never conditionally mount/unmount */}
-        <OpenCashDrawerModal
-          visible={isModalOpen('cashDrawerOpen')}
-          onSubmit={handleCashDrawerSubmit}
-          onCancel={handleCashDrawerCancel}
-        />
-      </>
-    )
+    // Session is ready - return null (parent will handle rendering main POS)
+    return null
   }
 
-  // Show cash drawer modal if register selected but drawer not opened yet
-  if (sessionInfo && isModalOpen('cashDrawerOpen')) {
-    return (
+  return (
+    <>
+      {renderScreen()}
+
+      {/* ALWAYS RENDER MODALS - Never conditionally mount/unmount */}
       <OpenCashDrawerModal
-        visible={true}
+        visible={isModalOpen('cashDrawerOpen')}
         onSubmit={handleCashDrawerSubmit}
         onCancel={handleCashDrawerCancel}
       />
-    )
-  }
-
-  // Session is ready - return null (POSScreen will show main interface)
-  return null
+    </>
+  )
 }
 
 const POSSessionSetupMemo = memo(POSSessionSetup)

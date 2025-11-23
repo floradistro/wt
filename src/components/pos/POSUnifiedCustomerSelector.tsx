@@ -40,8 +40,9 @@ import { useCustomerSearch } from '@/hooks/pos/useCustomerSearch'
 import { useCustomerSelectorAnimations } from '@/hooks/pos/useCustomerSelectorAnimations'
 import { useRecentCustomers, type RecentCustomer } from '@/hooks/pos/useRecentCustomers'
 import { formatRelativeTime } from '@/utils/time'
-import { usePOSSession } from '@/stores/posSession.store'
+import { useAppAuth } from '@/contexts/AppAuthContext'
 import { useActiveModal, checkoutUIActions } from '@/stores/checkout-ui.store'
+import { customerActions } from '@/stores/customer.store'
 
 /**
  * POSUnifiedCustomerSelector - TRUE ZERO PROPS ✅✅✅
@@ -49,7 +50,7 @@ import { useActiveModal, checkoutUIActions } from '@/stores/checkout-ui.store'
  *
  * Reads from stores:
  * - visible: checkout-ui.store (activeModal === 'customerSelector')
- * - vendorId: posSession.store (vendor.id)
+ * - vendorId: AppAuthContext (vendor.id)
  *
  * Calls store actions:
  * - onCustomerSelected → checkoutUIActions.handleCustomerSelected
@@ -71,7 +72,7 @@ function POSUnifiedCustomerSelector() {
   // ========================================
   // STORES - Apple Engineering Standard (READ FROM ENVIRONMENT)
   // ========================================
-  const { vendor } = usePOSSession()
+  const { vendor } = useAppAuth()
   const vendorId = vendor?.id || ''
 
   // ========================================
@@ -175,8 +176,9 @@ function POSUnifiedCustomerSelector() {
   const handleCustomerSelect = useCallback((customer: Customer) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
     addRecentCustomer(customer)
-    // TRUE ZERO PROPS: Call store action instead of prop callback
-    checkoutUIActions.handleCustomerSelected(customer)
+    // TRUE ZERO PROPS: Call store actions
+    customerActions.selectCustomer(customer)
+    checkoutUIActions.closeModal()
   }, [addRecentCustomer])
 
   // Memoize customer item rendering
@@ -283,8 +285,9 @@ function POSUnifiedCustomerSelector() {
               <TouchableOpacity
                 onPress={() => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                  // TRUE ZERO PROPS: Call store action instead of prop callback
-                  checkoutUIActions.handleAddCustomer()
+                  // TRUE ZERO PROPS: Open add customer modal
+                  checkoutUIActions.closeModal()
+                  checkoutUIActions.openModal('addCustomer')
                 }}
                 style={styles.manualAddButtonInner}
                 activeOpacity={0.7}

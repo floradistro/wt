@@ -84,8 +84,11 @@ function POSCustomerMatchModal() {
 
       const timer = setTimeout(() => {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
-        // TRUE ZERO PROPS: Call store action instead of prop callback
-        checkoutUIActions.handleSelectMatch(bestMatch.customer)
+        // TRUE ZERO PROPS: Call store actions
+        customerActions.selectCustomer(bestMatch.customer)
+        customerActions.clearCustomerMatches()
+        customerActions.clearScannedData()
+        checkoutUIActions.closeModal()
       }, 1500)
 
       setAutoSelectTimer(timer)
@@ -100,22 +103,30 @@ function POSCustomerMatchModal() {
   const handleSelectMatch = (match: CustomerMatch) => {
     if (autoSelectTimer) clearTimeout(autoSelectTimer)
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
-    // TRUE ZERO PROPS: Call store action instead of prop callback
-    checkoutUIActions.handleSelectMatch(match.customer)
+    // TRUE ZERO PROPS: Call store actions
+    customerActions.selectCustomer(match.customer)
+    customerActions.clearCustomerMatches()
+    customerActions.clearScannedData()
+    checkoutUIActions.closeModal()
   }
 
   const handleCreateNew = () => {
     if (autoSelectTimer) clearTimeout(autoSelectTimer)
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-    // TRUE ZERO PROPS: Call store action instead of prop callback
-    checkoutUIActions.handleCreateNewCustomer()
+    // TRUE ZERO PROPS: Call store actions - open add customer modal
+    customerActions.clearCustomerMatches()
+    checkoutUIActions.closeModal()
+    checkoutUIActions.openModal('addCustomer')
   }
 
   const handleSearchManually = () => {
     if (autoSelectTimer) clearTimeout(autoSelectTimer)
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-    // TRUE ZERO PROPS: Call store action instead of prop callback
-    checkoutUIActions.handleSearchManually()
+    // TRUE ZERO PROPS: Call store actions - open customer selector
+    customerActions.clearCustomerMatches()
+    customerActions.clearScannedData()
+    checkoutUIActions.closeModal()
+    checkoutUIActions.openModal('customerSelector')
   }
 
   const handleClose = () => {

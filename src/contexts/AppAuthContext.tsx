@@ -16,6 +16,7 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 import type { User } from '@supabase/supabase-js'
 import type { Vendor, Location } from '@/types/pos'
 import { useAuthStore } from '@/stores/auth.store'
+import { useCustomerStore } from '@/stores/customer.store'
 import { supabase } from '@/lib/supabase/client'
 import { logger } from '@/utils/logger'
 
@@ -63,6 +64,7 @@ export function AppAuthProvider({ children }: AppAuthProviderProps) {
         // User logged out - clear vendor data
         setVendor(null)
         setLocations([])
+        useCustomerStore.getState().setVendorId(null)
         return
       }
 
@@ -106,6 +108,9 @@ export function AppAuthProvider({ children }: AppAuthProviderProps) {
 
         setVendor(vendorData)
 
+        // Set vendorId in customer store for customer search functionality
+        useCustomerStore.getState().setVendorId(vendorData.id)
+
         // Load locations for vendor
         const { data: locationsData, error: locationsError } = await supabase
           .from('locations')
@@ -127,6 +132,7 @@ export function AppAuthProvider({ children }: AppAuthProviderProps) {
         setError(err instanceof Error ? err.message : 'Failed to load vendor data')
         setVendor(null)
         setLocations([])
+        useCustomerStore.getState().setVendorId(null)
       } finally {
         setLoading(false)
       }

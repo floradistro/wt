@@ -1,11 +1,6 @@
 /**
- * POSRegisterSelector - Grid Layout - ZERO PROPS ✅
+ * POSRegisterSelector - Grid Layout
  * Beautiful centered grid showing all registers
- *
- * ZERO PROP DRILLING:
- * - No locationId prop - reads from posSession.store
- * - No locationName prop - reads from posSession.store
- * - No vendorLogo prop - reads from posSession.store
  */
 
 import { View, Text, StyleSheet, TouchableOpacity, Dimensions, Animated, Image } from 'react-native'
@@ -15,7 +10,6 @@ import * as Haptics from 'expo-haptics'
 import { memo, useRef, useEffect, useState, useCallback } from 'react'
 import { supabase } from '@/lib/supabase/client'
 import { logger } from '@/utils/logger'
-import { usePOSSessionStore } from '@/stores/posSession.store'
 
 const { width } = Dimensions.get('window')
 const isTablet = width > 600
@@ -38,6 +32,9 @@ interface Register {
 }
 
 interface POSRegisterSelectorProps {
+  locationId: string
+  locationName: string
+  vendorLogo?: string | null
   onRegisterSelected: (registerId: string, sessionId?: string) => void
   onBackToLocationSelector?: () => void
 }
@@ -173,18 +170,12 @@ function RegisterCard({
 }
 
 function POSRegisterSelector({
+  locationId,
+  locationName,
+  vendorLogo,
   onRegisterSelected,
   onBackToLocationSelector,
 }: POSRegisterSelectorProps) {
-  // ========================================
-  // STORE - TRUE ZERO PROPS (read from environment)
-  // ========================================
-  const sessionInfo = usePOSSessionStore((state) => state.sessionInfo)
-  const vendor = usePOSSessionStore((state) => state.vendor)
-  const locationId = sessionInfo?.locationId || ''
-  const locationName = sessionInfo?.locationName || ''
-  const vendorLogo = vendor?.logo_url
-
   const [registers, setRegisters] = useState<Register[]>([])
   const [loading, setLoading] = useState(true)
   const [currentTime, setCurrentTime] = useState(new Date())

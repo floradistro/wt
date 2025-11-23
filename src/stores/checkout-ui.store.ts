@@ -57,22 +57,6 @@ interface CheckoutUIState {
   setErrorModal: (visible: boolean, title?: string, message?: string) => void
   reset: () => void
 
-  // Modal Actions - TRUE ZERO PROPS (no callbacks needed as props)
-  // These are set by POSCheckoutModals during initialization
-  handleCustomerSelected?: (customer: Customer) => void
-  handleNoMatchFoundWithData?: (data: AAMVAData) => Promise<void>
-  handleCustomerCreated?: (customer: Customer) => void
-  handleAddCustomer?: () => void
-  handleSelectMatch?: (customer: Customer) => void
-  handleCreateNewCustomer?: () => void
-  handleSearchManually?: () => void
-  handlePaymentComplete?: (paymentData: PaymentData) => Promise<SaleCompletionData>
-  handlePaymentCancel?: () => void
-  handleCloseDrawerSubmit?: (closingCash: number, notes: string) => Promise<void>
-  handleCloseDrawerCancel?: () => void
-
-  // Register modal action handlers (called by POSCheckoutModals)
-  registerModalHandlers: (handlers: Partial<CheckoutUIState>) => void
 }
 
 const initialState = {
@@ -160,14 +144,6 @@ export const useCheckoutUIStore = create<CheckoutUIState>()(
       },
 
       /**
-       * Register modal action handlers
-       * TRUE ZERO PROPS: Modals call these actions instead of receiving callbacks as props
-       */
-      registerModalHandlers: (handlers: Partial<CheckoutUIState>) => {
-        set(handlers, false, 'checkoutUI/registerModalHandlers')
-      },
-
-      /**
        * Reset entire UI state (for checkout completion or cart clear)
        */
       reset: () => {
@@ -219,67 +195,9 @@ export const checkoutUIActions = {
   get openModal() { return useCheckoutUIStore.getState().openModal },
   get closeModal() { return useCheckoutUIStore.getState().closeModal },
   get setErrorModal() { return useCheckoutUIStore.getState().setErrorModal },
-  get registerModalHandlers() { return useCheckoutUIStore.getState().registerModalHandlers },
   // isModalOpen is still available for non-reactive checks if needed
   isModalOpen: (id: string) => useCheckoutUIStore.getState().activeModal === id,
   get reset() { return useCheckoutUIStore.getState().reset },
-
-  // Modal action handlers (TRUE ZERO PROPS - called directly by modals)
-  get handleCustomerSelected() {
-    const handler = useCheckoutUIStore.getState().handleCustomerSelected
-    if (!handler) logger.warn('⚠️ handleCustomerSelected not registered yet')
-    return handler || (() => {})
-  },
-  get handleNoMatchFoundWithData() {
-    const handler = useCheckoutUIStore.getState().handleNoMatchFoundWithData
-    if (!handler) logger.warn('⚠️ handleNoMatchFoundWithData not registered yet')
-    return handler || (async () => {})
-  },
-  get handleCustomerCreated() {
-    const handler = useCheckoutUIStore.getState().handleCustomerCreated
-    if (!handler) logger.warn('⚠️ handleCustomerCreated not registered yet')
-    return handler || (() => {})
-  },
-  get handleAddCustomer() {
-    const handler = useCheckoutUIStore.getState().handleAddCustomer
-    if (!handler) logger.warn('⚠️ handleAddCustomer not registered yet')
-    return handler || (() => {})
-  },
-  get handleSelectMatch() {
-    const handler = useCheckoutUIStore.getState().handleSelectMatch
-    if (!handler) logger.warn('⚠️ handleSelectMatch not registered yet')
-    return handler || (() => {})
-  },
-  get handleCreateNewCustomer() {
-    const handler = useCheckoutUIStore.getState().handleCreateNewCustomer
-    if (!handler) logger.warn('⚠️ handleCreateNewCustomer not registered yet')
-    return handler || (() => {})
-  },
-  get handleSearchManually() {
-    const handler = useCheckoutUIStore.getState().handleSearchManually
-    if (!handler) logger.warn('⚠️ handleSearchManually not registered yet')
-    return handler || (() => {})
-  },
-  get handlePaymentComplete() {
-    const handler = useCheckoutUIStore.getState().handlePaymentComplete
-    if (!handler) logger.warn('⚠️ handlePaymentComplete not registered yet')
-    return handler || (async () => ({} as SaleCompletionData))
-  },
-  get handlePaymentCancel() {
-    const handler = useCheckoutUIStore.getState().handlePaymentCancel
-    if (!handler) logger.warn('⚠️ handlePaymentCancel not registered yet')
-    return handler || (() => {})
-  },
-  get handleCloseDrawerSubmit() {
-    const handler = useCheckoutUIStore.getState().handleCloseDrawerSubmit
-    if (!handler) logger.warn('⚠️ handleCloseDrawerSubmit not registered yet')
-    return handler || (async () => {})
-  },
-  get handleCloseDrawerCancel() {
-    const handler = useCheckoutUIStore.getState().handleCloseDrawerCancel
-    if (!handler) logger.warn('⚠️ handleCloseDrawerCancel not registered yet')
-    return handler || (() => {})
-  },
 }
 
 // Legacy hook for backward compatibility

@@ -34,8 +34,7 @@ import { colors, typography, spacing, radius, animation } from './src/theme/toke
 import { logger } from './src/utils/logger'
 
 // Context Providers - Apple Engineering Standard
-import { AppAuthProvider } from './src/contexts/AppAuthContext'
-// ✅ POSSessionContext DELETED - Now using posSession.store.ts (Zustand)
+import { AppAuthProvider, POSSessionProvider } from './src/contexts'
 
 initializeSentry()
 
@@ -214,10 +213,11 @@ function App() {
     return (
       <ErrorBoundary>
         <StatusBar barStyle="light-content" backgroundColor="#000000" />
-        {/* ✅ Context Providers - Zero Prop Drilling Architecture */}
+        {/* Context Providers - Zero Prop Drilling Architecture */}
         <AppAuthProvider>
-          {/* ✅ POSSession managed by posSession.store.ts (Zustand) - No Context Provider needed */}
-          <DashboardNavigator />
+          <POSSessionProvider vendorId={user?.user_metadata?.vendor_id || null} authUserId={user?.id || null}>
+            <DashboardNavigator />
+          </POSSessionProvider>
         </AppAuthProvider>
       </ErrorBoundary>
     )

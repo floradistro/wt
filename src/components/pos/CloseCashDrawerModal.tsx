@@ -2,39 +2,29 @@ import {  View, Text, StyleSheet, TextInput, TouchableOpacity, Modal, Animated, 
 import {  BlurView } from 'expo-blur'
 import * as Haptics from 'expo-haptics'
 import { memo,  useRef, useEffect, useState } from 'react'
-import { usePOSSession } from '@/stores/posSession.store'
-import { useActiveModal, checkoutUIActions } from '@/stores/checkout-ui.store'
 
 const { width } = Dimensions.get('window')
 const isTablet = width > 600
 
-/**
- * CloseCashDrawerModal - TRUE ZERO PROPS ✅✅✅
- * NO PROPS - Reads state and calls actions from store
- *
- * Reads from stores:
- * - visible: checkout-ui.store (activeModal === 'cashDrawerClose')
- * - sessionData: posSession.store
- *
- * Calls store actions:
- * - onSubmit → checkoutUIActions.handleCloseDrawerSubmit
- * - onCancel → checkoutUIActions.handleCloseDrawerCancel
- */
-function CloseCashDrawerModal() {
-  // ========================================
-  // STORES - TRUE ZERO PROPS (read from environment)
-  // ========================================
-  const activeModal = useActiveModal()
-  const visible = activeModal === 'cashDrawerClose'
-  // ========================================
-  // STORES - Apple Engineering Standard (READ FROM ENVIRONMENT)
-  // ========================================
-  const { sessionData } = usePOSSession()
-  const sessionNumber = sessionData?.sessionNumber || ''
-  const totalSales = sessionData?.totalSales || 0
-  const totalCash = sessionData?.totalCash || 0
-  const openingCash = sessionData?.openingCash || 0
+interface CloseCashDrawerModalProps {
+  visible: boolean
+  sessionNumber: string
+  totalSales: number
+  totalCash: number
+  openingCash: number
+  onSubmit: (closingCash: number, notes: string) => void
+  onCancel: () => void
+}
 
+function CloseCashDrawerModal({
+  visible,
+  sessionNumber: _sessionNumber,
+  totalSales,
+  totalCash,
+  openingCash,
+  onSubmit,
+  onCancel,
+}: CloseCashDrawerModalProps) {
   const [closingCash, setClosingCash] = useState('')
   const [notes, setNotes] = useState('')
   const fadeAnim = useRef(new Animated.Value(0)).current
@@ -79,8 +69,7 @@ function CloseCashDrawerModal() {
     if (amount < 0) return
 
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
-    // TRUE ZERO PROPS: Call store action instead of prop callback
-    checkoutUIActions.handleCloseDrawerSubmit(amount, notes)
+    onSubmit(amount, notes)
     setClosingCash('')
     setNotes('')
   }
@@ -89,8 +78,7 @@ function CloseCashDrawerModal() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
     setClosingCash('')
     setNotes('')
-    // TRUE ZERO PROPS: Call store action instead of prop callback
-    checkoutUIActions.handleCloseDrawerCancel()
+    onCancel()
   }
 
   return (

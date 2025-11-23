@@ -11,7 +11,7 @@
  * - subtotal, itemCount → cart.store
  * - taxAmount → tax.store
  * - currentProcessor, processorStatus → payment-processor.store
- * - locationId, registerId → posSession.store
+ * - locationId, registerId → POSSessionContext
  */
 
 import { useState, useMemo } from 'react'
@@ -20,7 +20,7 @@ import { LiquidGlassView } from '@callstack/liquid-glass'
 import { Ionicons } from '@expo/vector-icons'
 import * as Haptics from 'expo-haptics'
 import { useCartTotals } from '@/stores/cart.store'
-import { usePOSSession } from '@/stores/posSession.store'
+import { usePOSSession } from '@/contexts/POSSessionContext'
 import { taxActions } from '@/stores/tax.store'
 import { useLoyaltyState } from '@/stores/loyalty.store'
 import { usePaymentProcessor } from '@/stores/payment-processor.store'
@@ -37,16 +37,16 @@ export function CardPaymentView({
   // STORES - TRUE ZERO PROPS (read from environment)
   // ========================================
   const { subtotal, itemCount } = useCartTotals()
-  const { sessionInfo } = usePOSSession()
+  const { session } = usePOSSession()
   const { loyaltyProgram, pointsToRedeem } = useLoyaltyState()
   const currentProcessor = usePaymentProcessor((state) => state.currentProcessor)
   const processorStatus = usePaymentProcessor((state) => state.status)
 
   // Calculate tax
   const { taxAmount, taxRate, taxName } = useMemo(() => {
-    if (!sessionInfo?.locationId) return { taxAmount: 0, taxRate: 0, taxName: undefined }
-    return taxActions.calculateTax(subtotal, sessionInfo.locationId)
-  }, [subtotal, sessionInfo?.locationId])
+    if (!session?.locationId) return { taxAmount: 0, taxRate: 0, taxName: undefined }
+    return taxActions.calculateTax(subtotal, session.locationId)
+  }, [subtotal, session?.locationId])
 
   // Calculate loyalty discount
   const loyaltyDiscountAmount = useMemo(() => {

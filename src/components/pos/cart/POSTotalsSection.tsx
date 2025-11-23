@@ -17,7 +17,7 @@ import { useCartItems, useCartTotals } from '@/stores/cart.store'
 import { useSelectedCustomer } from '@/stores/customer.store'
 import { useLoyaltyProgram, usePointsToRedeem, loyaltyActions } from '@/stores/loyalty.store'
 import { useSelectedDiscountId, checkoutUIActions } from '@/stores/checkout-ui.store'
-import { usePOSSession } from '@/stores/posSession.store'
+import { usePOSSession } from '@/contexts/POSSessionContext'
 import { taxActions } from '@/stores/tax.store'
 import { useCampaigns } from '@/stores/loyalty-campaigns.store'
 
@@ -31,7 +31,7 @@ function POSTotalsSection() {
   const loyaltyProgram = useLoyaltyProgram()
   const loyaltyPointsToRedeem = usePointsToRedeem()
   const selectedDiscountId = useSelectedDiscountId()
-  const { sessionInfo } = usePOSSession()
+  const { session } = usePOSSession()
 
   // Get active discounts
   const campaigns = useCampaigns()
@@ -64,7 +64,7 @@ function POSTotalsSection() {
 
   const subtotalAfterDiscount = Math.max(0, subtotalAfterLoyalty - discountAmount)
 
-  const locationId = sessionInfo?.locationId
+  const locationId = session?.locationId
 
   // Tax calculation from tax store
   const { taxAmount, taxRate } = useMemo(() => {

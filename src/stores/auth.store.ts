@@ -4,7 +4,7 @@ import { useShallow } from 'zustand/react/shallow'
 import type { Session, User } from '@supabase/supabase-js'
 import { AuthService } from '../features/auth/services/auth.service'
 import { useLocationFilter } from './location-filter.store'
-import { usePOSSessionStore } from './posSession.store'
+// Note: POS session is now managed by POSSessionContext, not a store
 import { useCartStore } from './cart.store'
 import { usePaymentStore } from './payment.store'
 import { useTaxStore } from './tax.store'
@@ -89,9 +89,9 @@ export const useAuthStore = create<AuthState>()(
       logger.clearUser()
 
       // Reset all stores on logout (Apple principle: Clean slate)
+      // Note: POSSession is managed by Context, cleared automatically on logout
       // POS Stores
       useLocationFilter.getState().reset()
-      usePOSSessionStore.getState().reset()
       useCartStore.getState().reset()
       usePaymentStore.getState().resetPayment()
       useTaxStore.getState().reset()
