@@ -407,7 +407,7 @@ const styles = StyleSheet.create({
   },
   imageContainer: {
     width: '100%',
-    aspectRatio: 4 / 5,
+    aspectRatio: 1, // Square cards for better grid density
     backgroundColor: 'rgba(0,0,0,0.3)', // iOS: Subtle dark for images
     overflow: 'hidden',
     position: 'relative',
