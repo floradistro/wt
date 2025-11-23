@@ -47,26 +47,6 @@ function POSSessionSetup({ user }: POSSessionSetupProps) {
   // EFFECTS - Load vendor and locations from store
   // ========================================
 
-  // SAFETY: Force close any stuck session setup modals ONLY on initial app mount
-  // IMPORTANT: Only close session setup modals, not checkout modals
-  // DON'T close modals if they were just opened by selectRegister flow
-  useEffect(() => {
-    logger.debug('[POSSessionSetup] Mounting - checking for stuck modals')
-
-    // Read directly from store to avoid dependency on activeModal hook
-    const currentModal = useCheckoutUIStore.getState().activeModal
-
-    // List of modals that POSSessionSetup manages
-    const sessionModals = ['registerSelector', 'cashDrawerOpen']
-
-    // Only close if it's a session modal AND we don't have any session info yet
-    // (which means we're on true initial mount, not after register selection)
-    if (currentModal && sessionModals.includes(currentModal) && !sessionInfo) {
-      logger.error('❌ SESSION MODAL STUCK OPEN ON MOUNT:', currentModal, '- Force closing')
-      checkoutUIActions.closeModal()
-    }
-  }, []) // Empty deps = run once on mount
-
   useEffect(() => {
     if (user?.id) {
       // Call store action directly (Apple Standard - no local state needed!)
