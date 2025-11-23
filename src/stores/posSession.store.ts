@@ -289,9 +289,26 @@ export const usePOSSessionStore = create<POSSessionState>()(
   openCashDrawer: async (openingCash: number, _notes: string) => {
     const { sessionInfo, customUserId, vendor } = get();
 
-    if (!sessionInfo || !customUserId || !vendor) {
-      throw new Error('Session info, user ID, or vendor missing');
+    if (!sessionInfo) {
+      throw new Error('Session info missing');
     }
+
+    if (!customUserId) {
+      logger.error('[openCashDrawer] customUserId is missing!', { customUserId });
+      throw new Error('User ID is required to start a session');
+    }
+
+    if (!vendor) {
+      throw new Error('Vendor info missing');
+    }
+
+    logger.debug('[openCashDrawer] Starting session with:', {
+      locationId: sessionInfo.locationId,
+      registerId: sessionInfo.registerId,
+      userId: customUserId,
+      vendorId: vendor.id,
+      openingCash,
+    });
 
     try {
       // Call RPC function to create session
@@ -303,7 +320,10 @@ export const usePOSSessionStore = create<POSSessionState>()(
         p_vendor_id: vendor.id,
       });
 
-      if (error) throw error;
+      if (error) {
+        logger.error('[openCashDrawer] RPC error:', error);
+        throw error;
+      }
 
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
