@@ -35,6 +35,7 @@ import { ProductDetail } from '@/components/products/detail/ProductDetail'
 import {
   useActiveNav,
   useProductsSearchQuery,
+  useProductsScreenStore,
   productsScreenActions,
 } from '@/stores/products-list.store'
 import { useProductsStore } from '@/stores/products.store'
@@ -53,7 +54,7 @@ function ProductsScreenComponent() {
   // ✅ Read from Zustand stores
   const activeNav = useActiveNav()
   const searchQuery = useProductsSearchQuery()
-  const selectedProduct = useProductsScreenStore(state => state.selectedProduct)
+  const selectedProduct = useProductsScreenStore((state) => state.selectedProduct)
   const { selectedLocationIds } = useLocationFilter()
 
   // Products store - products AND categories
@@ -63,7 +64,7 @@ function ProductsScreenComponent() {
   const loadProducts = useProductsStore(state => state.loadProducts)
 
   // Suppliers store (for purchase orders view)
-  const suppliersLoading = useSuppliersManagementStore(state => state.loading)
+  const suppliersLoading = useSuppliersManagementStore(state => state.isLoading)
   const loadSuppliers = useSuppliersManagementStore(state => state.loadSuppliers)
 
   // Load products when vendor locations are available
@@ -97,12 +98,12 @@ function ProductsScreenComponent() {
 
   // Compute counts for nav
   const lowStockCount = useMemo(
-    () => allProducts.filter(p => (p.total_stock || 0) > 0 && (p.total_stock || 0) < 10).length,
+    () => allProducts.filter(p => (p.inventory_quantity || 0) > 0 && (p.inventory_quantity || 0) < 10).length,
     [allProducts]
   )
 
   const outOfStockCount = useMemo(
-    () => allProducts.filter(p => (p.total_stock || 0) === 0).length,
+    () => allProducts.filter(p => (p.inventory_quantity || 0) === 0).length,
     [allProducts]
   )
 
@@ -171,7 +172,7 @@ function ProductsScreenComponent() {
         return (
           <CategoriesView
             categories={categories}
-            loading={categoriesLoading}
+            isLoading={categoriesLoading}
             vendorLogo={vendor?.logo_url || null}
           />
         )
@@ -180,7 +181,7 @@ function ProductsScreenComponent() {
         return (
           <PurchaseOrdersViewWrapper
             purchaseOrders={purchaseOrders}
-            loading={poLoading}
+            isLoading={poLoading}
             vendorLogo={vendor?.logo_url || null}
           />
         )
@@ -188,6 +189,8 @@ function ProductsScreenComponent() {
       case 'audits':
         return (
           <AuditsViewWrapper
+            onCreatePress={() => productsScreenActions.openModal('createAudit')}
+            selectedLocationIds={selectedLocationIds}
             vendorLogo={vendor?.logo_url || null}
           />
         )
@@ -265,7 +268,11 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   detailPanel: {
-    width: layout.detailPanelWidth,
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     borderLeftWidth: 1,
     borderLeftColor: colors.border.subtle,
     backgroundColor: colors.background.secondary,

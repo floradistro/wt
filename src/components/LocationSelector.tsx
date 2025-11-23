@@ -35,7 +35,7 @@ export function LocationSelector({
   const itemLabel = context === 'orders' ? 'orders' : 'products'
 
   // Safe defaults for undefined userLocations
-  const safeUserLocations = userLocations || []
+  const safeUserLocations: UserLocationAccess[] = userLocations || []
 
   useEffect(() => {
     if (visible) {

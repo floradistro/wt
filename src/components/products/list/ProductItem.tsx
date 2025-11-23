@@ -34,47 +34,15 @@ function ProductItemComponent({
 }: ProductItemProps) {
   // Calculate location-aware inventory display
   const inventoryDisplay = useMemo(() => {
-    if (selectedLocationIds.length === 0) {
-      // No filter - show aggregate across all locations
-      return {
-        type: 'aggregate' as const,
-        totalStock: item.total_stock ?? 0,
-        locationsCount: item.inventory?.length || 0,
-      }
-    } else if (selectedLocationIds.length === 1) {
-      // Single location - show just that location's stock
-      const locationInv = item.inventory?.find(inv => inv.location_id === selectedLocationIds[0])
-      const qty = locationInv?.quantity || 0
-      return {
-        type: 'single' as const,
-        stock: qty,
-        isInStock: qty > 0,
-      }
-    } else {
-      // Multiple locations - show total with breakdown
-      const selectedInv = item.inventory?.filter(inv => selectedLocationIds.includes(inv.location_id)) || []
-      const totalFiltered = selectedInv.reduce((sum, inv) => sum + (inv.quantity || 0), 0)
+    // Use inventory_quantity from the current product (single location data from store)
+    const qty = item.inventory_quantity ?? 0
 
-      // Get top 2 locations by stock for preview
-      const locationStocks = selectedLocationIds
-        .map((locId, idx) => {
-          const inv = item.inventory?.find(i => i.location_id === locId)
-          return {
-            name: locationNames[idx],
-            quantity: inv?.quantity || 0,
-          }
-        })
-        .sort((a, b) => b.quantity - a.quantity)
-        .slice(0, 2)
-
-      return {
-        type: 'multi' as const,
-        totalStock: totalFiltered,
-        topLocations: locationStocks,
-        totalLocations: selectedLocationIds.length,
-      }
+    return {
+      type: 'single' as const,
+      stock: qty,
+      isInStock: qty > 0,
     }
-  }, [item, selectedLocationIds, locationNames])
+  }, [item])
 
   return (
     <Pressable
