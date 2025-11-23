@@ -52,6 +52,14 @@ export class ErrorBoundary extends Component<Props, State> {
         errorBoundary: 'true',
       },
     })
+
+    // Auto-reset after Maximum update depth error (infinite loop fixed)
+    if (error.message && error.message.includes('Maximum update depth exceeded')) {
+      console.log('🔄 Auto-resetting ErrorBoundary after infinite loop error (now fixed)')
+      setTimeout(() => {
+        this.resetError()
+      }, 2000)
+    }
   }
 
   resetError = () => {

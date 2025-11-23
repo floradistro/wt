@@ -1,18 +1,16 @@
 /**
- * useCustomerSelection Hook
+ * useCustomerSelection Hook - ZERO PROPS ✅
  * Jobs Principle: Manage customer selection state and logic
  *
- * Extracted from POSCheckout to improve maintainability
- * Handles:
- * - Customer selection state
- * - Scanned ID data management
- * - Customer matching logic
- * - Customer creation flow
+ * ZERO PROP DRILLING:
+ * - No vendorId prop - reads from customer.store
+ * - Handles customer selection state, scanned ID data, matching logic
  */
 
 import { useState, useCallback } from 'react'
 import { supabase } from '@/lib/supabase/client'
 import { logger } from '@/utils/logger'
+import { useCustomerStore } from '@/stores/customer.store'
 import type { Customer } from '@/types/pos'
 import type { AAMVAData } from '@/lib/id-scanner/aamva-parser'
 
@@ -24,7 +22,12 @@ export interface CustomerMatch {
   reason: string
 }
 
-export function useCustomerSelection(vendorId: string) {
+export function useCustomerSelection() {
+  // ========================================
+  // STORE - TRUE ZERO PROPS (read from environment)
+  // ========================================
+  const vendorId = useCustomerStore((state) => state.vendorId)
+
   // ========================================
   // STATE
   // ========================================
@@ -99,6 +102,14 @@ export function useCustomerSelection(vendorId: string) {
     customer: Customer | null
     matchType: 'exact' | 'high' | null
   }> => {
+    // Get vendorId from store at call time
+    const currentVendorId = useCustomerStore.getState().vendorId
+
+    if (!currentVendorId) {
+      logger.error('Cannot find matching customer: vendorId not set in store')
+      return { customer: null, matchType: null }
+    }
+
     try {
       logger.debug('🔍 [Customer Match] Searching for customer with ID data:', {
         firstName: data.firstName,
@@ -106,7 +117,7 @@ export function useCustomerSelection(vendorId: string) {
         lastName: data.lastName,
         dateOfBirth: data.dateOfBirth,
         licenseNumber: data.licenseNumber ? `***${data.licenseNumber.slice(-4)}` : null,
-        vendorId,
+        vendorId: currentVendorId,
       })
 
       let customer: Customer | null = null
@@ -119,7 +130,7 @@ export function useCustomerSelection(vendorId: string) {
           .from('customers')
           .select('*')
           .eq('drivers_license_number', data.licenseNumber)
-          .eq('vendor_id', vendorId)
+          .eq('vendor_id', currentVendorId)
           .eq('is_active', true)
           .single()
 
@@ -159,7 +170,7 @@ export function useCustomerSelection(vendorId: string) {
             .eq('first_name', nameVar.first_name)
             .eq('last_name', data.lastName)
             .eq('date_of_birth', data.dateOfBirth)
-            .eq('vendor_id', vendorId)
+            .eq('vendor_id', currentVendorId)
             .eq('is_active', true)
 
           const { data: nameMatches, error } = await query
@@ -189,7 +200,7 @@ export function useCustomerSelection(vendorId: string) {
           .from('customers')
           .select('*')
           .eq('date_of_birth', data.dateOfBirth)
-          .eq('vendor_id', vendorId)
+          .eq('vendor_id', currentVendorId)
           .eq('is_active', true)
 
         logger.debug('🔍 [Customer Match] Found customers with same DOB:', allCustomers?.length || 0)
@@ -251,7 +262,7 @@ export function useCustomerSelection(vendorId: string) {
       logger.error('Error finding matching customer:', error)
       return { customer: null, matchType: null }
     }
-  }, [vendorId])
+  }, [])
 
   /**
    * Create customer match object for UI display

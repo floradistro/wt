@@ -3,36 +3,28 @@ import * as Haptics from 'expo-haptics'
 import { useState, memo } from 'react'
 import type { CartItem } from '@/types/pos'
 
+// ✅ ZERO PROP DRILLING - Read from stores
+import { cartActions, useDiscountingItemId } from '@/stores/cart.store'
+import { checkoutUIActions } from '@/stores/checkout-ui.store'
+
 interface POSCartItemProps {
-  item: CartItem
-  onAdd: () => void
-  onRemove: () => void
-  onOpenTierSelector?: () => void
-  onApplyDiscount?: (type: 'percentage' | 'amount', value: number) => void
-  onRemoveDiscount?: () => void
-  isDiscounting?: boolean
-  onStartDiscounting?: () => void
-  onCancelDiscounting?: () => void
+  item: CartItem  // ✅ ONLY visual data - no callbacks, no state
 }
 
-function POSCartItem({
-  item,
-  onAdd,
-  onRemove,
-  onOpenTierSelector,
-  onApplyDiscount,
-  onRemoveDiscount,
-  isDiscounting,
-  onStartDiscounting,
-  onCancelDiscounting,
-}: POSCartItemProps) {
+function POSCartItem({ item }: POSCartItemProps) {
+  // ✅ ZERO PROP DRILLING: Read discounting state from store
+  const discountingItemId = useDiscountingItemId()
   const [discountType, setDiscountType] = useState<'percentage' | 'amount'>('percentage')
   const [discountValue, setDiscountValue] = useState('')
 
+  // ✅ ZERO PROP DRILLING: Derived state from store
+  const isDiscounting = discountingItemId === item.id
+
   const handleApplyDiscount = () => {
     const value = parseFloat(discountValue)
-    if (value > 0 && onApplyDiscount) {
-      onApplyDiscount(discountType, value)
+    if (value > 0) {
+      // ✅ ZERO PROP DRILLING: Call store action directly
+      cartActions.applyManualDiscount(item.id, discountType, value)
       setDiscountValue('')
     }
   }
@@ -55,20 +47,17 @@ function POSCartItem({
             {item.tierLabel && (
               <TouchableOpacity
                 onPress={() => {
-                  if (onOpenTierSelector) {
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                    onOpenTierSelector()
-                  }
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                  // ✅ ZERO PROP DRILLING: Call store action directly
+                  checkoutUIActions.setTierSelectorProductId(item.productId)
                 }}
                 style={styles.tierBadge}
-                disabled={!onOpenTierSelector}
                 accessibilityRole="button"
                 accessibilityLabel={`Change tier from ${item.tierLabel}`}
                 accessibilityHint="Opens tier selection options"
-                accessibilityState={{ disabled: !onOpenTierSelector }}
               >
                 <Text style={styles.tierBadgeText}>{item.tierLabel}</Text>
-                {onOpenTierSelector && <Text style={styles.tierBadgeChevron}>›</Text>}
+                <Text style={styles.tierBadgeChevron}>›</Text>
               </TouchableOpacity>
             )}
           </View>
@@ -89,7 +78,8 @@ function POSCartItem({
             <TouchableOpacity
               onPress={() => {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                onRemoveDiscount?.()
+                // ✅ ZERO PROP DRILLING: Call store action directly
+                cartActions.removeManualDiscount(item.id)
               }}
               style={styles.discountAppliedBadge}
               accessibilityRole="button"
@@ -114,7 +104,8 @@ function POSCartItem({
               <TouchableOpacity
                 onPress={() => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                  onRemove()
+                  // ✅ ZERO PROP DRILLING: Call store action directly
+                  cartActions.updateQuantity(item.id, -1)
                 }}
                 style={styles.cartButton}
                 accessibilityRole="button"
@@ -135,7 +126,8 @@ function POSCartItem({
               <TouchableOpacity
                 onPress={() => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                  onAdd()
+                  // ✅ ZERO PROP DRILLING: Call store action directly
+                  cartActions.updateQuantity(item.id, 1)
                 }}
                 style={styles.cartButton}
                 accessibilityRole="button"
@@ -150,7 +142,8 @@ function POSCartItem({
             <TouchableOpacity
               onPress={() => {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                onRemove()
+                // ✅ ZERO PROP DRILLING: Call store action directly
+                cartActions.updateQuantity(item.id, -1)
               }}
               style={styles.cartRemoveButton}
               accessibilityRole="button"
@@ -170,7 +163,8 @@ function POSCartItem({
         <TouchableOpacity
           onPress={() => {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-            onStartDiscounting?.()
+            // ✅ ZERO PROP DRILLING: Call store action directly
+            cartActions.setDiscountingItemId(item.id)
           }}
           style={styles.addDiscountLink}
           accessibilityRole="button"
@@ -250,7 +244,8 @@ function POSCartItem({
             <TouchableOpacity
               onPress={() => {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                onCancelDiscounting?.()
+                // ✅ ZERO PROP DRILLING: Call store action directly
+                cartActions.setDiscountingItemId(null)
                 setDiscountValue('')
               }}
               style={styles.discountCancelBtn}

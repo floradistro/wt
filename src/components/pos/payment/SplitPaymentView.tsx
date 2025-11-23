@@ -1,10 +1,17 @@
 /**
- * Split Payment View - CLEAN VERSION
+ * Split Payment View - TRUE ZERO PROPS ✅
  * Two-Phase Commit Architecture
  *
  * DOES NOT process payments itself.
  * Just collects split amounts and triggers checkout.
  * Edge Function handles the actual payment processing.
+ *
+ * ZERO DATA PROPS - Reads from stores:
+ * - total (calculated from subtotal + tax)
+ * - subtotal → cart.store
+ * - taxAmount → tax.store
+ * - currentProcessor → payment-processor.store
+ * - locationId, registerId → posSession.store
  */
 
 import { useState, useMemo } from 'react'
@@ -12,21 +19,49 @@ import { View, Text, TextInput, TouchableOpacity, StyleSheet } from 'react-nativ
 import { LiquidGlassView } from '@callstack/liquid-glass'
 import { Ionicons } from '@expo/vector-icons'
 import * as Haptics from 'expo-haptics'
-import type { ProcessorInfo } from '@/stores/payment-processor.store'
-import type { BasePaymentViewProps, PaymentData, SaleCompletionData } from './PaymentTypes'
+import { useCartTotals } from '@/stores/cart.store'
+import { usePOSSession } from '@/stores/posSession.store'
+import { taxActions } from '@/stores/tax.store'
+import { useLoyaltyState } from '@/stores/loyalty.store'
+import { usePaymentProcessor } from '@/stores/payment-processor.store'
+import type { PaymentData, SaleCompletionData } from './PaymentTypes'
 
-interface SplitPaymentViewProps extends BasePaymentViewProps {
-  currentProcessor: ProcessorInfo | null
-  locationId?: string
-  registerId?: string
-  onComplete: (paymentData: PaymentData) => Promise<SaleCompletionData>
+interface SplitPaymentViewProps {
+  onComplete: (paymentData: PaymentData) => Promise<SaleCompletionData>  // ✅ Coordination callback only
 }
 
 export function SplitPaymentView({
-  total,
-  currentProcessor,
   onComplete,
 }: SplitPaymentViewProps) {
+  // ========================================
+  // STORES - TRUE ZERO PROPS (read from environment)
+  // ========================================
+  const { subtotal, itemCount } = useCartTotals()
+  const { sessionInfo } = usePOSSession()
+  const { loyaltyProgram, pointsToRedeem } = useLoyaltyState()
+  const currentProcessor = usePaymentProcessor((state) => state.currentProcessor)
+
+  // Calculate tax
+  const { taxAmount, taxRate, taxName } = useMemo(() => {
+    if (!sessionInfo?.locationId) return { taxAmount: 0, taxRate: 0, taxName: undefined }
+    return taxActions.calculateTax(subtotal, sessionInfo.locationId)
+  }, [subtotal, sessionInfo?.locationId])
+
+  // Calculate loyalty discount
+  const loyaltyDiscountAmount = useMemo(() => {
+    if (!loyaltyProgram || pointsToRedeem === 0) return 0
+    return (pointsToRedeem * (loyaltyProgram.point_value || 0.01))
+  }, [loyaltyProgram, pointsToRedeem])
+
+  // Calculate total
+  const total = useMemo(() => {
+    const subtotalAfterDiscount = Math.max(0, subtotal - loyaltyDiscountAmount)
+    return subtotalAfterDiscount + taxAmount
+  }, [subtotal, loyaltyDiscountAmount, taxAmount])
+
+  // ========================================
+  // LOCAL STATE (UI only)
+  // ========================================
   const [splitCashAmount, setSplitCashAmount] = useState('')
   const [splitCardAmount, setSplitCardAmount] = useState('')
   const [processing, setProcessing] = useState(false)

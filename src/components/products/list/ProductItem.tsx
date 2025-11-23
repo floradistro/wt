@@ -11,7 +11,7 @@
 import React, { useMemo, memo } from 'react'
 import { View, Text, StyleSheet, Pressable, Image } from 'react-native'
 import { layout } from '@/theme/layout'
-import type { Product } from '@/hooks/useProducts'
+import type { Product } from '@/types/products'
 
 interface ProductItemProps {
   item: Product

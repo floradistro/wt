@@ -9,7 +9,7 @@ import { memo } from 'react'
 import { LiquidGlassView, isLiquidGlassSupported } from '@callstack/liquid-glass'
 import * as Haptics from 'expo-haptics'
 import { colors, typography, spacing, radius } from '@/theme/tokens'
-import type { Product } from '@/hooks/useProducts'
+import type { Product } from '@/types/products'
 
 interface ProductCardProps {
   product: Product

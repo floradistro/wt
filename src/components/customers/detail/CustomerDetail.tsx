@@ -1,37 +1,62 @@
 /**
  * CustomerDetail Component
  * Detail panel for viewing and editing customer information
+ *
+ * ZERO PROP DRILLING ARCHITECTURE:
+ * - Reads customer from customers-ui.store
+ * - Reads UI state from customers-ui.store
+ * - Calls store actions directly (no callbacks)
  */
 
-import React, { useState, memo } from 'react'
+import React, { useState, useEffect, memo } from 'react'
 import { View, Text, ScrollView, Pressable, TextInput, Alert } from 'react-native'
 import * as Haptics from 'expo-haptics'
-import type { Customer } from '@/hooks/useCustomers'
-import { customersService } from '@/services/customers.service'
+import type { Customer } from '@/services/customers.service'
 import { logger } from '@/utils/logger'
 import { colors } from '@/theme/tokens'
 import { customersStyles as styles } from '../customers.styles'
+import {
+  useSelectedCustomerUI,
+  useIsEditMode,
+  useActiveModal,
+  customersUIActions,
+} from '@/stores/customers-ui.store'
+import {
+  customersListActions,
+} from '@/stores/customers-list.store'
 
-export interface CustomerDetailProps {
-  customer: Customer
-  onClose: () => void
-  onDelete: () => void
-  onUpdate: (customer: Customer) => void
-}
+// ✅ ZERO PROPS!
+export const CustomerDetail = memo(() => {
+  // ✅ Read from stores
+  const customer = useSelectedCustomerUI()
+  const isEditing = useIsEditMode()
+  const showLoyaltyModal = useActiveModal() === 'loyalty'
 
-export const CustomerDetail = memo<CustomerDetailProps>(({ customer, onClose, onDelete, onUpdate }) => {
-  const [isEditing, setIsEditing] = useState(false)
-  const [editedCustomer, setEditedCustomer] = useState<Partial<Customer>>(customer)
+  // Local edit state (temporary form data)
+  const [editedCustomer, setEditedCustomer] = useState<Partial<Customer>>(customer || {})
   const [isSaving, setIsSaving] = useState(false)
-  const [showLoyaltyModal, setShowLoyaltyModal] = useState(false)
   const [customAmount, setCustomAmount] = useState('')
+
+  // ✅ Sync editedCustomer when customer changes from store
+  useEffect(() => {
+    if (customer) {
+      setEditedCustomer(customer)
+    }
+  }, [customer])
+
+  // Guard: No customer selected
+  if (!customer) {
+    return null
+  }
 
   const handleSave = async () => {
     try {
       setIsSaving(true)
-      const updated = await customersService.updateCustomer(customer.id, editedCustomer)
-      onUpdate(updated)
-      setIsEditing(false)
+      // ✅ Use store action
+      const updated = await customersListActions.updateCustomer(customer.id, editedCustomer)
+      // ✅ Update UI state
+      customersUIActions.setEditMode(false)
+      customersUIActions.selectCustomer(updated) // Update with fresh data
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
     } catch (err) {
       logger.error('Failed to update customer:', err)
@@ -43,7 +68,7 @@ export const CustomerDetail = memo<CustomerDetailProps>(({ customer, onClose, on
 
   const handleCancel = () => {
     setEditedCustomer(customer)
-    setIsEditing(false)
+    customersUIActions.setEditMode(false)
   }
 
   const handleLoyaltyAdjustment = (adjustment: number) => {
@@ -56,11 +81,13 @@ export const CustomerDetail = memo<CustomerDetailProps>(({ customer, onClose, on
           text: 'Confirm',
           onPress: async () => {
             try {
-              await customersService.updateCustomerLoyaltyPoints(customer.id, adjustment)
+              // ✅ Use store action
+              await customersListActions.updateLoyaltyPoints(customer.id, adjustment)
+              // ✅ Update selected customer with new points
               const updated = { ...customer, loyalty_points: customer.loyalty_points + adjustment }
-              onUpdate(updated as Customer)
+              customersUIActions.selectCustomer(updated as Customer)
               Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
-              setShowLoyaltyModal(false)
+              customersUIActions.closeLoyaltyModal()
               setCustomAmount('')
             } catch (err) {
               logger.error('Failed to update loyalty points:', err)
@@ -95,7 +122,7 @@ export const CustomerDetail = memo<CustomerDetailProps>(({ customer, onClose, on
     <View style={styles.detailContainer}>
       {/* Header */}
       <View style={styles.detailHeader}>
-        <Pressable style={styles.backButton} onPress={onClose}>
+        <Pressable style={styles.backButton} onPress={() => customersUIActions.clearSelection()}>
           <Text style={styles.backButtonText}>← Back</Text>
         </Pressable>
         <View style={styles.detailHeaderActions}>
@@ -122,13 +149,36 @@ export const CustomerDetail = memo<CustomerDetailProps>(({ customer, onClose, on
             <>
               <Pressable
                 style={[styles.actionButton, styles.editButton]}
-                onPress={() => setIsEditing(true)}
+                onPress={() => customersUIActions.setEditMode(true)}
               >
                 <Text style={styles.actionButtonText}>Edit</Text>
               </Pressable>
               <Pressable
                 style={[styles.actionButton, styles.deleteButton]}
-                onPress={onDelete}
+                onPress={() => {
+                  Alert.alert(
+                    'Delete Customer',
+                    `Are you sure you want to delete ${customer.full_name || 'this customer'}? This action cannot be undone.`,
+                    [
+                      { text: 'Cancel', style: 'cancel' },
+                      {
+                        text: 'Delete',
+                        style: 'destructive',
+                        onPress: async () => {
+                          try {
+                            await customersListActions.deleteCustomer(customer.id)
+                            customersUIActions.clearSelection()
+                            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+                            logger.info('Customer deleted successfully:', customer.id)
+                          } catch (err) {
+                            logger.error('Failed to delete customer:', err)
+                            Alert.alert('Error', 'Failed to delete customer. Please try again.')
+                          }
+                        },
+                      },
+                    ]
+                  )
+                }}
               >
                 <Text style={styles.deleteButtonText}>Delete</Text>
               </Pressable>
@@ -188,7 +238,7 @@ export const CustomerDetail = memo<CustomerDetailProps>(({ customer, onClose, on
             style={styles.statCard}
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-              setShowLoyaltyModal(true)
+              customersUIActions.openLoyaltyModal()
             }}
           >
             <Text style={[styles.statValue, styles.loyaltyStatValue]}>
@@ -283,7 +333,7 @@ export const CustomerDetail = memo<CustomerDetailProps>(({ customer, onClose, on
                 style={styles.loyaltyCloseButton}
                 onPress={() => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                  setShowLoyaltyModal(false)
+                  customersUIActions.closeLoyaltyModal()
                 }}
               >
                 <Text style={styles.loyaltyCloseButtonText}>Close</Text>

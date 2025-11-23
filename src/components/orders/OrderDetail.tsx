@@ -1,224 +1,145 @@
 /**
- * Order Detail Component
+ * Order Detail Component - REFACTORED (Zero Props)
  * Comprehensive order workflows with all edge cases
  * Professional, interactive order management - POS-quality UX
+ *
+ * CHANGES FROM ORIGINAL:
+ * - NO PROPS (was: order, onBack, onOrderUpdated)
+ * - Reads order from stores (by selectedOrderId)
+ * - All state from order-detail.store (was: 15+ useState)
+ * - Vendor from AppAuthContext (not loaded again)
+ * - Real-time in store (not component)
+ * - Form state in store (not local)
+ * - Modal state in store (not local)
  */
 
 import { View, Text, StyleSheet, Pressable, ActivityIndicator, ScrollView, Linking, Alert, Animated, TextInput, Image } from 'react-native'
-import { useState, useEffect, useRef } from 'react'
+import { useEffect, useRef } from 'react'
 import * as Haptics from 'expo-haptics'
 import { BlurView } from 'expo-blur'
 import { Ionicons } from '@expo/vector-icons'
 import { colors, spacing, radius } from '@/theme/tokens'
 import { layout } from '@/theme/layout'
-import { supabase } from '@/lib/supabase/client'
 import { logger } from '@/utils/logger'
 import type { Order } from '@/services/orders.service'
 
-interface OrderItem {
-  id: string
-  product_name: string
-  quantity: number
-  unit_price: number
-  line_total: number
-}
+// ✅ NEW: Import from Context
+import { useAppAuth } from '@/contexts/AppAuthContext'
 
-interface OrderDetailProps {
-  order: Order
-  onBack: () => void
-  onOrderUpdated: () => void
-}
+// ✅ NEW: Import from Zustand stores
+import { useOrders, useOrdersActions, useOrdersStore } from '@/stores/orders.store'
+import { useSelectedOrderId, useOrdersUIActions } from '@/stores/orders-ui.store'
+import {
+  useOrderItems,
+  useLoyaltyData,
+  useTaxDetails,
+  useOrderDetailLoading,
+  useOrderDetailModals,
+  useOrderDetailForm,
+  useOrderDetailSuccess,
+  useOrderDetailActions,
+} from '@/stores/order-detail.store'
 
-export function OrderDetail({ order: initialOrder, onBack, onOrderUpdated }: OrderDetailProps) {
-  const [order, setOrder] = useState(initialOrder)
-  const [orderItems, setOrderItems] = useState<OrderItem[]>([])
-  const [isLoading, setIsLoading] = useState(true)
-  const [isUpdating, setIsUpdating] = useState(false)
-  const [showSuccess, setShowSuccess] = useState(false)
-  const [successMessage, setSuccessMessage] = useState('')
-  const [showNotesModal, setShowNotesModal] = useState(false)
-  const [staffNotes, setStaffNotes] = useState(order.staff_notes || '')
-  const [showLabelModal, setShowLabelModal] = useState(false)
-  const [trackingNumber, setTrackingNumber] = useState(order.tracking_number || '')
-  const [shippingCost, setShippingCost] = useState(order.shipping_cost?.toString() || '')
-  const [vendorLogo, setVendorLogo] = useState<string | null>(null)
-  const [vendorName, setVendorName] = useState<string>('')
-  const [loyaltyPointsEarned, setLoyaltyPointsEarned] = useState<number>(0)
-  const [loyaltyPointsRedeemed, setLoyaltyPointsRedeemed] = useState<number>(0)
-  const [taxDetails, setTaxDetails] = useState<Array<{ name: string; amount: number; rate?: number }>>([])
+// NO PROPS! Component reads from stores
+export function OrderDetail() {
+  // ========================================
+  // FOUNDATION from Context (vendor)
+  // ========================================
+  const { vendor } = useAppAuth()
 
+  // ========================================
+  // GET SELECTED ORDER from Zustand
+  // ========================================
+  const selectedOrderId = useSelectedOrderId()
+  const orders = useOrders()
+  const order = orders.find(o => o.id === selectedOrderId)
 
-  // Animation values
+  // ========================================
+  // BUSINESS LOGIC from Zustand (order data)
+  // ========================================
+  const orderItems = useOrderItems()
+  const { loyaltyPointsEarned, loyaltyPointsRedeemed } = useLoyaltyData()
+  const taxDetails = useTaxDetails()
+  const { loading, isUpdating } = useOrderDetailLoading()
+
+  // ========================================
+  // UI STATE from Zustand (modals, success)
+  // ========================================
+  const { showNotesModal, showLabelModal } = useOrderDetailModals()
+  const { staffNotes, trackingNumber, shippingCost } = useOrderDetailForm()
+  const { showSuccess, successMessage } = useOrderDetailSuccess()
+
+  // ========================================
+  // ACTIONS from Zustand
+  // ========================================
+  const {
+    loadOrderDetails,
+    updateNotes,
+    updateShippingLabel,
+    advanceStatus,
+    openNotesModal,
+    closeNotesModal,
+    openLabelModal,
+    closeLabelModal,
+    setStaffNotes,
+    setTrackingNumber,
+    setShippingCost,
+    showSuccessOverlay,
+    reset: resetDetail,
+  } = useOrderDetailActions()
+
+  const { refreshOrders } = useOrdersActions()
+  const { selectOrder } = useOrdersUIActions()
+
+  // ========================================
+  // LOCAL UI STATE (animations only)
+  // ========================================
   const successOpacity = useRef(new Animated.Value(0)).current
   const successScale = useRef(new Animated.Value(0.8)).current
   const buttonScale = useRef(new Animated.Value(1)).current
 
-  // Real-time subscription
-  useEffect(() => {
-    const channel = supabase
-      .channel(`order-${order.id}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'orders',
-          filter: `id=eq.${order.id}`,
-        },
-        (payload) => {
-          logger.info('Order updated in real-time:', payload.new)
-          setOrder(payload.new as Order)
-          onOrderUpdated()
-        }
-      )
-      .subscribe()
+  // ========================================
+  // INITIALIZATION & CLEANUP
+  // ========================================
 
+  // Load order details when order selected
+  useEffect(() => {
+    if (!order?.id) {
+      logger.warn('[OrderDetail] No order selected')
+      return
+    }
+
+    logger.info('[OrderDetail] Loading details for order:', order.id)
+    loadOrderDetails(order.id)
+
+    // Cleanup when order deselected
     return () => {
-      supabase.removeChannel(channel)
+      logger.info('[OrderDetail] Cleaning up order details')
+      resetDetail()
     }
-  }, [order.id])
+  }, [order?.id])
+
+  // ========================================
+  // SUCCESS ANIMATION (synced with store state)
+  // ========================================
 
   useEffect(() => {
-    loadOrderItems()
-    loadVendorInfo()
-    loadLoyaltyAndPaymentInfo()
-    loadTaxDetails()
-  }, [order.id])
-
-  const loadVendorInfo = async () => {
-    try {
-      const { data: orderData, error: orderError } = await supabase
-        .from('orders')
-        .select('vendor_id, vendors(id, store_name, logo_url)')
-        .eq('id', order.id)
-        .single()
-
-      if (orderError) {
-        logger.error('Order vendor query error', { error: orderError })
-        return
-      }
-
-      if (orderData?.vendors) {
-        const vendor = orderData.vendors as any
-        setVendorName(vendor.store_name || '')
-        setVendorLogo(vendor.logo_url || null)
-      }
-    } catch (error) {
-      logger.error('Failed to load vendor info', { error })
-    }
-  }
-
-  const loadLoyaltyAndPaymentInfo = async () => {
-    try {
-      // Load loyalty transactions
-      if (order.customer_id) {
-        const { data: loyaltyData, error: loyaltyError} = await supabase
-          .from('loyalty_transactions')
-          .select('transaction_type, points')
-          .eq('reference_type', 'order')
-          .eq('reference_id', order.id)
-
-        if (!loyaltyError && loyaltyData) {
-          const earned = loyaltyData.find(t => t.transaction_type === 'earned')?.points || 0
-          const spent = Math.abs(loyaltyData.find(t => t.transaction_type === 'spent')?.points || 0)
-          setLoyaltyPointsEarned(earned)
-          setLoyaltyPointsRedeemed(spent)
-        }
-      }
-
-      // NOTE: Split payment details are not currently stored in the database
-      // The payment_method is normalized ('split' -> 'credit') and only one transaction is created
-      // To display split payments, we would need to:
-      // 1. Add split_payment_cash and split_payment_card columns to orders table
-      // 2. OR create multiple payment_transactions records for split payments
-      // 3. OR add split_payments JSONB column to orders table
-      //
-      // For now, we just show the normalized payment method from the order
-      logger.debug('[OrderDetail] Payment method from order:', order.payment_method)
-    } catch (error) {
-      logger.error('Failed to load loyalty and payment info', { error })
-    }
-  }
-
-  const loadOrderItems = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('order_items')
-        .select('id, product_name, quantity, unit_price, line_total')
-        .eq('order_id', order.id)
-
-      if (error) throw error
-      setOrderItems(data || [])
-    } catch (error) {
-      logger.error('Failed to load order items:', error)
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  const loadTaxDetails = async () => {
-    try {
-      logger.debug('[OrderDetail] Loading tax details for order', {
-        orderId: order.id,
-        pickupLocationId: order.pickup_location_id,
-        taxAmount: order.tax_amount
-      })
-
-      // Load location tax information
-      if (order.pickup_location_id) {
-        const { data: locationData, error: locationError } = await supabase
-          .from('locations')
-          .select('tax_name, tax_rate')
-          .eq('id', order.pickup_location_id)
-          .single()
-
-        logger.debug('[OrderDetail] Location tax data', { locationData, locationError })
-
-        if (!locationError && locationData) {
-          // Use the ACTUAL tax rate from the location, not calculated
-          // The stored tax_amount is calculated on subtotal AFTER loyalty discounts,
-          // so calculating rate from tax_amount/subtotal gives wrong results
-          const taxes = []
-          if (order.tax_amount > 0) {
-            taxes.push({
-              name: locationData.tax_name || 'Tax',
-              amount: order.tax_amount,
-              rate: locationData.tax_rate // Store the actual rate from location
-            })
-          }
-          logger.debug('[OrderDetail] Setting tax details', { taxes })
-          setTaxDetails(taxes)
-        } else {
-          logger.warn('[OrderDetail] No location data found or error', { locationError })
-        }
-      } else {
-        logger.warn('[OrderDetail] No pickup_location_id on order')
-      }
-    } catch (error) {
-      logger.error('Failed to load tax details:', error)
-    }
-  }
-
-  const showSuccessAnimation = (message: string) => {
-    setSuccessMessage(message)
-    setShowSuccess(true)
-
-    Animated.parallel([
-      Animated.spring(successOpacity, {
-        toValue: 1,
-        useNativeDriver: true,
-        tension: 50,
-        friction: 7,
-      }),
-      Animated.spring(successScale, {
-        toValue: 1,
-        useNativeDriver: true,
-        tension: 50,
-        friction: 7,
-      }),
-    ]).start()
-
-    setTimeout(() => {
+    if (showSuccess) {
+      Animated.parallel([
+        Animated.spring(successOpacity, {
+          toValue: 1,
+          useNativeDriver: true,
+          tension: 50,
+          friction: 7,
+        }),
+        Animated.spring(successScale, {
+          toValue: 1,
+          useNativeDriver: true,
+          tension: 50,
+          friction: 7,
+        }),
+      ]).start()
+    } else {
       Animated.parallel([
         Animated.timing(successOpacity, {
           toValue: 0,
@@ -230,16 +151,22 @@ export function OrderDetail({ order: initialOrder, onBack, onOrderUpdated }: Ord
           duration: 300,
           useNativeDriver: true,
         }),
-      ]).start(() => {
-        setShowSuccess(false)
-      })
-    }, 2000)
+      ]).start()
+    }
+  }, [showSuccess])
+
+  // ========================================
+  // EVENT HANDLERS
+  // ========================================
+
+  const handleBack = () => {
+    selectOrder(null)
   }
 
   const handleStatusUpdate = async (newStatus: Order['status'], label: string) => {
-    try {
-      setIsUpdating(true)
+    if (!order) return
 
+    try {
       Animated.sequence([
         Animated.timing(buttonScale, {
           toValue: 0.95,
@@ -255,60 +182,38 @@ export function OrderDetail({ order: initialOrder, onBack, onOrderUpdated }: Ord
 
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
 
-      const now = new Date().toISOString()
-      const updates: any = { status: newStatus, updated_at: now }
-
-      // Set timestamps based on status
-      switch (newStatus) {
-        case 'preparing':
-          updates.prepared_at = now
-          break
-        case 'ready':
-          updates.ready_at = now
-          updates.notified_at = now
-          break
-        case 'out_for_delivery':
-          updates.ready_at = now
-          break
-        case 'ready_to_ship':
-          updates.ready_at = now
-          break
-        case 'shipped':
-          updates.shipped_at = now
-          break
-        case 'completed':
-          updates.completed_at = now
-          break
-        case 'delivered':
-          updates.delivered_at = now
-          updates.completed_at = now
-          break
-      }
-
-      const { error } = await supabase
-        .from('orders')
-        .update(updates)
-        .eq('id', order.id)
-
-      if (error) throw error
-
-      // Update local state immediately for instant UI feedback
-      setOrder(prev => ({ ...prev, ...updates }))
-      onOrderUpdated?.() // Notify parent component
+      // Use advanceStatus for context-aware workflows, or direct status update
+      // For now, we'll use direct update (advanceStatus is for "next" button)
+      await useOrdersStore.getState().updateOrderStatus(order.id, newStatus)
 
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
-      showSuccessAnimation(label)
+      showSuccessOverlay(label)
+      refreshOrders()
     } catch (error) {
       logger.error('Failed to update order status:', error)
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
       Alert.alert('Error', 'Failed to update order status')
-    } finally {
-      setIsUpdating(false)
     }
   }
 
-  // Cancel order with confirmation
+  const handleAdvanceStatus = async () => {
+    if (!order) return
+
+    try {
+      const orderType = order.order_type || order.delivery_type || 'walk_in'
+      await advanceStatus(order.id, orderType, order.status)
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+      refreshOrders()
+    } catch (error) {
+      logger.error('Failed to advance status:', error)
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
+      Alert.alert('Error', 'Failed to update status')
+    }
+  }
+
   const handleCancelOrder = () => {
+    if (!order) return
+
     Alert.alert(
       'Cancel Order',
       'Are you sure you want to cancel this order? This action cannot be undone.',
@@ -319,31 +224,13 @@ export function OrderDetail({ order: initialOrder, onBack, onOrderUpdated }: Ord
           style: 'destructive',
           onPress: async () => {
             try {
-              setIsUpdating(true)
-              const now = new Date().toISOString()
-              const updates = {
-                status: 'cancelled' as Order['status'],
-                updated_at: now,
-              }
-
-              const { error } = await supabase
-                .from('orders')
-                .update(updates)
-                .eq('id', order.id)
-
-              if (error) throw error
-
-              // Update local state immediately for instant UI feedback
-              setOrder(prev => ({ ...prev, ...updates }))
-              onOrderUpdated?.() // Notify parent component
-
+              await useOrdersStore.getState().updateOrderStatus(order.id, 'cancelled')
               Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
-              showSuccessAnimation('Order cancelled')
+              showSuccessOverlay('Order cancelled')
+              refreshOrders()
             } catch (error) {
               logger.error('Failed to cancel order:', error)
               Alert.alert('Error', 'Failed to cancel order')
-            } finally {
-              setIsUpdating(false)
             }
           },
         },
@@ -351,69 +238,32 @@ export function OrderDetail({ order: initialOrder, onBack, onOrderUpdated }: Ord
     )
   }
 
-  // Save staff notes
   const handleSaveNotes = async () => {
+    if (!order) return
+
     try {
-      const now = new Date().toISOString()
-      const updates = {
-        staff_notes: staffNotes,
-        updated_at: now,
-      }
-
-      const { error } = await supabase
-        .from('orders')
-        .update(updates)
-        .eq('id', order.id)
-
-      if (error) throw error
-
-      // Update local state immediately
-      setOrder(prev => ({ ...prev, ...updates }))
-      onOrderUpdated?.()
-
-      setShowNotesModal(false)
+      await updateNotes(order.id, staffNotes)
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
-      showSuccessAnimation('Notes saved')
+      refreshOrders()
     } catch (error) {
       logger.error('Failed to save notes:', error)
       Alert.alert('Error', 'Failed to save notes')
     }
   }
 
-  // Save shipping label info
   const handleSaveLabel = async () => {
+    if (!order) return
+
+    if (!trackingNumber.trim()) {
+      Alert.alert('Error', 'Please enter a tracking number')
+      return
+    }
+
     try {
-      if (!trackingNumber.trim()) {
-        Alert.alert('Error', 'Please enter a tracking number')
-        return
-      }
-
-      const updates: any = {
-        tracking_number: trackingNumber.trim(),
-        updated_at: new Date().toISOString(),
-      }
-
-      if (shippingCost) {
-        const cost = parseFloat(shippingCost)
-        if (!isNaN(cost)) {
-          updates.shipping_cost = cost
-        }
-      }
-
-      const { error } = await supabase
-        .from('orders')
-        .update(updates)
-        .eq('id', order.id)
-
-      if (error) throw error
-
-      // Update local state immediately
-      setOrder(prev => ({ ...prev, ...updates }))
-      onOrderUpdated?.()
-
-      setShowLabelModal(false)
+      const cost = shippingCost ? parseFloat(shippingCost) : undefined
+      await updateShippingLabel(order.id, trackingNumber.trim(), cost)
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
-      showSuccessAnimation('Shipping label saved')
+      refreshOrders()
     } catch (error) {
       logger.error('Failed to save label:', error)
       Alert.alert('Error', 'Failed to save shipping label')
@@ -421,27 +271,32 @@ export function OrderDetail({ order: initialOrder, onBack, onOrderUpdated }: Ord
   }
 
   const handleCall = () => {
-    if (order.customer_phone) {
+    if (order?.customer_phone) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
       Linking.openURL(`tel:${order.customer_phone}`)
     }
   }
 
   const handleText = () => {
-    if (order.customer_phone) {
+    if (order?.customer_phone) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
       Linking.openURL(`sms:${order.customer_phone}`)
     }
   }
 
   const handleEmail = () => {
-    if (order.customer_email) {
+    if (order?.customer_email) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
       Linking.openURL(`mailto:${order.customer_email}`)
     }
   }
 
+  // ========================================
+  // HELPERS (Pure Functions)
+  // ========================================
+
   const getOrderType = () => {
+    if (!order) return 'Store'
     const type = order.order_type || order.delivery_type || 'walk_in'
     switch (type.toLowerCase()) {
       case 'walk_in':
@@ -481,439 +336,320 @@ export function OrderDetail({ order: initialOrder, onBack, onOrderUpdated }: Ord
 
   const getStatusLabel = (status: Order['status']) => {
     switch (status) {
-      case 'pending':
-        return 'Pending'
-      case 'preparing':
-        return 'Preparing'
-      case 'ready':
-        return 'Ready'
-      case 'out_for_delivery':
-        return 'Out for Delivery'
-      case 'ready_to_ship':
-        return 'Ready to Ship'
-      case 'shipped':
-        return 'Shipped'
-      case 'in_transit':
-        return 'In Transit'
-      case 'delivered':
-        return 'Delivered'
-      case 'completed':
-        return 'Completed'
-      case 'cancelled':
-        return 'Cancelled'
-      default:
-        return status
+      case 'pending': return 'Pending'
+      case 'preparing': return 'Preparing'
+      case 'ready': return 'Ready'
+      case 'out_for_delivery': return 'Out for Delivery'
+      case 'ready_to_ship': return 'Ready to Ship'
+      case 'shipped': return 'Shipped'
+      case 'in_transit': return 'In Transit'
+      case 'delivered': return 'Delivered'
+      case 'completed': return 'Completed'
+      case 'cancelled': return 'Cancelled'
     }
   }
 
-  // Comprehensive workflow buttons for all order types
-  const getActionButtons = () => {
-    const buttons = []
-    const type = (order.order_type || order.delivery_type || 'walk_in').toLowerCase()
+  // Get next status button based on order type
+  const getNextStatusButton = () => {
+    if (!order) return null
 
-    // Walk-in orders are auto-completed, no actions needed
-    if (type === 'walk_in' || type === 'instore') {
-      if (order.status === 'completed') return null
+    const orderType = order.order_type || order.delivery_type || 'walk_in'
+    const status = order.status
+
+    switch (orderType.toLowerCase()) {
+      case 'walk_in':
+      case 'instore':
+        if (status === 'pending') {
+          return { status: 'completed' as Order['status'], label: 'Mark Complete' }
+        }
+        break
+
+      case 'pickup':
+        if (status === 'pending') {
+          return { status: 'preparing' as Order['status'], label: 'Start Preparing' }
+        } else if (status === 'preparing') {
+          return { status: 'ready' as Order['status'], label: 'Mark Ready' }
+        } else if (status === 'ready') {
+          return { status: 'completed' as Order['status'], label: 'Mark Complete' }
+        }
+        break
+
+      case 'delivery':
+        if (status === 'pending') {
+          return { status: 'preparing' as Order['status'], label: 'Start Preparing' }
+        } else if (status === 'preparing') {
+          return { status: 'out_for_delivery' as Order['status'], label: 'Out for Delivery' }
+        } else if (status === 'out_for_delivery') {
+          return { status: 'completed' as Order['status'], label: 'Mark Complete' }
+        }
+        break
+
+      case 'shipping':
+        if (status === 'pending') {
+          return { status: 'preparing' as Order['status'], label: 'Start Preparing' }
+        } else if (status === 'preparing') {
+          return { status: 'ready_to_ship' as Order['status'], label: 'Ready to Ship' }
+        } else if (status === 'ready_to_ship') {
+          return { status: 'shipped' as Order['status'], label: 'Mark Shipped' }
+        } else if (status === 'shipped') {
+          return { status: 'in_transit' as Order['status'], label: 'In Transit' }
+        } else if (status === 'in_transit') {
+          return { status: 'delivered' as Order['status'], label: 'Mark Delivered' }
+        }
+        break
     }
 
-    // PICKUP WORKFLOW: pending → preparing → ready → completed
-    if (type === 'pickup') {
-      switch (order.status) {
-        case 'pending':
-          buttons.push({
-            label: 'Start Preparing',
-            action: () => handleStatusUpdate('preparing', 'Started preparing order'),
-            primary: true,
-          })
-          break
-
-        case 'preparing':
-          buttons.push({
-            label: 'Mark Ready for Pickup',
-            action: () => handleStatusUpdate('ready', 'Order ready for pickup'),
-            primary: true,
-          })
-          break
-
-        case 'ready':
-          buttons.push({
-            label: 'Customer Picked Up',
-            action: () => handleStatusUpdate('completed', 'Order completed'),
-            primary: true,
-          })
-          buttons.push({
-            label: 'Customer No-Show',
-            action: () => handleCancelOrder(),
-            primary: false,
-          })
-          break
-      }
-    }
-
-    // DELIVERY WORKFLOW: pending → preparing → out_for_delivery → completed
-    if (type === 'delivery') {
-      switch (order.status) {
-        case 'pending':
-          buttons.push({
-            label: 'Start Preparing',
-            action: () => handleStatusUpdate('preparing', 'Started preparing order'),
-            primary: true,
-          })
-          break
-
-        case 'preparing':
-          buttons.push({
-            label: 'Out for Delivery',
-            action: () => handleStatusUpdate('out_for_delivery', 'Order out for delivery'),
-            primary: true,
-          })
-          break
-
-        case 'out_for_delivery':
-          buttons.push({
-            label: 'Mark Delivered',
-            action: () => handleStatusUpdate('completed', 'Order delivered'),
-            primary: true,
-          })
-          buttons.push({
-            label: 'Customer Not Home',
-            action: () => handleStatusUpdate('ready', 'Returned to store'),
-            primary: false,
-          })
-          buttons.push({
-            label: 'Address Issue',
-            action: () => setShowNotesModal(true),
-            primary: false,
-          })
-          break
-      }
-    }
-
-    // SHIPPING WORKFLOW: pending → ready_to_ship → shipped → in_transit → delivered
-    if (type === 'shipping') {
-      switch (order.status) {
-        case 'pending':
-          buttons.push({
-            label: 'Start Preparing',
-            action: () => handleStatusUpdate('preparing', 'Started preparing order'),
-            primary: true,
-          })
-          break
-
-        case 'preparing':
-          buttons.push({
-            label: 'Ready to Ship',
-            action: () => handleStatusUpdate('ready_to_ship', 'Ready for shipping label'),
-            primary: true,
-          })
-          break
-
-        case 'ready_to_ship':
-          buttons.push({
-            label: 'Mark as Shipped',
-            action: () => handleStatusUpdate('shipped', 'Package shipped'),
-            primary: true,
-          })
-          buttons.push({
-            label: order.tracking_number ? 'Update Shipping Label' : 'Add Shipping Label',
-            action: () => setShowLabelModal(true),
-            primary: false,
-          })
-          break
-
-        case 'shipped':
-          buttons.push({
-            label: 'In Transit',
-            action: () => handleStatusUpdate('in_transit', 'Package in transit'),
-            primary: true,
-          })
-          break
-
-        case 'in_transit':
-          buttons.push({
-            label: 'Mark Delivered',
-            action: () => handleStatusUpdate('delivered', 'Package delivered'),
-            primary: true,
-          })
-          buttons.push({
-            label: 'Package Lost',
-            action: () => setShowNotesModal(true),
-            primary: false,
-          })
-          break
-      }
-    }
-
-    // Add cancel button for non-completed orders
-    if (order.status !== 'completed' && order.status !== 'cancelled' && order.status !== 'delivered') {
-      buttons.push({
-        label: 'Cancel Order',
-        action: () => handleCancelOrder(),
-        primary: false,
-        danger: true,
-      })
-    }
-
-    return buttons.length > 0 ? buttons : null
+    return null
   }
 
-  const orderType = getOrderType()
-  const actionButtons = getActionButtons()
+  // ========================================
+  // RENDER
+  // ========================================
 
-  if (isLoading) {
+  if (!order) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator color="#fff" size="large" />
+      <View style={styles.container}>
+        <Text style={styles.emptyTitle}>No order selected</Text>
+        <Text style={styles.emptyText}>Select an order to view details</Text>
       </View>
     )
   }
 
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color={colors.text.secondary} />
+        <Text style={styles.loadingText}>Loading order details...</Text>
+      </View>
+    )
+  }
+
+  const nextStatusButton = getNextStatusButton()
+
   return (
     <View style={styles.container}>
+      {/* Header with Back Button */}
+      <View style={styles.header}>
+        <Pressable style={styles.backButton} onPress={handleBack}>
+          <Ionicons name="chevron-back" size={28} color={colors.text.primary} />
+          <Text style={styles.backButtonText}>Orders</Text>
+        </Pressable>
+      </View>
+
       <ScrollView
         style={styles.scrollView}
-        contentContainerStyle={styles.contentContainer}
+        contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={true}
         indicatorStyle="white"
-        scrollIndicatorInsets={{ right: 2, bottom: layout.dockHeight }}
       >
-        {/* Header */}
-        <View style={styles.header}>
-          <Pressable onPress={onBack} style={styles.backButton}>
-            <Text style={styles.backButtonText}>‹ Back</Text>
-          </Pressable>
-        </View>
-
-        {/* Hero Header with Vendor Logo */}
+        {/* Hero Section */}
         <View style={styles.heroSection}>
-          <View style={styles.heroContainer}>
-            <View style={styles.heroContent}>
-              {/* Vendor Logo */}
-              {vendorLogo ? (
-                <Image source={{ uri: vendorLogo }} style={styles.vendorLogo} />
-              ) : (
-                <View style={[styles.vendorLogo, styles.vendorLogoPlaceholder]}>
-                  <Ionicons name="storefront" size={32} color="rgba(255,255,255,0.6)" />
-                </View>
-              )}
+          {/* Vendor Logo */}
+          {vendor?.logo_url && (
+            <Image
+              source={{ uri: vendor.logo_url }}
+              style={styles.vendorLogo}
+              resizeMode="contain"
+            />
+          )}
 
-              {/* Order Info */}
-              <View style={styles.heroInfo}>
-                <Text style={styles.heroOrderNumber}>{order.order_number}</Text>
-                {vendorName && (
-                  <Text style={styles.heroVendorName}>{vendorName}</Text>
-                )}
-              </View>
+          {/* Order Number */}
+          <Text style={styles.orderNumber}>{order.order_number}</Text>
 
-              {/* Status Badge */}
-              <View
-                style={[
-                  styles.statusBadge,
-                  { backgroundColor: getStatusColor(order.status) + '20', borderColor: getStatusColor(order.status) }
-                ]}
-              >
-                <Text style={[styles.statusBadgeText, { color: getStatusColor(order.status) }]}>
-                  {getStatusLabel(order.status)}
-                </Text>
-              </View>
-            </View>
+          {/* Status Badge */}
+          <View
+            style={[
+              styles.statusBadge,
+              { backgroundColor: `${getStatusColor(order.status)}20` },
+            ]}
+          >
+            <View
+              style={[
+                styles.statusDot,
+                { backgroundColor: getStatusColor(order.status) },
+              ]}
+            />
+            <Text
+              style={[
+                styles.statusText,
+                { color: getStatusColor(order.status) },
+              ]}
+            >
+              {getStatusLabel(order.status)}
+            </Text>
           </View>
         </View>
-
 
         {/* Action Buttons */}
-        {actionButtons && actionButtons.length > 0 && (
-          <View style={styles.primaryActionContainer}>
-            {actionButtons.map((button, index) => (
-              <Animated.View
-                key={index}
-                style={{ transform: [{ scale: button.primary ? buttonScale : 1 }] }}
-              >
-                <Pressable
-                  style={[
-                    button.primary ? styles.primaryActionButton : styles.secondaryActionButton,
-                    button.danger && styles.dangerActionButton,
-                    isUpdating && styles.primaryActionButtonDisabled
-                  ]}
-                  onPress={button.action}
-                  disabled={isUpdating}
-                >
-                  {isUpdating && button.primary ? (
-                    <ActivityIndicator color="#000" />
-                  ) : (
-                    <Text style={button.primary ? styles.primaryActionText : styles.secondaryActionText}>
-                      {button.label}
-                    </Text>
-                  )}
-                </Pressable>
-              </Animated.View>
-            ))}
-          </View>
-        )}
+        {order.status !== 'completed' &&
+          order.status !== 'delivered' &&
+          order.status !== 'cancelled' && (
+            <View style={styles.actionButtonsContainer}>
+              {nextStatusButton && (
+                <Animated.View style={{ transform: [{ scale: buttonScale }] }}>
+                  <Pressable
+                    style={[styles.actionButton, styles.actionButtonPrimary]}
+                    onPress={() =>
+                      handleStatusUpdate(
+                        nextStatusButton.status,
+                        nextStatusButton.label
+                      )
+                    }
+                    disabled={isUpdating}
+                  >
+                    {isUpdating ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <>
+                        <Ionicons name="checkmark-circle" size={20} color="#fff" />
+                        <Text style={styles.actionButtonText}>
+                          {nextStatusButton.label}
+                        </Text>
+                      </>
+                    )}
+                  </Pressable>
+                </Animated.View>
+              )}
 
-        {/* Order Info - Unified Section */}
+              <Pressable
+                style={[styles.actionButton, styles.actionButtonSecondary]}
+                onPress={handleCancelOrder}
+                disabled={isUpdating}
+              >
+                <Ionicons name="close-circle" size={20} color="#ff3b30" />
+                <Text style={[styles.actionButtonText, { color: '#ff3b30' }]}>
+                  Cancel Order
+                </Text>
+              </Pressable>
+            </View>
+          )}
+
+        {/* Order Info Section */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>ORDER INFORMATION</Text>
-          <View style={styles.infoCard}>
-            {/* Customer */}
+          <Text style={styles.sectionTitle}>Order Information</Text>
+          <View style={styles.card}>
             <View style={styles.infoRow}>
               <Text style={styles.infoLabel}>Customer</Text>
               <Text style={styles.infoValue}>{order.customer_name || 'Guest'}</Text>
             </View>
-
-            {/* Type */}
             <View style={styles.infoRow}>
               <Text style={styles.infoLabel}>Type</Text>
-              <Text style={styles.infoValue}>{orderType}</Text>
+              <Text style={styles.infoValue}>{getOrderType()}</Text>
             </View>
-
-            {/* Date */}
             <View style={styles.infoRow}>
               <Text style={styles.infoLabel}>Date</Text>
               <Text style={styles.infoValue}>
-                {new Date(order.created_at).toLocaleDateString('en-US', {
-                  month: 'short',
-                  day: 'numeric',
-                  year: 'numeric',
-                  hour: 'numeric',
-                  minute: '2-digit',
-                })}
+                {new Date(order.created_at).toLocaleString()}
               </Text>
             </View>
-
-            {/* Payment Method */}
-            <View style={[styles.infoRow, !order.staff_notes && styles.infoRowLast]}>
+            <View style={styles.infoRow}>
               <Text style={styles.infoLabel}>Payment</Text>
-              <View style={{ alignItems: 'flex-end', flex: 1, marginLeft: 16 }}>
-                {(order as any).split_payment_cash && (order as any).split_payment_card ? (
-                  <>
-                    <Text style={styles.infoValue}>Split Payment</Text>
-                    <Text style={[styles.infoValue, { fontSize: 13, marginTop: 2 }]}>
-                      Cash: ${((order as any).split_payment_cash).toFixed(2)}
-                    </Text>
-                    <Text style={[styles.infoValue, { fontSize: 13 }]}>
-                      Card: ${((order as any).split_payment_card).toFixed(2)}
-                    </Text>
-                  </>
-                ) : (
-                  <Text style={styles.infoValue}>
-                    {order.payment_method === 'cash' ? 'Cash'
-                      : order.payment_method === 'card' || order.payment_method === 'credit' || order.payment_method === 'debit' ? 'Card'
-                      : order.payment_method || 'N/A'}
-                  </Text>
-                )}
-              </View>
+              <Text style={styles.infoValue}>
+                {order.payment_method || 'N/A'}
+              </Text>
             </View>
-
-            {/* Staff Notes */}
             {order.staff_notes && (
-              <View style={[styles.infoRow, styles.infoRowLast]}>
+              <View style={styles.infoRow}>
                 <Text style={styles.infoLabel}>Notes</Text>
-                <Text style={styles.infoValue} numberOfLines={2}>{order.staff_notes}</Text>
+                <Text style={styles.infoValue}>{order.staff_notes}</Text>
               </View>
             )}
+            <Pressable
+              style={styles.editNotesButton}
+              onPress={() => openNotesModal(order.staff_notes || '')}
+            >
+              <Ionicons name="create-outline" size={20} color={colors.text.secondary} />
+              <Text style={styles.editNotesText}>
+                {order.staff_notes ? 'Edit Notes' : 'Add Notes'}
+              </Text>
+            </Pressable>
           </View>
         </View>
 
-        {/* Payment Breakdown - Clean Rows */}
+        {/* Payment Breakdown */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>PAYMENT</Text>
-          <View style={styles.infoCard}>
-            {/* Subtotal */}
+          <Text style={styles.sectionTitle}>Payment Breakdown</Text>
+          <View style={styles.card}>
             <View style={styles.infoRow}>
               <Text style={styles.infoLabel}>Subtotal</Text>
               <Text style={styles.infoValue}>${order.subtotal.toFixed(2)}</Text>
             </View>
 
-            {/* Tax Breakdown */}
-            {taxDetails.length > 0 ? (
-              <>
-                {taxDetails.map((tax, index) => (
-                  <View key={index} style={styles.infoRow}>
-                    <Text style={styles.infoLabel}>{tax.name}</Text>
-                    <View style={{ alignItems: 'flex-end', flex: 1, marginLeft: 16 }}>
-                      <Text style={styles.infoValue}>${tax.amount.toFixed(2)}</Text>
-                      <Text style={[styles.infoValue, { fontSize: 13, marginTop: 2 }]}>
-                        {tax.rate ? `${(tax.rate * 100).toFixed(2)}% rate` : 'Tax'}
-                      </Text>
-                    </View>
-                  </View>
-                ))}
-              </>
-            ) : (
-              <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Tax</Text>
-                <View style={{ alignItems: 'flex-end', flex: 1, marginLeft: 16 }}>
-                  <Text style={styles.infoValue}>${order.tax_amount.toFixed(2)}</Text>
-                </View>
+            {taxDetails.map((tax, index) => (
+              <View key={index} style={styles.infoRow}>
+                <Text style={styles.infoLabel}>
+                  {tax.name} {tax.rate ? `(${(tax.rate * 100).toFixed(2)}%)` : ''}
+                </Text>
+                <Text style={styles.infoValue}>${tax.amount.toFixed(2)}</Text>
               </View>
-            )}
+            ))}
 
-            {/* Discount */}
             {order.discount_amount > 0 && (
               <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Discount</Text>
-                <Text style={styles.infoValue}>-${order.discount_amount.toFixed(2)}</Text>
+                <Text style={[styles.infoLabel, { color: '#34c759' }]}>Discount</Text>
+                <Text style={[styles.infoValue, { color: '#34c759' }]}>
+                  -${order.discount_amount.toFixed(2)}
+                </Text>
               </View>
             )}
 
-            {/* Loyalty Points Redeemed */}
             {loyaltyPointsRedeemed > 0 && (
               <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Points Redeemed</Text>
-                <Text style={styles.infoValue}>-{loyaltyPointsRedeemed} pts</Text>
+                <Text style={[styles.infoLabel, { color: '#34c759' }]}>
+                  Loyalty Points Redeemed
+                </Text>
+                <Text style={[styles.infoValue, { color: '#34c759' }]}>
+                  {loyaltyPointsRedeemed} pts
+                </Text>
               </View>
             )}
 
-            {/* Loyalty Points Earned */}
             {loyaltyPointsEarned > 0 && (
               <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Points Earned</Text>
-                <Text style={styles.infoValue}>+{loyaltyPointsEarned} pts</Text>
+                <Text style={styles.infoLabel}>Loyalty Points Earned</Text>
+                <Text style={styles.infoValue}>{loyaltyPointsEarned} pts</Text>
               </View>
             )}
 
-            {/* Total */}
-            <View style={[styles.infoRow, styles.infoRowTotal, styles.infoRowLast]}>
-              <Text style={styles.infoLabelTotal}>Total</Text>
-              <Text style={styles.infoValueTotal}>${order.total_amount.toFixed(2)}</Text>
+            <View style={[styles.infoRow, styles.totalRow]}>
+              <Text style={styles.totalLabel}>Total</Text>
+              <Text style={styles.totalValue}>${order.total_amount.toFixed(2)}</Text>
             </View>
           </View>
         </View>
 
         {/* Customer Contact */}
-        {(order.customer_email || order.customer_phone) && (
+        {(order.customer_phone || order.customer_email) && (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>CONTACT</Text>
-            <View style={styles.infoCard}>
+            <Text style={styles.sectionTitle}>Customer Contact</Text>
+            <View style={styles.contactButtons}>
               {order.customer_phone && (
-                <Pressable
-                  style={[styles.infoRow, !order.customer_email && styles.infoRowLast]}
-                  onPress={handleCall}
-                >
-                  <Text style={styles.infoLabel}>Phone</Text>
-                  <Text style={styles.infoValue}>{order.customer_phone}</Text>
-                </Pressable>
+                <>
+                  <Pressable style={styles.contactButton} onPress={handleCall}>
+                    <Ionicons name="call" size={20} color={colors.text.primary} />
+                    <Text style={styles.contactButtonText}>Call</Text>
+                  </Pressable>
+                  <Pressable style={styles.contactButton} onPress={handleText}>
+                    <Ionicons name="chatbubble" size={20} color={colors.text.primary} />
+                    <Text style={styles.contactButtonText}>Text</Text>
+                  </Pressable>
+                </>
               )}
-
               {order.customer_email && (
-                <Pressable
-                  style={[styles.infoRow, styles.infoRowLast]}
-                  onPress={handleEmail}
-                >
-                  <Text style={styles.infoLabel}>Email</Text>
-                  <Text style={styles.infoValue} numberOfLines={1}>{order.customer_email}</Text>
+                <Pressable style={styles.contactButton} onPress={handleEmail}>
+                  <Ionicons name="mail" size={20} color={colors.text.primary} />
+                  <Text style={styles.contactButtonText}>Email</Text>
                 </Pressable>
               )}
             </View>
           </View>
         )}
 
-        {/* Shipping Info */}
-        {(order.order_type === 'shipping' && (order.tracking_number || order.shipping_address_line1)) && (
+        {/* Shipping Info (for shipping orders) */}
+        {(order.order_type as string) === 'shipping' && (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>SHIPPING</Text>
-            <View style={styles.infoCard}>
+            <Text style={styles.sectionTitle}>Shipping Information</Text>
+            <View style={styles.card}>
               {order.tracking_number && (
                 <View style={styles.infoRow}>
                   <Text style={styles.infoLabel}>Tracking</Text>
@@ -921,47 +657,55 @@ export function OrderDetail({ order: initialOrder, onBack, onOrderUpdated }: Ord
                 </View>
               )}
               {order.shipping_cost && (
-                <View style={[styles.infoRow, !order.shipping_address_line1 && styles.infoRowLast]}>
-                  <Text style={styles.infoLabel}>Cost</Text>
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Shipping Cost</Text>
                   <Text style={styles.infoValue}>${order.shipping_cost.toFixed(2)}</Text>
                 </View>
               )}
               {order.shipping_address_line1 && (
-                <View style={[styles.infoRow, styles.infoRowLast]}>
+                <View style={styles.infoRow}>
                   <Text style={styles.infoLabel}>Address</Text>
-                  <View style={{ alignItems: 'flex-end', flex: 1, marginLeft: 16 }}>
-                    <Text style={styles.infoValue}>{order.shipping_name}</Text>
-                    <Text style={styles.infoValue}>{order.shipping_address_line1}</Text>
-                    {order.shipping_address_line2 && (
-                      <Text style={styles.infoValue}>{order.shipping_address_line2}</Text>
-                    )}
-                    <Text style={styles.infoValue}>
-                      {order.shipping_city}, {order.shipping_state} {order.shipping_zip}
-                    </Text>
-                  </View>
+                  <Text style={styles.infoValue}>
+                    {order.shipping_address_line1}
+                    {order.shipping_address_line2 && `, ${order.shipping_address_line2}`}
+                    {'\n'}
+                    {order.shipping_city}, {order.shipping_state} {order.shipping_zip}
+                  </Text>
                 </View>
               )}
+              <Pressable
+                style={styles.editNotesButton}
+                onPress={() =>
+                  openLabelModal(
+                    order.tracking_number || '',
+                    order.shipping_cost?.toString() || ''
+                  )
+                }
+              >
+                <Ionicons name="create-outline" size={20} color={colors.text.secondary} />
+                <Text style={styles.editNotesText}>
+                  {order.tracking_number ? 'Edit Label' : 'Add Label'}
+                </Text>
+              </Pressable>
             </View>
           </View>
         )}
 
         {/* Order Items */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>ITEMS ({orderItems.length})</Text>
-          <View style={styles.infoCard}>
-            {orderItems.map((item, index) => (
-              <View
-                key={item.id}
-                style={[
-                  styles.itemRow,
-                  index === orderItems.length - 1 && styles.itemRowLast
-                ]}
-              >
-                <View style={styles.itemInfo}>
-                  <Text style={styles.itemName}>{item.product_name}</Text>
-                  <Text style={styles.itemQuantity}>Qty {item.quantity} × ${item.unit_price.toFixed(2)}</Text>
+          <Text style={styles.sectionTitle}>Order Items</Text>
+          <View style={styles.card}>
+            {orderItems.map((item) => (
+              <View key={item.id} style={styles.orderItemRow}>
+                <View style={styles.orderItemInfo}>
+                  <Text style={styles.orderItemName}>{item.product_name}</Text>
+                  <Text style={styles.orderItemDetails}>
+                    {item.quantity} × ${item.unit_price.toFixed(2)}
+                  </Text>
                 </View>
-                <Text style={styles.itemPrice}>${item.line_total.toFixed(2)}</Text>
+                <Text style={styles.orderItemTotal}>
+                  ${item.line_total.toFixed(2)}
+                </Text>
               </View>
             ))}
           </View>
@@ -979,489 +723,388 @@ export function OrderDetail({ order: initialOrder, onBack, onOrderUpdated }: Ord
             },
           ]}
         >
-          <View style={styles.successCard}>
-            <View style={styles.successCheckmark}>
-              <Text style={styles.successCheckmarkText}>✓</Text>
-            </View>
-            <Text style={styles.successText}>{successMessage}</Text>
-          </View>
+          <BlurView intensity={90} style={styles.successBlur}>
+            <Ionicons name="checkmark-circle" size={64} color="#34c759" />
+            <Text style={styles.successMessage}>{successMessage}</Text>
+          </BlurView>
         </Animated.View>
       )}
 
       {/* Notes Modal */}
       {showNotesModal && (
         <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Staff Notes</Text>
-            <TextInput
-              style={styles.notesInput}
-              value={staffNotes}
-              onChangeText={setStaffNotes}
-              placeholder="Add notes about this order..."
-              placeholderTextColor="rgba(255,255,255,0.4)"
-              multiline
-              numberOfLines={4}
-              autoFocus
-            />
-            <View style={styles.modalButtons}>
-              <Pressable
-                style={styles.modalButtonSecondary}
-                onPress={() => setShowNotesModal(false)}
-              >
-                <Text style={styles.modalButtonSecondaryText}>Cancel</Text>
-              </Pressable>
-              <Pressable
-                style={styles.modalButtonPrimary}
-                onPress={handleSaveNotes}
-              >
-                <Text style={styles.modalButtonPrimaryText}>Save</Text>
-              </Pressable>
+          <BlurView intensity={40} style={styles.modalBlur}>
+            <View style={styles.modal}>
+              <Text style={styles.modalTitle}>Staff Notes</Text>
+              <TextInput
+                style={styles.modalInput}
+                value={staffNotes}
+                onChangeText={setStaffNotes}
+                placeholder="Enter notes..."
+                placeholderTextColor={colors.text.tertiary}
+                multiline
+                numberOfLines={4}
+                autoFocus
+              />
+              <View style={styles.modalButtons}>
+                <Pressable
+                  style={[styles.modalButton, styles.modalButtonCancel]}
+                  onPress={closeNotesModal}
+                >
+                  <Text style={styles.modalButtonTextCancel}>Cancel</Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.modalButton, styles.modalButtonSave]}
+                  onPress={handleSaveNotes}
+                >
+                  <Text style={styles.modalButtonText}>Save</Text>
+                </Pressable>
+              </View>
             </View>
-          </View>
+          </BlurView>
         </View>
       )}
 
       {/* Shipping Label Modal */}
       {showLabelModal && (
         <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Shipping Label</Text>
-
-            {/* Tracking Number */}
-            <View style={{ marginBottom: 16 }}>
-              <Text style={styles.labelInputLabel}>Tracking Number *</Text>
+          <BlurView intensity={40} style={styles.modalBlur}>
+            <View style={styles.modal}>
+              <Text style={styles.modalTitle}>Shipping Label</Text>
               <TextInput
-                style={styles.labelInput}
+                style={styles.modalInput}
                 value={trackingNumber}
                 onChangeText={setTrackingNumber}
-                placeholder="Enter USPS tracking number"
-                placeholderTextColor="rgba(255,255,255,0.4)"
-                autoCapitalize="characters"
+                placeholder="Tracking number *"
+                placeholderTextColor={colors.text.tertiary}
                 autoFocus
               />
-            </View>
-
-            {/* Shipping Cost */}
-            <View style={{ marginBottom: 20 }}>
-              <Text style={styles.labelInputLabel}>Shipping Cost (Optional)</Text>
               <TextInput
-                style={styles.labelInput}
+                style={styles.modalInput}
                 value={shippingCost}
                 onChangeText={setShippingCost}
-                placeholder="0.00"
-                placeholderTextColor="rgba(255,255,255,0.4)"
+                placeholder="Shipping cost (optional)"
+                placeholderTextColor={colors.text.tertiary}
                 keyboardType="decimal-pad"
               />
-            </View>
-
-            {/* Address Info (Read-only) */}
-            {order.shipping_address_line1 && (
-              <View style={styles.addressPreview}>
-                <Text style={styles.addressPreviewLabel}>SHIPPING TO</Text>
-                <Text style={styles.addressPreviewText}>
-                  {order.shipping_name}
-                </Text>
-                <Text style={styles.addressPreviewText}>
-                  {order.shipping_address_line1}
-                </Text>
-                {order.shipping_address_line2 && (
-                  <Text style={styles.addressPreviewText}>
-                    {order.shipping_address_line2}
-                  </Text>
-                )}
-                <Text style={styles.addressPreviewText}>
-                  {order.shipping_city}, {order.shipping_state} {order.shipping_zip}
-                </Text>
+              <View style={styles.modalButtons}>
+                <Pressable
+                  style={[styles.modalButton, styles.modalButtonCancel]}
+                  onPress={closeLabelModal}
+                >
+                  <Text style={styles.modalButtonTextCancel}>Cancel</Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.modalButton, styles.modalButtonSave]}
+                  onPress={handleSaveLabel}
+                >
+                  <Text style={styles.modalButtonText}>Save</Text>
+                </Pressable>
               </View>
-            )}
-
-            <View style={styles.modalButtons}>
-              <Pressable
-                style={styles.modalButtonSecondary}
-                onPress={() => setShowLabelModal(false)}
-              >
-                <Text style={styles.modalButtonSecondaryText}>Cancel</Text>
-              </Pressable>
-              <Pressable
-                style={styles.modalButtonPrimary}
-                onPress={handleSaveLabel}
-              >
-                <Text style={styles.modalButtonPrimaryText}>Save Label</Text>
-              </Pressable>
             </View>
-          </View>
+          </BlurView>
         </View>
       )}
     </View>
   )
 }
 
+// ========================================
+// STYLES
+// ========================================
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000',
+    backgroundColor: colors.background.primary,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: spacing.md,
+    fontSize: 16,
+    color: colors.text.secondary,
+  },
+  header: {
+    padding: spacing.lg,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border.regular,
+  },
+  backButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  backButtonText: {
+    fontSize: 17,
+    color: colors.text.primary,
   },
   scrollView: {
     flex: 1,
   },
-  contentContainer: {
-    paddingBottom: layout.dockHeight + 20,
+  scrollContent: {
+    padding: spacing.lg,
+    paddingBottom: layout.dockHeight + spacing.xl,
   },
-  loadingContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#000',
-  },
-  header: {
-    paddingHorizontal: layout.containerMargin,
-    paddingTop: layout.containerMargin,
-    paddingBottom: 16,
-  },
-  backButton: {
-    paddingVertical: 8,
-  },
-  backButtonText: {
-    fontSize: 17,
-    color: '#fff',
-    fontWeight: '600',
-  },
-
-  // Hero Header
   heroSection: {
-    marginHorizontal: layout.containerMargin,
-    marginBottom: 24,
-    backgroundColor: 'rgba(118,118,128,0.24)',
-    borderRadius: 10,
-    overflow: 'hidden',
-  },
-  heroContainer: {
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-  },
-  heroContent: {
-    flexDirection: 'row',
     alignItems: 'center',
-    gap: 16,
+    marginBottom: spacing.xl,
   },
   vendorLogo: {
-    width: 56,
-    height: 56,
-    borderRadius: 12,
+    width: 80,
+    height: 80,
+    marginBottom: spacing.md,
   },
-  vendorLogoPlaceholder: {
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  heroInfo: {
-    flex: 1,
-    gap: 4,
-  },
-  heroOrderNumber: {
-    fontSize: 20,
+  orderNumber: {
+    fontSize: 28,
     fontWeight: '700',
-    color: '#fff',
-    letterSpacing: -0.3,
-  },
-  heroVendorName: {
-    fontSize: 15,
-    fontWeight: '400',
-    color: 'rgba(235,235,245,0.6)',
-    letterSpacing: -0.2,
+    color: colors.text.primary,
+    marginBottom: spacing.sm,
   },
   statusBadge: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 20,
-    borderWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.round,
+    gap: spacing.xs,
   },
-  statusBadgeText: {
-    fontSize: 13,
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  statusText: {
+    fontSize: 15,
     fontWeight: '600',
-    letterSpacing: -0.1,
   },
-
-  primaryActionContainer: {
-    paddingHorizontal: layout.containerMargin,
-    marginBottom: 32,
-    gap: 12,
+  actionButtonsContainer: {
+    gap: spacing.sm,
+    marginBottom: spacing.xl,
   },
-  primaryActionButton: {
-    paddingVertical: 20,
-    paddingHorizontal: 24,
-    borderRadius: 30,
-    backgroundColor: '#fff',
+  actionButton: {
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 60,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    gap: spacing.sm,
   },
-  secondaryActionButton: {
-    paddingVertical: 16,
-    paddingHorizontal: 20,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
+  actionButtonPrimary: {
+    backgroundColor: colors.semantic.info,
   },
-  dangerActionButton: {
-    backgroundColor: 'rgba(255,59,48,0.15)',
+  actionButtonSecondary: {
+    backgroundColor: colors.background.secondary,
+    borderWidth: 1,
+    borderColor: '#ff3b30',
   },
-  primaryActionButtonDisabled: {
-    opacity: 0.6,
-  },
-  primaryActionText: {
-    fontSize: 19,
-    fontWeight: '700',
-    color: '#000',
-    letterSpacing: -0.4,
-  },
-  secondaryActionText: {
-    fontSize: 16,
+  actionButtonText: {
+    fontSize: 17,
     fontWeight: '600',
     color: '#fff',
-    letterSpacing: -0.2,
   },
-
   section: {
-    marginBottom: 20,
+    marginBottom: spacing.xl,
   },
   sectionTitle: {
-    fontSize: 11,
+    fontSize: 20,
     fontWeight: '700',
-    color: 'rgba(255,255,255,0.5)',
-    letterSpacing: 0.8,
-    textTransform: 'uppercase',
-    marginBottom: 8,
-    paddingHorizontal: layout.containerMargin,
+    color: colors.text.primary,
+    marginBottom: spacing.md,
   },
-
-  // Unified Info Card Pattern (iOS Settings Style)
-  infoCard: {
-    marginHorizontal: layout.containerMargin,
-    backgroundColor: 'rgba(118,118,128,0.24)',
-    borderRadius: 10,
-    overflow: 'hidden',
+  card: {
+    backgroundColor: colors.background.secondary,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
   },
   infoRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 11,
-    paddingHorizontal: 16,
-    borderBottomWidth: 0.5,
-    borderBottomColor: 'rgba(255,255,255,0.05)',
-  },
-  infoRowLast: {
-    borderBottomWidth: 0,
+    paddingVertical: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border.regular,
   },
   infoLabel: {
     fontSize: 15,
-    fontWeight: '400',
-    color: '#fff',
+    color: colors.text.secondary,
   },
   infoValue: {
     fontSize: 15,
-    fontWeight: '400',
-    color: 'rgba(235,235,245,0.6)',
+    fontWeight: '500',
+    color: colors.text.primary,
     textAlign: 'right',
     flex: 1,
-    marginLeft: 16,
+    marginLeft: spacing.md,
   },
-  infoRowTotal: {
-    paddingTop: 16,
-    borderTopWidth: 0.5,
-    borderTopColor: 'rgba(255,255,255,0.1)',
+  totalRow: {
+    borderBottomWidth: 0,
+    marginTop: spacing.sm,
+    paddingTop: spacing.md,
+    borderTopWidth: 2,
+    borderTopColor: colors.border.regular,
   },
-  infoLabelTotal: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: '#fff',
-  },
-  infoValueTotal: {
-    fontSize: 20,
+  totalLabel: {
+    fontSize: 18,
     fontWeight: '700',
-    color: '#fff',
+    color: colors.text.primary,
   },
-
-  // Items
-  itemRow: {
+  totalValue: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.text.primary,
+  },
+  editNotesButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 11,
-    paddingHorizontal: 16,
-    borderBottomWidth: 0.5,
-    borderBottomColor: 'rgba(255,255,255,0.05)',
+    gap: spacing.xs,
+    marginTop: spacing.md,
   },
-  itemRowLast: {
-    borderBottomWidth: 0,
-  },
-  itemInfo: {
-    flex: 1,
-    gap: 4,
-  },
-  itemName: {
+  editNotesText: {
     fontSize: 15,
-    color: '#fff',
-    fontWeight: '600',
+    color: colors.text.secondary,
   },
-  itemQuantity: {
+  contactButtons: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  contactButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: spacing.md,
+    backgroundColor: colors.background.secondary,
+    borderRadius: radius.md,
+    gap: spacing.xs,
+  },
+  contactButtonText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.text.primary,
+  },
+  orderItemRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border.regular,
+  },
+  orderItemInfo: {
+    flex: 1,
+  },
+  orderItemName: {
+    fontSize: 15,
+    fontWeight: '500',
+    color: colors.text.primary,
+    marginBottom: spacing.xs,
+  },
+  orderItemDetails: {
     fontSize: 13,
-    color: 'rgba(235,235,245,0.6)',
-    fontWeight: '400',
+    color: colors.text.secondary,
   },
-  itemPrice: {
-    fontSize: 17,
-    color: '#fff',
+  orderItemTotal: {
+    fontSize: 15,
     fontWeight: '600',
+    color: colors.text.primary,
   },
-
   successOverlay: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(0,0,0,0.8)',
+    alignItems: 'center',
     zIndex: 1000,
   },
-  successCard: {
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    borderRadius: 30,
-    padding: 40,
+  successBlur: {
+    padding: spacing.xl * 2,
+    borderRadius: radius.xl,
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
+    gap: spacing.md,
   },
-  successCheckmark: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: '#34c759',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 20,
-  },
-  successCheckmarkText: {
-    fontSize: 48,
-    color: '#fff',
-    fontWeight: '700',
-  },
-  successText: {
+  successMessage: {
     fontSize: 20,
     fontWeight: '600',
-    color: '#fff',
-    textAlign: 'center',
+    color: colors.text.primary,
   },
-
   modalOverlay: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(0,0,0,0.9)',
+    alignItems: 'center',
     zIndex: 1000,
   },
-  modalCard: {
+  modalBlur: {
+    flex: 1,
+    width: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modal: {
     width: '80%',
-    maxWidth: 500,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    borderRadius: 30,
-    padding: 24,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
+    maxWidth: 400,
+    backgroundColor: colors.background.secondary,
+    borderRadius: radius.xl,
+    padding: spacing.xl,
   },
   modalTitle: {
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: '700',
-    color: '#fff',
-    marginBottom: 20,
+    color: colors.text.primary,
+    marginBottom: spacing.md,
   },
-  notesInput: {
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    borderRadius: 20,
-    padding: 16,
-    fontSize: 16,
-    color: '#fff',
-    minHeight: 120,
-    textAlignVertical: 'top',
-    marginBottom: 20,
+  modalInput: {
+    backgroundColor: colors.background.primary,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    fontSize: 15,
+    color: colors.text.primary,
+    marginBottom: spacing.md,
   },
   modalButtons: {
     flexDirection: 'row',
-    gap: 12,
+    gap: spacing.sm,
   },
-  modalButtonSecondary: {
+  modalButton: {
     flex: 1,
-    paddingVertical: 16,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
+    padding: spacing.md,
+    borderRadius: radius.md,
     alignItems: 'center',
   },
-  modalButtonSecondaryText: {
-    fontSize: 16,
+  modalButtonCancel: {
+    backgroundColor: colors.background.primary,
+  },
+  modalButtonSave: {
+    backgroundColor: colors.semantic.info,
+  },
+  modalButtonText: {
+    fontSize: 17,
     fontWeight: '600',
     color: '#fff',
   },
-  modalButtonPrimary: {
-    flex: 1,
-    paddingVertical: 16,
-    borderRadius: 20,
-    backgroundColor: '#fff',
-    alignItems: 'center',
+  modalButtonTextCancel: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: colors.text.secondary,
   },
-  modalButtonPrimaryText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#000',
+  emptyTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: colors.text.primary,
+    textAlign: 'center',
+    marginTop: spacing.xl * 2,
   },
-
-  // Shipping Label Modal Styles
-  labelInputLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: 'rgba(255,255,255,0.5)',
-    letterSpacing: 0.8,
-    textTransform: 'uppercase',
-    marginBottom: 8,
-  },
-  labelInput: {
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    borderRadius: 20,
-    padding: 16,
-    fontSize: 16,
-    color: '#fff',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
-  },
-  addressPreview: {
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderRadius: 20,
-    padding: 16,
-    marginBottom: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-  },
-  addressPreviewLabel: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: 'rgba(255,255,255,0.4)',
-    letterSpacing: 0.8,
-    textTransform: 'uppercase',
-    marginBottom: 8,
-  },
-  addressPreviewText: {
-    fontSize: 14,
-    color: 'rgba(255,255,255,0.7)',
-    fontWeight: '400',
-    lineHeight: 20,
+  emptyText: {
+    fontSize: 15,
+    color: colors.text.secondary,
+    textAlign: 'center',
+    marginTop: spacing.sm,
   },
 })

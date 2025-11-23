@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { devtools } from 'zustand/middleware'
 import { useShallow } from 'zustand/react/shallow'
 import type { Session, User } from '@supabase/supabase-js'
 import { AuthService } from '../features/auth/services/auth.service'
@@ -8,6 +9,16 @@ import { useCartStore } from './cart.store'
 import { usePaymentStore } from './payment.store'
 import { useTaxStore } from './tax.store'
 import { useCheckoutUIStore } from './checkout-ui.store'
+import { useSettingsUIStore } from './settings-ui.store'
+import { useUsersManagementStore } from './users-management.store'
+import { useSuppliersManagementStore } from './suppliers-management.store'
+import { useLoyaltyCampaignsStore } from './loyalty-campaigns.store'
+import { usePaymentProcessorsSettingsStore } from './payment-processors-settings.store'
+import { useOrdersStore } from './orders.store'
+import { useOrdersUIStore } from './orders-ui.store'
+import { useOrderDetailStore } from './order-detail.store'
+import { useCustomersListStore } from './customers-list.store'
+import { useCustomersUIStore } from './customers-ui.store'
 import { logger } from '@/utils/logger'
 
 interface AuthState {
@@ -27,7 +38,9 @@ interface AuthState {
   setSession: (session: Session | null) => void
 }
 
-export const useAuthStore = create<AuthState>((set, _get) => ({
+export const useAuthStore = create<AuthState>()(
+  devtools(
+    (set, _get) => ({
   // Initial state
   user: null,
   session: null,
@@ -76,12 +89,29 @@ export const useAuthStore = create<AuthState>((set, _get) => ({
       logger.clearUser()
 
       // Reset all stores on logout (Apple principle: Clean slate)
+      // POS Stores
       useLocationFilter.getState().reset()
       usePOSSessionStore.getState().reset()
       useCartStore.getState().reset()
       usePaymentStore.getState().resetPayment()
       useTaxStore.getState().reset()
       useCheckoutUIStore.getState().reset()
+
+      // Customers Stores ✅ NEW
+      useCustomersListStore.getState().reset()
+      useCustomersUIStore.getState().reset()
+
+      // Orders Stores ✅
+      useOrdersStore.getState().reset()
+      useOrdersUIStore.getState().reset()
+      useOrderDetailStore.getState().reset()
+
+      // Settings Stores ✅
+      useSettingsUIStore.getState().reset()
+      useUsersManagementStore.getState().reset()
+      useSuppliersManagementStore.getState().reset()
+      useLoyaltyCampaignsStore.getState().reset()
+      usePaymentProcessorsSettingsStore.getState().reset()
 
       set({
         user: null,
@@ -150,7 +180,10 @@ export const useAuthStore = create<AuthState>((set, _get) => ({
 
   // Set session (for external updates)
   setSession: (session: Session | null) => set({ session }),
-}))
+    }),
+    { name: 'AuthStore' }
+  )
+)
 
 // Selector hooks for better performance
 // ✅ CRITICAL: Use useShallow to prevent new object on every render

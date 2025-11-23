@@ -33,6 +33,10 @@ import { Button, TextInput as DSTextInput } from './src/theme'
 import { colors, typography, spacing, radius, animation } from './src/theme/tokens'
 import { logger } from './src/utils/logger'
 
+// Context Providers - Apple Engineering Standard
+import { AppAuthProvider } from './src/contexts/AppAuthContext'
+// ✅ POSSessionContext DELETED - Now using posSession.store.ts (Zustand)
+
 initializeSentry()
 
 // Validate payment environment on app startup
@@ -210,7 +214,11 @@ function App() {
     return (
       <ErrorBoundary>
         <StatusBar barStyle="light-content" backgroundColor="#000000" />
-        <DashboardNavigator />
+        {/* ✅ Context Providers - Zero Prop Drilling Architecture */}
+        <AppAuthProvider>
+          {/* ✅ POSSession managed by posSession.store.ts (Zustand) - No Context Provider needed */}
+          <DashboardNavigator />
+        </AppAuthProvider>
       </ErrorBoundary>
     )
   }

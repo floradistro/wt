@@ -1,23 +1,56 @@
 /**
- * OrderItem Component
+ * OrderItem Component - REFACTORED (Reduced Props)
  * Memoized order list item optimized for FlatList virtualization
  * Apple-quality performance with clean color coding
+ *
+ * CHANGES FROM ORIGINAL:
+ * - Removed isSelected prop (derived from selectedOrderId in store)
+ * - Removed onPress callback prop (uses store action directly)
+ * - Props: 5 → 3 (60% reduction)
+ * - Only visual props remain (order, showLocation, isLast)
  */
 
-import React from 'react'
+import React, { useCallback } from 'react'
 import { View, Text, Pressable } from 'react-native'
+import * as Haptics from 'expo-haptics'
 import { type Order } from '@/services/orders.service'
 import { ordersStyles as styles } from '../orders.styles'
 
+// ✅ NEW: Import from Zustand stores
+import { useSelectedOrderId, useOrdersUIActions } from '@/stores/orders-ui.store'
+
 interface OrderItemProps {
-  order: Order
-  showLocation: boolean
-  isSelected: boolean
-  isLast: boolean
-  onPress: () => void
+  order: Order             // ✅ KEEP: Visual data (needed for rendering)
+  showLocation: boolean    // ✅ KEEP: Visual prop (conditional rendering)
+  isLast: boolean          // ✅ KEEP: Visual prop (styling)
+  // ❌ REMOVED: isSelected (derived from store)
+  // ❌ REMOVED: onPress (uses store action)
 }
 
-const OrderItem = React.memo<OrderItemProps>(({ order, showLocation, isSelected, isLast, onPress }) => {
+const OrderItem = React.memo<OrderItemProps>(({ order, showLocation, isLast }) => {
+  // ========================================
+  // DERIVED STATE from Zustand
+  // ========================================
+  const selectedOrderId = useSelectedOrderId()
+  const isSelected = selectedOrderId === order.id  // Derived locally
+
+  // ========================================
+  // ACTIONS from Zustand
+  // ========================================
+  const { selectOrder } = useOrdersUIActions()
+
+  // ========================================
+  // EVENT HANDLERS
+  // ========================================
+  const handlePress = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    selectOrder(order.id)  // Direct store action (no callback prop)
+  }, [order.id, selectOrder])
+
+  // ========================================
+  // HELPER FUNCTIONS (unchanged)
+  // ========================================
+
   // Format time
   const timeStr = new Date(order.created_at).toLocaleTimeString('en-US', {
     hour: 'numeric',
@@ -103,6 +136,10 @@ const OrderItem = React.memo<OrderItemProps>(({ order, showLocation, isSelected,
         .slice(0, 2)
     : 'G'
 
+  // ========================================
+  // RENDER (unchanged)
+  // ========================================
+
   return (
     <Pressable
       style={[
@@ -110,7 +147,7 @@ const OrderItem = React.memo<OrderItemProps>(({ order, showLocation, isSelected,
         isSelected && styles.orderItemActive,
         isLast && styles.orderItemLast,
       ]}
-      onPress={onPress}
+      onPress={handlePress}
       accessibilityRole="none"
     >
       {/* Icon/Placeholder */}

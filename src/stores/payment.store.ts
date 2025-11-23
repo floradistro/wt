@@ -62,6 +62,43 @@ const initialState = {
   completionData: null,
 }
 
+/**
+ * State Machine: Valid Payment Stage Transitions
+ * Prevents impossible states (e.g., 'success' → 'initializing')
+ */
+const VALID_TRANSITIONS: Record<PaymentStage | 'null', PaymentStage[]> = {
+  // Starting a new payment
+  null: ['initializing'],
+
+  // Forward progress through payment stages
+  initializing: ['sending', 'error'],
+  sending: ['processing', 'error'],
+  waiting: ['processing', 'error'],
+  processing: ['approving', 'waiting', 'error'],
+  approving: ['success', 'error'],
+  success: ['saving', 'complete', 'error'],
+  saving: ['complete', 'error'],
+
+  // Terminal states (can only go to null via reset)
+  complete: [],
+  error: [],
+}
+
+/**
+ * Check if state transition is valid
+ */
+const canTransition = (from: PaymentStage | null, to: PaymentStage): boolean => {
+  const fromKey = from || 'null'
+  const validNextStates = VALID_TRANSITIONS[fromKey as keyof typeof VALID_TRANSITIONS]
+
+  if (!validNextStates) {
+    logger.error(`[Payment Store] Unknown state: ${fromKey}`)
+    return false
+  }
+
+  return validNextStates.includes(to)
+}
+
 export const usePaymentStore = create<PaymentState>()(
   devtools(
     (set, get) => ({
@@ -72,6 +109,17 @@ export const usePaymentStore = create<PaymentState>()(
        * Implements two-phase commit with atomic database operations
        */
       processPayment: async (params: ProcessPaymentParams): Promise<SaleCompletionData> => {
+        // ===== DOUBLE-WRITE PROTECTION =====
+        // Check if payment is already being processed
+        const { stage } = get()
+        if (stage && ['initializing', 'sending', 'processing', 'approving'].includes(stage)) {
+          const error = 'Payment already in progress. Please wait for the current payment to complete.'
+          logger.warn('🚫 [Payment Store] Blocked duplicate payment call', { currentStage: stage })
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning)
+          throw new Error(error)
+        }
+        // ===== END DOUBLE-WRITE PROTECTION =====
+
         const {
           paymentData,
           cart,
@@ -334,10 +382,24 @@ export const usePaymentStore = create<PaymentState>()(
       },
 
       /**
-       * Set payment stage manually
+       * Set payment stage with state machine validation
+       * Throws error on invalid transitions (e.g., 'success' → 'initializing')
        */
       setStage: (stage: PaymentStage) => {
-        set({ stage }, false, 'payment/setStage')
+        const { stage: currentStage } = get()
+
+        // Validate transition
+        if (!canTransition(currentStage, stage)) {
+          const error = `Invalid payment state transition: ${currentStage || 'null'} → ${stage}`
+          logger.error(`[Payment Store] ${error}`, {
+            from: currentStage,
+            to: stage,
+            validTransitions: VALID_TRANSITIONS[currentStage || 'null'],
+          })
+          throw new Error(error)
+        }
+
+        set({ stage }, false, `payment/setStage/${stage}`)
       },
 
       /**

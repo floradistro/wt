@@ -1,9 +1,10 @@
 /**
- * useLoyaltyTransaction - POS Loyalty Transaction Hook
+ * useLoyaltyTransaction - POS Loyalty Transaction Hook - ZERO PROPS ✅
  *
- * Apple Engineering: Renamed from useLoyalty to clarify scope
- * This hook manages loyalty point redemption during checkout
- * For loyalty program CRUD operations, use hooks/useLoyalty.ts
+ * ZERO PROP DRILLING:
+ * - No vendorId prop - reads from customer.store
+ * - No selectedCustomer prop - reads from customer.store
+ * - Manages loyalty point redemption during checkout
  */
 
 import { useState, useEffect, useCallback } from 'react'
@@ -11,13 +12,14 @@ import type { LoyaltyProgram, Customer } from '@/types/pos'
 import { loyaltyService } from '@/services'
 import { logger } from '@/utils/logger'
 import { supabase } from '@/lib/supabase/client'
+import { useCustomerStore } from '@/stores/customer.store'
 
-/**
- * Manages loyalty points during a POS transaction
- * @param vendorId - Current vendor ID
- * @param selectedCustomer - Customer making the purchase
- */
-export function useLoyaltyTransaction(vendorId: string | null, selectedCustomer: Customer | null) {
+export function useLoyaltyTransaction() {
+  // ========================================
+  // STORE - TRUE ZERO PROPS (read from environment)
+  // ========================================
+  const vendorId = useCustomerStore((state) => state.vendorId)
+  const selectedCustomer = useCustomerStore((state) => state.selectedCustomer)
   const [loyaltyProgram, setLoyaltyProgram] = useState<LoyaltyProgram | null>(null)
   const [loyaltyPointsToRedeem, setLoyaltyPointsToRedeem] = useState(0)
 

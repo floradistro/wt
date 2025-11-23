@@ -123,12 +123,29 @@ export const useTaxStore = create<TaxState>()(
       /**
        * Calculate tax for a given subtotal and location
        * Uses cached config or default if not loaded
+       *
+       * CRITICAL: This is called in useMemo in 5+ components
+       * - Must be synchronous (no async database calls)
+       * - Must not spam warnings on every render
+       * - Tax config MUST be preloaded when session starts
        */
       calculateTax: (subtotal: number, locationId: string): TaxCalculation => {
         const config = get().taxConfigs[locationId]
 
         if (!config) {
-          logger.warn('[TaxStore] No config found for location, using default:', locationId)
+          // CRITICAL FIX: Only log warning once, not on every render
+          // This was causing 5x warnings per sale and massive console spam
+          const hasLoggedWarning = get().taxConfigs[`${locationId}_warning_logged`]
+          if (!hasLoggedWarning) {
+            logger.warn('[TaxStore] No config found for location, using default:', locationId)
+            // Mark warning as logged to prevent spam
+            set((state) => ({
+              taxConfigs: {
+                ...state.taxConfigs,
+                [`${locationId}_warning_logged`]: true as any, // Hack to track warning state
+              }
+            }), false, 'tax/warningLogged')
+          }
 
           // Return default calculation
           return {
@@ -186,20 +203,20 @@ export const useTaxError = () => useTaxStore((state) => state.error)
 export const useAllTaxConfigs = () => useTaxStore((state) => state.taxConfigs)
 
 /**
- * Convenience hook: Auto-load tax config and return calculator
- * Usage: const { taxAmount, taxRate } = useTaxCalculation(subtotal, locationId)
+ * ❌ DELETED: useTaxCalculation - had useEffect inside selector causing infinite loops
+ *
+ * ✅ USE THIS INSTEAD in components:
+ *
+ * const taxActions = useTaxActions()
+ *
+ * useEffect(() => {
+ *   if (locationId) {
+ *     taxActions.loadTaxConfig(locationId)
+ *   }
+ * }, [locationId])
+ *
+ * const { taxAmount, taxRate } = useMemo(() =>
+ *   taxActions.calculateTax(subtotal, locationId),
+ *   [subtotal, locationId]
+ * )
  */
-export const useTaxCalculation = (subtotal: number, locationId: string): TaxCalculation => {
-  const actions = useTaxActions()
-
-  // Auto-load config if needed (only runs once per location)
-  React.useEffect(() => {
-    if (locationId) {
-      actions.loadTaxConfig(locationId)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    // actions is memoized and stable, safe to omit from deps
-  }, [locationId])
-
-  return actions.calculateTax(subtotal, locationId)
-}

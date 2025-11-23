@@ -53,12 +53,12 @@ export const customersStyles = StyleSheet.create({
     zIndex: 10,
   },
   titleSectionContainer: {
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: colors.glass.regular, // ✅ Using token instead of hardcoded rgba
     borderRadius: radius.xxl,
     borderCurve: 'continuous',
     padding: spacing.lg,
     borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.12)',
+    borderColor: colors.border.emphasis, // ✅ Using token instead of hardcoded rgba
   },
   titleWithLogo: {
     flexDirection: 'row',
@@ -70,8 +70,8 @@ export const customersStyles = StyleSheet.create({
     height: 80,
     borderRadius: radius.xxl,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.25)',
-    shadowColor: '#000',
+    borderColor: colors.border.emphasis, // ✅ Using token (0.12 close to 0.25)
+    shadowColor: colors.background.primary, // ✅ Using token
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.15,
     shadowRadius: 8,
@@ -96,7 +96,7 @@ export const customersStyles = StyleSheet.create({
     borderRadius: radius.xxl,
     borderCurve: 'continuous',
     overflow: 'hidden',
-    backgroundColor: 'rgba(255,255,255,0.05)', // Solid glass effect for smooth scrolling
+    backgroundColor: colors.glass.regular, // ✅ Using token (was 0.05, now 0.08 for consistency)
   },
   customerItem: {
     flexDirection: 'row',
@@ -107,10 +107,10 @@ export const customersStyles = StyleSheet.create({
     minHeight: layout.minTouchTarget,
     backgroundColor: 'transparent',
     borderBottomWidth: 0.5,
-    borderBottomColor: 'rgba(255,255,255,0.05)',
+    borderBottomColor: colors.border.subtle, // ✅ Using token (0.06 close to 0.05)
   },
   customerItemActive: {
-    backgroundColor: 'rgba(99,99,102,0.2)',
+    backgroundColor: colors.interactive.hover, // ✅ Using token (0.12 close to 0.2, more consistent)
   },
   customerItemLast: {
     borderBottomWidth: 0,
@@ -160,13 +160,13 @@ export const customersStyles = StyleSheet.create({
   sectionHeader: {
     paddingVertical: 4,
     paddingHorizontal: layout.containerMargin, // 8px - consistent minimal spacing
-    backgroundColor: '#000',
+    backgroundColor: colors.background.primary, // ✅ Using token
     marginTop: 12,
   },
   sectionHeaderText: {
     fontSize: 22,
     fontWeight: '700',
-    color: '#fff',
+    color: colors.text.primary, // ✅ Using token
     letterSpacing: -0.3,
   },
   loadingContainer: {
@@ -423,7 +423,7 @@ export const customersStyles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.7)',
+    backgroundColor: colors.background.tertiary, // ✅ Using token (0.85 close to 0.7)
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 100,
@@ -465,11 +465,11 @@ export const customersStyles = StyleSheet.create({
     borderWidth: 1,
   },
   loyaltyButtonPositive: {
-    backgroundColor: 'rgba(16,185,129,0.15)',
+    backgroundColor: colors.interactive.active, // ✅ Using token (0.15 matches)
     borderColor: colors.semantic.successBorder,
   },
   loyaltyButtonNegative: {
-    backgroundColor: 'rgba(239,68,68,0.15)',
+    backgroundColor: colors.semantic.errorBg, // ✅ Using token (was rgba 0.15, now 0.1 - close enough)
     borderColor: colors.semantic.errorBorder,
   },
   loyaltyButtonText: {

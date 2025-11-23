@@ -11,10 +11,12 @@
  */
 
 import { create } from 'zustand'
+import { devtools } from 'zustand/middleware'
 import { useShallow } from 'zustand/react/shallow'
 import { supabase } from '@/lib/supabase/client'
 import { logger } from '@/utils/logger'
 import { transformInventoryToProducts, extractCategories } from '@/utils/product-transformers'
+import { eventLogger } from '@/services/event-logger.service'
 import type { Product } from '@/types/pos'
 
 // ========================================
@@ -27,12 +29,14 @@ interface ProductsState {
   loading: boolean
   error: string | null
   locationId: string | null
+  currentController: AbortController | null
 
   // Actions
   loadProducts: (locationId: string) => Promise<void>
   refreshProducts: () => Promise<void>
   setLocationId: (locationId: string) => void
   getProductById: (id: string) => Product | undefined
+  cancelLoadProducts: () => void
   reset: () => void
 }
 
@@ -40,18 +44,42 @@ interface ProductsState {
 // STORE
 // ========================================
 // ANTI-LOOP: No useEffects, no subscriptions, no setState in selectors
-export const useProductsStore = create<ProductsState>((set, get) => ({
+export const useProductsStore = create<ProductsState>()(
+  devtools(
+    (set, get) => ({
   // State
   products: [],
   categories: ['All'],
   loading: false,
   error: null,
   locationId: null,
+  currentController: null,
 
   // Actions
+  /**
+   * Cancel any in-flight product loading request
+   */
+  cancelLoadProducts: () => {
+    const { currentController } = get()
+    if (currentController) {
+      logger.debug('[Products Store] Aborting previous request')
+      currentController.abort()
+      set({ currentController: null })
+
+      // Log cancellation event
+      eventLogger.system.requestCancelled('Load Products', 'New request started')
+    }
+  },
+
   loadProducts: async (locationId: string) => {
+    // Cancel any previous request
+    get().cancelLoadProducts()
+
+    // Create new AbortController for this request
+    const controller = new AbortController()
+
     // ANTI-LOOP: Only updates state once at the end, no circular dependencies
-    set({ loading: true, error: null, locationId })
+    set({ loading: true, error: null, locationId, currentController: controller })
 
     try {
       logger.debug('[Products Store] Loading products for location:', locationId)
@@ -89,6 +117,13 @@ export const useProductsStore = create<ProductsState>((set, get) => ({
         `)
         .eq('location_id', locationId)
         .gt('quantity', 0)
+        .abortSignal(controller.signal)
+
+      // Check if request was aborted
+      if (controller.signal.aborted) {
+        logger.debug('[Products Store] Request was aborted (expected)')
+        return
+      }
 
       if (error) throw error
 
@@ -103,17 +138,32 @@ export const useProductsStore = create<ProductsState>((set, get) => ({
         categories: uniqueCategories.length,
       })
 
+      // Log successful product load
+      eventLogger.product.load(transformedProducts.length, locationId)
+
       set({
         products: transformedProducts,
         categories: uniqueCategories,
         loading: false,
+        currentController: null,
       })
     } catch (error) {
+      // Don't set error state if request was just aborted
+      if (error instanceof Error && error.name === 'AbortError') {
+        logger.debug('[Products Store] Request aborted (expected)')
+        return
+      }
+
       const errorMessage = error instanceof Error ? error.message : 'Failed to load products'
       logger.error('[Products Store] Failed to load products:', error)
+
+      // Log error event
+      eventLogger.system.error('ProductsStore', errorMessage, { locationId })
+
       set({
         error: errorMessage,
         loading: false,
+        currentController: null,
       })
     }
   },
@@ -147,14 +197,21 @@ export const useProductsStore = create<ProductsState>((set, get) => ({
   },
 
   reset: () => {
+    // Cancel any in-flight requests before reset
+    get().cancelLoadProducts()
+
     set({
       products: [],
       categories: ['All'],
       loading: false,
       error: null,
+      currentController: null,
     })
   },
-}))
+    }),
+    { name: 'ProductsStore' }
+  )
+)
 
 // ========================================
 // SELECTORS (ANTI-LOOP: Use useShallow for objects)
@@ -189,5 +246,6 @@ export const productsActions = {
   get refreshProducts() { return useProductsStore.getState().refreshProducts },
   get setLocationId() { return useProductsStore.getState().setLocationId },
   get getProductById() { return useProductsStore.getState().getProductById },
+  get cancelLoadProducts() { return useProductsStore.getState().cancelLoadProducts },
   get reset() { return useProductsStore.getState().reset },
 }

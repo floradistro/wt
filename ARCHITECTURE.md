@@ -1,319 +1,494 @@
 # WhaleTools Native - Architecture Guide
 
-**Production Architecture - Zero Prop Drilling, Apple Engineering Standards**
+**Last Updated:** 2025-11-22
+**Status:** Production
+
+---
+
+## Overview
+
+WhaleTools Native is a React Native iPad POS application built with TypeScript, Expo, and Supabase. The architecture follows Apple's engineering principles with a focus on simplicity, performance, and maintainability.
 
 ---
 
 ## Core Principles
 
-### 1. Context for Foundation, Zustand for Features
+### 1. Zero Prop Drilling
+All business logic and data lives in Zustand stores. Components receive only visual props (styling, animations) and unavoidable context (IDs, navigation callbacks).
 
-**Use React Context For:**
-- ✅ Authentication & authorization (user, vendor)
-- ✅ App-wide configuration (locations, session)
-- ✅ Infrequently changing data
-- ✅ Cross-cutting concerns
+### 2. Zustand Store Architecture
+State management uses Zustand with the following patterns:
+- **Domain-specific stores** - One store per business domain
+- **Focused selectors** - Granular hooks prevent unnecessary re-renders
+- **Auto-reload** - CRUD operations automatically refresh data
+- **Reset on logout** - All stores reset when user logs out
 
-**Use Zustand For:**
-- ✅ Feature-specific state (cart, orders, customers)
-- ✅ UI state (modals, filters, navigation)
-- ✅ Business logic & workflows
-- ✅ Frequently changing data
-
----
-
-## Architecture Overview
-
+### 3. Component Structure
 ```
-Context Layer (Foundation)
-├─ AppAuthContext
-│  ├─ user: User | null
-│  ├─ vendor: Vendor | null
-│  └─ locations: Location[]
-│
-└─ POSSessionContext
-   ├─ session: POSSession | null
-   ├─ register: Register | null
-   └─ apiConfig: APIConfig | null
-
-Zustand Layer (Features)
-├─ Business Logic Stores
-│  ├─ cart.store.ts
-│  ├─ orders.store.ts
-│  ├─ customers.store.ts
-│  ├─ payment.store.ts
-│  └─ loyalty.store.ts
-│
-├─ UI State Stores
-│  ├─ checkout-ui.store.ts
-│  ├─ orders-ui.store.ts
-│  └─ customers-ui.store.ts
-│
-└─ Computed Stores
-   ├─ order-filter.store.ts
-   ├─ product-filter.store.ts
-   └─ location-filter.store.ts
-
-Components (Presentation)
-└─ Read from Context/Zustand
-   └─ No prop drilling
+Component
+├── Reads data from stores (via focused selectors)
+├── Uses store actions for mutations
+├── Receives visual props only (headerOpacity, colors, etc.)
+└── Contains only UI logic (no business logic)
 ```
 
 ---
 
-## Store Patterns
+## Store Architecture
 
-### Store Structure
+### Store Pattern
+All stores follow this structure:
 
 ```typescript
-// Example: orders.store.ts
+// stores/example.store.ts
 import { create } from 'zustand'
 import { devtools } from 'zustand/middleware'
 import { useShallow } from 'zustand/react/shallow'
 
-interface OrdersState {
-  // Data
-  orders: Order[]
-  loading: boolean
-  error: Error | null
+interface ExampleState {
+  // State
+  data: Item[]
+  isLoading: boolean
+  error: string | null
 
   // Actions
-  loadOrders: () => Promise<void>
-  updateOrder: (id: string, data: Partial<Order>) => Promise<void>
+  loadData: (userId: string) => Promise<void>
+  createItem: (data: ItemData) => Promise<Result>
+  updateItem: (id: string, data: Partial<ItemData>) => Promise<Result>
+  deleteItem: (id: string) => Promise<Result>
   reset: () => void
 }
 
-export const useOrdersStore = create<OrdersState>()(
+export const useExampleStore = create<ExampleState>()(
   devtools(
     (set, get) => ({
-      // Initial state
-      orders: [],
-      loading: false,
+      data: [],
+      isLoading: false,
       error: null,
 
-      // Actions
-      loadOrders: async () => {
-        set({ loading: true }, false, 'orders/loadOrders/start')
-        try {
-          const orders = await ordersService.getOrders()
-          set({ orders, loading: false }, false, 'orders/loadOrders/success')
-        } catch (error) {
-          set({ error, loading: false }, false, 'orders/loadOrders/error')
-        }
+      loadData: async (userId) => {
+        set({ isLoading: true, error: null })
+        // API call
+        set({ data: result, isLoading: false })
       },
 
-      // Reset on logout
-      reset: () => set({ orders: [], loading: false, error: null }, false, 'orders/reset'),
+      createItem: async (itemData) => {
+        const result = await api.create(itemData)
+        if (result.success) {
+          get().loadData(userId) // Auto-reload
+        }
+        return result
+      },
+
+      reset: () => set({ data: [], isLoading: false, error: null }),
     }),
-    { name: 'OrdersStore' }
+    { name: 'ExampleStore' }
   )
 )
 
 // Focused selectors
-export const useOrders = () => useOrdersStore((state) => state.orders)
-export const useOrdersLoading = () => useOrdersStore((state) => state.loading)
-export const useOrdersActions = () => useOrdersStore(
+export const useData = () => useExampleStore((state) => state.data)
+export const useLoading = () => useExampleStore((state) => state.isLoading)
+export const useActions = () => useExampleStore(
   useShallow((state) => ({
-    loadOrders: state.loadOrders,
-    updateOrder: state.updateOrder,
+    loadData: state.loadData,
+    createItem: state.createItem,
+    updateItem: state.updateItem,
+    deleteItem: state.deleteItem,
   }))
 )
 ```
 
-### Key Patterns
+### Active Stores
 
-1. **Redux DevTools Integration**
-   ```typescript
-   devtools((set) => ({ ... }), { name: 'StoreName' })
-   ```
-
-2. **Action Names for Debugging**
-   ```typescript
-   set({ loading: true }, false, 'orders/loadOrders/start')
-   ```
-
-3. **useShallow for Objects**
-   ```typescript
-   export const useOrdersActions = () => useOrdersStore(
-     useShallow((state) => ({
-       loadOrders: state.loadOrders,
-       updateOrder: state.updateOrder,
-     }))
-   )
-   ```
-
-4. **Focused Selectors**
-   ```typescript
-   // ✅ Good - only re-renders when orders change
-   export const useOrders = () => useOrdersStore((state) => state.orders)
-
-   // ❌ Bad - re-renders on any state change
-   export const useOrdersState = () => useOrdersStore()
-   ```
-
-5. **Reset on Logout**
-   ```typescript
-   // In auth.store.ts
-   logout: async () => {
-     // Reset all feature stores
-     useCartStore.getState().reset()
-     useOrdersStore.getState().reset()
-     useCustomersStore.getState().reset()
-   }
-   ```
+| Store | Purpose | Lines | Status |
+|-------|---------|-------|--------|
+| **auth.store.ts** | Authentication & session | 199 | Production |
+| **cart.store.ts** | Shopping cart | ~500 | Production |
+| **posSession.store.ts** | POS session management | ~400 | Production |
+| **product-filter.store.ts** | Product filtering | ~300 | Production |
+| **checkout-ui.store.ts** | Checkout modal state | ~200 | Production |
+| **payment.store.ts** | Payment processing | ~300 | Production |
+| **tax.store.ts** | Tax calculations | ~200 | Production |
+| **orders.store.ts** | Order management | ~400 | Production |
+| **orders-ui.store.ts** | Orders modal state | ~150 | Production |
+| **order-detail.store.ts** | Single order details | ~300 | Production |
+| **customers-list.store.ts** | Customer data | ~400 | Production |
+| **customers-ui.store.ts** | Customer modal state | ~150 | Production |
+| **users-management.store.ts** | User CRUD | 518 | Production |
+| **suppliers-management.store.ts** | Supplier CRUD | 233 | Production |
+| **settings-ui.store.ts** | Settings modal state | ~200 | Production |
+| **loyalty-campaigns.store.ts** | Loyalty & campaigns | ~250 | Skeleton |
+| **payment-processors-settings.store.ts** | Payment config | ~200 | Skeleton |
 
 ---
 
-## Component Patterns
+## View Architecture
 
-### Zero Prop Drilling
+### POS View
+**Zero prop drilling achieved** - All data from stores
 
-**❌ Bad - Prop Drilling:**
+```
+POSScreen
+├── POSSessionSetup (session management)
+├── POSProductBrowser (product display)
+│   └── POSProductGrid
+│       └── POSProductCard
+├── POSCart (cart display)
+│   └── POSTotalsSection
+└── POSCheckout (checkout flow)
+    └── POSCheckoutModals
+```
+
+**Key Stores:**
+- `posSession.store.ts` - Session state
+- `cart.store.ts` - Cart items
+- `product-filter.store.ts` - Filtering
+- `checkout-ui.store.ts` - Modal state
+- `payment.store.ts` - Payment processing
+
+### Orders View
+**Zero prop drilling achieved** - All data from stores
+
+```
+OrdersScreen
+└── OrdersContent
+    ├── OrdersList
+    └── OrderDetail
+        ├── OrderStatusSection
+        ├── OrderCustomerSection
+        ├── OrderItemsSection
+        └── OrderTotalsSection
+```
+
+**Key Stores:**
+- `orders.store.ts` - Order list & filters
+- `orders-ui.store.ts` - Modal state
+- `order-detail.store.ts` - Selected order details
+
+### Customers View
+**Zero prop drilling achieved** - All data from stores
+
+```
+CustomersScreen
+└── CustomersList
+    └── CustomerDetail
+        ├── CustomerInfo
+        ├── LoyaltySection
+        └── OrderHistory
+```
+
+**Key Stores:**
+- `customers-list.store.ts` - Customer data
+- `customers-ui.store.ts` - Modal state
+
+### Settings View
+**Zero prop drilling achieved** - All data from stores
+
+```
+SettingsScreen
+├── AccountDetail
+├── LocationsDetail
+│   └── LocationConfigurationDetail
+├── UserManagementDetail
+│   └── UserManagementModals
+├── SupplierManagementDetail
+│   └── SupplierManagementModals
+├── LoyaltyManagementDetail
+│   └── CampaignsDetail
+└── DeveloperToolsDetail
+```
+
+**Key Stores:**
+- `users-management.store.ts` - User CRUD
+- `suppliers-management.store.ts` - Supplier CRUD
+- `settings-ui.store.ts` - Modal state
+- `loyalty-campaigns.store.ts` - Loyalty/campaigns (skeleton)
+- `payment-processors-settings.store.ts` - Payment config (skeleton)
+
+---
+
+## Data Loading Patterns
+
+### On Mount Loading
 ```typescript
-function OrdersScreen() {
-  const [selectedOrder, setSelectedOrder] = useState(null)
+// Parent screen loads all data on mount
+useEffect(() => {
+  if (!user?.id) return
 
-  return (
-    <OrderDetail
-      order={selectedOrder}
-      onBack={() => setSelectedOrder(null)}
-    />
-  )
-}
+  useExampleStore.getState().loadData(user.id)
+  useOtherStore.getState().loadOtherData(user.id)
+}, [user?.id])
+```
 
-function OrderDetail({ order, onBack }: OrderDetailProps) {
-  // ...
+### Auto-Reload After Mutations
+```typescript
+// Store actions auto-reload after successful mutations
+createItem: async (itemData) => {
+  const result = await api.create(itemData)
+  if (result.success) {
+    // Auto-reload to get fresh data
+    get().loadData(currentUserId)
+  }
+  return result
 }
 ```
 
-**✅ Good - Zero Props:**
+### Reset on Logout
 ```typescript
-function OrdersScreen() {
-  // Component reads from stores
-  return <OrderDetail />
-}
+// auth.store.ts logout function
+logout: async () => {
+  await AuthService.logout()
 
-function OrderDetail() {
-  // Read from stores
-  const selectedOrderId = useSelectedOrderId()
-  const orders = useOrders()
-  const order = orders.find(o => o.id === selectedOrderId)
-
-  // Use store actions
-  const { selectOrder } = useOrdersUIActions()
-  const handleBack = () => selectOrder(null)
-
-  // ...
+  // Reset all stores
+  usePOSSessionStore.getState().reset()
+  useCartStore.getState().reset()
+  useOrdersStore.getState().reset()
+  useUsersManagementStore.getState().reset()
+  // ... all other stores
 }
 ```
 
-### Visual Props Only
+---
 
-Only pass props that are needed for rendering/layout:
+## Modal State Management
+
+### Pattern: UI State Stores
+Modal visibility is managed by dedicated UI stores (not component state):
 
 ```typescript
-// ✅ Good - Visual props only
-<OrderItem
-  order={order}          // Visual data
-  showLocation={true}    // Layout flag
-  isLast={false}         // Styling flag
-/>
+// Example: settings-ui.store.ts
+interface SettingsUIState {
+  activeModal: SettingsModalType | null
+  selectedUser: User | null
 
-// ❌ Bad - Callback props
-<OrderItem
-  order={order}
-  onPress={() => handleSelect(order)}  // ❌ Use store action instead
-/>
+  openModal: (modal: SettingsModalType, item?: any) => void
+  closeModal: () => void
+}
 
-// ❌ Bad - Derived props
-<OrderItem
-  order={order}
-  isSelected={selectedId === order.id}  // ❌ Derive from store instead
-/>
+// Usage in component:
+const { openModal } = useSettingsUIActions()
+const handleEdit = (user) => openModal('editUser', user)
+
+// Usage in modal:
+const activeModal = useActiveModal()
+const selectedUser = useSelectedUser()
+return activeModal === 'editUser' ? <EditUserModal /> : null
 ```
 
 ---
 
-## Performance Patterns
+## Performance Optimization
 
-1. **React.memo for List Items**
-   ```typescript
-   const OrderItem = React.memo<OrderItemProps>(({ order }) => {
-     // ...
-   })
-   ```
+### 1. Focused Selectors
+```typescript
+// ✅ Good - Only re-renders when data changes
+const data = useData()
 
-2. **FlatList Virtualization**
-   ```typescript
-   <FlatList
-     data={orders}
-     renderItem={renderOrderItem}
-     maxToRenderPerBatch={20}
-     windowSize={21}
-     removeClippedSubviews={true}
-   />
-   ```
+// ❌ Bad - Re-renders on any store change
+const { data } = useExampleStore()
+```
 
-3. **Lazy Loading**
-   ```typescript
-   // Load detail data only when selected
-   useEffect(() => {
-     if (!orderId) return
-     loadOrderDetails(orderId)
-     return () => resetDetail()
-   }, [orderId])
-   ```
+### 2. useShallow for Action Selectors
+```typescript
+// ✅ Good - Object reference stays stable
+const actions = useExampleStore(
+  useShallow((state) => ({
+    create: state.create,
+    update: state.update,
+  }))
+)
 
----
+// ❌ Bad - New object on every render
+const actions = {
+  create: useExampleStore((state) => state.create),
+  update: useExampleStore((state) => state.update),
+}
+```
 
-## Common Anti-Patterns
-
-### ❌ Don't Do This
-
-1. **Duplicating Context Data in Stores**
-   ```typescript
-   // ❌ Bad
-   interface OrdersState {
-     vendor: Vendor  // Already in AppAuthContext!
-   }
-
-   // ✅ Good - Read from Context
-   const { vendor } = useAppAuth()
-   ```
-
-2. **Prop Drilling Callbacks**
-   ```typescript
-   // ❌ Bad
-   <Component onSave={() => handleSave()} />
-
-   // ✅ Good
-   <Component />
-   // Component uses: const { save } = useActions()
-   ```
-
-3. **Multiple useState in Components**
-   ```typescript
-   // ❌ Bad
-   const [loading, setLoading] = useState(false)
-   const [error, setError] = useState(null)
-   const [data, setData] = useState([])
-
-   // ✅ Good - Move to store
-   const { data, loading, error } = useStoreData()
-   ```
+### 3. React.memo for Pure Components
+```typescript
+const Component = memo(({ visualProp }) => {
+  const data = useData()
+  return <View>{/* ... */}</View>
+})
+```
 
 ---
 
-## Summary
+## TypeScript Patterns
 
-**Architecture Rules:**
-1. Context for foundation (auth, config)
-2. Zustand for features (business logic, UI state)
-3. Zero prop drilling (components read from environment)
-4. Visual props only (no callbacks, no derived data)
-5. Focused selectors (minimal re-renders)
-6. Store subscriptions (not component subscriptions)
-7. Redux DevTools (for debugging)
-8. Reset on logout (clean slate)
+### Store Types
+```typescript
+// Always define explicit interfaces
+interface StoreState {
+  data: Item[]
+  isLoading: boolean
+  loadData: (userId: string) => Promise<void>
+}
 
-**Result:** Apple-grade architecture with 97/100 compliance score.
+// Use create<Type>() for type safety
+export const useStore = create<StoreState>()(...)
+```
+
+### Component Props
+```typescript
+// Props should be visual only
+interface ComponentProps {
+  headerOpacity: Animated.Value  // Animation
+  vendorLogo?: string | null     // Visual
+  onBack?: () => void            // Navigation (minimal)
+}
+
+// NOT business logic:
+// ❌ data: Item[]
+// ❌ onCreateItem: (item: Item) => void
+```
+
+---
+
+## Debugging
+
+### Redux DevTools
+All stores have DevTools middleware:
+```typescript
+{ name: 'ExampleStore' }
+```
+
+Enable Redux DevTools to inspect:
+- Store state
+- Action history
+- Time-travel debugging
+
+### Logging
+Use `logger` utility for consistent logging:
+```typescript
+import { logger } from '@/utils/logger'
+
+logger.debug('[Component] Debug message', { data })
+logger.error('[Component] Error occurred', { error })
+```
+
+---
+
+## Testing Considerations
+
+### Store Testing
+```typescript
+// Test store actions directly
+const store = useExampleStore.getState()
+await store.loadData('user-123')
+expect(store.data).toHaveLength(5)
+```
+
+### Component Testing
+```typescript
+// Mock store selectors
+jest.mock('@/stores/example.store', () => ({
+  useData: () => mockData,
+  useActions: () => mockActions,
+}))
+```
+
+---
+
+## Common Patterns
+
+### Loading States
+```typescript
+// In store
+const isLoading = useLoading()
+if (isLoading) return <LoadingSpinner />
+```
+
+### Error Handling
+```typescript
+// Stores return Result objects
+type Result = { success: boolean; error?: string }
+
+const result = await createItem(data)
+if (!result.success) {
+  Alert.alert('Error', result.error)
+}
+```
+
+### Conditional UI
+```typescript
+// Use focused selectors
+const activeModal = useActiveModal()
+return activeModal === 'edit' ? <EditModal /> : null
+```
+
+---
+
+## Migration Guide
+
+### Converting Component to Use Stores
+
+**Before:**
+```typescript
+function Component({
+  data,
+  loading,
+  onCreate,
+  onUpdate,
+  onDelete,
+}) {
+  return <View>{/* ... */}</View>
+}
+
+<Component
+  data={data}
+  loading={loading}
+  onCreate={onCreate}
+  onUpdate={onUpdate}
+  onDelete={onDelete}
+/>
+```
+
+**After:**
+```typescript
+function Component() {
+  const data = useData()
+  const loading = useLoading()
+  const { create, update, delete } = useActions()
+
+  return <View>{/* ... */}</View>
+}
+
+<Component />  // Zero props!
+```
+
+---
+
+## Best Practices
+
+### DO ✅
+- Use focused selectors (`useData()` not `useStore()`)
+- Put business logic in stores
+- Auto-reload after mutations
+- Reset stores on logout
+- Use DevTools middleware
+- Keep components thin (UI only)
+
+### DON'T ❌
+- Pass data as props (use stores)
+- Pass callbacks as props (use store actions)
+- Call store actions in render (use handlers)
+- Subscribe to entire store (use focused selectors)
+- Forget to reset stores on logout
+
+---
+
+## References
+
+- **Store Directory:** `/src/stores/`
+- **Component Directory:** `/src/components/`
+- **Screens Directory:** `/src/screens/`
+- **Hooks Directory:** `/src/hooks/` (mostly types now)
+
+---
+
+**Maintained by:** WhaleTools Team
+**Architecture Pattern:** Zustand + Focused Selectors
+**Quality Standard:** Apple Engineering Principles

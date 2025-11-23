@@ -2,22 +2,38 @@
  * Customers Screen
  * iPad Settings-style interface with Liquid Glass
  * Steve Jobs: "Design is not just what it looks like. Design is how it works."
+ *
+ * ZERO PROP DRILLING ARCHITECTURE:
+ * - Reads auth/vendor from AppAuthContext
+ * - Reads customer data from customers-list.store
+ * - Reads UI state from customers-ui.store
+ * - No local state, no callbacks
  */
 
-import { View, Text, Pressable, ScrollView, ActivityIndicator, Animated, Image, Alert } from 'react-native'
-import React, { useState, useRef, useEffect, useMemo, useCallback, memo } from 'react'
+import { View, Text, Pressable, ScrollView, ActivityIndicator, Animated, Image } from 'react-native'
+import React, { useRef, useEffect, useMemo, memo } from 'react'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { LinearGradient } from 'expo-linear-gradient'
 import * as Haptics from 'expo-haptics'
 import { colors } from '@/theme/tokens'
 import { layout } from '@/theme/layout'
-import { useCustomers, type Customer } from '@/hooks/useCustomers'
 import { NavSidebar, type NavItem } from '@/components/NavSidebar'
 import { useDockOffset } from '@/navigation/DockOffsetContext'
 import { logger } from '@/utils/logger'
-import { useAuth } from '@/stores/auth.store'
-import { supabase } from '@/lib/supabase/client'
-import { CustomerItem, CustomerDetail } from '@/components/customers'
+import { useAppAuth } from '@/contexts/AppAuthContext'
+import {
+  useCustomersList,
+  useCustomersLoading,
+  useSearchQuery,
+  useActiveNavFilter,
+  customersListActions,
+} from '@/stores/customers-list.store'
+import {
+  useSelectedCustomerUI,
+  customersUIActions,
+} from '@/stores/customers-ui.store'
+import type { Customer } from '@/services/customers.service'
+import { CustomerItem, CustomerDetail, EditCustomerModal } from '@/components/customers'
 import { customersStyles as styles } from '@/components/customers/customers.styles'
 
 type NavSection = 'all' | 'top-customers' | 'recent'
@@ -33,76 +49,100 @@ SectionHeader.displayName = 'SectionHeader'
 
 function CustomersScreenComponent() {
   const dockOffset = useDockOffset()
-  const { user } = useAuth()
 
-  // Navigation State
-  const [activeNav, setActiveNav] = useState<NavSection>('all')
-  const [searchQuery, setSearchQuery] = useState('')
+  // ✅ Read from Context
+  const { user, vendor } = useAppAuth()
 
-  // Selection State
-  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null)
+  // ✅ Read from Zustand Stores
+  const customers = useCustomersList()
+  const loading = useCustomersLoading()
+  const searchQuery = useSearchQuery()
+  const activeNav = useActiveNavFilter()
+  const selectedCustomer = useSelectedCustomerUI()
 
-  // Vendor Logo
-  const [vendorLogo, setVendorLogo] = useState<string | null>(null)
+  // ✅ ANTI-LOOP: Compute filtered customers with useMemo
+  // NEVER use useFilteredCustomers hook - it creates new arrays on every render
+  const filteredCustomers = useMemo(() => {
+    const filtered = [...customers]
+    switch (activeNav) {
+      case 'top-customers':
+        return filtered.sort((a, b) => (b.total_spent || 0) - (a.total_spent || 0)).slice(0, 50)
+      case 'recent':
+        return filtered.sort((a, b) =>
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        ).slice(0, 50)
+      default:
+        return filtered.sort((a, b) => {
+          const nameA = (a.full_name || a.first_name || '').toLowerCase()
+          const nameB = (b.full_name || b.first_name || '').toLowerCase()
+          return nameA.localeCompare(nameB)
+        })
+    }
+  }, [customers, activeNav])
 
-  // Animation State
+  // ✅ ANTI-LOOP: Compute grouped customers with useMemo
+  // NEVER compute in selector - causes infinite loop
+  const groupedCustomers = useMemo(() => {
+    if (activeNav !== 'all') return null
+
+    const sorted = [...filteredCustomers]
+
+    const groups: Record<string, Customer[]> = {}
+
+    sorted.forEach((customer) => {
+      const firstLetter = (
+        customer.full_name ||
+        customer.first_name ||
+        customer.email ||
+        '#'
+      )
+        .charAt(0)
+        .toUpperCase()
+      const letter = /[A-Z]/.test(firstLetter) ? firstLetter : '#'
+
+      if (!groups[letter]) groups[letter] = []
+      groups[letter].push(customer)
+    })
+
+    return Object.entries(groups).sort(([a], [b]) => {
+      if (a === '#') return 1
+      if (b === '#') return -1
+      return a.localeCompare(b)
+    })
+  }, [filteredCustomers, activeNav])
+
+  // Animation State (still needed for UI)
   const slideAnim = useRef(new Animated.Value(0)).current
   const contentWidth = useRef(0)
-  const [isDetailVisible, setIsDetailVisible] = useState(false)
   const headerOpacity = useRef(new Animated.Value(0)).current
 
-  // Data Hooks
-  const { customers, loading, error, refresh, searchCustomers: performSearch, deleteCustomer } = useCustomers({
-    autoLoad: true,
-    searchTerm: searchQuery
-  })
-
-  // Load vendor info
+  // Load customers on mount
   useEffect(() => {
-    async function loadVendorInfo() {
-      if (!user?.email) return
-      try {
-        const { data: userData, error: userError } = await supabase
-          .from('users')
-          .select('vendor_id, vendors(id, store_name, logo_url)')
-          .eq('auth_user_id', user.id)
-          .maybeSingle()
+    if (!vendor?.id) return
 
-        if (userError || !userData) {
-          logger.error('User query error', { error: userError })
-          return
-        }
+    logger.info('[CustomersScreen] Loading customers for vendor:', vendor.id)
+    customersListActions.loadCustomers(vendor.id)
+    customersListActions.setupRealtimeSubscription()
 
-        logger.debug('[CustomersScreen] Vendor data loaded:', {
-          hasVendor: !!userData?.vendors,
-          vendorData: userData?.vendors,
-          logoUrl: (userData?.vendors as any)?.logo_url
-        })
-
-        if (userData?.vendors) {
-          const vendor = userData.vendors as any
-          setVendorLogo(vendor.logo_url || null)
-          logger.debug('[CustomersScreen] Set vendor logo to:', vendor.logo_url)
-        }
-      } catch (error) {
-        logger.error('Failed to load vendor info', { error })
-      }
+    return () => {
+      customersListActions.cleanupRealtimeSubscription()
     }
-    loadVendorInfo()
-  }, [user])
+  }, [vendor?.id])
 
-  // Search Effect with debouncing for better performance
+  // Search Effect with debouncing
   useEffect(() => {
+    if (!vendor?.id) return
+
     const timeoutId = setTimeout(() => {
       if (searchQuery.trim()) {
-        performSearch(searchQuery)
+        customersListActions.searchCustomers(vendor.id, searchQuery)
       } else {
-        refresh()
+        customersListActions.loadCustomers(vendor.id)
       }
     }, 300) // 300ms debounce
 
     return () => clearTimeout(timeoutId)
-  }, [searchQuery, performSearch, refresh])
+  }, [searchQuery, vendor?.id])
 
   // Animate panel when customer is selected/deselected
   useEffect(() => {
@@ -112,7 +152,6 @@ function CustomersScreenComponent() {
       tension: 80,
       friction: 12,
     }).start()
-    setIsDetailVisible(!!selectedCustomer)
   }, [selectedCustomer, slideAnim])
 
   // Navigation Items
@@ -137,95 +176,6 @@ function CustomersScreenComponent() {
     ],
     [customers.length]
   )
-
-  // Filter customers based on active nav
-  const filteredCustomers = useMemo(() => {
-    const filtered = [...customers]
-
-    switch (activeNav) {
-      case 'top-customers':
-        return filtered
-          .sort((a, b) => (b.total_spent || 0) - (a.total_spent || 0))
-          .slice(0, 50)
-      case 'recent':
-        return filtered
-          .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-          .slice(0, 50)
-      default:
-        return filtered.sort((a, b) => {
-          const nameA = (a.full_name || a.first_name || '').toLowerCase()
-          const nameB = (b.full_name || b.first_name || '').toLowerCase()
-          return nameA.localeCompare(nameB)
-        })
-    }
-  }, [customers, activeNav])
-
-  // Group by first letter (for All view)
-  const groupedCustomers = useMemo(() => {
-    if (activeNav !== 'all') return null
-
-    const groups: Record<string, Customer[]> = {}
-    filteredCustomers.forEach((customer) => {
-      const firstLetter = (
-        customer.full_name ||
-        customer.first_name ||
-        customer.email ||
-        '#'
-      )
-        .charAt(0)
-        .toUpperCase()
-      const letter = /[A-Z]/.test(firstLetter) ? firstLetter : '#'
-
-      if (!groups[letter]) groups[letter] = []
-      groups[letter].push(customer)
-    })
-
-    return Object.entries(groups).sort(([a], [b]) => {
-      if (a === '#') return 1
-      if (b === '#') return -1
-      return a.localeCompare(b)
-    })
-  }, [filteredCustomers, activeNav])
-
-  // Handle customer selection
-  const handleSelectCustomer = useCallback((customer: Customer) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-    setSelectedCustomer(customer)
-  }, [])
-
-  // Handle close detail
-  const handleCloseDetail = useCallback(() => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-    setSelectedCustomer(null)
-  }, [])
-
-  // Handle delete customer
-  const handleDeleteCustomer = useCallback(async () => {
-    if (!selectedCustomer) return
-
-    Alert.alert(
-      'Delete Customer',
-      `Are you sure you want to delete ${selectedCustomer.full_name || 'this customer'}? This action cannot be undone.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await deleteCustomer(selectedCustomer.id)
-              setSelectedCustomer(null)
-              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
-              logger.info('Customer deleted successfully:', selectedCustomer.id)
-            } catch (err) {
-              logger.error('Failed to delete customer:', err)
-              Alert.alert('Error', 'Failed to delete customer. Please try again.')
-            }
-          },
-        },
-      ]
-    )
-  }, [selectedCustomer, deleteCustomer])
 
   // Render list content
   const renderListContent = () => {
@@ -253,7 +203,7 @@ function CustomersScreenComponent() {
           {searchQuery && (
             <Pressable
               style={styles.clearSearchButton}
-              onPress={() => setSearchQuery('')}
+              onPress={() => customersListActions.setSearchQuery('')}
             >
               <Text style={styles.clearSearchButtonText}>CLEAR SEARCH</Text>
             </Pressable>
@@ -277,7 +227,10 @@ function CustomersScreenComponent() {
                       item={customer}
                       isLast={idx === groupCustomers.length - 1}
                       isSelected={selectedCustomer?.id === customer.id}
-                      onPress={() => handleSelectCustomer(customer)}
+                      onPress={() => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                        customersUIActions.selectCustomer(customer)
+                      }}
                     />
                   ))}
                 </View>
@@ -298,7 +251,10 @@ function CustomersScreenComponent() {
               item={customer}
               isLast={idx === filteredCustomers.length - 1}
               isSelected={selectedCustomer?.id === customer.id}
-              onPress={() => handleSelectCustomer(customer)}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                customersUIActions.selectCustomer(customer)
+              }}
             />
           ))}
         </View>
@@ -327,13 +283,13 @@ function CustomersScreenComponent() {
           activeItemId={activeNav}
           onItemPress={(id) => {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-            setActiveNav(id as NavSection)
-            setSelectedCustomer(null)
+            customersListActions.setActiveNav(id as NavSection)
+            customersUIActions.clearSelection()
           }}
           searchValue={searchQuery}
-          onSearchChange={setSearchQuery}
+          onSearchChange={customersListActions.setSearchQuery}
           searchPlaceholder="Search customers..."
-          vendorLogo={vendorLogo}
+          vendorLogo={vendor?.logo_url || null}
           userName={user?.email || 'User'}
         />
 
@@ -392,9 +348,9 @@ function CustomersScreenComponent() {
               <View style={styles.cardWrapper}>
                 <View style={styles.titleSectionContainer}>
                   <View style={styles.titleWithLogo}>
-                    {vendorLogo ? (
+                    {vendor?.logo_url ? (
                       <Image
-                        source={{ uri: vendorLogo }}
+                        source={{ uri: vendor.logo_url }}
                         style={styles.vendorLogoInline}
                         resizeMode="contain"
                         fadeDuration={0}
@@ -420,7 +376,7 @@ function CustomersScreenComponent() {
           </Animated.View>
 
           {/* RIGHT DETAIL PANEL */}
-          {isDetailVisible && (
+          {selectedCustomer && (
             <Animated.View
               style={[
                 styles.detailPanel,
@@ -429,21 +385,15 @@ function CustomersScreenComponent() {
                 },
               ]}
             >
-              {selectedCustomer && (
-                <CustomerDetail
-                  customer={selectedCustomer}
-                  onClose={handleCloseDetail}
-                  onDelete={handleDeleteCustomer}
-                  onUpdate={(updated) => {
-                    setSelectedCustomer(updated)
-                    refresh()
-                  }}
-                />
-              )}
+              {/* ✅ ZERO PROPS - Component reads from stores */}
+              <CustomerDetail />
             </Animated.View>
           )}
         </View>
       </View>
+
+      {/* ✅ ZERO PROPS - Modal reads from stores */}
+      <EditCustomerModal />
     </SafeAreaView>
   )
 }

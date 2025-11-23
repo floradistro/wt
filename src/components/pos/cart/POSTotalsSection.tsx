@@ -1,47 +1,157 @@
+/**
+ * POSTotalsSection Component - Apple Engineering Standard
+ *
+ * ZERO PROP DRILLING ✅
+ * Reads ALL state from stores - no props needed
+ */
+
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native'
-import { memo } from 'react'
+import React, { memo, useMemo, useRef, useCallback } from 'react'
 import Slider from '@react-native-community/slider'
 import * as Haptics from 'expo-haptics'
-import type { Customer, LoyaltyProgram } from '@/types/pos'
 import { Button } from '@/theme'
+import { logger } from '@/utils/logger'
 
-interface POSTotalsSectionProps {
-  subtotal: number
-  loyaltyDiscountAmount: number
-  discountAmount?: number
-  selectedDiscount?: any
-  taxAmount: number
-  taxRate: number
-  total: number
-  selectedCustomer: Customer | null
-  loyaltyProgram: LoyaltyProgram | null
-  loyaltyPointsToRedeem: number
-  maxRedeemablePoints: number
-  onSetLoyaltyPoints: (points: number) => void
-  onCheckout: () => void
-  disabled?: boolean
-}
+// Stores (ZERO PROP DRILLING)
+import { useCartItems, useCartTotals } from '@/stores/cart.store'
+import { useSelectedCustomer } from '@/stores/customer.store'
+import { useLoyaltyProgram, usePointsToRedeem, loyaltyActions } from '@/stores/loyalty.store'
+import { useSelectedDiscountId, checkoutUIActions } from '@/stores/checkout-ui.store'
+import { usePOSSession } from '@/stores/posSession.store'
+import { taxActions } from '@/stores/tax.store'
+import { useCampaigns } from '@/stores/loyalty-campaigns.store'
 
-function POSTotalsSection({
-  subtotal,
-  loyaltyDiscountAmount,
-  discountAmount = 0,
-  selectedDiscount,
-  taxAmount,
-  taxRate,
-  total,
-  selectedCustomer,
-  loyaltyProgram,
-  loyaltyPointsToRedeem,
-  maxRedeemablePoints,
-  onSetLoyaltyPoints,
-  onCheckout,
-  disabled = false,
-}: POSTotalsSectionProps) {
+function POSTotalsSection() {
+  // ========================================
+  // STORES - Read ALL state (ZERO PROP DRILLING)
+  // ========================================
+  const cart = useCartItems()
+  const { subtotal } = useCartTotals()
+  const selectedCustomer = useSelectedCustomer()
+  const loyaltyProgram = useLoyaltyProgram()
+  const loyaltyPointsToRedeem = usePointsToRedeem()
+  const selectedDiscountId = useSelectedDiscountId()
+  const { sessionInfo } = usePOSSession()
+
+  // Get active discounts
+  const campaigns = useCampaigns()
+  const activeDiscounts = useMemo(() =>
+    campaigns.filter(d => d.is_active),
+    [campaigns]
+  )
+
+  // Get selected discount
+  const selectedDiscount = useMemo(() =>
+    activeDiscounts.find(d => d.id === selectedDiscountId) || null,
+    [activeDiscounts, selectedDiscountId]
+  )
+
+  // ========================================
+  // CALCULATIONS (from stores) - using store value (no local state)
+  // ========================================
+  const loyaltyDiscountAmount = loyaltyActions.getDiscountAmount()
+  const subtotalAfterLoyalty = Math.max(0, subtotal - loyaltyDiscountAmount)
+
+  const discountAmount = useMemo(() => {
+    if (!selectedDiscount) return 0
+
+    if (selectedDiscount.discount_type === 'percentage') {
+      return subtotalAfterLoyalty * (selectedDiscount.discount_value / 100)
+    } else {
+      return Math.min(selectedDiscount.discount_value, subtotalAfterLoyalty)
+    }
+  }, [selectedDiscount, subtotalAfterLoyalty])
+
+  const subtotalAfterDiscount = Math.max(0, subtotalAfterLoyalty - discountAmount)
+
+  const locationId = sessionInfo?.locationId
+
+  // Tax calculation from tax store
+  const { taxAmount, taxRate } = useMemo(() => {
+    if (!locationId) {
+      return { taxAmount: 0, taxRate: 0.08 }
+    }
+    return taxActions.calculateTax(subtotalAfterDiscount, locationId)
+  }, [subtotalAfterDiscount, locationId])
+
+  const total = subtotalAfterDiscount + taxAmount
+
+  const maxRedeemablePoints = useMemo(() => {
+    if (!selectedCustomer) return 0
+
+    const customerPoints = selectedCustomer.loyalty_points || 0
+    let pointValue = loyaltyProgram?.point_value || 0.01
+
+    // TEMPORARY FIX: If point_value seems wrong (too high), use 0.05
+    // This happens when the loyalty program is misconfigured in the database
+    if (pointValue > 1) {
+      logger.error('❌ LOYALTY CONFIG ERROR: point_value is too high!', {
+        configuredValue: pointValue,
+        expectedValue: 0.05,
+        fixing: true,
+      })
+      pointValue = 0.05 // Override with sensible default
+    }
+
+    // Calculate max from subtotal (how many points worth of discount can be applied)
+    const maxFromSubtotal = Math.floor(subtotal / pointValue)
+    const maxPoints = Math.min(customerPoints, maxFromSubtotal)
+
+    // Debug logging
+    logger.warn('🎯 LOYALTY DEBUG:', {
+      customerName: `${selectedCustomer.first_name} ${selectedCustomer.last_name}`,
+      customerPoints,
+      subtotal,
+      pointValue,
+      pointValueFromDB: loyaltyProgram?.point_value,
+      wasFixed: (loyaltyProgram?.point_value || 0) > 1,
+      calculation: `${subtotal} / ${pointValue} = ${maxFromSubtotal}`,
+      maxFromSubtotal,
+      finalMaxPoints: maxPoints,
+    })
+
+    return maxPoints
+  }, [selectedCustomer, subtotal, loyaltyProgram])
+
+  // ========================================
+  // SLIDER OPTIMIZATION - Use throttled updates
+  // ========================================
+  const sliderTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+
+  const handleSliderChange = useCallback((value: number) => {
+    const roundedValue = Math.round(value)
+
+    // Clear existing timeout
+    if (sliderTimeoutRef.current) {
+      clearTimeout(sliderTimeoutRef.current)
+    }
+
+    // Throttle updates: only update store after 50ms of no movement
+    sliderTimeoutRef.current = setTimeout(() => {
+      loyaltyActions.setPointsToRedeem(roundedValue)
+    }, 50)
+  }, [])
+
+  const handleSliderComplete = useCallback((value: number) => {
+    // Clear any pending throttled update
+    if (sliderTimeoutRef.current) {
+      clearTimeout(sliderTimeoutRef.current)
+    }
+
+    // Immediate final update
+    const roundedValue = Math.round(value)
+    loyaltyActions.setPointsToRedeem(roundedValue)
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+  }, [])
+
+  // ========================================
+  // HANDLERS
+  // ========================================
   const handleCheckout = () => {
-    if (disabled) return
+    if (cart.length === 0) return
+    logger.debug('🛒 POSTotalsSection: Opening payment modal')
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
-    onCheckout()
+    checkoutUIActions.openModal('payment')
   }
 
   const showLoyaltyRedemption =
@@ -52,8 +162,87 @@ function POSTotalsSection({
     loyaltyProgram.enabled &&
     maxRedeemablePoints > 0
 
+  // ========================================
+  // DISCOUNT SELECTOR STATE
+  // ========================================
+  const [showDiscountSelector, setShowDiscountSelector] = React.useState(false)
+
+  const handleSelectDiscount = useCallback((discountId: string) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    checkoutUIActions.setSelectedDiscountId(discountId)
+    setShowDiscountSelector(false)
+  }, [])
+
+  const handleClearDiscount = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    checkoutUIActions.setSelectedDiscountId(null)
+  }, [])
+
   return (
     <View style={styles.container}>
+      {/* Discount Selector - Only show if there are active discounts */}
+      {activeDiscounts.length > 0 && (
+        <View style={styles.discountSection}>
+          {!selectedDiscount ? (
+            <TouchableOpacity
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                setShowDiscountSelector(!showDiscountSelector)
+              }}
+              style={styles.discountButton}
+            >
+              <Text style={styles.discountButtonText}>
+                {showDiscountSelector ? 'Hide Discounts' : 'Apply Discount'}
+              </Text>
+              <Text style={styles.discountButtonCount}>
+                {activeDiscounts.length} available
+              </Text>
+            </TouchableOpacity>
+          ) : (
+            <View style={styles.discountSelected}>
+              <View style={styles.discountSelectedInfo}>
+                <Text style={styles.discountSelectedName}>{selectedDiscount.name}</Text>
+                <Text style={styles.discountSelectedValue}>
+                  {selectedDiscount.discount_type === 'percentage'
+                    ? `-${selectedDiscount.discount_value}%`
+                    : `-$${selectedDiscount.discount_value}`}
+                </Text>
+              </View>
+              <TouchableOpacity onPress={handleClearDiscount} style={styles.discountClearButton}>
+                <Text style={styles.discountClearButtonText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* Discount List (when expanded) */}
+          {showDiscountSelector && !selectedDiscount && (
+            <View style={styles.discountList}>
+              {activeDiscounts.map((discount) => (
+                <TouchableOpacity
+                  key={discount.id}
+                  onPress={() => handleSelectDiscount(discount.id)}
+                  style={styles.discountListItem}
+                >
+                  <View style={styles.discountListItemInfo}>
+                    <Text style={styles.discountListItemName}>{discount.name}</Text>
+                    {discount.badge_text && (
+                      <Text style={styles.discountListItemDescription}>
+                        {discount.badge_text}
+                      </Text>
+                    )}
+                  </View>
+                  <Text style={styles.discountListItemValue}>
+                    {discount.discount_type === 'percentage'
+                      ? `-${discount.discount_value}%`
+                      : `-$${discount.discount_value}`}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+        </View>
+      )}
+
       {/* Loyalty Points Redemption - Before totals */}
       {showLoyaltyRedemption && (
         <View style={styles.loyaltyRedemptionSection}>
@@ -79,9 +268,10 @@ function POSTotalsSection({
                 style={styles.loyaltySlider}
                 minimumValue={0}
                 maximumValue={maxRedeemablePoints}
-                step={Math.max(10, loyaltyProgram.min_redemption_points || 10)}
+                step={loyaltyProgram?.min_redemption_points || 10}
                 value={loyaltyPointsToRedeem}
-                onValueChange={(value) => onSetLoyaltyPoints(Math.round(value))}
+                onValueChange={handleSliderChange}
+                onSlidingComplete={handleSliderComplete}
                 minimumTrackTintColor="rgba(255,255,255,0.3)"
                 maximumTrackTintColor="rgba(255,255,255,0.1)"
                 thumbTintColor="#fff"
@@ -101,7 +291,7 @@ function POSTotalsSection({
                 <TouchableOpacity
                   onPress={() => {
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                    onSetLoyaltyPoints(0)
+                    loyaltyActions.setPointsToRedeem(0)
                   }}
                   style={styles.loyaltyClearButton}
                   accessible={true}
@@ -114,7 +304,7 @@ function POSTotalsSection({
                 <TouchableOpacity
                   onPress={() => {
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                    onSetLoyaltyPoints(maxRedeemablePoints)
+                    loyaltyActions.setPointsToRedeem(maxRedeemablePoints)
                   }}
                   style={styles.loyaltyMaxButton}
                   accessible={true}
@@ -130,7 +320,7 @@ function POSTotalsSection({
             <TouchableOpacity
               onPress={() => {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                onSetLoyaltyPoints(maxRedeemablePoints)
+                loyaltyActions.setPointsToRedeem(maxRedeemablePoints)
               }}
               style={styles.loyaltyRedeemButton}
               accessible={true}
@@ -199,7 +389,7 @@ function POSTotalsSection({
           size="large"
           fullWidth
           onPress={handleCheckout}
-          disabled={disabled}
+          disabled={cart.length === 0}
         >
           CHECKOUT
         </Button>
@@ -266,6 +456,7 @@ const styles = StyleSheet.create({
   // Checkout Button Container
   checkoutButtonContainer: {
     marginHorizontal: 16,
+    marginBottom: 16, // ✅ Bottom padding - lift off bottom edge
   },
   // Loyalty Redemption Section
   loyaltyRedemptionSection: {
@@ -366,6 +557,113 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     color: '#10b981',
+    letterSpacing: -0.2,
+  },
+  // Discount Selector Section
+  discountSection: {
+    marginHorizontal: 16,
+    gap: 8,
+  },
+  discountButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    backgroundColor: 'rgba(59,130,246,0.15)',
+    borderRadius: 12,
+    borderWidth: 0.5,
+    borderColor: 'rgba(59,130,246,0.3)',
+  },
+  discountButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: 'rgba(59,130,246,0.9)',
+    letterSpacing: -0.1,
+  },
+  discountButtonCount: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: 'rgba(59,130,246,0.6)',
+    letterSpacing: 0.6,
+  },
+  // Selected discount pill
+  discountSelected: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    paddingLeft: 16,
+    paddingRight: 10,
+    backgroundColor: 'rgba(59,130,246,0.15)',
+    borderRadius: 12,
+    borderWidth: 0.5,
+    borderColor: 'rgba(59,130,246,0.3)',
+  },
+  discountSelectedInfo: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  discountSelectedName: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.9)',
+    letterSpacing: -0.1,
+  },
+  discountSelectedValue: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: 'rgba(59,130,246,0.9)',
+    letterSpacing: -0.1,
+  },
+  discountClearButton: {
+    width: 28,
+    height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  discountClearButtonText: {
+    fontSize: 16,
+    color: 'rgba(255,255,255,0.4)',
+  },
+  // Discount list (expanded)
+  discountList: {
+    gap: 6,
+  },
+  discountListItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 10,
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  discountListItemInfo: {
+    flex: 1,
+    marginRight: 12,
+  },
+  discountListItemName: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.9)',
+    letterSpacing: -0.1,
+    marginBottom: 2,
+  },
+  discountListItemDescription: {
+    fontSize: 11,
+    fontWeight: '400',
+    color: 'rgba(255,255,255,0.5)',
+    letterSpacing: -0.05,
+  },
+  discountListItemValue: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: 'rgba(59,130,246,0.9)',
     letterSpacing: -0.2,
   },
 })

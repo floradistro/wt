@@ -14,6 +14,15 @@ import type { LoyaltyProgram } from "@/hooks/useLoyalty"
 import type { Campaign } from "@/hooks/useCampaigns"
 import { CampaignsDetail } from "./CampaignsDetail"
 import { loyaltyManagementStyles as styles } from "./loyaltyManagement.styles"
+import {
+  useLoyaltyProgram,
+  useLoyaltyProgramLoading,
+  useLoyaltyActions,
+  useCampaigns,
+  useCampaignStats,
+  useCampaignsLoading,
+  useCampaignActions,
+} from "@/stores/loyalty-campaigns.store"
 
 function LoyaltyIcon({ color }: { color: string }) {
   return (
@@ -28,36 +37,22 @@ function LoyaltyIcon({ color }: { color: string }) {
 }
 
 function LoyaltyManagementDetail({
-  program,
-  isLoading,
   headerOpacity,
-  onCreateProgram,
-  onUpdateProgram,
-  onToggleStatus,
   vendorLogo,
-  campaigns,
-  campaignStats,
-  campaignsLoading,
-  onCreateCampaign,
-  onUpdateCampaign,
-  onDeleteCampaign,
-  onToggleCampaignStatus,
 }: {
-  program: LoyaltyProgram | null
-  isLoading: boolean
   headerOpacity: Animated.Value
-  onCreateProgram: any
-  onUpdateProgram: any
-  onToggleStatus: any
   vendorLogo?: string | null
-  campaigns: Campaign[]
-  campaignStats: any
-  campaignsLoading: boolean
-  onCreateCampaign: any
-  onUpdateCampaign: any
-  onDeleteCampaign: any
-  onToggleCampaignStatus: any
 }) {
+  // ✅ Read from stores instead of props
+  const program = useLoyaltyProgram()
+  const isLoading = useLoyaltyProgramLoading()
+  const { createProgram, updateProgram, toggleProgramStatus } = useLoyaltyActions()
+
+  const campaigns = useCampaigns()
+  const campaignStats = useCampaignStats()
+  const campaignsLoading = useCampaignsLoading()
+  const { createCampaign, updateCampaign, deleteCampaign, toggleCampaignStatus } = useCampaignActions()
+
   const [activeTab, setActiveTab] = useState<'program' | 'campaigns'>('program')
   const [isEditing, setIsEditing] = useState(false)
   const [showCreateCampaignModal, setShowCreateCampaignModal] = useState(false)
@@ -95,9 +90,9 @@ function LoyaltyManagementDetail({
 
     let result
     if (program) {
-      result = await onUpdateProgram(data)
+      result = await updateProgram(data)
     } else {
-      result = await onCreateProgram(data)
+      result = await createProgram(data)
     }
 
     if (result.success) {
@@ -122,7 +117,7 @@ function LoyaltyManagementDetail({
           text: statusText.charAt(0).toUpperCase() + statusText.slice(1),
           onPress: async () => {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
-            const result = await onToggleStatus(newStatus)
+            const result = await toggleProgramStatus(newStatus)
             if (!result.success) {
               Alert.alert('Error', result.error || 'Failed to update loyalty program status')
             }
@@ -231,10 +226,10 @@ function LoyaltyManagementDetail({
               campaigns={campaigns}
               stats={campaignStats}
               isLoading={campaignsLoading}
-              onCreate={onCreateCampaign}
-              onUpdate={onUpdateCampaign}
-              onDelete={onDeleteCampaign}
-              onToggleStatus={onToggleCampaignStatus}
+              onCreate={createCampaign}
+              onUpdate={updateCampaign}
+              onDelete={deleteCampaign}
+              onToggleStatus={toggleCampaignStatus}
             />
           )}
         </ScrollView>
@@ -573,10 +568,10 @@ function LoyaltyManagementDetail({
             campaigns={campaigns}
             stats={campaignStats}
             isLoading={campaignsLoading}
-            onCreate={onCreateCampaign}
-            onUpdate={onUpdateCampaign}
-            onDelete={onDeleteCampaign}
-            onToggleStatus={onToggleCampaignStatus}
+            onCreate={createCampaign}
+            onUpdate={updateCampaign}
+            onDelete={deleteCampaign}
+            onToggleStatus={toggleCampaignStatus}
           />
         )}
       </ScrollView>

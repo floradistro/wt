@@ -1,26 +1,32 @@
 /**
  * Editable Custom Fields Section
  * Allows adding, editing, and removing product-specific custom fields
+ *
+ * State Management:
+ * - Reads custom fields from product-edit.store
+ * - Supports dynamic field creation and removal
+ * - Shows/hides based on edit mode and field existence
  */
 
 import { View, Text, StyleSheet, Pressable, TextInput } from 'react-native'
 import * as Haptics from 'expo-haptics'
 import { radius } from '@/theme/tokens'
 import { layout } from '@/theme/layout'
+import {
+  useIsEditing,
+  useEditedCustomFields,
+  useOriginalProduct,
+  productEditActions,
+} from '@/stores/product-edit.store'
 
-interface EditableCustomFieldsSectionProps {
-  customFields: Record<string, any> | null | undefined
-  editedCustomFields: Record<string, any>
-  isEditing: boolean
-  onCustomFieldsChange: (fields: Record<string, any>) => void
-}
+export function EditableCustomFieldsSection() {
+  // Read from store
+  const isEditing = useIsEditing()
+  const editedCustomFields = useEditedCustomFields()
+  const originalProduct = useOriginalProduct()
 
-export function EditableCustomFieldsSection({
-  customFields,
-  editedCustomFields,
-  isEditing,
-  onCustomFieldsChange,
-}: EditableCustomFieldsSectionProps) {
+  const customFields = originalProduct?.custom_fields || null
+
   // Don't render if no custom fields and not editing
   if (!customFields && !isEditing) return null
   if (Object.keys(customFields || {}).length === 0 && !isEditing) return null
@@ -28,7 +34,7 @@ export function EditableCustomFieldsSection({
   const handleAddField = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
     const newKey = `custom_field_${Date.now()}`
-    onCustomFieldsChange({
+    productEditActions.updateField('editedCustomFields', {
       ...editedCustomFields,
       [newKey]: '',
     })
@@ -38,7 +44,7 @@ export function EditableCustomFieldsSection({
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
     const updated = { ...editedCustomFields }
     delete updated[key]
-    onCustomFieldsChange(updated)
+    productEditActions.updateField('editedCustomFields', updated)
   }
 
   const handleUpdateFieldKey = (oldKey: string, newKey: string) => {
@@ -47,11 +53,11 @@ export function EditableCustomFieldsSection({
     const value = updated[oldKey]
     delete updated[oldKey]
     updated[newKey] = value
-    onCustomFieldsChange(updated)
+    productEditActions.updateField('editedCustomFields', updated)
   }
 
   const handleUpdateFieldValue = (key: string, value: string) => {
-    onCustomFieldsChange({
+    productEditActions.updateField('editedCustomFields', {
       ...editedCustomFields,
       [key]: value,
     })

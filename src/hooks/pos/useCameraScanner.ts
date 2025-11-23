@@ -1,14 +1,10 @@
 /**
- * useCameraScanner Hook
+ * useCameraScanner Hook - ZERO PROPS ✅
  * Jobs Principle: Manage camera lifecycle and ID scanning
  *
- * Extracted from POSUnifiedCustomerSelector to improve maintainability
- * Handles:
- * - Camera permissions
- * - Camera lifecycle (mount/unmount)
- * - Barcode scanning
- * - ID parsing and age verification
- * - Focus functionality
+ * ZERO PROP DRILLING:
+ * - No onScanComplete callback - calls customer.store action directly
+ * - Handles camera permissions, lifecycle, scanning, age verification
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react'
@@ -17,8 +13,9 @@ import * as Haptics from 'expo-haptics'
 import { parseAAMVABarcode, isLegalAge, calculateAge, type AAMVAData } from '@/lib/id-scanner/aamva-parser'
 import { playSuccessBeep, playRejectionTone } from '@/lib/id-scanner/audio'
 import { logger } from '@/utils/logger'
+import { customerActions } from '@/stores/customer.store'
 
-export function useCameraScanner(onScanComplete: (data: AAMVAData) => void) {
+export function useCameraScanner() {
   // ========================================
   // STATE
   // ========================================
@@ -73,9 +70,9 @@ export function useCameraScanner(onScanComplete: (data: AAMVAData) => void) {
         }
       }
 
-      // Show parsed data and trigger callback
+      // Show parsed data and save to customer store (ZERO PROP DRILLING ✅)
       setParsedData(data)
-      onScanComplete(data)
+      customerActions.setScannedData(data)
     } catch (error) {
       logger.error('Scan error:', error)
       resetScanner()
@@ -105,7 +102,7 @@ export function useCameraScanner(onScanComplete: (data: AAMVAData) => void) {
       // Process instantly
       handleBarcodeScan(code.value!)
     },
-    [isScanning, isProcessing, onScanComplete]
+    [isScanning, isProcessing]
   )
 
   const codeScanner = useCodeScanner({

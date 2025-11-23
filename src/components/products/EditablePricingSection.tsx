@@ -1,77 +1,59 @@
 /**
  * Editable Pricing Section
  * Handles both single and tiered pricing with template selection
- * Allows product-specific pricing overrides
+ *
+ * State Management:
+ * - Reads all pricing state from product-edit.store
+ * - Loads pricing templates based on product category
+ * - Supports single price and tiered pricing modes
  */
 
 import { View, Text, StyleSheet, Pressable, TextInput, ActivityIndicator, ScrollView } from 'react-native'
-import { useState, useEffect } from 'react'
+import { useEffect } from 'react'
 import * as Haptics from 'expo-haptics'
-import type { PricingTier } from '@/hooks/useProducts'
+import type { PricingTier } from '@/types/products'
 import { radius } from '@/theme/tokens'
 import { layout } from '@/theme/layout'
+import {
+  useProductEditState,
+  usePricingEditState,
+  useTemplatesState,
+  useIsEditing,
+  useOriginalProduct,
+  productEditActions,
+} from '@/stores/product-edit.store'
 
-interface EditablePricingSectionProps {
-  // Product data
-  price: number | null
-  costPrice: number | null
-  salePrice: number | null
-  onSale: boolean
-  pricingMode: 'single' | 'tiered'
-  pricingTiers: PricingTier[]
-  templateId: string | null
+export function EditablePricingSection() {
+  // Read from store
+  const isEditing = useIsEditing()
+  const originalProduct = useOriginalProduct()
+  const { editedPrice, editedCostPrice, pricingMode, pricingTiers, selectedTemplateId } = usePricingEditState()
+  const { availableTemplates, loadingTemplates } = useTemplatesState()
 
-  // Edit state
-  isEditing: boolean
-  editedPrice: string
-  editedCostPrice: string
-  onPriceChange: (price: string) => void
-  onCostPriceChange: (price: string) => void
-  onPricingModeChange: (mode: 'single' | 'tiered') => void
-  onTiersChange: (tiers: PricingTier[]) => void
-  onTemplateChange: (templateId: string) => void
-
-  // Templates
-  categoryId: string | null
-  availableTemplates: any[]
-  loadTemplates: (categoryId: string) => Promise<void>
-}
-
-export function EditablePricingSection({
-  price,
-  costPrice,
-  salePrice,
-  onSale,
-  pricingMode,
-  pricingTiers,
-  templateId,
-  isEditing,
-  editedPrice,
-  editedCostPrice,
-  onPriceChange,
-  onCostPriceChange,
-  onPricingModeChange,
-  onTiersChange,
-  onTemplateChange,
-  categoryId,
-  availableTemplates,
-  loadTemplates,
-}: EditablePricingSectionProps) {
-  const [loadingTemplates, setLoadingTemplates] = useState(false)
-
+  // Load templates when entering edit mode
   useEffect(() => {
-    if (isEditing && categoryId && availableTemplates.length === 0) {
-      setLoadingTemplates(true)
-      loadTemplates(categoryId).finally(() => setLoadingTemplates(false))
+    if (isEditing && originalProduct?.primary_category_id && availableTemplates.length === 0) {
+      productEditActions.loadTemplates(originalProduct.primary_category_id)
     }
-  }, [isEditing, categoryId])
+  }, [isEditing, originalProduct?.primary_category_id, availableTemplates.length])
 
-  const displayPrice = price || 0
-  const displayCostPrice = costPrice || 0
-  const margin = displayCostPrice > 0 && displayPrice > 0
-    ? (((displayPrice - displayCostPrice) / displayPrice) * 100).toFixed(1)
-    : null
+  // Don't render until product is loaded in store
+  if (!originalProduct) {
+    return null
+  }
 
+  // Display values from original product (for view mode)
+  const displayPrice = originalProduct?.price || 0
+  const displayCostPrice = originalProduct?.cost_price || 0
+  const displaySalePrice = originalProduct?.sale_price || null
+  const isOnSale = originalProduct?.on_sale || false
+
+  const margin =
+    displayCostPrice > 0 && displayPrice > 0
+      ? (((displayPrice - displayCostPrice) / displayPrice) * 100).toFixed(1)
+      : null
+
+  // Handlers using store actions
   const handleAddCustomTier = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
     const newTier: PricingTier = {
@@ -83,23 +65,21 @@ export function EditablePricingSection({
       enabled: true,
       sort_order: pricingTiers.length + 1,
     }
-    onTiersChange([...pricingTiers, newTier])
+    productEditActions.updateTiers([...pricingTiers, newTier])
   }
 
   const handleRemoveTier = (tierId: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-    onTiersChange(pricingTiers.filter(t => t.id !== tierId))
+    productEditActions.updateTiers(pricingTiers.filter((t) => t.id !== tierId))
   }
 
   const handleUpdateTier = (tierId: string, updates: Partial<PricingTier>) => {
-    onTiersChange(
-      pricingTiers.map(t => t.id === tierId ? { ...t, ...updates } : t)
-    )
+    productEditActions.updateTiers(pricingTiers.map((t) => (t.id === tierId ? { ...t, ...updates } : t)))
   }
 
-  const handleApplyTemplate = (selectedTemplateId: string) => {
+  const handleApplyTemplate = (templateId: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
-    const template = availableTemplates.find(t => t.id === selectedTemplateId)
+    const template = availableTemplates.find((t) => t.id === templateId)
     if (!template || !template.default_tiers) return
 
     const tiers = template.default_tiers.map((tier: any, index: number) => ({
@@ -112,9 +92,9 @@ export function EditablePricingSection({
       sort_order: tier.sort_order || index + 1,
     }))
 
-    onTiersChange(tiers)
-    onPricingModeChange('tiered')
-    onTemplateChange(selectedTemplateId)
+    productEditActions.updateTiers(tiers)
+    productEditActions.setPricingMode('tiered')
+    productEditActions.setTemplateId(templateId)
   }
 
   return (
@@ -127,10 +107,7 @@ export function EditablePricingSection({
             <View style={styles.modeToggleRow}>
               <Pressable
                 style={[styles.modeButton, pricingMode === 'single' && styles.modeButtonActive]}
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                  onPricingModeChange('single')
-                }}
+                onPress={() => productEditActions.setPricingMode('single')}
               >
                 <Text style={[styles.modeButtonText, pricingMode === 'single' && styles.modeButtonTextActive]}>
                   Single Price
@@ -138,10 +115,7 @@ export function EditablePricingSection({
               </Pressable>
               <Pressable
                 style={[styles.modeButton, pricingMode === 'tiered' && styles.modeButtonActive]}
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                  onPricingModeChange('tiered')
-                }}
+                onPress={() => productEditActions.setPricingMode('tiered')}
               >
                 <Text style={[styles.modeButtonText, pricingMode === 'tiered' && styles.modeButtonTextActive]}>
                   Tiered
@@ -158,7 +132,7 @@ export function EditablePricingSection({
                     <TextInput
                       style={styles.priceInput}
                       value={editedPrice}
-                      onChangeText={onPriceChange}
+                      onChangeText={(value) => productEditActions.updateField('editedPrice', value)}
                       placeholder="0.00"
                       placeholderTextColor="rgba(235,235,245,0.3)"
                       keyboardType="decimal-pad"
@@ -172,7 +146,7 @@ export function EditablePricingSection({
                     <TextInput
                       style={styles.priceInput}
                       value={editedCostPrice}
-                      onChangeText={onCostPriceChange}
+                      onChangeText={(value) => productEditActions.updateField('editedCostPrice', value)}
                       placeholder="0.00"
                       placeholderTextColor="rgba(235,235,245,0.3)"
                       keyboardType="decimal-pad"
@@ -191,24 +165,24 @@ export function EditablePricingSection({
                   <View style={styles.templateRow}>
                     <Text style={styles.templateRowLabel}>Template</Text>
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.templateList}>
-                      {availableTemplates.map(template => (
+                      {availableTemplates.map((template) => (
                         <Pressable
                           key={template.id}
                           style={[
                             styles.templateChip,
-                            templateId === template.id && styles.templateChipActive
+                            selectedTemplateId === template.id && styles.templateChipActive,
                           ]}
                           onPress={() => handleApplyTemplate(template.id)}
                         >
-                          <Text style={[
-                            styles.templateChipText,
-                            templateId === template.id && styles.templateChipTextActive
-                          ]}>
+                          <Text
+                            style={[
+                              styles.templateChipText,
+                              selectedTemplateId === template.id && styles.templateChipTextActive,
+                            ]}
+                          >
                             {template.name}
                           </Text>
-                          {templateId === template.id && (
-                            <Text style={styles.templateCheckmark}>✓</Text>
-                          )}
+                          {selectedTemplateId === template.id && <Text style={styles.templateCheckmark}>✓</Text>}
                         </Pressable>
                       ))}
                     </ScrollView>
@@ -314,15 +288,15 @@ export function EditablePricingSection({
                   </View>
                 )}
                 {margin && (
-                  <View style={[styles.row, !onSale && styles.rowLast]}>
+                  <View style={[styles.row, !isOnSale && styles.rowLast]}>
                     <Text style={styles.rowLabel}>Margin</Text>
                     <Text style={styles.rowValue}>{margin}%</Text>
                   </View>
                 )}
-                {onSale && salePrice && (
+                {isOnSale && displaySalePrice && (
                   <View style={[styles.row, styles.rowLast]}>
                     <Text style={styles.rowLabel}>Sale Price</Text>
-                    <Text style={styles.rowValue}>${salePrice.toFixed(2)}</Text>
+                    <Text style={styles.rowValue}>${displaySalePrice.toFixed(2)}</Text>
                   </View>
                 )}
               </>

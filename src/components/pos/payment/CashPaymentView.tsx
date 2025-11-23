@@ -1,7 +1,13 @@
 /**
- * Cash Payment View
+ * Cash Payment View - TRUE ZERO PROPS ✅
  * Single Responsibility: Handle cash payment input and change calculation
  * Apple Standard: Component < 300 lines
+ *
+ * ZERO DATA PROPS - Reads from stores:
+ * - total (calculated from subtotal + tax)
+ * - subtotal, itemCount → cart.store
+ * - taxAmount, taxRate, taxName → tax.store
+ * - locationId → posSession.store
  */
 
 import { useState, useMemo } from 'react'
@@ -11,16 +17,47 @@ import { Ionicons } from '@expo/vector-icons'
 import * as Haptics from 'expo-haptics'
 import { logger } from '@/utils/logger'
 import { Sentry } from '@/utils/sentry'
-import type { BasePaymentViewProps, PaymentData, SaleCompletionData, PaymentStage } from './PaymentTypes'
+import { useCartTotals } from '@/stores/cart.store'
+import { usePOSSession } from '@/stores/posSession.store'
+import { taxActions } from '@/stores/tax.store'
+import { useLoyaltyState } from '@/stores/loyalty.store'
+import type { PaymentData, SaleCompletionData, PaymentStage } from './PaymentTypes'
 
-interface CashPaymentViewProps extends BasePaymentViewProps {
-  onComplete: (paymentData: PaymentData) => Promise<SaleCompletionData>
+interface CashPaymentViewProps {
+  onComplete: (paymentData: PaymentData) => Promise<SaleCompletionData>  // ✅ Coordination callback only
 }
 
 export function CashPaymentView({
-  total,
   onComplete,
 }: CashPaymentViewProps) {
+  // ========================================
+  // STORES - TRUE ZERO PROPS (read from environment)
+  // ========================================
+  const { subtotal, itemCount } = useCartTotals()
+  const { sessionInfo } = usePOSSession()
+  const { loyaltyProgram, pointsToRedeem } = useLoyaltyState()
+
+  // Calculate tax
+  const { taxAmount, taxRate, taxName } = useMemo(() => {
+    if (!sessionInfo?.locationId) return { taxAmount: 0, taxRate: 0, taxName: undefined }
+    return taxActions.calculateTax(subtotal, sessionInfo.locationId)
+  }, [subtotal, sessionInfo?.locationId])
+
+  // Calculate loyalty discount
+  const loyaltyDiscountAmount = useMemo(() => {
+    if (!loyaltyProgram || pointsToRedeem === 0) return 0
+    return (pointsToRedeem * (loyaltyProgram.point_value || 0.01))
+  }, [loyaltyProgram, pointsToRedeem])
+
+  // Calculate total
+  const total = useMemo(() => {
+    const subtotalAfterDiscount = Math.max(0, subtotal - loyaltyDiscountAmount)
+    return subtotalAfterDiscount + taxAmount
+  }, [subtotal, loyaltyDiscountAmount, taxAmount])
+
+  // ========================================
+  // LOCAL STATE (UI only)
+  // ========================================
   const [cashTendered, setCashTendered] = useState('')
   const [processing, setProcessing] = useState(false)
   const [paymentStage, setPaymentStage] = useState<PaymentStage>('initializing')

@@ -430,10 +430,10 @@ const styles = StyleSheet.create({
   },
   sidebarContainer: {
     flex: 1,
-    marginLeft: 8, // Ultra-minimal iOS-style padding
-    marginRight: 8, // Match left - ultra-minimal (same as cart)
-    marginTop: 8, // Match left - ultra-minimal (same as cart)
-    marginBottom: 8, // Match left - ultra-minimal (same as cart)
+    marginLeft: 0, // ✅ FIXED: iOS Settings has NO left margin - extends to edge
+    marginRight: 4, // ✅ FIXED: Minimal right margin (was 8px, now 4px to match iOS)
+    marginTop: 0, // ✅ FIXED: NO top margin - extends to status bar (iOS pattern)
+    marginBottom: 0, // ✅ FIXED: NO bottom margin - extends to bottom (iOS pattern)
     borderRadius: layout.containerRadius,
     borderCurve: 'continuous',
     overflow: 'hidden',
@@ -462,8 +462,8 @@ const styles = StyleSheet.create({
 
   // User Profile Section
   userProfileWrapper: {
-    paddingHorizontal: 8, // Ultra-minimal to match cart header
-    marginBottom: 12,
+    paddingHorizontal: 8, // Consistent internal padding
+    marginBottom: 8, // ✅ FIXED: Tighter spacing (was 12px, now 8px)
   },
   userProfileCard: {
     borderRadius: layout.pillRadius,
@@ -476,7 +476,7 @@ const styles = StyleSheet.create({
   userProfile: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 12,
+    paddingVertical: 10, // ✅ FIXED: More compact (was 12px, now 10px to match iOS Settings)
     paddingHorizontal: 12,
     gap: 12,
     minHeight: layout.minTouchTarget,
@@ -608,7 +608,7 @@ const styles = StyleSheet.create({
 
   // Nav Items
   navItems: {
-    gap: 8,
+    gap: 4, // ✅ FIXED: Tighter gap between items (was 8px, now 4px to match iOS Settings)
   },
   navItemWrapper: {
     paddingHorizontal: 8, // Ultra-minimal to match cart header
@@ -624,7 +624,7 @@ const styles = StyleSheet.create({
   navItemContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 10,
+    paddingVertical: 8, // ✅ FIXED: More compact (was 10px, now 8px to match iOS Settings)
     paddingHorizontal: 12,
     gap: 12,
     minHeight: layout.minTouchTarget,

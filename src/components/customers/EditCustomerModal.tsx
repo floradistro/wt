@@ -1,31 +1,39 @@
 /**
  * Edit Customer Modal
  * Apple-style modal for creating/editing customers
- * Uses POSModal for consistency
+ *
+ * ZERO PROP DRILLING ARCHITECTURE:
+ * - Reads modal state from customers-ui.store
+ * - Reads customer from customers-ui.store
+ * - Reads vendor from AppAuthContext
+ * - Calls store actions directly (no callbacks)
  */
 
 import { View, Text, StyleSheet, TextInput, Pressable, ScrollView, Alert } from 'react-native'
-import React, { useState, useCallback } from 'react'
+import React, { useState, useCallback, useEffect } from 'react'
 import { colors, typography, spacing, radius, device } from '@/theme/tokens'
 import { POSModal } from '@/components/pos/POSModal'
-import { customersService, type Customer } from '@/services/customers.service'
+import type { Customer } from '@/services/customers.service'
 import { logger } from '@/utils/logger'
 import { findPotentialDuplicates } from '@/utils/customer-deduplication'
 import * as Haptics from 'expo-haptics'
+import { useAppAuth } from '@/contexts/AppAuthContext'
+import {
+  useSelectedCustomerUI,
+  useActiveModal,
+  customersUIActions,
+} from '@/stores/customers-ui.store'
+import {
+  customersListActions,
+} from '@/stores/customers-list.store'
 
-interface EditCustomerModalProps {
-  visible: boolean
-  customer?: Customer | null
-  onClose: () => void
-  onSuccess: (customer: Customer) => void
-}
+// ✅ ZERO PROPS!
+export function EditCustomerModal() {
+  // ✅ Read from Context & Stores
+  const { vendor } = useAppAuth()
+  const customer = useSelectedCustomerUI()
+  const visible = useActiveModal() === 'edit'
 
-export function EditCustomerModal({
-  visible,
-  customer,
-  onClose,
-  onSuccess,
-}: EditCustomerModalProps) {
   const isEditing = !!customer
   const isTablet = device.isTablet
 
@@ -36,6 +44,16 @@ export function EditCustomerModal({
   const [phone, setPhone] = useState(customer?.phone || '')
   const [isSubmitting, setIsSubmitting] = useState(false)
 
+  // Reset form when customer changes or modal opens
+  useEffect(() => {
+    if (visible) {
+      setFirstName(customer?.first_name || '')
+      setLastName(customer?.last_name || '')
+      setEmail(customer?.email || '')
+      setPhone(customer?.phone || '')
+    }
+  }, [customer, visible])
+
   // Reset form when modal closes
   const handleClose = useCallback(() => {
     setFirstName(customer?.first_name || '')
@@ -43,8 +61,8 @@ export function EditCustomerModal({
     setEmail(customer?.email || '')
     setPhone(customer?.phone || '')
     setIsSubmitting(false)
-    onClose()
-  }, [customer, onClose])
+    customersUIActions.closeEditModal()
+  }, [customer])
 
   // Format phone as user types
   const handlePhoneChange = (text: string) => {
@@ -116,6 +134,11 @@ export function EditCustomerModal({
 
   // Handle form submission
   const handleSubmit = useCallback(async () => {
+    if (!vendor?.id) {
+      Alert.alert('Error', 'Vendor not found')
+      return
+    }
+
     // Validation
     if (!firstName && !lastName && !email && !phone) {
       Alert.alert('Validation Error', 'Please provide at least a name, email, or phone number.')
@@ -142,17 +165,20 @@ export function EditCustomerModal({
 
       let result: Customer
 
-      if (isEditing) {
-        // Update existing customer
-        result = await customersService.updateCustomer(customer!.id, customerData)
+      if (isEditing && customer) {
+        // ✅ Update existing customer via store
+        result = await customersListActions.updateCustomer(customer.id, customerData)
+        // ✅ Update selected customer
+        customersUIActions.selectCustomer(result)
       } else {
-        // Create new customer
-        result = await customersService.createCustomer(customerData)
+        // ✅ Create new customer via store
+        result = await customersListActions.createCustomer(vendor.id, customerData)
+        // ✅ Select the newly created customer
+        customersUIActions.selectCustomer(result)
       }
 
       // Success feedback
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
-      onSuccess(result)
       handleClose()
     } catch (err) {
       logger.error('Failed to save customer:', err)
@@ -163,7 +189,7 @@ export function EditCustomerModal({
     } finally {
       setIsSubmitting(false)
     }
-  }, [firstName, lastName, email, phone, isEditing, customer, checkDuplicates, onSuccess, handleClose])
+  }, [firstName, lastName, email, phone, isEditing, customer, checkDuplicates, handleClose, vendor])
 
   return (
     <POSModal

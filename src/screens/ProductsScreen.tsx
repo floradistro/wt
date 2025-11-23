@@ -1,229 +1,85 @@
 /**
  * ProductsScreen - Refactored Orchestrator
- * Apple Standard: Focused orchestrator - delegates to view components
+ * Apple Standard: Clean orchestrator with 6 views
  *
- * THIS FILE: Clean orchestrator (~550 lines)
- * ORIGINAL: 2,732-line monolith (60% reduction)
+ * Views:
+ * - All Products / Low Stock / Out of Stock (ProductsListView)
+ * - Categories (CategoriesView)
+ * - Purchase Orders (PurchaseOrdersViewWrapper)
+ * - Audits (AuditsViewWrapper)
  *
- * Architecture:
- * - CategoriesView: Category management
- * - PurchaseOrdersViewWrapper: Purchase orders list
- * - AuditsViewWrapper: Audits management
- * - ProductsListView: Products with A-Z section index
- * - ProductDetail: Product detail panel
+ * ZERO PROP DRILLING:
+ * - All state managed in products-screen.store (products-list.store)
+ * - Views read from stores directly
+ * - < 300 lines, atomic, clean
  */
 
-import React, { useState, useRef, useEffect, useMemo, useCallback, memo } from 'react'
+import React, { useRef, useEffect, useMemo, memo } from 'react'
 import { View, StyleSheet, Animated, useWindowDimensions } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import * as Haptics from 'expo-haptics'
-import { supabase } from '@/lib/supabase/client'
-import { useAuth } from '@/stores/auth.store'
-import { logger } from '@/utils/logger'
+import { colors } from '@/theme/tokens'
 import { layout } from '@/theme/layout'
-
-// Extracted Components
-import {
-  ProductDetail,
-  CategoriesView,
-  PurchaseOrdersViewWrapper,
-  AuditsViewWrapper,
-  ProductsListView,
-  CreateProductModal,
-  CreateAuditModal,
-} from '@/components/products'
 import { NavSidebar, type NavItem } from '@/components/NavSidebar'
-import { CategoryDetail, CategoryModal, CustomFieldModal, PricingTemplateModal } from '@/components/categories'
-import { PurchaseOrderDetail, CreatePOModal, ReceivePOModal } from '@/components/purchase-orders'
-import { LocationSelector } from '@/components/LocationSelector'
-import type { FilterOption, ActiveFilter } from '@/components/shared'
+import { useAppAuth } from '@/contexts/AppAuthContext'
+import { logger } from '@/utils/logger'
 
-// Extracted Hooks
-import { useProducts, type Product } from '@/hooks/useProducts'
+// Views
+import { ProductsContentView } from './products/ProductsContentView'
+import { CategoriesContentView } from './products/CategoriesContentView'
+import { PurchaseOrdersContentView } from './products/PurchaseOrdersContentView'
+import { AuditsContentView } from './products/AuditsContentView'
+
+// Store
+import {
+  useActiveNav,
+  useProductsSearchQuery,
+  productsScreenActions,
+} from '@/stores/products-list.store'
+
+// Hooks
+import { useProducts } from '@/hooks/useProducts'
 import { useCategories } from '@/hooks/useCategories'
-import { useCustomFields } from '@/hooks/useCustomFields'
-import { usePricingTemplates } from '@/hooks/usePricingTemplates'
-import { useUserLocations } from '@/hooks/useUserLocations'
 import { usePurchaseOrders } from '@/hooks/usePurchaseOrders'
-import { useProductFilters } from '@/hooks/products'
+import { useUserLocations } from '@/hooks/useUserLocations'
 import { useLocationFilter } from '@/stores/location-filter.store'
 
-// Services
-import { getPurchaseOrderById, type PurchaseOrder } from '@/services/purchase-orders.service'
-
-type NavSection = 'all' | 'low-stock' | 'out-of-stock' | 'categories' | 'purchase-orders' | 'audits'
+// Modals
+import { CreateProductModal, CreateAuditModal } from '@/components/products'
+import { CategoryModal } from '@/components/categories'
+import { CreatePOModal, ReceivePOModal } from '@/components/purchase-orders'
 
 function ProductsScreenComponent() {
-  const { user } = useAuth()
-
-  // ========================================
-  // TOP-LEVEL STATE (Minimal!)
-  // ========================================
-  const [activeNav, setActiveNav] = useState<NavSection>('all')
-  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
-  const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null)
-  const [selectedPurchaseOrder, setSelectedPurchaseOrder] = useState<PurchaseOrder | null>(null)
-  const [navSearchQuery, setNavSearchQuery] = useState('')
-  const [productSearchQuery, setProductSearchQuery] = useState('')
-
-  // Vendor info
-  const [vendorLogo, setVendorLogo] = useState<string | null>(null)
-  const [vendorName, setVendorName] = useState<string>('')
-  const [vendorId, setVendorId] = useState<string>('')
-
-  // Modal states
-  const [showCategoryModal, setShowCategoryModal] = useState(false)
-  const [showFieldModal, setShowFieldModal] = useState(false)
-  const [showPricingModal, setShowPricingModal] = useState(false)
-  const [showLocationSelector, setShowLocationSelector] = useState(false)
-  const [showCreatePOModal, setShowCreatePOModal] = useState(false)
-  const [showReceivePOModal, setShowReceivePOModal] = useState(false)
-  const [showCreateProductModal, setShowCreateProductModal] = useState(false)
-  const [showCreateAuditModal, setShowCreateAuditModal] = useState(false)
-
-  // Sliding animation
-  const slideAnim = useRef(new Animated.Value(0)).current
-
+  const { user, vendor } = useAppAuth()
   const { width } = useWindowDimensions()
+
+  // ✅ Read from Zustand stores
+  const activeNav = useActiveNav()
+  const searchQuery = useProductsSearchQuery()
+
+  // Data hooks
+  const { products: allProducts, isLoading: productsLoading } = useProducts({ search: '' })
+  const { categories, isLoading: categoriesLoading } = useCategories({ includeGlobal: true, parentId: null })
+  const { selectedLocationIds } = useLocationFilter()
+  const { purchaseOrders, isLoading: poLoading, stats: poStats } = usePurchaseOrders({ locationIds: selectedLocationIds })
+  const { locations: userLocations } = useUserLocations()
+
+  // Animations
+  const slideAnim = useRef(new Animated.Value(0)).current
   const contentWidth = width - layout.sidebarWidth
 
-  // ========================================
-  // DATA LOADING
-  // ========================================
-  const { products: allProducts, isLoading, reload } = useProducts({ search: '' })
-  const { categories, isLoading: categoriesLoading, reload: reloadCategories } = useCategories({
-    includeGlobal: true,
-    parentId: null
-  })
-  const { purchaseOrders, isLoading: purchaseOrdersLoading, reload: reloadPurchaseOrders, stats: poStats } =
-    usePurchaseOrders({ locationIds: useLocationFilter().selectedLocationIds })
+  // Compute counts for nav
+  const lowStockCount = useMemo(
+    () => allProducts.filter(p => (p.total_stock || 0) > 0 && (p.total_stock || 0) < 10).length,
+    [allProducts]
+  )
 
-  // Load fields and templates
-  const { fields: allFields, reload: reloadFields } = useCustomFields({ includeInherited: false })
-  const { templates: allTemplates, reload: reloadTemplates } = usePricingTemplates({})
+  const outOfStockCount = useMemo(
+    () => allProducts.filter(p => (p.total_stock || 0) === 0).length,
+    [allProducts]
+  )
 
-  // Location filtering
-  const { locations: userLocations } = useUserLocations()
-  const { selectedLocationIds, setSelectedLocationIds, initializeFromUserLocations } = useLocationFilter()
-
-  const selectedLocationNames = useMemo(() => {
-    if (selectedLocationIds.length === 0) return []
-    return userLocations
-      .filter(ul => selectedLocationIds.includes(ul.location.id))
-      .map(ul => ul.location.name)
-  }, [selectedLocationIds, userLocations])
-
-  // Auto-select location for staff users
-  useEffect(() => {
-    if (userLocations.length > 0) {
-      const isAdmin = userLocations.some(ul => ul.role === 'owner')
-      const assignedIds = userLocations.map(ul => ul.location.id)
-      initializeFromUserLocations(assignedIds, isAdmin)
-    }
-  }, [userLocations.length, initializeFromUserLocations])
-
-  // Category map for filters
-  const categoryMap = useMemo(() => {
-    const map = new Map<string, string>()
-    categories.forEach(cat => map.set(cat.id, cat.name))
-    return map
-  }, [categories])
-
-  // ========================================
-  // FILTERS - Using Extracted Hook! 🎉
-  // ========================================
-  const filterHook = useProductFilters({
-    products: allProducts,
-    categoryMap,
-    selectedLocationIds,
-    activeNav: activeNav as 'all' | 'low-stock' | 'out-of-stock',
-  })
-
-  // Update search query in filter hook
-  useEffect(() => {
-    filterHook.setSearchQuery(productSearchQuery)
-  }, [productSearchQuery])
-
-  // ========================================
-  // VENDOR INFO LOADING
-  // ========================================
-  useEffect(() => {
-    loadVendorInfo()
-  }, [user])
-
-  const loadVendorInfo = async () => {
-    if (!user?.email) return
-    try {
-      const { data: userData, error: userError } = await supabase
-        .from('users')
-        .select('vendor_id, vendors(id, store_name, logo_url)')
-        .eq('auth_user_id', user.id)
-        .maybeSingle()
-
-      if (userError || !userData) {
-        logger.error('User query error', { error: userError })
-        return
-      }
-
-      if (userData?.vendors) {
-        const vendor = userData.vendors as any
-        setVendorId(vendor.id || '')
-        setVendorName(vendor.store_name || '')
-        setVendorLogo(vendor.logo_url || null)
-      }
-    } catch (error) {
-      logger.error('Failed to load vendor info', { error })
-    }
-  }
-
-  // ========================================
-  // HANDLERS
-  // ========================================
-  const handleProductUpdated = () => {
-    reload()
-  }
-
-  // Keep selectedProduct in sync with reloaded data
-  useEffect(() => {
-    if (selectedProduct) {
-      const updatedProduct = allProducts.find(p => p.id === selectedProduct.id)
-      if (updatedProduct && updatedProduct !== selectedProduct) {
-        setSelectedProduct(updatedProduct)
-      }
-    }
-  }, [allProducts, selectedProduct])
-
-  const handleCategoryUpdated = () => {
-    reloadCategories()
-    reloadFields()
-    reloadTemplates()
-  }
-
-  const handleProductSelect = useCallback((product: Product) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-    setSelectedProduct(product)
-  }, [])
-
-  // Filter categories by nav search
-  const filteredCategories = useMemo(() => {
-    if (!navSearchQuery) return categories
-    const lowerSearch = navSearchQuery.toLowerCase()
-    return categories.filter(cat =>
-      cat.name.toLowerCase().includes(lowerSearch) ||
-      cat.description?.toLowerCase().includes(lowerSearch)
-    )
-  }, [categories, navSearchQuery])
-
-  // ========================================
-  // NAV ITEMS
-  // ========================================
-  const lowStockCount = allProducts.filter(p => {
-    const stock = p.total_stock ?? 0
-    return stock > 0 && stock < 10
-  }).length
-
-  const outOfStockCount = allProducts.filter(p => (p.total_stock ?? 0) === 0).length
-
+  // Nav Items
   const navItems: NavItem[] = useMemo(() => [
     {
       id: 'all',
@@ -255,7 +111,6 @@ function ProductsScreenComponent() {
       icon: 'doc',
       label: 'Purchase Orders',
       count: poStats.pending,
-      badge: poStats.pending > 0 ? 'info' as const : undefined,
     },
     {
       id: 'audits',
@@ -264,279 +119,98 @@ function ProductsScreenComponent() {
     },
   ], [allProducts.length, lowStockCount, outOfStockCount, poStats.pending])
 
-  // Clear selections when switching nav sections
-  useEffect(() => {
-    setSelectedProduct(null)
-    setSelectedCategoryId(null)
-    setSelectedPurchaseOrder(null)
-  }, [activeNav])
+  // Handle nav changes
+  const handleNavPress = (id: string) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    productsScreenActions.setActiveNav(id as any)
+    productsScreenActions.clearSelection()
+  }
 
-  // Animate when product/category/PO is selected/deselected
-  useEffect(() => {
-    const shouldSlide = activeNav === 'categories'
-      ? selectedCategoryId !== null
-      : activeNav === 'purchase-orders'
-      ? selectedPurchaseOrder !== null
-      : activeNav === 'audits'
-      ? false
-      : selectedProduct !== null
-    Animated.spring(slideAnim, {
-      toValue: shouldSlide ? 1 : 0,
-      useNativeDriver: true,
-      tension: 80,
-      friction: 12,
-    }).start()
-  }, [selectedProduct, selectedCategoryId, selectedPurchaseOrder, activeNav, slideAnim])
+  // Render active view
+  const renderContent = () => {
+    switch (activeNav) {
+      case 'all':
+      case 'low-stock':
+      case 'out-of-stock':
+        return (
+          <ProductsContentView
+            products={allProducts}
+            loading={productsLoading}
+            vendorLogo={vendor?.logo_url || null}
+          />
+        )
 
-  // ========================================
-  // LAYOUT CALCULATIONS
-  // ========================================
-  const listTranslateX = slideAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0, -contentWidth / 2],
-  })
+      case 'categories':
+        return (
+          <CategoriesContentView
+            categories={categories}
+            loading={categoriesLoading}
+            vendorLogo={vendor?.logo_url || null}
+          />
+        )
 
-  const detailTranslateX = slideAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [contentWidth, 0],
-  })
+      case 'purchase-orders':
+        return (
+          <PurchaseOrdersContentView
+            purchaseOrders={purchaseOrders}
+            loading={poLoading}
+            vendorLogo={vendor?.logo_url || null}
+          />
+        )
 
-  // ========================================
-  // RENDER - Clean Orchestration!
-  // ========================================
+      case 'audits':
+        return (
+          <AuditsContentView
+            vendorLogo={vendor?.logo_url || null}
+          />
+        )
+
+      default:
+        return null
+    }
+  }
+
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'left']}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.layout}>
-        {/* LEFT: Navigation Sidebar */}
+        {/* LEFT SIDEBAR */}
         <NavSidebar
           width={layout.sidebarWidth}
           items={navItems}
           activeItemId={activeNav}
-          onItemPress={(id: string) => setActiveNav(id as NavSection)}
-          searchValue={navSearchQuery}
-          onSearchChange={setNavSearchQuery}
-          vendorLogo={vendorLogo}
-          vendorName={vendorName}
+          onItemPress={handleNavPress}
+          searchValue={searchQuery}
+          onSearchChange={productsScreenActions.setSearchQuery}
+          searchPlaceholder="Search..."
+          vendorLogo={vendor?.logo_url || null}
           userName={user?.email || 'User'}
-          onUserProfilePress={() => setShowLocationSelector(true)}
-          selectedLocationNames={selectedLocationNames}
         />
 
-        {/* RIGHT: Content Area */}
+        {/* CONTENT AREA */}
         <View style={styles.contentArea}>
-          <View style={styles.productsList}>
-            {/* CATEGORIES VIEW */}
-            {activeNav === 'categories' && (
-              <CategoriesView
-                categories={filteredCategories}
-                selectedCategoryId={selectedCategoryId}
-                onCategorySelect={setSelectedCategoryId}
-                onAddCategory={() => setShowCategoryModal(true)}
-                isLoading={categoriesLoading}
-                vendorLogo={vendorLogo}
-                searchQuery={navSearchQuery}
-              />
-            )}
-
-            {/* PURCHASE ORDERS VIEW */}
-            {activeNav === 'purchase-orders' && (
-              <PurchaseOrdersViewWrapper
-                purchaseOrders={purchaseOrders}
-                selectedPO={selectedPurchaseOrder}
-                onSelect={setSelectedPurchaseOrder}
-                isLoading={purchaseOrdersLoading}
-                onAddPress={() => setShowCreatePOModal(true)}
-                vendorLogo={vendorLogo}
-              />
-            )}
-
-            {/* AUDITS VIEW */}
-            {activeNav === 'audits' && (
-              <AuditsViewWrapper
-                onCreatePress={() => setShowCreateAuditModal(true)}
-                vendorLogo={vendorLogo}
-                selectedLocationIds={selectedLocationIds}
-              />
-            )}
-
-            {/* PRODUCTS VIEW (All, Low Stock, Out of Stock) */}
-            {(activeNav === 'all' || activeNav === 'low-stock' || activeNav === 'out-of-stock') && (
-              <ProductsListView
-                products={filterHook.filteredProducts}
-                productSections={filterHook.productSections}
-                selectedProduct={selectedProduct}
-                onProductSelect={handleProductSelect}
-                activeNav={activeNav as 'all' | 'low-stock' | 'out-of-stock'}
-                vendorLogo={vendorLogo}
-                isLoading={isLoading}
-                selectedLocationIds={selectedLocationIds}
-                selectedLocationNames={selectedLocationNames}
-                categoryMap={categoryMap}
-                onAddProduct={() => setShowCreateProductModal(true)}
-              />
-            )}
-          </View>
-
-          {/* DETAIL PANEL */}
-          {((activeNav === 'categories' && selectedCategoryId) ||
-            (activeNav === 'purchase-orders' && selectedPurchaseOrder) ||
-            ((activeNav === 'all' || activeNav === 'low-stock' || activeNav === 'out-of-stock') && selectedProduct)) && (
-            <Animated.View
-              style={[
-                styles.detailPanel,
-                {
-                  transform: [{ translateX: detailTranslateX }],
-                },
-              ]}
-            >
-            {activeNav === 'purchase-orders' && selectedPurchaseOrder ? (
-              <PurchaseOrderDetail
-                purchaseOrder={selectedPurchaseOrder}
-                onBack={() => setSelectedPurchaseOrder(null)}
-                onUpdated={async () => {
-                  const reloadPromise = reloadPurchaseOrders()
-                  if (selectedPurchaseOrder) {
-                    try {
-                      const updatedPO = await getPurchaseOrderById(selectedPurchaseOrder.id)
-                      setSelectedPurchaseOrder(updatedPO)
-                    } catch (err) {
-                      logger.error('Failed to refresh PO detail', { error: err })
-                    }
-                  }
-                  await reloadPromise
-                }}
-                onReceive={() => setShowReceivePOModal(true)}
-              />
-            ) : activeNav === 'categories' && selectedCategoryId ? (
-              (() => {
-                const category = categories.find(c => c.id === selectedCategoryId)
-                if (!category) return null
-                const fieldsCount = allFields.filter(f => f.category_id === selectedCategoryId).length
-                const templatesCount = allTemplates.filter(t => t.category_id === selectedCategoryId).length
-                return (
-                  <CategoryDetail
-                    category={category}
-                    onBack={() => setSelectedCategoryId(null)}
-                    onCategoryUpdated={handleCategoryUpdated}
-                    fieldsCount={fieldsCount}
-                    templatesCount={templatesCount}
-                  />
-                )
-              })()
-            ) : selectedProduct ? (
-              <ProductDetail
-                product={selectedProduct}
-                onBack={() => setSelectedProduct(null)}
-                onProductUpdated={handleProductUpdated}
-              />
-            ) : null}
-            </Animated.View>
-          )}
+          {renderContent()}
         </View>
       </View>
 
       {/* MODALS */}
-      <CategoryModal
-        visible={showCategoryModal}
-        categories={categories}
-        onClose={() => setShowCategoryModal(false)}
-        onSaved={() => {
-          reloadCategories()
-          setShowCategoryModal(false)
-        }}
-      />
-
-      <CustomFieldModal
-        visible={showFieldModal}
-        categoryId={selectedCategoryId || ''}
-        onClose={() => setShowFieldModal(false)}
-        onSaved={handleCategoryUpdated}
-      />
-
-      {selectedCategoryId && (
-        <PricingTemplateModal
-          visible={showPricingModal}
-          categoryId={selectedCategoryId}
-          onClose={() => setShowPricingModal(false)}
-          onSaved={handleCategoryUpdated}
-        />
-      )}
-
-      <LocationSelector
-        visible={showLocationSelector}
-        userLocations={userLocations}
-        selectedLocationIds={selectedLocationIds}
-        onSelect={setSelectedLocationIds}
-        onClose={() => setShowLocationSelector(false)}
-      />
-
-      <CreatePOModal
-        visible={showCreatePOModal}
-        vendorId={vendorId}
-        onClose={() => setShowCreatePOModal(false)}
-        onCreated={() => {
-          reloadPurchaseOrders()
-          setShowCreatePOModal(false)
-        }}
-      />
-
-      {selectedPurchaseOrder && (
-        <ReceivePOModal
-          visible={showReceivePOModal}
-          purchaseOrder={selectedPurchaseOrder}
-          onClose={() => setShowReceivePOModal(false)}
-          onReceived={async () => {
-            setShowReceivePOModal(false)
-            const reloadPromise = reloadPurchaseOrders()
-            if (selectedPurchaseOrder) {
-              try {
-                const updatedPO = await getPurchaseOrderById(selectedPurchaseOrder.id)
-                setSelectedPurchaseOrder(updatedPO)
-              } catch (err) {
-                logger.error('Failed to refresh PO detail after receiving', { error: err })
-              }
-            }
-            await reloadPromise
-          }}
-        />
-      )}
-
-      <CreateProductModal
-        visible={showCreateProductModal}
-        vendorId={vendorId}
-        onClose={() => setShowCreateProductModal(false)}
-        onCreated={(productId) => {
-          reload()
-          setShowCreateProductModal(false)
-          const newProduct = allProducts.find(p => p.id === productId)
-          if (newProduct) {
-            setSelectedProduct(newProduct)
-          }
-        }}
-      />
-
-      <CreateAuditModal
-        visible={showCreateAuditModal}
-        onClose={() => setShowCreateAuditModal(false)}
-        onCreated={() => {
-          setShowCreateAuditModal(false)
-        }}
-      />
+      <CreateProductModal />
+      <CreateAuditModal />
+      <CategoryModal />
+      <CreatePOModal />
+      <ReceivePOModal />
     </SafeAreaView>
   )
 }
 
-// Export memoized version for performance
 export const ProductsScreen = memo(ProductsScreenComponent)
-ProductsScreen.displayName = 'ProductsScreen'
 
 // ========================================
-// STYLES - Minimal layout styles only
+// STYLES
 // ========================================
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000',
+    backgroundColor: colors.background.primary,
   },
   layout: {
     flex: 1,
@@ -544,18 +218,7 @@ const styles = StyleSheet.create({
   },
   contentArea: {
     flex: 1,
+    position: 'relative',
     overflow: 'hidden',
-  },
-  productsList: {
-    flex: 1,
-  },
-  detailPanel: {
-    position: 'absolute',
-    top: 0,
-    right: 0,
-    bottom: 0,
-    width: '100%',
-    backgroundColor: '#000',
-    zIndex: 10,
   },
 })

@@ -1,27 +1,36 @@
 /**
- * Layout Constants
+ * Layout Constants - Apple Engineering Standard
  * Standardized across all screens - Apple consistency
+ *
+ * DESIGN SYSTEM PRINCIPLE:
+ * All spacing uses the 8px base unit for perfect alignment.
+ * This creates visual rhythm and prevents inconsistencies.
  */
 
 export const layout = {
-  // Sidebar Navigation (Settings-style)
-  sidebarWidth: 375,
+  // Sidebar Navigation (Settings-style) - ✅ FIXED: Apple iPadOS spec is 320px
+  sidebarWidth: 320, // iPad Settings sidebar standard (was 375px - too wide!)
 
   // ==========================================
-  // APP-WIDE STANDARD SPACING: 8px (Minimal)
+  // APPLE 8PX DESIGN SYSTEM
   // ==========================================
-  // This matches the padding between the nav sidebar and screen edge
+  // Base unit: 8px
+  // All spacing derives from this unit (8px, 16px, 24px, etc.)
   //
-  // CRITICAL RULE: ALL content must use 8px spacing
-  // - Sections use: marginHorizontal: layout.containerMargin (8px)
-  // - Section titles: NO horizontal padding (inherit section margin)
-  // - Cards inside sections: NO horizontal margin (inherit section margin)
-  // - Rows inside cards: paddingHorizontal: layout.containerMargin (8px)
-  // - Content inside cards: paddingHorizontal: layout.containerMargin (8px)
+  // CRITICAL RULE: Use ONLY these standardized values
+  // ❌ NEVER use arbitrary values (e.g., 20px, 12px, etc.)
+  // ✅ ALWAYS use layout.spacing constants
   //
-  // Result: Everything aligns perfectly at 8px from screen edge (minimal, Apple-style)
-  //
-  containerMargin: 8, // Minimal spacing - matches NavSidebar edge spacing
+  spacing: {
+    xs: 4,   // Extra small (half unit)
+    sm: 8,   // Small (1 unit) - PRIMARY EDGE SPACING
+    md: 16,  // Medium (2 units)
+    lg: 24,  // Large (3 units)
+    xl: 32,  // Extra large (4 units)
+  },
+
+  // Primary edge spacing (8px everywhere)
+  containerMargin: 8, // CRITICAL: All edges use this value
 
   // Legacy spacing values (DEPRECATED - causes inconsistent padding)
   contentHorizontal: 16, // DEPRECATED - use containerMargin
@@ -51,4 +60,35 @@ export const layout = {
 
   // Dock
   dockHeight: 100, // Dock height + spacing for scroll padding
+
+  // ==========================================
+  // POS LAYOUT SYSTEM (Apple Quality)
+  // ==========================================
+  // Ensures perfect alignment between cart, products, and search bar
+  //
+  // VISUAL HIERARCHY:
+  // ┌─────────────────────┬─────────────────────────────┐
+  // │ Cart Container      │ Search Bar                  │ ← Both 8px from edges
+  // │ [8px margin]        │ [8px absolute positioning]  │
+  // │                     │                             │
+  // │                     │ Product Grid                │ ← 8px padding all sides
+  // │                     │ [8px padding]               │
+  // └─────────────────────┴─────────────────────────────┘
+  //
+  pos: {
+    // Cart spacing (matches NavSidebar)
+    cartMarginAll: 8,          // All margins around cart container
+
+    // Product grid spacing
+    productGridPaddingLeft: 8,   // Left padding (aligns with cart right edge)
+    productGridPaddingRight: 8,  // Right padding (8px from screen edge) - CRITICAL!
+    productGridPaddingTop: 72,   // Top padding (space for floating search bar)
+    productGridGap: 16,          // Gap between product cards
+
+    // Search bar positioning
+    searchBarTop: 8,             // Top position
+    searchBarLeft: 8,            // Left position (aligns with product grid)
+    searchBarRight: 8,           // Right position (8px from screen edge) - CRITICAL!
+    searchBarHeight: 48,         // Fixed height
+  },
 } as const

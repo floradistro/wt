@@ -11,7 +11,9 @@
  */
 
 import { create } from 'zustand'
+import { devtools, persist } from 'zustand/middleware'
 import { useShallow } from 'zustand/react/shallow'
+import AsyncStorage from '@react-native-async-storage/async-storage'
 import { supabase } from '@/lib/supabase/client'
 import { logger } from '@/utils/logger'
 import type { Customer } from '@/types/pos'
@@ -55,7 +57,10 @@ interface CustomerState {
 // STORE
 // ========================================
 // ANTI-LOOP: No useEffects, no subscriptions, no setState in selectors
-export const useCustomerStore = create<CustomerState>((set, get) => ({
+export const useCustomerStore = create<CustomerState>()(
+  devtools(
+    persist(
+      (set, get) => ({
   // State
   selectedCustomer: null,
   scannedDataForNewCustomer: null,
@@ -309,7 +314,30 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
       customerMatches: [],
     })
   },
-}))
+    }),
+      {
+        name: 'customer-storage',
+        storage: {
+          getItem: async (name) => {
+            const value = await AsyncStorage.getItem(name)
+            return value ? JSON.parse(value) : null
+          },
+          setItem: async (name, value) => {
+            await AsyncStorage.setItem(name, JSON.stringify(value))
+          },
+          removeItem: async (name) => {
+            await AsyncStorage.removeItem(name)
+          },
+        },
+        partialize: (state) => ({
+          // Only persist selected customer, not scan data or matches
+          selectedCustomer: state.selectedCustomer,
+        }),
+      }
+    ),
+    { name: 'CustomerStore' }
+  )
+)
 
 // ========================================
 // SELECTORS (ANTI-LOOP: Use useShallow for objects)

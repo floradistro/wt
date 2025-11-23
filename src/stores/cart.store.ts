@@ -13,8 +13,9 @@
  */
 
 import { create } from 'zustand'
-import { devtools } from 'zustand/middleware'
+import { devtools, persist } from 'zustand/middleware'
 import { useShallow } from 'zustand/react/shallow'
+import AsyncStorage from '@react-native-async-storage/async-storage'
 import * as Haptics from 'expo-haptics'
 import type { CartItem, Product, PricingTier } from '@/types/pos'
 import { logger } from '@/utils/logger'
@@ -42,8 +43,9 @@ const initialState = {
 
 export const useCartStore = create<CartState>()(
   devtools(
-    (set, get) => ({
-      ...initialState,
+    persist(
+      (set, get) => ({
+        ...initialState,
 
       /**
        * Add product to cart (with optional pricing tier)
@@ -266,6 +268,26 @@ export const useCartStore = create<CartState>()(
         set(initialState, false, 'cart/reset')
       },
     }),
+      {
+        name: 'cart-storage',
+        storage: {
+          getItem: async (name) => {
+            const value = await AsyncStorage.getItem(name)
+            return value ? JSON.parse(value) : null
+          },
+          setItem: async (name, value) => {
+            await AsyncStorage.setItem(name, JSON.stringify(value))
+          },
+          removeItem: async (name) => {
+            await AsyncStorage.removeItem(name)
+          },
+        },
+        partialize: (state) => ({
+          // Only persist cart items, not UI state
+          items: state.items,
+        }),
+      }
+    ),
     { name: 'CartStore' }
   )
 )
@@ -298,6 +320,9 @@ export const cartActions = {
   get changeTier() { return useCartStore.getState().changeTier },
   get applyManualDiscount() { return useCartStore.getState().applyManualDiscount },
   get removeManualDiscount() { return useCartStore.getState().removeManualDiscount },
+  // Aliases for clarity
+  get applyStaffDiscount() { return useCartStore.getState().applyManualDiscount },
+  get clearStaffDiscount() { return useCartStore.getState().removeManualDiscount },
   get clearCart() { return useCartStore.getState().clearCart },
   get setDiscountingItemId() { return useCartStore.getState().setDiscountingItemId },
   get reset() { return useCartStore.getState().reset },

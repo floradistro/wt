@@ -1,2 +1,2 @@
+// ✅ ZERO PROPS - No interface to export
 export { CustomerDetail } from './CustomerDetail'
-export type { CustomerDetailProps } from './CustomerDetail'

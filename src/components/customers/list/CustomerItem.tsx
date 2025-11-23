@@ -5,7 +5,7 @@
 
 import React from 'react'
 import { View, Text, Pressable } from 'react-native'
-import type { Customer } from '@/hooks/useCustomers'
+import type { Customer } from '@/services/customers.service'
 import { customersStyles as styles } from '../customers.styles'
 
 interface CustomerItemProps {

@@ -11,7 +11,7 @@
  */
 
 import { useState, useMemo, useCallback } from 'react'
-import type { Product } from '@/hooks/useProducts'
+import type { Product } from '@/types/products'
 import type { FilterOption, ActiveFilter } from '@/components/shared'
 
 interface UseProductFiltersProps {

@@ -12,7 +12,7 @@ import { supabase } from '@/lib/supabase/client'
 import { useAuth } from '@/stores/auth.store'
 import { logger } from '@/utils/logger'
 import { layout } from '@/theme/layout'
-import type { Category } from '@/hooks/useCategories'
+import type { Category } from '@/types/categories'
 
 interface CategoryModalProps {
   visible: boolean

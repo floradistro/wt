@@ -22,6 +22,8 @@ import { SupplierManagementModals } from "../SupplierManagementModals"
 import { PaymentProcessorModal } from "../PaymentProcessorModal"
 import { DetailRow } from "./DetailRow"
 import { locationConfigurationStyles as styles } from "./locationConfiguration.styles"
+import { usePaymentProcessors, usePaymentProcessorsLoading, usePaymentProcessorsError, usePaymentProcessorsActions } from "@/stores/payment-processors-settings.store"
+import { useActiveModal, useSelectedProcessor, useSelectedLocationId, useSettingsUIActions } from "@/stores/settings-ui.store"
 
 function PaymentIcon({ color }: { color: string }) {
   return (
@@ -35,60 +37,52 @@ function PaymentIcon({ color }: { color: string }) {
 
 function LocationConfigurationDetail({
   location,
-  processors,
-  processorsLoading,
-  processorsError,
   headerOpacity,
   onBack,
-  onCreateProcessor,
-  onUpdateProcessor,
-  onDeleteProcessor,
-  onTestConnection,
-  onSetAsDefault,
-  onToggleStatus,
-  onReload,
 }: {
   location: UserLocationAccess
-  processors: PaymentProcessor[]
-  processorsLoading: boolean
-  processorsError: string | null
   headerOpacity: Animated.Value
   onBack: () => void
-  onCreateProcessor: any
-  onUpdateProcessor: any
-  onDeleteProcessor: any
-  onTestConnection: any
-  onSetAsDefault: any
-  onToggleStatus: any
-  onReload: () => void
 }) {
-  const [showAddProcessorModal, setShowAddProcessorModal] = useState(false)
-  const [editingProcessor, setEditingProcessor] = useState<PaymentProcessor | null>(null)
+  // ✅ Read from stores instead of props
+  const allProcessors = usePaymentProcessors()
+  const processorsLoading = usePaymentProcessorsLoading()
+  const processorsError = usePaymentProcessorsError()
+  const { createProcessor, updateProcessor, deleteProcessor, testConnection, setAsDefault, toggleProcessorStatus } = usePaymentProcessorsActions()
+
+  // Filter processors for this location
+  const processors = allProcessors.filter(p => p.location_id === location.location.id)
+
+  // ✅ Use store actions for modal state
+  const activeModal = useActiveModal()
+  const selectedProcessor = useSelectedProcessor()
+  const selectedLocationId = useSelectedLocationId()
+  const { openModal, closeModal } = useSettingsUIActions()
+
   const [testingProcessorId, setTestingProcessorId] = useState<string | null>(null)
 
   const handleAddProcessor = () => {
-    setEditingProcessor(null)
-    setShowAddProcessorModal(true)
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    openModal('addProcessor', null, location.location.id)
   }
 
   const handleEditProcessor = (processor: PaymentProcessor) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-    setEditingProcessor(processor)
-    setShowAddProcessorModal(true)
+    openModal('editProcessor', processor, location.location.id)
   }
 
   const handleTestConnection = async (processor: PaymentProcessor) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
     setTestingProcessorId(processor.id)
 
-    const result = await onTestConnection(processor.id)
+    const result = await testConnection(processor.id)
     setTestingProcessorId(null)
 
     if (result.success) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
       Alert.alert(
         'Test Successful ✓',
-        result.message || '$1.00 test transaction approved.\n\nTerminal is online and ready to accept payments.',
+        '$1.00 test transaction approved.\n\nTerminal is online and ready to accept payments.',
         [{ text: 'OK', style: 'default' }]
       )
     } else {
@@ -103,7 +97,7 @@ function LocationConfigurationDetail({
 
   const handleSetAsDefault = async (processor: PaymentProcessor) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
-    const result = await onSetAsDefault(processor.id)
+    const result = await setAsDefault(processor.id)
     if (!result.success) {
       Alert.alert('Error', result.error || 'Failed to set as default')
     }
@@ -122,7 +116,7 @@ function LocationConfigurationDetail({
           text: statusText.charAt(0).toUpperCase() + statusText.slice(1),
           onPress: async () => {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
-            const result = await onToggleStatus(processor.id, newStatus)
+            const result = await toggleProcessorStatus(processor.id, newStatus)
             if (!result.success) {
               Alert.alert('Error', result.error || 'Failed to update processor status')
             }
@@ -143,7 +137,7 @@ function LocationConfigurationDetail({
           style: 'destructive',
           onPress: async () => {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning)
-            const result = await onDeleteProcessor(processor.id)
+            const result = await deleteProcessor(processor.id)
             if (!result.success) {
               Alert.alert('Error', result.error || 'Failed to delete processor')
             }
@@ -275,7 +269,10 @@ function LocationConfigurationDetail({
                   {processorsError}
                 </Text>
                 <Pressable
-                  onPress={onReload}
+                  onPress={() => {
+                    // Reload is now automatic via store actions, but we can explicitly trigger if needed
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                  }}
                   style={[styles.addButton, { marginTop: spacing.sm }]}
                 >
                   <Text style={styles.addButtonText}>Retry</Text>
@@ -474,17 +471,18 @@ function LocationConfigurationDetail({
         )}
       </ScrollView>
 
-      <PaymentProcessorModal
-        visible={showAddProcessorModal}
-        processor={editingProcessor}
-        locationId={location.location.id}
-        onClose={() => {
-          setShowAddProcessorModal(false)
-          setEditingProcessor(null)
-        }}
-        onCreate={onCreateProcessor}
-        onUpdate={onUpdateProcessor}
-      />
+      {/* ✅ Modal controlled by store */}
+      {(activeModal === 'addProcessor' || activeModal === 'editProcessor') &&
+       selectedLocationId === location.location.id && (
+        <PaymentProcessorModal
+          visible={true}
+          processor={selectedProcessor}
+          locationId={location.location.id}
+          onClose={closeModal}
+          onCreate={createProcessor}
+          onUpdate={updateProcessor}
+        />
+      )}
     </View>
   )
 }

@@ -1,22 +1,24 @@
 /**
- * useCustomerSearch Hook
+ * useCustomerSearch Hook - ZERO PROPS ✅
  * Jobs Principle: Manage customer search and filtering
  *
- * Extracted from POSUnifiedCustomerSelector to improve maintainability
- * Handles:
- * - Search query state
- * - Customer search (Supabase query)
- * - Search results state
- * - Debounced search for performance
+ * ZERO PROP DRILLING:
+ * - No vendorId prop - reads from customer.store
+ * - Handles search query state, customer search, debounced search
  */
 
 import { useState, useCallback, useEffect } from 'react'
 import { supabase } from '@/lib/supabase/client'
 import { logger } from '@/utils/logger'
 import { useDebounce } from '@/hooks/useDebounce'
+import { useCustomerStore } from '@/stores/customer.store'
 import type { Customer } from '@/types/pos'
 
-export function useCustomerSearch(vendorId: string) {
+export function useCustomerSearch() {
+  // ========================================
+  // STORE - TRUE ZERO PROPS (read from environment)
+  // ========================================
+  const vendorId = useCustomerStore((state) => state.vendorId)
   // ========================================
   // STATE
   // ========================================
@@ -34,6 +36,14 @@ export function useCustomerSearch(vendorId: string) {
     async (query: string) => {
       if (!query.trim()) {
         setCustomers([])
+        setSearching(false)
+        return
+      }
+
+      // Get vendorId from store at search time
+      const currentVendorId = useCustomerStore.getState().vendorId
+      if (!currentVendorId) {
+        logger.error('Cannot search customers: vendorId not set in store')
         setSearching(false)
         return
       }
@@ -60,7 +70,7 @@ export function useCustomerSearch(vendorId: string) {
         const { data: results } = await supabase
           .from('customers')
           .select('*')
-          .eq('vendor_id', vendorId)
+          .eq('vendor_id', currentVendorId)
           .eq('is_active', true) // Only search active customers
           .or(searchConditions)
           .order('created_at', { ascending: false })
@@ -73,7 +83,7 @@ export function useCustomerSearch(vendorId: string) {
         setSearching(false)
       }
     },
-    [vendorId]
+    []
   )
 
   // Trigger search when debounced query changes

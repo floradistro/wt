@@ -12,6 +12,7 @@
  */
 
 import { create } from 'zustand'
+import { devtools } from 'zustand/middleware'
 import { useShallow } from 'zustand/react/shallow'
 import { supabase } from '@/lib/supabase/client'
 import { loyaltyService } from '@/services'
@@ -47,7 +48,9 @@ interface LoyaltyState {
 // STORE
 // ========================================
 // ANTI-LOOP: No useEffects, no subscriptions, no setState in selectors
-export const useLoyaltyStore = create<LoyaltyState>((set, get) => ({
+export const useLoyaltyStore = create<LoyaltyState>()(
+  devtools(
+    (set, get) => ({
   // State
   loyaltyProgram: null,
   pointsToRedeem: 0,
@@ -111,7 +114,13 @@ export const useLoyaltyStore = create<LoyaltyState>((set, get) => ({
    */
   getDiscountAmount: () => {
     const { pointsToRedeem, loyaltyProgram } = get()
-    const pointValue = loyaltyProgram?.point_value || 0.01
+    let pointValue = loyaltyProgram?.point_value || 0.01
+
+    // TEMPORARY FIX: If point_value is misconfigured (>$1), use sensible default
+    if (pointValue > 1) {
+      pointValue = 0.05
+    }
+
     return pointsToRedeem * pointValue
   },
 
@@ -127,7 +136,13 @@ export const useLoyaltyStore = create<LoyaltyState>((set, get) => ({
     // Note: We need customer's current loyalty points from customer store
     // This function only calculates max based on subtotal
     // Component must pass customer.loyalty_points to compare
-    const pointValue = loyaltyProgram?.point_value || 0.01
+    let pointValue = loyaltyProgram?.point_value || 0.01
+
+    // TEMPORARY FIX: If point_value is misconfigured (>$1), use sensible default
+    if (pointValue > 1) {
+      pointValue = 0.05
+    }
+
     const maxPointsFromSubtotal = Math.floor(subtotal / pointValue)
 
     return maxPointsFromSubtotal
@@ -145,7 +160,10 @@ export const useLoyaltyStore = create<LoyaltyState>((set, get) => ({
     const pointsPerDollar = loyaltyProgram?.points_per_dollar || 1.0
     return Math.floor(total * pointsPerDollar)
   },
-}))
+    }),
+    { name: 'LoyaltyStore' }
+  )
+)
 
 // ========================================
 // SELECTORS (ANTI-LOOP: Use useShallow for objects)

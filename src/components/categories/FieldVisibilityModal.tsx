@@ -11,7 +11,7 @@ import * as Haptics from 'expo-haptics'
 import { supabase } from '@/lib/supabase/client'
 import { logger } from '@/utils/logger'
 import { layout } from '@/theme/layout'
-import type { FieldVisibilityConfig } from '@/hooks/useCategories'
+import type { FieldVisibilityConfig } from '@/types/categories'
 
 interface VisibilityContext {
   key: keyof FieldVisibilityConfig

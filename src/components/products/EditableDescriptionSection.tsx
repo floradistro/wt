@@ -1,25 +1,25 @@
 /**
  * Editable Description Section
- * Inline editing for product description following iOS patterns
+ * Inline editing for product description
+ *
+ * State Management:
+ * - Reads description state from product-edit.store
+ * - Shows/hides based on edit mode and content availability
  */
 
 import { View, Text, StyleSheet, TextInput } from 'react-native'
 import { radius } from '@/theme/tokens'
 import { layout } from '@/theme/layout'
+import { useIsEditing, useEditedDescription, useOriginalProduct, productEditActions } from '@/stores/product-edit.store'
 
-interface EditableDescriptionSectionProps {
-  description: string | null
-  editedDescription: string
-  isEditing: boolean
-  onChangeText: (text: string) => void
-}
+export function EditableDescriptionSection() {
+  // Read from store
+  const isEditing = useIsEditing()
+  const editedDescription = useEditedDescription()
+  const originalProduct = useOriginalProduct()
 
-export function EditableDescriptionSection({
-  description,
-  editedDescription,
-  isEditing,
-  onChangeText,
-}: EditableDescriptionSectionProps) {
+  const description = originalProduct?.description || null
+
   // Don't render section if no description and not editing
   if (!description && !isEditing) return null
 
@@ -28,18 +28,18 @@ export function EditableDescriptionSection({
       <Text style={styles.sectionTitle}>DESCRIPTION</Text>
       <View style={styles.cardGlass}>
         {isEditing ? (
-            <View style={styles.editRow}>
-              <TextInput
-                style={styles.descriptionInput}
-                value={editedDescription}
-                onChangeText={onChangeText}
-                placeholder="Add a description..."
-                placeholderTextColor="rgba(235,235,245,0.3)"
-                multiline
-                textAlignVertical="top"
-              />
-            </View>
-          ) : (
+          <View style={styles.editRow}>
+            <TextInput
+              style={styles.descriptionInput}
+              value={editedDescription}
+              onChangeText={(text) => productEditActions.updateField('editedDescription', text)}
+              placeholder="Add a description..."
+              placeholderTextColor="rgba(235,235,245,0.3)"
+              multiline
+              textAlignVertical="top"
+            />
+          </View>
+        ) : (
             <View style={styles.viewRow}>
               <Text style={styles.descriptionText}>
                 {description?.replace(/<[^>]*>/g, '') || ''}

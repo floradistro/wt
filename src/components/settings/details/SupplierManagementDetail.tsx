@@ -4,13 +4,13 @@
  */
 
 import { View, Text, ScrollView, Pressable, ActivityIndicator, Animated, Alert, Image } from "react-native"
-import { useState } from "react"
 import { LiquidGlassView, LiquidGlassContainerView, isLiquidGlassSupported } from "@callstack/liquid-glass"
 import { LinearGradient } from "expo-linear-gradient"
 import * as Haptics from "expo-haptics"
 import { colors, spacing } from "@/theme/tokens"
 import { layout } from "@/theme/layout"
-import type { Supplier } from "@/hooks/useSuppliers"
+import { useSuppliers, useSuppliersLoading, useSuppliersActions } from "@/stores/suppliers-management.store"
+import { useSettingsUIActions } from "@/stores/settings-ui.store"
 import { SupplierManagementModals } from "../SupplierManagementModals"
 import { supplierManagementStyles as styles } from "./supplierManagement.styles"
 
@@ -25,42 +25,30 @@ function SuppliersIcon({ color }: { color: string }) {
 }
 
 function SupplierManagementDetail({
-  suppliers,
-  isLoading,
   headerOpacity,
-  onCreateSupplier,
-  onUpdateSupplier,
-  onDeleteSupplier,
-  onToggleStatus,
-  onReload,
   vendorLogo,
 }: {
-  suppliers: Supplier[]
-  isLoading: boolean
   headerOpacity: Animated.Value
-  onCreateSupplier: any
-  onUpdateSupplier: any
-  onDeleteSupplier: any
-  onToggleStatus: any
-  onReload: () => void
   vendorLogo?: string | null
 }) {
-  const [showAddModal, setShowAddModal] = useState(false)
-  const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null)
-  const [selectedSupplier, setSelectedSupplier] = useState<Supplier | null>(null)
+  // ✅ Read from stores instead of props
+  const suppliers = useSuppliers()
+  const isLoading = useSuppliersLoading()
+  const { deleteSupplier, toggleSupplierStatus } = useSuppliersActions()
+  const { openModal } = useSettingsUIActions()
 
+  // ✅ Use store actions instead of local state
   const handleAddSupplier = () => {
-    setEditingSupplier(null)
-    setShowAddModal(true)
-  }
-
-  const handleEditSupplier = (supplier: Supplier) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-    setEditingSupplier(supplier)
-    setShowAddModal(true)
+    openModal('addSupplier')
   }
 
-  const handleToggleStatus = async (supplier: Supplier) => {
+  const handleEditSupplier = (supplier: any) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    openModal('editSupplier', supplier)
+  }
+
+  const handleToggleStatus = async (supplier: any) => {
     const newStatus = !supplier.is_active
     const statusText = newStatus ? 'activate' : 'deactivate'
 
@@ -73,7 +61,7 @@ function SupplierManagementDetail({
           text: statusText.charAt(0).toUpperCase() + statusText.slice(1),
           onPress: async () => {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
-            const result = await onToggleStatus(supplier.id, newStatus)
+            const result = await toggleSupplierStatus(supplier.id, newStatus)
             if (!result.success) {
               Alert.alert('Error', result.error || 'Failed to update supplier status')
             }
@@ -83,7 +71,7 @@ function SupplierManagementDetail({
     )
   }
 
-  const handleDeleteSupplier = (supplier: Supplier) => {
+  const handleDeleteSupplier = (supplier: any) => {
     Alert.alert(
       'Delete Supplier',
       `Are you sure you want to permanently delete ${supplier.external_name}? This action cannot be undone.`,
@@ -94,7 +82,7 @@ function SupplierManagementDetail({
           style: 'destructive',
           onPress: async () => {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning)
-            const result = await onDeleteSupplier(supplier.id)
+            const result = await deleteSupplier(supplier.id)
             if (!result.success) {
               Alert.alert('Error', result.error || 'Failed to delete supplier')
             }
@@ -157,17 +145,8 @@ function SupplierManagementDetail({
           </View>
         </ScrollView>
 
-        <SupplierManagementModals
-          showAddModal={showAddModal}
-          editingSupplier={editingSupplier}
-          onCloseAddModal={() => {
-            setShowAddModal(false)
-            setEditingSupplier(null)
-          }}
-          onCreateSupplier={onCreateSupplier}
-          onUpdateSupplier={onUpdateSupplier}
-          onReload={onReload}
-        />
+        {/* ✅ Zero props - modal reads from stores */}
+        <SupplierManagementModals />
       </View>
     )
   }
@@ -352,17 +331,8 @@ function SupplierManagementDetail({
         )}
       </ScrollView>
 
-      <SupplierManagementModals
-        showAddModal={showAddModal}
-        editingSupplier={editingSupplier}
-        onCloseAddModal={() => {
-          setShowAddModal(false)
-          setEditingSupplier(null)
-        }}
-        onCreateSupplier={onCreateSupplier}
-        onUpdateSupplier={onUpdateSupplier}
-        onReload={onReload}
-      />
+      {/* ✅ Zero props - modal reads from stores */}
+      <SupplierManagementModals />
     </View>
   )
 }

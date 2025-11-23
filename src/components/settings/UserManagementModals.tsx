@@ -11,67 +11,46 @@ import { LinearGradient } from 'expo-linear-gradient'
 import * as Haptics from 'expo-haptics'
 import { colors, spacing, radius } from '@/theme/tokens'
 import { BlurView } from 'expo-blur'
-import type { UserWithLocations } from '@/hooks/useUsers'
-import type { UserLocationAccess } from '@/hooks/useUserLocations'
+import type { UserWithLocations } from '@/types/users'
+import type { UserLocationAccess } from '@/types/users'
+import { useActiveModal, useSelectedUser, useSettingsUIActions } from '@/stores/settings-ui.store'
+import { useUsersActions } from '@/stores/users-management.store'
+import { useUserLocations } from '@/hooks/useUserLocations'
 
-interface UserManagementModalsProps {
-  showAddModal: boolean
-  showPasswordModal: boolean
-  showLocationsModal: boolean
-  editingUser: UserWithLocations | null
-  selectedUser: UserWithLocations | null
-  locations: UserLocationAccess[]
-  onCloseAddModal: () => void
-  onClosePasswordModal: () => void
-  onCloseLocationsModal: () => void
-  onCreateUser: any
-  onUpdateUser: any
-  onSetPassword: any
-  onAssignLocations: any
-  onReload: () => void
-}
+// ✅ ZERO PROPS - Component reads everything from stores
+export function UserManagementModals() {
+  // Read modal state from store
+  const activeModal = useActiveModal()
+  const selectedUser = useSelectedUser()
+  const { locations } = useUserLocations()
 
-export function UserManagementModals({
-  showAddModal,
-  showPasswordModal,
-  showLocationsModal,
-  editingUser,
-  selectedUser,
-  locations,
-  onCloseAddModal,
-  onClosePasswordModal,
-  onCloseLocationsModal,
-  onCreateUser,
-  onUpdateUser,
-  onSetPassword,
-  onAssignLocations,
-  onReload,
-}: UserManagementModalsProps) {
+  // Get actions from stores
+  const { closeModal } = useSettingsUIActions()
+  const { createUser, updateUser, setUserPassword, assignLocations } = useUsersActions()
+
   return (
     <>
-      {showAddModal && (
+      {(activeModal === 'addUser' || activeModal === 'editUser') && (
         <AddEditUserModal
-          user={editingUser}
-          onClose={onCloseAddModal}
-          onCreateUser={onCreateUser}
-          onUpdateUser={onUpdateUser}
-          onReload={onReload}
+          user={selectedUser}
+          onClose={closeModal}
+          onCreateUser={createUser}
+          onUpdateUser={updateUser}
         />
       )}
-      {showPasswordModal && selectedUser && (
+      {activeModal === 'setPassword' && selectedUser && (
         <SetPasswordModal
           user={selectedUser}
-          onClose={onClosePasswordModal}
-          onSetPassword={onSetPassword}
+          onClose={closeModal}
+          onSetPassword={setUserPassword}
         />
       )}
-      {showLocationsModal && selectedUser && (
+      {activeModal === 'assignLocations' && selectedUser && (
         <AssignLocationsModal
           user={selectedUser}
           locations={locations}
-          onClose={onCloseLocationsModal}
-          onAssignLocations={onAssignLocations}
-          onReload={onReload}
+          onClose={closeModal}
+          onAssignLocations={assignLocations}
         />
       )}
     </>
@@ -84,13 +63,11 @@ function AddEditUserModal({
   onClose,
   onCreateUser,
   onUpdateUser,
-  onReload,
 }: {
   user: UserWithLocations | null
   onClose: () => void
   onCreateUser: any
   onUpdateUser: any
-  onReload: () => void
 }) {
   const { width, height } = useWindowDimensions()
   const isLandscape = width > height
@@ -142,7 +119,7 @@ function AddEditUserModal({
 
       if (result.success) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
-        onReload()
+        // ✅ Store actions auto-reload, no need for manual reload
         onClose()
       } else {
         setError(result.error || 'Failed to save user')
@@ -484,13 +461,11 @@ function AssignLocationsModal({
   locations,
   onClose,
   onAssignLocations,
-  onReload,
 }: {
   user: UserWithLocations
   locations: UserLocationAccess[]
   onClose: () => void
   onAssignLocations: any
-  onReload: () => void
 }) {
   const { width, height } = useWindowDimensions()
   const isLandscape = width > height
@@ -530,7 +505,7 @@ function AssignLocationsModal({
       const result = await onAssignLocations(user.id, selectedLocationIds)
       if (result.success) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
-        onReload()
+        // ✅ Store actions auto-reload, no need for manual reload
         onClose()
       } else {
         setError(result.error || 'Failed to assign locations')

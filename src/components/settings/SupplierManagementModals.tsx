@@ -5,39 +5,33 @@
  */
 
 import { View, Text, StyleSheet, Modal, Pressable, TextInput, ScrollView, ActivityIndicator, Alert, useWindowDimensions } from 'react-native'
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useMemo } from 'react'
 import { LiquidGlassView, isLiquidGlassSupported } from '@callstack/liquid-glass'
 import * as Haptics from 'expo-haptics'
 import { colors, spacing, radius } from '@/theme/tokens'
 import { BlurView } from 'expo-blur'
-import type { Supplier } from '@/hooks/useSuppliers'
+import type { Supplier } from '@/types/suppliers'
+import { useActiveModal, useSelectedSupplier, useSettingsUIActions } from '@/stores/settings-ui.store'
+import { useSuppliersActions } from '@/stores/suppliers-management.store'
 
-interface SupplierManagementModalsProps {
-  showAddModal: boolean
-  editingSupplier: Supplier | null
-  onCloseAddModal: () => void
-  onCreateSupplier: any
-  onUpdateSupplier: any
-  onReload: () => void
-}
+// ✅ ZERO PROPS - Component reads everything from stores
+export function SupplierManagementModals() {
+  // Read modal state from store
+  const activeModal = useActiveModal()
+  const selectedSupplier = useSelectedSupplier()
 
-export function SupplierManagementModals({
-  showAddModal,
-  editingSupplier,
-  onCloseAddModal,
-  onCreateSupplier,
-  onUpdateSupplier,
-  onReload,
-}: SupplierManagementModalsProps) {
+  // Get actions from stores
+  const { closeModal } = useSettingsUIActions()
+  const { createSupplier, updateSupplier } = useSuppliersActions()
+
   return (
     <>
-      {showAddModal && (
+      {(activeModal === 'addSupplier' || activeModal === 'editSupplier') && (
         <AddEditSupplierModal
-          supplier={editingSupplier}
-          onClose={onCloseAddModal}
-          onCreateSupplier={onCreateSupplier}
-          onUpdateSupplier={onUpdateSupplier}
-          onReload={onReload}
+          supplier={selectedSupplier}
+          onClose={closeModal}
+          onCreateSupplier={createSupplier}
+          onUpdateSupplier={updateSupplier}
         />
       )}
     </>
@@ -50,13 +44,11 @@ function AddEditSupplierModal({
   onClose,
   onCreateSupplier,
   onUpdateSupplier,
-  onReload,
 }: {
   supplier: Supplier | null
   onClose: () => void
   onCreateSupplier: any
   onUpdateSupplier: any
-  onReload: () => void
 }) {
   const { width, height } = useWindowDimensions()
   const isLandscape = width > height
@@ -99,7 +91,7 @@ function AddEditSupplierModal({
 
       if (result.success) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
-        onReload()
+        // ✅ Store actions auto-reload, no need for manual reload
         onClose()
       } else {
         setError(result.error || 'Failed to save supplier')

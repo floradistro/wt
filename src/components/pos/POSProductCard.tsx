@@ -2,14 +2,24 @@ import { View, Text, StyleSheet, Image, TouchableOpacity, Dimensions, Animated, 
 import { BlurView } from 'expo-blur'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import * as Haptics from 'expo-haptics'
-import { useState, useRef, memo, forwardRef, useImperativeHandle } from 'react'
+import { useState, useRef, memo, forwardRef, useImperativeHandle, useMemo } from 'react'
+
+// Stores (ZERO PROP DRILLING - Apple Engineering Standard)
+import { cartActions, useCartItems } from '@/stores/cart.store'
+import { useProductFilters } from '@/stores/product-filter.store'
+import { useTierSelectorProductId, checkoutUIActions } from '@/stores/checkout-ui.store'
+
+// Utils
+import { getMatchingFilters } from '@/utils/product-transformers'
+
+import { layout } from '@/theme/layout'
 
 const { width } = Dimensions.get('window')
 // Jobs Principle: 3-column grid accounting for cart sidebar
-// Layout matches Products/Settings: 375px cart + product area
+// ✅ FIXED: Layout matches iPad Settings: 320px cart + product area
 // Product area: 8px left padding + cards + 20px right padding
 // Cards: 3 columns with 16px gaps between them
-const cartWidth = 375 // Match nav sidebar width exactly
+const cartWidth = layout.sidebarWidth // ✅ FIXED: Use layout constant (320px, not hardcoded 375px)
 const productGridPadding = 8 + 20 // Left (8px) + right (20px) padding
 const gapsBetweenCards = 16 * 2 // 2 gaps for 3 columns (16px each)
 const totalUsedWidth = cartWidth + productGridPadding + gapsBetweenCards
@@ -38,18 +48,20 @@ interface Product {
 
 interface POSProductCardProps {
   product: Product
-  onAddToCart: (product: Product, tier?: PricingTier) => void
-  activeFilters?: {
-    category?: string
-    strainTypes?: string[]
-    consistencies?: string[]
-    flavors?: string[]
-  }
-  matchingFilters?: string[]
 }
 
-const POSProductCard = forwardRef<any, POSProductCardProps>(({ product, onAddToCart, matchingFilters }, ref) => {
+const POSProductCard = forwardRef<any, POSProductCardProps>(({ product }, ref) => {
+  // ✅ ZERO PROP DRILLING: Read all state from stores
+  const filters = useProductFilters()
+  const tierSelectorProductId = useTierSelectorProductId()
+  const cartItems = useCartItems()
   const insets = useSafeAreaInsets()
+
+  // ✅ ANTI-LOOP: Compute matching filters for this product with useMemo (NOT in selector)
+  const matchingFilters = useMemo(() =>
+    getMatchingFilters(product, filters),
+    [product, filters]
+  )
   const [showPricingModal, setShowPricingModal] = useState(false)
   const [selectedTier, setSelectedTier] = useState<number | null>(null)
   const scaleAnim = useRef(new Animated.Value(1)).current
@@ -129,8 +141,19 @@ const POSProductCard = forwardRef<any, POSProductCardProps>(({ product, onAddToC
       setSelectedTier(index)
     }
 
-    // Add to cart
-    onAddToCart(product, tier)
+    // ✅ ZERO PROP DRILLING: Check if we're in tier change mode
+    if (tierSelectorProductId) {
+      // Tier change mode: Update existing cart item
+      const cartItem = cartItems.find((item) => item.productId === tierSelectorProductId)
+      if (cartItem && tier) {
+        cartActions.changeTier(cartItem.id, product, tier)
+      }
+      // Clear tier selector mode
+      checkoutUIActions.setTierSelectorProductId(null)
+    } else {
+      // Normal mode: Add to cart
+      cartActions.addToCart(product, tier)
+    }
 
     // Jobs Principle: Auto-dismiss after brief visual confirmation
     setTimeout(() => {

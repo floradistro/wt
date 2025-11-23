@@ -19,7 +19,7 @@ import { useState, useMemo, useEffect } from 'react'
 import { LiquidGlassView, isLiquidGlassSupported } from '@callstack/liquid-glass'
 import * as Haptics from 'expo-haptics'
 import { colors, spacing, radius, typography } from '@/theme/tokens'
-import type { PaymentProcessor, ProcessorType, ProcessorFormData } from '@/hooks/usePaymentProcessors'
+import type { PaymentProcessor, ProcessorType, ProcessorFormData } from '@/types/payment-processors'
 
 interface PaymentProcessorModalProps {
   visible: boolean

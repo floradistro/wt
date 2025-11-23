@@ -28,25 +28,39 @@ import type { AAMVAData } from '@/lib/id-scanner/aamva-parser'
 import { POSModal } from './POSModal'
 import { logger } from '@/utils/logger'
 import { createCustomer } from '@/services/customers.service'
+import { usePOSSession } from '@/stores/posSession.store'
+import { useCustomerState } from '@/stores/customer.store'
+import { useActiveModal, checkoutUIActions } from '@/stores/checkout-ui.store'
 
 const { width } = Dimensions.get('window')
 const isTablet = width > 600
 
-interface POSAddCustomerModalProps {
-  visible: boolean
-  vendorId: string
-  prefilledData?: AAMVAData | null
-  onCustomerCreated: (customer: Customer) => void
-  onClose: () => void
-}
+/**
+ * POSAddCustomerModal - TRUE ZERO PROPS ✅✅✅
+ * NO PROPS - Reads state and calls actions from store
+ *
+ * Reads from stores:
+ * - visible: checkout-ui.store (activeModal === 'addCustomer')
+ * - vendorId: posSession.store (vendor.id)
+ * - prefilledData: customer.store (scannedData)
+ *
+ * Calls store actions:
+ * - onCustomerCreated → checkoutUIActions.handleCustomerCreated
+ * - onClose → checkoutUIActions.closeModal + customerActions.clearScannedData
+ */
+function POSAddCustomerModal() {
+  // ========================================
+  // STORES - TRUE ZERO PROPS (read from environment)
+  // ========================================
+  const activeModal = useActiveModal()
+  const visible = activeModal === 'addCustomer'
+  // ========================================
+  // STORES - Apple Engineering Standard (READ FROM ENVIRONMENT)
+  // ========================================
+  const { vendor } = usePOSSession()
+  const { scannedData: prefilledData } = useCustomerState()
+  const vendorId = vendor?.id || ''
 
-function POSAddCustomerModal({
-  visible,
-  vendorId,
-  prefilledData,
-  onCustomerCreated,
-  onClose,
-}: POSAddCustomerModalProps) {
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -127,7 +141,8 @@ function POSAddCustomerModal({
   const handleClose = () => {
     if (creating) return
     resetForm()
-    onClose()
+    // TRUE ZERO PROPS: Call store action instead of prop callback
+    checkoutUIActions.closeModal()
   }
 
   const handleCreate = async () => {
@@ -182,7 +197,8 @@ function POSAddCustomerModal({
 
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
       resetForm()
-      onCustomerCreated(posCustomer)
+      // TRUE ZERO PROPS: Call store action instead of prop callback
+      checkoutUIActions.handleCustomerCreated(posCustomer)
     } catch (error) {
       logger.error('Create customer error:', error)
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)

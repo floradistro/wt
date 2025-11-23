@@ -1,7 +1,11 @@
 /**
  * SalesHistoryModal Component
  * Product sales history with trends and analytics
- * Apple Engineering: Data visualization, clear insights, beautiful design
+ *
+ * State Management:
+ * - Reads product data from product-edit.store
+ * - Reads modal visibility from product-ui.store
+ * - Displays sales stats, charts, and recent transactions
  */
 
 import { View, Text, StyleSheet, Modal, Pressable, ScrollView, ActivityIndicator } from 'react-native'
@@ -12,13 +16,8 @@ import { colors, spacing, radius, typography } from '@/theme/tokens'
 import { layout } from '@/theme/layout'
 import { logger } from '@/utils/logger'
 import { useProductSalesHistory } from '@/hooks/useSalesHistory'
-import type { Product } from '@/hooks/useProducts'
-
-interface SalesHistoryModalProps {
-  visible: boolean
-  product: Product | null
-  onClose: () => void
-}
+import { useOriginalProduct } from '@/stores/product-edit.store'
+import { useActiveModal, productUIActions } from '@/stores/product-ui.store'
 
 type DateRange = '7days' | '30days' | '90days' | 'all'
 
@@ -29,11 +28,10 @@ const DATE_RANGES: { value: DateRange; label: string }[] = [
   { value: 'all', label: 'All Time' },
 ]
 
-export function SalesHistoryModal({
-  visible,
-  product,
-  onClose,
-}: SalesHistoryModalProps) {
+export function SalesHistoryModal() {
+  // Read from stores
+  const visible = useActiveModal() === 'sales-history'
+  const product = useOriginalProduct()
   const [dateRange, setDateRange] = useState<DateRange>('30days')
   const [startDate, setStartDate] = useState<string | undefined>()
   const [endDate, setEndDate] = useState<string | undefined>()
@@ -72,7 +70,7 @@ export function SalesHistoryModal({
 
   const handleClose = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-    onClose()
+    productUIActions.closeModal()
   }
 
   const formatCurrency = (value?: number) => {

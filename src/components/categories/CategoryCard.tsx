@@ -9,7 +9,7 @@ import { useState, useRef, useEffect } from 'react'
 import { LiquidGlassView, isLiquidGlassSupported } from '@callstack/liquid-glass'
 import * as Haptics from 'expo-haptics'
 import { layout } from '@/theme/layout'
-import type { Category } from '@/hooks/useCategories'
+import type { Category } from '@/types/categories'
 
 interface CategoryCardProps {
   category: Category

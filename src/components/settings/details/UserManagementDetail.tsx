@@ -4,76 +4,55 @@
  */
 
 import { View, Text, ScrollView, Pressable, ActivityIndicator, Alert, Animated, Image } from "react-native"
-import { useState } from "react"
 import { LiquidGlassView, LiquidGlassContainerView, isLiquidGlassSupported } from "@callstack/liquid-glass"
 import { LinearGradient } from "expo-linear-gradient"
 import * as Haptics from "expo-haptics"
 import { colors, spacing } from "@/theme/tokens"
 import { layout } from "@/theme/layout"
-import type { UserLocationAccess } from "@/hooks/useUserLocations"
-import type { UserWithLocations } from "@/hooks/useUsers"
+import { useUsers, useUsersLoading, useUsersActions } from "@/stores/users-management.store"
+import { useSettingsUIActions } from "@/stores/settings-ui.store"
+import { useUserLocations } from "@/hooks/useUserLocations"
 import { UserManagementModals } from "../UserManagementModals"
 import { TeamIcon } from "./icons"
 import { getRoleDisplay, getRoleBadgeColor } from "./userManagement.utils"
 import { styles } from "./userManagement.styles"
 
 function UserManagementDetail({
-  users,
-  isLoading,
   headerOpacity,
-  onCreateUser,
-  onUpdateUser,
-  onDeleteUser,
-  onSetPassword,
-  onAssignLocations,
-  onToggleStatus,
-  onReload,
-  locations,
   vendorLogo,
 }: {
-  users: UserWithLocations[]
-  isLoading: boolean
   headerOpacity: Animated.Value
-  onCreateUser: any
-  onUpdateUser: any
-  onDeleteUser: any
-  onSetPassword: any
-  onAssignLocations: any
-  onToggleStatus: any
-  onReload: () => void
-  locations: UserLocationAccess[]
   vendorLogo?: string | null
 }) {
-  const [showAddModal, setShowAddModal] = useState(false)
-  const [editingUser, setEditingUser] = useState<UserWithLocations | null>(null)
-  const [showPasswordModal, setShowPasswordModal] = useState(false)
-  const [showLocationsModal, setShowLocationsModal] = useState(false)
-  const [selectedUser, setSelectedUser] = useState<UserWithLocations | null>(null)
+  // ✅ Read from stores instead of props
+  const users = useUsers()
+  const isLoading = useUsersLoading()
+  const { locations } = useUserLocations()
+  const { deleteUser, toggleUserStatus } = useUsersActions()
+  const { openModal } = useSettingsUIActions()
 
+  // ✅ Use store actions instead of local state/callbacks
   const handleAddUser = () => {
-    setEditingUser(null)
-    setShowAddModal(true)
-  }
-
-  const handleEditUser = (user: UserWithLocations) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-    setEditingUser(user)
-    setShowAddModal(true)
+    openModal('addUser')
   }
 
-  const handleSetPassword = (user: UserWithLocations) => {
+  const handleEditUser = (user: any) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-    setSelectedUser(user)
-    setShowPasswordModal(true)
+    openModal('editUser', user)
   }
 
-  const handleAssignLocations = (user: UserWithLocations) => {
+  const handleSetPassword = (user: any) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-    setSelectedUser(user)
-    setShowLocationsModal(true)
+    openModal('setPassword', user)
   }
 
-  const handleToggleStatus = async (user: UserWithLocations) => {
+  const handleAssignLocations = (user: any) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    openModal('assignLocations', user)
+  }
+
+  const handleToggleStatus = async (user: any) => {
     const newStatus = user.status === 'active' ? 'inactive' : 'active'
     const statusText = newStatus === 'active' ? 'activate' : 'deactivate'
 
@@ -86,7 +65,7 @@ function UserManagementDetail({
           text: statusText.charAt(0).toUpperCase() + statusText.slice(1),
           onPress: async () => {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
-            const result = await onToggleStatus(user.id, newStatus)
+            const result = await toggleUserStatus(user.id, newStatus)
             if (!result.success) {
               Alert.alert('Error', result.error || 'Failed to update user status')
             }
@@ -96,7 +75,7 @@ function UserManagementDetail({
     )
   }
 
-  const handleDeleteUser = (user: UserWithLocations) => {
+  const handleDeleteUser = (user: any) => {
     Alert.alert(
       'Delete User',
       `Are you sure you want to delete ${user.first_name} ${user.last_name}? This cannot be undone.`,
@@ -107,7 +86,7 @@ function UserManagementDetail({
           style: 'destructive',
           onPress: async () => {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning)
-            const result = await onDeleteUser(user.id)
+            const result = await deleteUser(user.id)
             if (!result.success) {
               Alert.alert('Error', result.error || 'Failed to delete user')
             }
@@ -172,31 +151,8 @@ function UserManagementDetail({
           </View>
         </ScrollView>
 
-        <UserManagementModals
-          showAddModal={showAddModal}
-          showPasswordModal={showPasswordModal}
-          showLocationsModal={showLocationsModal}
-          editingUser={editingUser}
-          selectedUser={selectedUser}
-          locations={locations}
-          onCloseAddModal={() => {
-            setShowAddModal(false)
-            setEditingUser(null)
-          }}
-          onClosePasswordModal={() => {
-            setShowPasswordModal(false)
-            setSelectedUser(null)
-          }}
-          onCloseLocationsModal={() => {
-            setShowLocationsModal(false)
-            setSelectedUser(null)
-          }}
-          onCreateUser={onCreateUser}
-          onUpdateUser={onUpdateUser}
-          onSetPassword={onSetPassword}
-          onAssignLocations={onAssignLocations}
-          onReload={onReload}
-        />
+        {/* ✅ Zero props - modal reads from stores */}
+        <UserManagementModals />
       </View>
     )
   }
@@ -378,31 +334,8 @@ function UserManagementDetail({
         })}
       </ScrollView>
 
-      <UserManagementModals
-        showAddModal={showAddModal}
-        showPasswordModal={showPasswordModal}
-        showLocationsModal={showLocationsModal}
-        editingUser={editingUser}
-        selectedUser={selectedUser}
-        locations={locations}
-        onCloseAddModal={() => {
-          setShowAddModal(false)
-          setEditingUser(null)
-        }}
-        onClosePasswordModal={() => {
-          setShowPasswordModal(false)
-          setSelectedUser(null)
-        }}
-        onCloseLocationsModal={() => {
-          setShowLocationsModal(false)
-          setSelectedUser(null)
-        }}
-        onCreateUser={onCreateUser}
-        onUpdateUser={onUpdateUser}
-        onSetPassword={onSetPassword}
-        onAssignLocations={onAssignLocations}
-        onReload={onReload}
-      />
+      {/* ✅ Zero props - modal reads from stores */}
+      <UserManagementModals />
     </View>
   )
 }

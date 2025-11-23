@@ -1,6 +1,9 @@
 /**
- * POSProductBrowser Component
+ * POSProductBrowser Component - Apple Engineering Standard
  * Jobs Principle: One focused responsibility - Product display and filtering
+ *
+ * ZERO PROP DRILLING ✅
+ * Reads ALL state from stores - no props needed
  *
  * Handles:
  * - Product loading
@@ -10,10 +13,9 @@
  * - Filter dropdown UI
  */
 
-import { useState, useEffect, useRef, useCallback, memo } from 'react'
+import { useState, useEffect, useRef, useCallback, memo, useMemo } from 'react'
 import { View, Text, StyleSheet, ScrollView, Pressable, Animated } from 'react-native'
 import * as Haptics from 'expo-haptics'
-import { supabase } from '@/lib/supabase/client'
 import { LiquidGlassView, isLiquidGlassSupported } from '@callstack/liquid-glass'
 import { layout } from '@/theme/layout'
 
@@ -21,34 +23,60 @@ import { layout } from '@/theme/layout'
 import { POSSearchBar } from '../search/POSSearchBar'
 import { POSProductGrid } from './POSProductGrid'
 
-// Hooks
-import { useFilters } from '@/hooks/pos'
-
-// Stores (ZERO PROP DRILLING)
+// Stores (ZERO PROP DRILLING - Apple Engineering Standard)
 import { usePOSSession } from '@/stores/posSession.store'
 import { productsActions, useProductsState } from '@/stores/products.store'
+import { useProductsStore } from '@/stores/products.store'
+import {
+  useProductFilters,
+  useActiveFilterCount,
+  productFilterActions,
+} from '@/stores/product-filter.store'
 
-// Utilities
-import { transformInventoryToProducts, extractCategories } from '@/utils/product-transformers'
+// Utils
+import { applyFilters, extractFieldValues } from '@/utils/product-transformers'
 
 // Types
-import type { Product, SessionInfo, PricingTier } from '@/types/pos'
 import { logger } from '@/utils/logger'
 
-interface POSProductBrowserProps {
-  onAddToCart: (product: Product, tier?: PricingTier) => void
-  onProductsLoaded?: (products: Product[]) => void
-}
-
-function POSProductBrowser({ onAddToCart, onProductsLoaded }: POSProductBrowserProps) {
+function POSProductBrowser() {
   // ========================================
-  // STORES - ZERO PROP DRILLING
+  // STORES - ZERO PROP DRILLING (Apple Standard)
   // ========================================
   const { sessionInfo } = usePOSSession()
-  const { products, categories, loading: storeLoading } = useProductsState()
+  const { categories, loading: storeLoading } = useProductsState()
+
+  // Read raw data from stores
+  const products = useProductsStore((state) => state.products)
+  const filters = useProductFilters()
+  const activeFilterCount = useActiveFilterCount()
+
+  // ✅ ANTI-LOOP: Compute filtered/derived data with useMemo (NOT in selectors)
+  const filteredProducts = useMemo(() =>
+    applyFilters(products, filters),
+    [products, filters]
+  )
+
+  const availableStrainTypes = useMemo(() =>
+    extractFieldValues(products, 'strain_type'),
+    [products]
+  )
+
+  const availableConsistencies = useMemo(() =>
+    extractFieldValues(
+      products.filter((p) => p.category === 'Concentrates'),
+      'consistency'
+    ),
+    [products]
+  )
+
+  const availableFlavors = useMemo(() =>
+    extractFieldValues(products, 'flavor'),
+    [products]
+  )
 
   // ========================================
-  // STATE
+  // LOCAL STATE (UI only - dropdown visibility)
   // ========================================
   const [showCategoryDropdown, setShowCategoryDropdown] = useState(false)
 
@@ -57,33 +85,16 @@ function POSProductBrowser({ onAddToCart, onProductsLoaded }: POSProductBrowserP
   const filterScaleAnim = useRef(new Animated.Value(0.92)).current
 
   // ========================================
-  // FILTERS - Using consolidated hook
-  // ========================================
-  const {
-    filters,
-    filteredProducts,
-    activeFilterCount,
-    matchingFiltersMap,
-    availableStrainTypes,
-    availableConsistencies,
-    availableFlavors,
-    setSearchQuery,
-    setCategory,
-    toggleStrainType,
-    toggleConsistency,
-    toggleFlavor,
-    clearFilters,
-  } = useFilters(products)
-
-  // ========================================
   // EFFECTS
   // ========================================
+  // Load products into products.store
   useEffect(() => {
     if (sessionInfo?.locationId) {
-      // Load products into global store (ZERO PROP DRILLING)
       productsActions.loadProducts(sessionInfo.locationId)
     }
   }, [sessionInfo?.locationId])
+
+  // No need to sync products - filter store reads directly from products store! (Apple pattern)
 
   // Animate filter dropdown
   useEffect(() => {
@@ -116,27 +127,24 @@ function POSProductBrowser({ onAddToCart, onProductsLoaded }: POSProductBrowserP
         }),
       ]).start()
     }
-  }, [showCategoryDropdown])
-
-  // Products are now loaded directly in products.store (ZERO PROP DRILLING)
-  // No local loading function needed!
+  }, [showCategoryDropdown, filterDropdownAnim, filterScaleAnim])
 
   // ========================================
-  // HANDLERS
+  // HANDLERS - Use store actions (Apple Standard)
   // ========================================
   const handleCategoryPress = useCallback(
     (category: string) => {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-      setCategory(category)
+      productFilterActions.setCategory(category)
       setShowCategoryDropdown(false)
     },
-    [setCategory]
+    []
   )
 
   const handleClearFilters = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-    clearFilters()
-  }, [clearFilters])
+    productFilterActions.clearFilters()
+  }, [])
 
   const handleFilterPress = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
@@ -262,7 +270,7 @@ function POSProductBrowser({ onAddToCart, onProductsLoaded }: POSProductBrowserP
                             <Pressable
                               onPress={() => {
                                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                                toggleStrainType(strainType)
+                                productFilterActions.toggleStrainType(strainType)
                               }}
                               style={[
                                 styles.filterItemPressable,
@@ -305,7 +313,7 @@ function POSProductBrowser({ onAddToCart, onProductsLoaded }: POSProductBrowserP
                             <Pressable
                               onPress={() => {
                                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                                toggleConsistency(consistency)
+                                productFilterActions.toggleConsistency(consistency)
                               }}
                               style={[
                                 styles.filterItemPressable,
@@ -348,7 +356,7 @@ function POSProductBrowser({ onAddToCart, onProductsLoaded }: POSProductBrowserP
                             <Pressable
                               onPress={() => {
                                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                                toggleFlavor(flavor)
+                                productFilterActions.toggleFlavor(flavor)
                               }}
                               style={[
                                 styles.filterItemPressable,
@@ -370,25 +378,12 @@ function POSProductBrowser({ onAddToCart, onProductsLoaded }: POSProductBrowserP
         </>
       )}
 
-      {/* Product Grid */}
-      <POSProductGrid
-        products={filteredProducts}
-        loading={storeLoading}
-        onAddToCart={onAddToCart}
-        activeFilters={{
-          category: filters.category,
-          strainTypes: filters.strainTypes,
-          consistencies: filters.consistencies,
-          flavors: filters.flavors,
-        }}
-        matchingFiltersMap={matchingFiltersMap}
-      />
+      {/* Product Grid - ZERO PROPS ✅ */}
+      <POSProductGrid />
 
-      {/* Search Bar with Filters */}
+      {/* Search Bar with Filters - ZERO PROPS ✅ */}
       <POSSearchBar
-        searchQuery={filters.searchQuery}
-        onSearchChange={setSearchQuery}
-        activeFilterCount={activeFilterCount}
+        onSearchChange={productFilterActions.setSearchQuery}
         onFilterPress={handleFilterPress}
         onClearFilters={handleClearFilters}
       />

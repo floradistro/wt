@@ -40,28 +40,39 @@ import { useCustomerSearch } from '@/hooks/pos/useCustomerSearch'
 import { useCustomerSelectorAnimations } from '@/hooks/pos/useCustomerSelectorAnimations'
 import { useRecentCustomers, type RecentCustomer } from '@/hooks/pos/useRecentCustomers'
 import { formatRelativeTime } from '@/utils/time'
+import { usePOSSession } from '@/stores/posSession.store'
+import { useActiveModal, checkoutUIActions } from '@/stores/checkout-ui.store'
 
-interface POSUnifiedCustomerSelectorProps {
-  visible: boolean
-  vendorId: string
-  onCustomerSelected: (customer: Customer) => void
-  onNoMatchFoundWithData: (data: AAMVAData) => void
-  onAddCustomer?: () => void
-  onClose: () => void
-}
-
-function POSUnifiedCustomerSelector({
-  visible,
-  vendorId,
-  onCustomerSelected,
-  onNoMatchFoundWithData,
-  onAddCustomer,
-  onClose,
-}: POSUnifiedCustomerSelectorProps) {
+/**
+ * POSUnifiedCustomerSelector - TRUE ZERO PROPS ✅✅✅
+ * NO PROPS - Reads state and calls actions from store
+ *
+ * Reads from stores:
+ * - visible: checkout-ui.store (activeModal === 'customerSelector')
+ * - vendorId: posSession.store (vendor.id)
+ *
+ * Calls store actions:
+ * - onCustomerSelected → checkoutUIActions.handleCustomerSelected
+ * - onNoMatchFoundWithData → checkoutUIActions.handleNoMatchFoundWithData
+ * - onAddCustomer → checkoutUIActions.handleAddCustomer
+ * - onClose → checkoutUIActions.closeModal
+ */
+function POSUnifiedCustomerSelector() {
+  // ========================================
+  // STORES - TRUE ZERO PROPS (read from environment)
+  // ========================================
+  const activeModal = useActiveModal()
+  const visible = activeModal === 'customerSelector'
   const insets = useSafeAreaInsets()
   const device = useCameraDevice('back')
   const cameraRef = useRef<Camera>(null)
   const searchInputRef = useRef<TextInput>(null)
+
+  // ========================================
+  // STORES - Apple Engineering Standard (READ FROM ENVIRONMENT)
+  // ========================================
+  const { vendor } = usePOSSession()
+  const vendorId = vendor?.id || ''
 
   // ========================================
   // HOOKS - Camera Scanner (REFACTORED)
@@ -78,10 +89,10 @@ function POSUnifiedCustomerSelector({
     codeScanner,
     resetAll,
     handleCameraPress,
-  } = useCameraScanner(onNoMatchFoundWithData)
+  } = useCameraScanner() // ✅ ZERO PROPS - calls customer.store action directly
 
   // ========================================
-  // HOOKS - Customer Search (REFACTORED)
+  // HOOKS - Customer Search (ZERO PROPS ✅)
   // ========================================
   const {
     searchQuery,
@@ -89,16 +100,16 @@ function POSUnifiedCustomerSelector({
     searching,
     setSearchQuery,
     clearSearch,
-  } = useCustomerSearch(vendorId)
+  } = useCustomerSearch() // ✅ ZERO PROPS - reads vendorId from customer.store
 
   // ========================================
-  // HOOKS - Recent Customers
+  // HOOKS - Recent Customers (ZERO PROPS ✅)
   // ========================================
   const {
     recentCustomers,
     addRecentCustomer,
     clearRecentCustomers,
-  } = useRecentCustomers(vendorId)
+  } = useRecentCustomers() // ✅ ZERO PROPS - reads vendorId from customer.store
 
   // Smart mode: typing mode vs scanning mode
   const isTypingMode = searchQuery.length > 0
@@ -164,8 +175,9 @@ function POSUnifiedCustomerSelector({
   const handleCustomerSelect = useCallback((customer: Customer) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
     addRecentCustomer(customer)
-    onCustomerSelected(customer)
-  }, [addRecentCustomer, onCustomerSelected])
+    // TRUE ZERO PROPS: Call store action instead of prop callback
+    checkoutUIActions.handleCustomerSelected(customer)
+  }, [addRecentCustomer])
 
   // Memoize customer item rendering
   const renderCustomerItem = useCallback(({ item, index, total, isRecent }: { item: Customer | RecentCustomer; index: number; total: number; isRecent?: boolean }) => {
@@ -220,7 +232,7 @@ function POSUnifiedCustomerSelector({
       animationType="slide"
       presentationStyle="fullScreen"
       supportedOrientations={['portrait', 'landscape', 'landscape-left', 'landscape-right']}
-      onRequestClose={onClose}
+      onRequestClose={() => checkoutUIActions.closeModal()}
       statusBarTranslucent
     >
       <View style={styles.container}>
@@ -256,7 +268,7 @@ function POSUnifiedCustomerSelector({
         )}
 
         {/* Manual Add Customer Button */}
-        {!isTypingMode && isScanning && !isProcessing && !scanMessage && !parsedData && onAddCustomer && (
+        {!isTypingMode && isScanning && !isProcessing && !scanMessage && !parsedData && (
           <View style={styles.scanLabelContainer}>
             <LiquidGlassView
               effect="regular"
@@ -271,7 +283,8 @@ function POSUnifiedCustomerSelector({
               <TouchableOpacity
                 onPress={() => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                  onAddCustomer()
+                  // TRUE ZERO PROPS: Call store action instead of prop callback
+                  checkoutUIActions.handleAddCustomer()
                 }}
                 style={styles.manualAddButtonInner}
                 activeOpacity={0.7}
@@ -384,7 +397,7 @@ function POSUnifiedCustomerSelector({
               accessibilityHint="Type to search customers by name, email, or phone"
             />
             <TouchableOpacity
-              onPress={onClose}
+              onPress={() => checkoutUIActions.closeModal()}
               style={styles.doneButton}
               accessible={true}
               accessibilityRole="button"

@@ -1,34 +1,85 @@
 /**
- * POS Payment Modal
+ * POS Payment Modal - TRUE ZERO PROPS ✅✅✅
  * Single Responsibility: Payment orchestration and modal presentation
- * Apple Standard: Component < 300 lines
+ *
+ * NO PROPS - Reads state and calls actions from store:
+ * - visible: checkout-ui.store (activeModal === 'payment')
+ * - Cart totals from cart.store
+ * - Tax calculations from tax.store
+ * - Loyalty info from loyalty.store
+ * - Customer data from customer.store
+ * - Session data from posSession.store
+ * - Payment processor from payment-processor.store
+ *
+ * Calls store actions:
+ * - onPaymentComplete → checkoutUIActions.handlePaymentComplete
+ * - onCancel → checkoutUIActions.handlePaymentCancel
  */
 
 import { View, Text, StyleSheet, Modal, TouchableOpacity, Animated, useWindowDimensions, ScrollView } from 'react-native'
 import { LiquidGlassView } from '@callstack/liquid-glass'
-import { useState, useRef, useEffect, memo } from 'react'
+import { useState, useRef, useEffect, memo, useMemo } from 'react'
 import { Ionicons } from '@expo/vector-icons'
 import * as Haptics from 'expo-haptics'
 import { usePaymentProcessor } from '@/stores/payment-processor.store'
+import { useCartTotals } from '@/stores/cart.store'
+import { useLoyaltyState } from '@/stores/loyalty.store'
+import { useSelectedCustomer } from '@/stores/customer.store'
+import { usePOSSession } from '@/stores/posSession.store'
+import { taxActions } from '@/stores/tax.store'
+import { useActiveModal, checkoutUIActions } from '@/stores/checkout-ui.store'
 import { CashPaymentView } from './payment/CashPaymentView'
 import { CardPaymentView } from './payment/CardPaymentView'
 import { SplitPaymentView } from './payment/SplitPaymentView'
 import { SaleSuccessModal } from './SaleSuccessModal'
-import type { PaymentModalProps, PaymentData, SaleCompletionData } from './payment/PaymentTypes'
+import type { PaymentData, SaleCompletionData } from './payment/PaymentTypes'
 
-function POSPaymentModal({
-  visible,
-  total,
-  subtotal,
-  taxAmount,
-  taxRate,
-  taxName,
-  itemCount,
-  onPaymentComplete,
-  onCancel,
-  locationId,
-  registerId,
-}: PaymentModalProps) {
+function POSPaymentModal() {
+  // ========================================
+  // STORES - TRUE ZERO PROPS (read from environment)
+  // ========================================
+  const activeModal = useActiveModal()
+  const visible = activeModal === 'payment'
+  // ========================================
+  // STORES - Apple Engineering Standard (ZERO PROP DRILLING)
+  // ========================================
+  const { subtotal, itemCount } = useCartTotals()
+  const { loyaltyProgram, pointsToRedeem } = useLoyaltyState()
+  const selectedCustomer = useSelectedCustomer()
+  const { sessionInfo } = usePOSSession()
+
+  // Calculate tax from store
+  const { taxAmount, taxRate, taxName } = useMemo(() => {
+    if (!sessionInfo?.locationId) return { taxAmount: 0, taxRate: 0, taxName: undefined }
+    return taxActions.calculateTax(subtotal, sessionInfo.locationId)
+  }, [subtotal, sessionInfo?.locationId])
+
+  // Calculate loyalty discount
+  const loyaltyDiscountAmount = useMemo(() => {
+    if (!loyaltyProgram || pointsToRedeem === 0) return 0
+    return (pointsToRedeem * (loyaltyProgram.point_value || 0.01))
+  }, [loyaltyProgram, pointsToRedeem])
+
+  // Calculate total
+  const total = useMemo(() => {
+    const subtotalAfterDiscount = Math.max(0, subtotal - loyaltyDiscountAmount)
+    return subtotalAfterDiscount + taxAmount
+  }, [subtotal, loyaltyDiscountAmount, taxAmount])
+
+  // Payment processor status
+  const currentProcessor = usePaymentProcessor((state) => state.currentProcessor)
+  const processorStatus = usePaymentProcessor((state) => state.status)
+  const hasActiveProcessor = !!currentProcessor
+  const canCompleteCard = hasActiveProcessor
+
+  // Customer name for display
+  const customerName = selectedCustomer
+    ? `${selectedCustomer.first_name} ${selectedCustomer.last_name}`.trim()
+    : undefined
+
+  // ========================================
+  // LOCAL STATE (UI only)
+  // ========================================
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card' | 'split'>('cash')
   const [showSuccessModal, setShowSuccessModal] = useState(false)
   const [completionData, setCompletionData] = useState<SaleCompletionData | null>(null)
@@ -38,12 +89,6 @@ function POSPaymentModal({
   // Use current height for animations
   const slideAnim = useRef(new Animated.Value(height)).current
   const fadeAnim = useRef(new Animated.Value(0)).current
-
-  const currentProcessor = usePaymentProcessor((state) => state.currentProcessor)
-  const processorStatus = usePaymentProcessor((state) => state.status)
-
-  const hasActiveProcessor = !!currentProcessor
-  const canCompleteCard = hasActiveProcessor
 
   // Animation - update when visibility or dimensions change
   useEffect(() => {
@@ -73,7 +118,8 @@ function POSPaymentModal({
 
   const handleClose = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-    onCancel()
+    // TRUE ZERO PROPS: Call store action instead of prop callback
+    checkoutUIActions.handlePaymentCancel()
   }
 
   const handleTabChange = (method: 'cash' | 'card' | 'split') => {
@@ -83,7 +129,8 @@ function POSPaymentModal({
 
   const handlePaymentComplete = async (paymentData: PaymentData) => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
-    const saleData = await onPaymentComplete(paymentData)
+    // TRUE ZERO PROPS: Call store action instead of prop callback
+    const saleData = await checkoutUIActions.handlePaymentComplete(paymentData)
 
     // Show Apple-style success modal
     setCompletionData(saleData)
@@ -100,7 +147,8 @@ function POSPaymentModal({
     // Then close the payment modal smoothly
     setTimeout(() => {
       setCompletionData(null)
-      onCancel()
+      // TRUE ZERO PROPS: Call store action instead of prop callback
+      checkoutUIActions.handlePaymentCancel()
     }, 300) // Give 300ms for any exit animations
   }
 
@@ -243,46 +291,23 @@ function POSPaymentModal({
             scrollIndicatorInsets={{ right: 2 }}
             bounces={false}
           >
-            {/* Payment Views */}
+            {/* Payment Views - TRUE ZERO PROPS ✅ */}
+            {/* All data props removed - payment views read from stores */}
+            {/* Only coordination callback remains */}
             {paymentMethod === 'cash' && (
               <CashPaymentView
-                total={total}
-                subtotal={subtotal}
-                taxAmount={taxAmount}
-                taxRate={taxRate}
-                taxName={taxName}
-                itemCount={itemCount}
                 onComplete={handlePaymentComplete}
               />
             )}
 
             {paymentMethod === 'card' && (
               <CardPaymentView
-                total={total}
-                subtotal={subtotal}
-                taxAmount={taxAmount}
-                taxRate={taxRate}
-                taxName={taxName}
-                itemCount={itemCount}
-                currentProcessor={currentProcessor}
-                processorStatus={processorStatus}
-                locationId={locationId}
-                registerId={registerId}
                 onComplete={handlePaymentComplete}
               />
             )}
 
             {paymentMethod === 'split' && (
               <SplitPaymentView
-                total={total}
-                subtotal={subtotal}
-                taxAmount={taxAmount}
-                taxRate={taxRate}
-                taxName={taxName}
-                itemCount={itemCount}
-                currentProcessor={currentProcessor}
-                locationId={locationId}
-                registerId={registerId}
                 onComplete={handlePaymentComplete}
               />
             )}

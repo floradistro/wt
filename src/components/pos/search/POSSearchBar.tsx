@@ -1,13 +1,24 @@
+/**
+ * POSSearchBar - ZERO PROPS ✅
+ *
+ * ZERO PROP DRILLING:
+ * - No searchQuery prop - reads from product-filter.store
+ * - No activeFilterCount prop - reads from product-filter.store
+ * - Keeps coordination callbacks (onSearchChange, onFilterPress, onClearFilters)
+ */
+
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator } from 'react-native'
-import { memo, type ReactNode } from 'react'
+import { memo, type ReactNode, useMemo } from 'react'
 import { LiquidGlassView, isLiquidGlassSupported } from '@callstack/liquid-glass'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import * as Haptics from 'expo-haptics'
 import { layout } from '@/theme/layout'
 
+// Stores (ZERO PROP DRILLING - Apple Standard)
+import { useProductFilters, useActiveFilterCount } from '@/stores/product-filter.store'
+
 interface POSSearchBarProps {
-  searchQuery: string
   onSearchChange: (query: string) => void
-  activeFilterCount: number
   onFilterPress: () => void
   onClearFilters: () => void
   children?: ReactNode
@@ -18,22 +29,38 @@ interface POSSearchBarProps {
 }
 
 function POSSearchBar({
-  searchQuery,
   onSearchChange,
-  activeFilterCount,
   onFilterPress,
   onClearFilters,
   children,
   isSearching = false,
   placeholder = 'Search products...',
 }: POSSearchBarProps) {
+  // ========================================
+  // STORE - TRUE ZERO PROPS (read from environment)
+  // ========================================
+  const filters = useProductFilters()
+  const searchQuery = filters.searchQuery
+  const activeFilterCount = useActiveFilterCount()
+  const insets = useSafeAreaInsets()
+
+  // Apple Engineering: Dynamic positioning with safe area insets
+  // Ensures perfect alignment with product grid on all devices
+  const containerStyle = useMemo(() => ({
+    position: 'absolute' as const,
+    top: layout.pos.searchBarTop,
+    left: Math.max(layout.pos.searchBarLeft, insets.left),     // Account for notch/safe area
+    right: Math.max(layout.pos.searchBarRight, insets.right),  // Account for notch/safe area
+    zIndex: 10,
+  }), [insets.left, insets.right])
+
   const handleClearSearch = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
     onSearchChange('')
   }
 
   return (
-    <View style={styles.searchHeaderFloating}>
+    <View style={containerStyle}>
       <View style={styles.unifiedSearchBar}>
         <LiquidGlassView
           style={[
@@ -160,21 +187,15 @@ const POSSearchBarMemo = memo(POSSearchBar)
 export { POSSearchBarMemo as POSSearchBar }
 
 const styles = StyleSheet.create({
-  searchHeaderFloating: {
-    position: 'absolute',
-    top: 8, // Ultra-minimal to match cart margins
-    left: 8, // Match product grid left padding
-    right: 8, // Ultra-minimal to match cart margins
-    zIndex: 10,
-  },
+  // Note: Position styles moved to dynamic containerStyle (uses safe area insets)
   unifiedSearchBar: {
     alignSelf: 'stretch',
   },
   unifiedSearchBarPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    height: 48,
-    borderRadius: 24,
+    height: layout.pos.searchBarHeight, // 48px - from design system
+    borderRadius: layout.pos.searchBarHeight / 2, // Perfect pill shape
     borderCurve: 'continuous',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.15)',

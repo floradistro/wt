@@ -46,34 +46,37 @@ export interface SaleCompletionData {
   loyaltyPointsRedeemed?: number
 }
 
+/**
+ * PaymentModalProps - Apple Engineering Standard ✅
+ * ZERO DATA PROPS - Only callbacks and UI state
+ * Modal reads all data from stores
+ */
 export interface PaymentModalProps {
-  visible: boolean
-  total: number
-  subtotal: number
-  taxAmount: number
-  taxRate: number
-  taxName?: string
-  loyaltyDiscountAmount?: number
-  loyaltyPointsEarned?: number
-  currentLoyaltyPoints?: number
-  pointValue?: number
-  maxRedeemablePoints?: number
-  itemCount: number
-  customerName?: string
-  onApplyLoyaltyPoints?: (points: number) => void
-  onPaymentComplete: (paymentData: PaymentData) => Promise<SaleCompletionData>  // CHANGED: Now returns sale data
-  onCancel: () => void
-  hasPaymentProcessor?: boolean
-  locationId?: string
-  registerId?: string
+  visible: boolean  // ✅ UI state
+  onPaymentComplete: (paymentData: PaymentData) => Promise<SaleCompletionData>  // ✅ Callback
+  onCancel: () => void  // ✅ Callback
+
+  // All data props REMOVED - read from stores:
+  // - total, subtotal, taxAmount, taxRate, taxName → tax.store + cart.store
+  // - loyaltyDiscountAmount, loyaltyPointsEarned, etc → loyalty.store
+  // - itemCount → cart.store
+  // - customerName → customer.store
+  // - hasPaymentProcessor → payment-processor.store
+  // - locationId, registerId → posSession.store
 }
 
-export interface BasePaymentViewProps {
-  total: number
-  subtotal: number
-  taxAmount: number
-  taxRate: number
-  taxName?: string
-  itemCount: number
-  onComplete: (paymentData: PaymentData) => void
-}
+/**
+ * ❌ DELETED: BasePaymentViewProps
+ *
+ * Payment views now read ALL data from stores:
+ * - total, subtotal → cart.store (useCartTotals)
+ * - taxAmount, taxRate, taxName → tax.store (taxActions.calculateTax)
+ * - itemCount → cart.store (useCartTotals)
+ * - locationId → posSession.store (usePOSSession)
+ * - currentProcessor, processorStatus → payment-processor.store (usePaymentProcessor)
+ *
+ * Only coordination callback remains:
+ * - onComplete: (paymentData: PaymentData) => Promise<SaleCompletionData>
+ *
+ * This is TRUE ZERO PROP DRILLING ✅
+ */

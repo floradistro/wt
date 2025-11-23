@@ -269,6 +269,7 @@ export const radius = {
   lg: 16,     // Large (grouped lists)
   xl: 20,     // Extra large (inputs)
   xxl: 24,    // 2x large (modals, containers)
+  xxxl: 32,   // 3x large (large modals) ✅ ADDED: Used in POS modals
   pill: 100,  // Pill shape (height/2)
   round: 999, // Fully round
 } as const

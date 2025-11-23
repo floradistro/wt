@@ -1,7 +1,11 @@
 /**
  * AdjustInventoryModal Component
  * Manual inventory adjustments with reason tracking
- * Apple Engineering: Clean, purposeful, validated
+ *
+ * State Management:
+ * - Reads product data from product-edit.store
+ * - Reads modal visibility and location from product-ui.store
+ * - Stores adjustment result in product-ui.store to trigger parent reload
  */
 
 import { View, Text, StyleSheet, Modal, Pressable, TextInput, ScrollView, ActivityIndicator } from 'react-native'
@@ -11,19 +15,10 @@ import * as Haptics from 'expo-haptics'
 import { colors, spacing, radius, typography } from '@/theme/tokens'
 import { layout } from '@/theme/layout'
 import { logger } from '@/utils/logger'
-import { useProductAdjustments } from '@/hooks/useInventoryAdjustments'
+import { useInventoryAdjustments } from '@/hooks/useInventoryAdjustments'
 import type { AdjustmentType } from '@/services/inventory-adjustments.service'
-import type { Product } from '@/hooks/useProducts'
-
-interface AdjustInventoryModalProps {
-  visible: boolean
-  product: Product | null
-  locationId?: string
-  locationName?: string
-  onClose: () => void
-  onAdjusted: (result?: { quantity_after: number; product_total_stock?: number }) => void
-  onLocationChange?: (locationId: string, locationName: string) => void
-}
+import { useOriginalProduct } from '@/stores/product-edit.store'
+import { useActiveModal, useSelectedLocation, productUIActions } from '@/stores/product-ui.store'
 
 const ADJUSTMENT_TYPES: { value: AdjustmentType; label: string; description: string; quickReasons: string[] }[] = [
   {
@@ -76,19 +71,16 @@ const ADJUSTMENT_TYPES: { value: AdjustmentType; label: string; description: str
   },
 ]
 
-export function AdjustInventoryModal({
-  visible,
-  product,
-  locationId: initialLocationId,
-  locationName: initialLocationName,
-  onClose,
-  onAdjusted,
-  onLocationChange,
-}: AdjustInventoryModalProps) {
-  const [selectedLocationId, setSelectedLocationId] = useState(initialLocationId)
-  const [selectedLocationName, setSelectedLocationName] = useState(initialLocationName)
+export function AdjustInventoryModal() {
+  // Read from stores
+  const visible = useActiveModal() === 'adjust-inventory'
+  const product = useOriginalProduct()
+  const { selectedLocationId: storeLocationId, selectedLocationName: storeLocationName } = useSelectedLocation()
 
-  const { createAdjustment } = useProductAdjustments(product?.id, selectedLocationId)
+  const [selectedLocationId, setSelectedLocationId] = useState(storeLocationId)
+  const [selectedLocationName, setSelectedLocationName] = useState(storeLocationName)
+
+  const { createAdjustment } = useInventoryAdjustments(product?.id, selectedLocationId)
   const [adjustmentType, setAdjustmentType] = useState<AdjustmentType>('count_correction')
   const [quantityChange, setQuantityChange] = useState('')
   const [reason, setReason] = useState('')
@@ -98,11 +90,11 @@ export function AdjustInventoryModal({
   const [showLocationPicker, setShowLocationPicker] = useState(false)
   const [showCustomReason, setShowCustomReason] = useState(false)
 
-  // Sync local state with props
+  // Sync local state with store
   useEffect(() => {
-    setSelectedLocationId(initialLocationId)
-    setSelectedLocationName(initialLocationName)
-  }, [initialLocationId, initialLocationName])
+    setSelectedLocationId(storeLocationId)
+    setSelectedLocationName(storeLocationName)
+  }, [storeLocationId, storeLocationName])
 
   // Get current inventory for this location
   const currentInventory = product?.inventory?.find(inv => inv.location_id === selectedLocationId)
@@ -186,12 +178,12 @@ export function AdjustInventoryModal({
 
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
 
-      // Pass result back for optimistic UI update
-      onAdjusted(result ? {
+      // Store result to trigger parent reload
+      productUIActions.setAdjustmentResult(result ? {
         quantity_after: result.quantity_after,
-      } : undefined)
+      } : null)
 
-      onClose()
+      productUIActions.closeModal()
     } catch (error) {
       logger.error('Failed to create adjustment', { error })
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
@@ -205,14 +197,13 @@ export function AdjustInventoryModal({
     setSelectedLocationId(invLocationId)
     setSelectedLocationName(invLocationName)
     setShowLocationPicker(false)
-    if (onLocationChange) {
-      onLocationChange(invLocationId, invLocationName)
-    }
+    // Update store so location persists across modal sessions
+    productUIActions.setLocation(invLocationId, invLocationName)
   }
 
   const handleCancel = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-    onClose()
+    productUIActions.closeModal()
   }
 
   const selectedType = ADJUSTMENT_TYPES.find(t => t.value === adjustmentType)

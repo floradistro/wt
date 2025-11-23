@@ -8,6 +8,7 @@
  */
 
 import { create } from 'zustand'
+import { devtools } from 'zustand/middleware'
 
 interface LocationFilterState {
   selectedLocationIds: string[]
@@ -20,7 +21,9 @@ interface LocationFilterState {
   reset: () => void
 }
 
-export const useLocationFilter = create<LocationFilterState>((set, get) => ({
+export const useLocationFilter = create<LocationFilterState>()(
+  devtools(
+    (set, get) => ({
   selectedLocationIds: [],
   isInitialized: false,
 
@@ -96,4 +99,7 @@ export const useLocationFilter = create<LocationFilterState>((set, get) => ({
       isInitialized: false,
     })
   },
-}))
+    }),
+    { name: 'LocationFilterStore' }
+  )
+)

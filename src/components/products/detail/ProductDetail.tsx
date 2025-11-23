@@ -9,20 +9,28 @@
  * - Actions (adjust inventory, sales history)
  */
 
-import React, { useState, useEffect } from 'react'
+import React, { useEffect, useRef } from 'react'
 import { View, Text, StyleSheet, Pressable, ScrollView, TextInput, Image, ActivityIndicator } from 'react-native'
 import * as Haptics from 'expo-haptics'
-import { supabase } from '@/lib/supabase/client'
 import { useAuth } from '@/stores/auth.store'
-import { logger } from '@/utils/logger'
 import { layout } from '@/theme/layout'
 import { spacing, radius } from '@/theme/tokens'
-import type { Product, PricingTier } from '@/hooks/useProducts'
+import type { Product } from '@/types/products'
 import { EditableDescriptionSection } from '@/components/products/EditableDescriptionSection'
 import { EditablePricingSection } from '@/components/products/EditablePricingSection'
 import { EditableCustomFieldsSection } from '@/components/products/EditableCustomFieldsSection'
 import { AdjustInventoryModal } from '@/components/products/AdjustInventoryModal'
 import { SalesHistoryModal } from '@/components/products/SalesHistoryModal'
+import {
+  useProductEditState,
+  useIsEditing,
+  useIsSaving,
+  useEditedName,
+  useEditedSKU,
+  useOriginalProduct,
+  productEditActions,
+} from '@/stores/product-edit.store'
+import { useProductUIState, useLastAdjustmentResult, productUIActions } from '@/stores/product-ui.store'
 
 interface ProductDetailProps {
   product: Product
@@ -57,127 +65,73 @@ function SettingsRow({ label, value, showChevron = true, onPress }: SettingsRowP
 }
 
 export function ProductDetail({ product, onBack, onProductUpdated }: ProductDetailProps) {
-  const [isEditing, setIsEditing] = useState(false)
-  const [saving, setSaving] = useState(false)
+  // Auth from context
   const { user } = useAuth()
 
-  // Modal state
-  const [showAdjustInventoryModal, setShowAdjustInventoryModal] = useState(false)
-  const [showSalesHistoryModal, setShowSalesHistoryModal] = useState(false)
-  const [selectedLocationId, setSelectedLocationId] = useState<string | undefined>()
-  const [selectedLocationName, setSelectedLocationName] = useState<string | undefined>()
+  // Edit state from product-edit.store
+  const isEditing = useIsEditing()
+  const saving = useIsSaving()
+  const storeEditedName = useEditedName()
+  const storeEditedSKU = useEditedSKU()
+  const originalProduct = useOriginalProduct()
 
-  // Edit state
-  const [editedName, setEditedName] = useState(product.name)
-  const [editedSKU, setEditedSKU] = useState(product.sku || '')
-  const [editedDescription, setEditedDescription] = useState(product.description || '')
-  const [editedPrice, setEditedPrice] = useState(product.price?.toString() || product.regular_price?.toString() || '')
-  const [editedCostPrice, setEditedCostPrice] = useState(product.cost_price?.toString() || '')
-  const [pricingMode, setPricingMode] = useState<'single' | 'tiered'>(product.pricing_data?.mode || 'single')
-  const [pricingTiers, setPricingTiers] = useState<PricingTier[]>(product.pricing_data?.tiers || [])
-  const [availableTemplates, setAvailableTemplates] = useState<any[]>([])
-  const [selectedTemplateId, setSelectedTemplateId] = useState(product.pricing_data?.template_id || null)
-  const [editedCustomFields, setEditedCustomFields] = useState<Record<string, any>>(product.custom_fields || {})
+  // Modal state from product-ui.store
+  const { activeModal, selectedLocationId, selectedLocationName } = useProductUIState()
+  const lastAdjustmentResult = useLastAdjustmentResult()
 
   const hasMultipleLocations = (product.inventory?.length || 0) > 1
+
+  // Use store values when editing, fallback to product when store not initialized
+  const editedName = storeEditedName || product.name
+  const editedSKU = storeEditedSKU || product.sku || ''
+
+  // Initialize edit state synchronously on mount and product change
+  const isInitialized = useRef(false)
+
+  useEffect(() => {
+    // Always initialize on mount or product change
+    productEditActions.startEditing(product)
+    isInitialized.current = true
+
+    return () => {
+      productEditActions.stopEditing()
+      isInitialized.current = false
+    }
+  }, [product.id])
 
   // Set default location to first inventory location
   useEffect(() => {
     if (product.inventory && product.inventory.length > 0 && !selectedLocationId) {
-      setSelectedLocationId(product.inventory[0].location_id)
-      setSelectedLocationName(product.inventory[0].location_name)
+      productUIActions.setLocation(product.inventory[0].location_id, product.inventory[0].location_name || '')
     }
-  }, [product.id])
+  }, [product.id, selectedLocationId])
 
-  // Load pricing templates when entering edit mode
+  // Watch for adjustment results and trigger parent reload
   useEffect(() => {
-    if (isEditing && product.primary_category_id) {
-      loadPricingTemplates(product.primary_category_id)
+    if (lastAdjustmentResult) {
+      onProductUpdated()
+      // Clear the result after handling it
+      productUIActions.setAdjustmentResult(null)
     }
-  }, [isEditing, product.primary_category_id])
-
-  const loadPricingTemplates = async (categoryId: string) => {
-    try {
-      const { data, error } = await supabase
-        .from('pricing_tier_templates')
-        .select('*')
-        .eq('category_id', categoryId)
-        .eq('is_active', true)
-        .order('display_order')
-
-      if (error) throw error
-      setAvailableTemplates(data || [])
-    } catch (error) {
-      logger.error('Failed to load pricing templates:', error)
-    }
-  }
+  }, [lastAdjustmentResult, onProductUpdated])
 
   const handleSave = async () => {
-    if (!user?.email) return
+    if (!user?.id) return
 
-    try {
-      setSaving(true)
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy)
+    const vendorId = (user as any).vendor_id || user.id
 
-      const { data: userData, error: userError } = await supabase
-        .from('users')
-        .select('vendor_id')
-        .eq('auth_user_id', user.id)
-        .maybeSingle()
-
-      if (userError || !userData) throw userError || new Error('User record not found')
-
-      const pricingData = {
-        mode: pricingMode,
-        single_price: pricingMode === 'single' ? parseFloat(editedPrice) || null : null,
-        tiers: pricingMode === 'tiered' ? pricingTiers : undefined,
-        template_id: selectedTemplateId,
-        updated_at: new Date().toISOString(),
-      }
-
-      const { error: updateError } = await supabase
-        .from('products')
-        .update({
-          name: editedName,
-          sku: editedSKU,
-          description: editedDescription,
-          cost_price: parseFloat(editedCostPrice) || null,
-          pricing_data: pricingData,
-          custom_fields: editedCustomFields,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', product.id)
-        .eq('vendor_id', userData.vendor_id)
-
-      if (updateError) throw updateError
-
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
-      setIsEditing(false)
+    await productEditActions.saveProduct(user.id, vendorId, () => {
       onProductUpdated()
-    } catch (error) {
-      logger.error('Failed to save product:', {
-        error,
-        message: error instanceof Error ? error.message : 'Unknown error',
-        details: JSON.stringify(error, null, 2)
-      })
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
-    } finally {
-      setSaving(false)
-    }
+    })
   }
 
   const handleCancel = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-    setEditedName(product.name)
-    setEditedSKU(product.sku || '')
-    setEditedDescription(product.description || '')
-    setEditedPrice(product.price?.toString() || product.regular_price?.toString() || '')
-    setEditedCostPrice(product.cost_price?.toString() || '')
-    setPricingMode(product.pricing_data?.mode || 'single')
-    setPricingTiers(product.pricing_data?.tiers || [])
-    setSelectedTemplateId(product.pricing_data?.template_id || null)
-    setEditedCustomFields(product.custom_fields || {})
-    setIsEditing(false)
+    productEditActions.cancelEdit()
+  }
+
+  // Don't render until product is provided
+  if (!product) {
+    return null
   }
 
   return (
@@ -212,7 +166,7 @@ export function ProductDetail({ product, onBack, onProductUpdated }: ProductDeta
             <Pressable
               onPress={() => {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                setIsEditing(true)
+                productEditActions.updateField('isEditing', true)
               }}
               style={styles.editButton}
             >
@@ -230,7 +184,7 @@ export function ProductDetail({ product, onBack, onProductUpdated }: ProductDeta
               ) : (
                 <View style={[styles.headerIconPlaceholder, styles.headerIcon]}>
                   <Text style={styles.headerIconText}>
-                    {(isEditing ? editedName : product.name).charAt(0).toUpperCase()}
+                    {(isEditing && editedName ? editedName : product.name).charAt(0).toUpperCase()}
                   </Text>
                 </View>
               )}
@@ -240,14 +194,14 @@ export function ProductDetail({ product, onBack, onProductUpdated }: ProductDeta
                     <TextInput
                       style={styles.headerTitleInput}
                       value={editedName}
-                      onChangeText={setEditedName}
+                      onChangeText={(text) => productEditActions.updateField('editedName', text)}
                       placeholder="Product name"
                       placeholderTextColor="rgba(235,235,245,0.3)"
                     />
                     <TextInput
                       style={styles.headerSubtitleInput}
                       value={editedSKU}
-                      onChangeText={setEditedSKU}
+                      onChangeText={(text) => productEditActions.updateField('editedSKU', text)}
                       placeholder="SKU"
                       placeholderTextColor="rgba(235,235,245,0.3)"
                     />
@@ -279,26 +233,7 @@ export function ProductDetail({ product, onBack, onProductUpdated }: ProductDeta
         </View>
 
         {/* Pricing Section */}
-        <EditablePricingSection
-          price={product.price}
-          costPrice={product.cost_price}
-          salePrice={product.sale_price}
-          onSale={product.on_sale}
-          pricingMode={pricingMode}
-          pricingTiers={pricingTiers}
-          templateId={selectedTemplateId}
-          isEditing={isEditing}
-          editedPrice={editedPrice}
-          editedCostPrice={editedCostPrice}
-          onPriceChange={setEditedPrice}
-          onCostPriceChange={setEditedCostPrice}
-          onPricingModeChange={setPricingMode}
-          onTiersChange={setPricingTiers}
-          onTemplateChange={setSelectedTemplateId}
-          categoryId={product.primary_category_id}
-          availableTemplates={availableTemplates}
-          loadTemplates={loadPricingTemplates}
-        />
+        <EditablePricingSection />
 
         {/* Inventory Section */}
         <View style={styles.section}>
@@ -344,59 +279,25 @@ export function ProductDetail({ product, onBack, onProductUpdated }: ProductDeta
         </View>
 
         {/* Description */}
-        <EditableDescriptionSection
-          description={product.description}
-          editedDescription={editedDescription}
-          isEditing={isEditing}
-          onChangeText={setEditedDescription}
-        />
+        <EditableDescriptionSection />
 
         {/* Custom Fields */}
-        <EditableCustomFieldsSection
-          customFields={product.custom_fields}
-          editedCustomFields={editedCustomFields}
-          isEditing={isEditing}
-          onCustomFieldsChange={setEditedCustomFields}
-        />
+        <EditableCustomFieldsSection />
 
         {/* Actions */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>ACTIONS</Text>
           <View style={styles.cardGlass}>
-            <SettingsRow
-              label="Adjust Inventory"
-              onPress={() => setShowAdjustInventoryModal(true)}
-            />
-            <SettingsRow
-              label="View Sales History"
-              onPress={() => setShowSalesHistoryModal(true)}
-            />
+            <SettingsRow label="Adjust Inventory" onPress={() => productUIActions.openModal('adjust-inventory')} />
+            <SettingsRow label="View Sales History" onPress={() => productUIActions.openModal('sales-history')} />
             {hasMultipleLocations && <SettingsRow label="Transfer Stock" />}
           </View>
         </View>
       </ScrollView>
 
       {/* Modals */}
-      <AdjustInventoryModal
-        visible={showAdjustInventoryModal}
-        product={product}
-        locationId={selectedLocationId}
-        locationName={selectedLocationName}
-        onClose={() => setShowAdjustInventoryModal(false)}
-        onAdjusted={(result) => {
-          onProductUpdated()
-          setShowAdjustInventoryModal(false)
-        }}
-        onLocationChange={(locId, locName) => {
-          setSelectedLocationId(locId)
-          setSelectedLocationName(locName)
-        }}
-      />
-      <SalesHistoryModal
-        visible={showSalesHistoryModal}
-        product={product}
-        onClose={() => setShowSalesHistoryModal(false)}
-      />
+      <AdjustInventoryModal />
+      <SalesHistoryModal />
     </>
   )
 }

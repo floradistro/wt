@@ -17,7 +17,7 @@ import * as Haptics from 'expo-haptics'
 import { ProductItem } from '@/components/products/list/ProductItem'
 import { layout } from '@/theme/layout'
 import { colors, spacing, radius } from '@/theme/tokens'
-import type { Product } from '@/hooks/useProducts'
+import type { Product } from '@/types/products'
 
 interface ProductsListViewProps {
   products: Product[]

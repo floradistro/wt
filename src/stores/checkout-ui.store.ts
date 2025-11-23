@@ -1,11 +1,13 @@
 /**
  * Checkout UI Store - Apple Engineering Standard
  *
- * Principle: Centralized UI state for checkout flow
- * Replaces: Scattered local state and prop drilling in POSCart/POSCheckout
+ * Principle: Centralized UI state for checkout flow + TRUE ZERO PROPS modal management
+ * Replaces: Scattered local state and prop drilling in POSCart/POSCheckout + all modal props
  *
  * Benefits:
  * - Zero prop drilling for UI state
+ * - TRUE ZERO PROPS - modals read state and call actions directly from store
+ * - No callbacks passed as props - all actions in Zustand
  * - Accessible anywhere in checkout flow
  * - Redux DevTools visibility
  * - Clean separation: business logic (cart.store) vs UI state (checkout-ui.store)
@@ -14,6 +16,11 @@
 import { create } from 'zustand'
 import { devtools } from 'zustand/middleware'
 import { useShallow } from 'zustand/react/shallow'
+import * as Haptics from 'expo-haptics'
+import type { Customer } from '@/types/pos'
+import type { AAMVAData } from '@/lib/id-scanner/aamva-parser'
+import type { PaymentData, SaleCompletionData } from '@/components/pos/payment'
+import { logger } from '@/utils/logger'
 
 interface CheckoutUIState {
   // Campaign discount selection
@@ -22,6 +29,9 @@ interface CheckoutUIState {
   // Tier selector state
   tierSelectorProductId: string | null
 
+  // Staff discount modal
+  staffDiscountItemId: string | null
+
   // Discount selector visibility
   showDiscountSelector: boolean
 
@@ -29,22 +39,54 @@ interface CheckoutUIState {
   activeModal: string | null
   modalData: Record<string, any> | null
 
-  // Actions
+  // Error modal state
+  errorModal: {
+    visible: boolean
+    title: string
+    message: string
+  }
+
+  // UI Actions
   setSelectedDiscountId: (discountId: string | null) => void
   setTierSelectorProductId: (productId: string | null) => void
+  setStaffDiscountItemId: (itemId: string | null) => void
   setShowDiscountSelector: (show: boolean) => void
   openModal: (id: string, data?: any) => void
   closeModal: () => void
   isModalOpen: (id: string) => boolean
+  setErrorModal: (visible: boolean, title?: string, message?: string) => void
   reset: () => void
+
+  // Modal Actions - TRUE ZERO PROPS (no callbacks needed as props)
+  // These are set by POSCheckoutModals during initialization
+  handleCustomerSelected?: (customer: Customer) => void
+  handleNoMatchFoundWithData?: (data: AAMVAData) => Promise<void>
+  handleCustomerCreated?: (customer: Customer) => void
+  handleAddCustomer?: () => void
+  handleSelectMatch?: (customer: Customer) => void
+  handleCreateNewCustomer?: () => void
+  handleSearchManually?: () => void
+  handlePaymentComplete?: (paymentData: PaymentData) => Promise<SaleCompletionData>
+  handlePaymentCancel?: () => void
+  handleCloseDrawerSubmit?: (closingCash: number, notes: string) => Promise<void>
+  handleCloseDrawerCancel?: () => void
+
+  // Register modal action handlers (called by POSCheckoutModals)
+  registerModalHandlers: (handlers: Partial<CheckoutUIState>) => void
 }
 
 const initialState = {
   selectedDiscountId: null,
   tierSelectorProductId: null,
+  staffDiscountItemId: null,
   showDiscountSelector: false,
   activeModal: null,
   modalData: null,
+  errorModal: {
+    visible: false,
+    title: '',
+    message: '',
+  },
 }
 
 export const useCheckoutUIStore = create<CheckoutUIState>()(
@@ -64,6 +106,13 @@ export const useCheckoutUIStore = create<CheckoutUIState>()(
        */
       setTierSelectorProductId: (productId: string | null) => {
         set({ tierSelectorProductId: productId }, false, 'checkoutUI/setTierSelectorProductId')
+      },
+
+      /**
+       * Set which cart item's staff discount modal is open
+       */
+      setStaffDiscountItemId: (itemId: string | null) => {
+        set({ staffDiscountItemId: itemId }, false, 'checkoutUI/setStaffDiscountItemId')
       },
 
       /**
@@ -100,6 +149,25 @@ export const useCheckoutUIStore = create<CheckoutUIState>()(
       },
 
       /**
+       * Set error modal state
+       */
+      setErrorModal: (visible: boolean, title = '', message = '') => {
+        set(
+          { errorModal: { visible, title, message } },
+          false,
+          'checkoutUI/setErrorModal'
+        )
+      },
+
+      /**
+       * Register modal action handlers
+       * TRUE ZERO PROPS: Modals call these actions instead of receiving callbacks as props
+       */
+      registerModalHandlers: (handlers: Partial<CheckoutUIState>) => {
+        set(handlers, false, 'checkoutUI/registerModalHandlers')
+      },
+
+      /**
        * Reset entire UI state (for checkout completion or cart clear)
        */
       reset: () => {
@@ -122,6 +190,10 @@ export const useSelectedDiscountId = () =>
 export const useTierSelectorProductId = () =>
   useCheckoutUIStore((state) => state.tierSelectorProductId)
 
+// Get staff discount item ID
+export const useStaffDiscountItemId = () =>
+  useCheckoutUIStore((state) => state.staffDiscountItemId)
+
 // Get discount selector visibility
 export const useShowDiscountSelector = () =>
   useCheckoutUIStore((state) => state.showDiscountSelector)
@@ -134,16 +206,80 @@ export const useActiveModal = () =>
 export const useModalData = () =>
   useCheckoutUIStore((state) => state.modalData)
 
+// Get error modal state
+export const useErrorModal = () =>
+  useCheckoutUIStore((state) => state.errorModal)
+
 // Export checkout UI actions as plain object (not a hook!)
 export const checkoutUIActions = {
   get setSelectedDiscountId() { return useCheckoutUIStore.getState().setSelectedDiscountId },
   get setTierSelectorProductId() { return useCheckoutUIStore.getState().setTierSelectorProductId },
+  get setStaffDiscountItemId() { return useCheckoutUIStore.getState().setStaffDiscountItemId },
   get setShowDiscountSelector() { return useCheckoutUIStore.getState().setShowDiscountSelector },
   get openModal() { return useCheckoutUIStore.getState().openModal },
   get closeModal() { return useCheckoutUIStore.getState().closeModal },
+  get setErrorModal() { return useCheckoutUIStore.getState().setErrorModal },
+  get registerModalHandlers() { return useCheckoutUIStore.getState().registerModalHandlers },
   // isModalOpen is still available for non-reactive checks if needed
   isModalOpen: (id: string) => useCheckoutUIStore.getState().activeModal === id,
   get reset() { return useCheckoutUIStore.getState().reset },
+
+  // Modal action handlers (TRUE ZERO PROPS - called directly by modals)
+  get handleCustomerSelected() {
+    const handler = useCheckoutUIStore.getState().handleCustomerSelected
+    if (!handler) logger.warn('⚠️ handleCustomerSelected not registered yet')
+    return handler || (() => {})
+  },
+  get handleNoMatchFoundWithData() {
+    const handler = useCheckoutUIStore.getState().handleNoMatchFoundWithData
+    if (!handler) logger.warn('⚠️ handleNoMatchFoundWithData not registered yet')
+    return handler || (async () => {})
+  },
+  get handleCustomerCreated() {
+    const handler = useCheckoutUIStore.getState().handleCustomerCreated
+    if (!handler) logger.warn('⚠️ handleCustomerCreated not registered yet')
+    return handler || (() => {})
+  },
+  get handleAddCustomer() {
+    const handler = useCheckoutUIStore.getState().handleAddCustomer
+    if (!handler) logger.warn('⚠️ handleAddCustomer not registered yet')
+    return handler || (() => {})
+  },
+  get handleSelectMatch() {
+    const handler = useCheckoutUIStore.getState().handleSelectMatch
+    if (!handler) logger.warn('⚠️ handleSelectMatch not registered yet')
+    return handler || (() => {})
+  },
+  get handleCreateNewCustomer() {
+    const handler = useCheckoutUIStore.getState().handleCreateNewCustomer
+    if (!handler) logger.warn('⚠️ handleCreateNewCustomer not registered yet')
+    return handler || (() => {})
+  },
+  get handleSearchManually() {
+    const handler = useCheckoutUIStore.getState().handleSearchManually
+    if (!handler) logger.warn('⚠️ handleSearchManually not registered yet')
+    return handler || (() => {})
+  },
+  get handlePaymentComplete() {
+    const handler = useCheckoutUIStore.getState().handlePaymentComplete
+    if (!handler) logger.warn('⚠️ handlePaymentComplete not registered yet')
+    return handler || (async () => ({} as SaleCompletionData))
+  },
+  get handlePaymentCancel() {
+    const handler = useCheckoutUIStore.getState().handlePaymentCancel
+    if (!handler) logger.warn('⚠️ handlePaymentCancel not registered yet')
+    return handler || (() => {})
+  },
+  get handleCloseDrawerSubmit() {
+    const handler = useCheckoutUIStore.getState().handleCloseDrawerSubmit
+    if (!handler) logger.warn('⚠️ handleCloseDrawerSubmit not registered yet')
+    return handler || (async () => {})
+  },
+  get handleCloseDrawerCancel() {
+    const handler = useCheckoutUIStore.getState().handleCloseDrawerCancel
+    if (!handler) logger.warn('⚠️ handleCloseDrawerCancel not registered yet')
+    return handler || (() => {})
+  },
 }
 
 // Legacy hook for backward compatibility

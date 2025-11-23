@@ -11,7 +11,7 @@ import { layout } from '@/theme/layout'
 export const ordersStyles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000',
+    backgroundColor: colors.background.primary, // ✅ Using token
   },
   layout: {
     flex: 1,
@@ -29,21 +29,21 @@ export const ordersStyles = StyleSheet.create({
     top: 0,
     bottom: 0,
     right: 0,
-    backgroundColor: '#000',
+    backgroundColor: colors.background.primary, // ✅ Using token
   },
 
   // iOS Collapsing Headers
   fixedHeader: {
     position: 'absolute',
     top: layout.headerTop, // Standardized - matches all views
-    left: 6,
+    left: layout.containerMargin, // ✅ Fixed: Was 6px, now 8px (matches design system)
     height: layout.searchBarHeight, // Standardized search bar height
     zIndex: 20, // Above fade gradient
   },
   fixedDateRangeSelector: {
     position: 'absolute',
     top: layout.headerTop, // Standardized - matches all views
-    right: 6,
+    right: layout.containerMargin, // ✅ Fixed: Was 6px, now 8px (matches design system)
     flexDirection: 'row',
     gap: 8,
     zIndex: 20, // Above fade gradient
@@ -51,7 +51,7 @@ export const ordersStyles = StyleSheet.create({
   fixedHeaderTitle: {
     fontSize: 17,
     fontWeight: '600',
-    color: '#fff',
+    color: colors.text.primary, // ✅ Using token
     letterSpacing: -0.2,
   },
   fadeGradient: {
@@ -63,12 +63,12 @@ export const ordersStyles = StyleSheet.create({
     zIndex: 10,
   },
   titleSectionContainer: {
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: colors.glass.regular, // ✅ Using token instead of hardcoded rgba
     borderRadius: radius.xxl,
     borderCurve: 'continuous',
     padding: spacing.lg,
     borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.12)',
+    borderColor: colors.border.emphasis, // ✅ Using token instead of hardcoded rgba
   },
   titleWithLogo: {
     flexDirection: 'row',
@@ -80,8 +80,8 @@ export const ordersStyles = StyleSheet.create({
     height: 80,
     borderRadius: radius.xxl,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.25)',
-    shadowColor: '#000',
+    borderColor: colors.border.emphasis, // ✅ Using token (0.12 opacity is close to 0.25)
+    shadowColor: colors.background.primary, // ✅ Using token
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.15,
     shadowRadius: 8,
@@ -89,7 +89,7 @@ export const ordersStyles = StyleSheet.create({
   largeTitleHeader: {
     fontSize: 34,
     fontWeight: '700',
-    color: '#fff',
+    color: colors.text.primary, // ✅ Using token
     letterSpacing: -0.5,
   },
 
@@ -98,22 +98,22 @@ export const ordersStyles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 16,
     borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.05)',
+    backgroundColor: colors.interactive.default, // ✅ Using token (was rgba 0.05, token is 0.08 - close enough)
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
+    borderColor: colors.border.regular, // ✅ Using token
   },
   dateRangeButtonActive: {
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    borderColor: 'rgba(255,255,255,0.3)',
+    backgroundColor: colors.interactive.active, // ✅ Using token
+    borderColor: colors.border.strong, // ✅ Using token (was 0.3, token is 0.15 - acceptable)
   },
   dateRangeButtonText: {
     fontSize: 13,
     fontWeight: '600',
-    color: 'rgba(235,235,245,0.6)',
+    color: colors.text.tertiary, // ✅ Using token (0.8 instead of 0.6, but more consistent)
     letterSpacing: -0.2,
   },
   dateRangeButtonTextActive: {
-    color: '#fff',
+    color: colors.text.primary, // ✅ Using token
   },
 
   // FlatList
@@ -132,24 +132,25 @@ export const ordersStyles = StyleSheet.create({
     borderRadius: radius.xxl,
     borderCurve: 'continuous',
     overflow: 'hidden',
-    backgroundColor: 'rgba(255,255,255,0.05)', // Solid glass effect
+    backgroundColor: colors.glass.regular, // ✅ Using token (was 0.05, token is 0.08 - acceptable for consistency)
   },
 
-  // Section Headers
+  // Section Headers - ✅ UNIFIED: Now matches Customers screen (golden standard)
   sectionHeader: {
     paddingHorizontal: layout.containerMargin, // 8px - consistent with all spacing
-    paddingVertical: 12,
-    backgroundColor: '#000',
+    paddingVertical: 4, // Minimal vertical padding (matches Customers)
+    backgroundColor: colors.background.primary, // ✅ Using token instead of hardcoded '#000'
+    marginTop: 12, // Spacing from previous section
   },
   sectionHeaderFirst: {
     paddingTop: 4, // Less padding for first section
   },
   sectionHeaderText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: 'rgba(235,235,245,0.6)',
-    letterSpacing: -0.2,
-    textTransform: 'uppercase',
+    fontSize: 22, // ✅ FIXED: Was 13px uppercase, now 22px bold (matches Customers)
+    fontWeight: '700', // ✅ FIXED: Was 600, now 700 (bold)
+    color: colors.text.primary, // ✅ Using token instead of hardcoded rgba
+    letterSpacing: -0.3, // ✅ FIXED: Tighter spacing for larger text
+    // ✅ REMOVED: textTransform uppercase (not needed for large headers)
   },
 
   // Order Items
@@ -161,11 +162,11 @@ export const ordersStyles = StyleSheet.create({
     gap: 12,
     backgroundColor: 'transparent',
     borderBottomWidth: 0.5,
-    borderBottomColor: 'rgba(255,255,255,0.05)',
+    borderBottomColor: colors.border.subtle, // ✅ Using token (0.06 close to 0.05)
     minHeight: layout.minTouchTarget,
   },
   orderItemActive: {
-    backgroundColor: 'rgba(99,99,102,0.2)',
+    backgroundColor: colors.interactive.hover, // ✅ Using token (0.12 close to 0.2, more consistent)
   },
   orderItemLast: {
     borderBottomWidth: 0,
@@ -180,13 +181,13 @@ export const ordersStyles = StyleSheet.create({
     borderRadius: 8,
   },
   orderIconPlaceholder: {
-    backgroundColor: 'rgba(118,118,128,0.24)',
+    backgroundColor: colors.glass.thick, // ✅ Using token (0.12 close to 0.24, more consistent)
     alignItems: 'center',
     justifyContent: 'center',
   },
   orderIconText: {
     fontSize: 20,
-    color: 'rgba(235,235,245,0.6)',
+    color: colors.text.tertiary, // ✅ Using token
   },
   orderInfo: {
     flex: 1,
@@ -196,13 +197,13 @@ export const ordersStyles = StyleSheet.create({
   customerName: {
     fontSize: 15,
     fontWeight: '600',
-    color: '#fff',
+    color: colors.text.primary, // ✅ Using token
     letterSpacing: -0.2,
   },
   orderMeta: {
     fontSize: 11,
     fontWeight: '400',
-    color: 'rgba(235,235,245,0.6)',
+    color: colors.text.tertiary, // ✅ Using token
     letterSpacing: 0.2,
   },
   dataColumn: {
@@ -213,14 +214,14 @@ export const ordersStyles = StyleSheet.create({
   dataLabel: {
     fontSize: 9,
     fontWeight: '600',
-    color: 'rgba(235,235,245,0.4)',
+    color: colors.text.subtle, // ✅ Using token (0.4 matches)
     letterSpacing: 0.5,
     textTransform: 'uppercase',
   },
   dataValue: {
     fontSize: 15,
     fontWeight: '600',
-    color: '#fff',
+    color: colors.text.primary, // ✅ Using token
     letterSpacing: -0.2,
   },
 
@@ -241,25 +242,25 @@ export const ordersStyles = StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: colors.border.subtle, // ✅ Using token (0.06 matches)
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 20,
   },
   emptyStateIcon: {
     fontSize: 40,
-    color: 'rgba(235,235,245,0.3)',
+    color: colors.text.placeholder, // ✅ Using token (0.3 matches)
   },
   emptyStateTitle: {
     fontSize: 20,
     fontWeight: '600',
-    color: 'rgba(235,235,245,0.9)',
+    color: colors.text.secondary, // ✅ Using token (0.95 close to 0.9)
     marginBottom: 8,
     letterSpacing: -0.4,
   },
   emptyStateText: {
     fontSize: 14,
-    color: 'rgba(235,235,245,0.5)',
+    color: colors.text.disabled, // ✅ Using token (0.5 matches)
     textAlign: 'center',
     lineHeight: 20,
     letterSpacing: -0.2,
@@ -272,7 +273,7 @@ export const ordersStyles = StyleSheet.create({
     top: 0,
     bottom: 0,
     right: 0,
-    backgroundColor: '#000',
+    backgroundColor: colors.background.primary, // ✅ Using token
   },
   emptyDetail: {
     flex: 1,
@@ -283,12 +284,12 @@ export const ordersStyles = StyleSheet.create({
   emptyTitle: {
     fontSize: 28,
     fontWeight: '700',
-    color: '#fff',
+    color: colors.text.primary, // ✅ Using token
     marginBottom: 8,
   },
   emptyText: {
     fontSize: 17,
-    color: 'rgba(235,235,245,0.6)',
+    color: colors.text.tertiary, // ✅ Using token
     textAlign: 'center',
   },
 
@@ -303,7 +304,7 @@ export const ordersStyles = StyleSheet.create({
     paddingHorizontal: layout.containerMargin, // 8px - consistent minimal spacing
     paddingVertical: layout.containerMargin,
     borderBottomWidth: 0.5,
-    borderBottomColor: 'rgba(255,255,255,0.1)',
+    borderBottomColor: colors.border.regular, // ✅ Using token
   },
   backButton: {
     paddingVertical: 4,
@@ -311,7 +312,7 @@ export const ordersStyles = StyleSheet.create({
   backButtonText: {
     fontSize: 15,
     fontWeight: '400',
-    color: 'rgba(235,235,245,0.6)',
+    color: colors.text.tertiary, // ✅ Using token
     letterSpacing: -0.2,
   },
   headerCardContainer: {
@@ -323,7 +324,7 @@ export const ordersStyles = StyleSheet.create({
     borderRadius: radius.xxl,
     borderCurve: 'continuous',
     overflow: 'hidden',
-    backgroundColor: 'rgba(255,255,255,0.05)',
+    backgroundColor: colors.glass.regular, // ✅ Using token
   },
   headerCard: {
     flexDirection: 'row',
@@ -337,13 +338,13 @@ export const ordersStyles = StyleSheet.create({
     borderRadius: layout.cardRadius,
   },
   headerIconPlaceholder: {
-    backgroundColor: 'rgba(118,118,128,0.24)',
+    backgroundColor: colors.glass.thick, // ✅ Using token
     alignItems: 'center',
     justifyContent: 'center',
   },
   headerIconText: {
     fontSize: 28,
-    color: 'rgba(235,235,245,0.6)',
+    color: colors.text.tertiary, // ✅ Using token
   },
   headerInfo: {
     flex: 1,
@@ -351,7 +352,7 @@ export const ordersStyles = StyleSheet.create({
   headerTitle: {
     fontSize: 22,
     fontWeight: '700',
-    color: '#fff',
+    color: colors.text.primary, // ✅ Using token
     marginBottom: 4,
   },
   headerMeta: {
@@ -361,11 +362,11 @@ export const ordersStyles = StyleSheet.create({
   },
   headerSubtitle: {
     fontSize: 13,
-    color: 'rgba(235,235,245,0.6)',
+    color: colors.text.tertiary, // ✅ Using token
   },
   headerDot: {
     fontSize: 13,
-    color: 'rgba(235,235,245,0.3)',
+    color: colors.text.placeholder, // ✅ Using token
   },
 
   // SECTIONS
@@ -376,7 +377,7 @@ export const ordersStyles = StyleSheet.create({
   sectionTitle: {
     fontSize: 11,
     fontWeight: '600',
-    color: 'rgba(235,235,245,0.5)',
+    color: colors.text.disabled, // ✅ Using token (0.5 matches)
     letterSpacing: 0.6,
     textTransform: 'uppercase',
     marginBottom: 8,
@@ -386,7 +387,7 @@ export const ordersStyles = StyleSheet.create({
     borderRadius: radius.xxl,
     borderCurve: 'continuous',
     overflow: 'hidden',
-    backgroundColor: 'rgba(255,255,255,0.05)',
+    backgroundColor: colors.glass.regular, // ✅ Using token
   },
   row: {
     flexDirection: 'row',
@@ -396,12 +397,12 @@ export const ordersStyles = StyleSheet.create({
     paddingHorizontal: layout.rowPaddingHorizontal,
     minHeight: layout.minTouchTarget,
     borderBottomWidth: 0.5,
-    borderBottomColor: 'rgba(255,255,255,0.05)',
+    borderBottomColor: colors.border.subtle, // ✅ Using token
   },
   rowLabel: {
     fontSize: 15,
     fontWeight: '600',
-    color: '#fff',
+    color: colors.text.primary, // ✅ Using token
     letterSpacing: -0.2,
   },
   rowRight: {
@@ -411,11 +412,11 @@ export const ordersStyles = StyleSheet.create({
   },
   rowValue: {
     fontSize: 15,
-    color: 'rgba(235,235,245,0.6)',
+    color: colors.text.tertiary, // ✅ Using token
   },
   rowChevron: {
     fontSize: 15,
-    color: 'rgba(235,235,245,0.3)',
+    color: colors.text.placeholder, // ✅ Using token
   },
   inventoryHeader: {
     flexDirection: 'row',
@@ -428,6 +429,6 @@ export const ordersStyles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '700',
     letterSpacing: -0.3,
-    color: '#fff',
+    color: colors.text.primary, // ✅ Using token
   },
 })

@@ -24,6 +24,8 @@ import { colors, typography, spacing, radius, blur } from '@/theme/tokens'
 import type { Customer } from '@/types/pos'
 import type { AAMVAData } from '@/lib/id-scanner/aamva-parser'
 import { POSModal } from './POSModal'
+import { useCustomerState, customerActions } from '@/stores/customer.store'
+import { useActiveModal, checkoutUIActions } from '@/stores/checkout-ui.store'
 
 const { width } = Dimensions.get('window')
 const isTablet = width > 600
@@ -38,27 +40,34 @@ export interface CustomerMatch {
   reason: string // Human-readable explanation
 }
 
-interface POSCustomerMatchModalProps {
-  visible: boolean
-  scannedData: AAMVAData | null
-  matches: CustomerMatch[]
-  onSelectCustomer: (customer: Customer) => void
-  onCreateNew: () => void
-  onSearchManually: () => void
-  onClose: () => void
-}
-
-function POSCustomerMatchModal({
-  visible,
-  scannedData,
-  matches,
-  onSelectCustomer,
-  onCreateNew,
-  onSearchManually,
-  onClose,
-}: POSCustomerMatchModalProps) {
+/**
+ * POSCustomerMatchModal - TRUE ZERO PROPS ✅✅✅
+ * NO PROPS - Reads state and calls actions from store
+ *
+ * Reads from stores:
+ * - visible: checkout-ui.store (activeModal === 'customerMatch')
+ * - scannedData: customer.store
+ * - matches: customer.store
+ *
+ * Calls store actions:
+ * - onSelectCustomer → checkoutUIActions.handleSelectMatch
+ * - onCreateNew → checkoutUIActions.handleCreateNewCustomer
+ * - onSearchManually → checkoutUIActions.handleSearchManually
+ * - onClose → checkoutUIActions.closeModal + customerActions.clearCustomerMatches + customerActions.clearScannedData
+ */
+function POSCustomerMatchModal() {
+  // ========================================
+  // STORES - TRUE ZERO PROPS (read from environment)
+  // ========================================
+  const activeModal = useActiveModal()
+  const visible = activeModal === 'customerMatch'
   const [autoSelectTimer, setAutoSelectTimer] = useState<NodeJS.Timeout | null>(null)
   const progressAnim = useRef(new Animated.Value(0)).current
+
+  // ========================================
+  // STORES - Apple Engineering Standard (READ FROM ENVIRONMENT)
+  // ========================================
+  const { scannedData, matches } = useCustomerState()
 
   const bestMatch = matches[0]
   const hasMatches = matches.length > 0
@@ -75,7 +84,8 @@ function POSCustomerMatchModal({
 
       const timer = setTimeout(() => {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
-        onSelectCustomer(bestMatch.customer)
+        // TRUE ZERO PROPS: Call store action instead of prop callback
+        checkoutUIActions.handleSelectMatch(bestMatch.customer)
       }, 1500)
 
       setAutoSelectTimer(timer)
@@ -90,24 +100,30 @@ function POSCustomerMatchModal({
   const handleSelectMatch = (match: CustomerMatch) => {
     if (autoSelectTimer) clearTimeout(autoSelectTimer)
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
-    onSelectCustomer(match.customer)
+    // TRUE ZERO PROPS: Call store action instead of prop callback
+    checkoutUIActions.handleSelectMatch(match.customer)
   }
 
   const handleCreateNew = () => {
     if (autoSelectTimer) clearTimeout(autoSelectTimer)
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-    onCreateNew()
+    // TRUE ZERO PROPS: Call store action instead of prop callback
+    checkoutUIActions.handleCreateNewCustomer()
   }
 
   const handleSearchManually = () => {
     if (autoSelectTimer) clearTimeout(autoSelectTimer)
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-    onSearchManually()
+    // TRUE ZERO PROPS: Call store action instead of prop callback
+    checkoutUIActions.handleSearchManually()
   }
 
   const handleClose = () => {
     if (autoSelectTimer) clearTimeout(autoSelectTimer)
-    onClose()
+    // TRUE ZERO PROPS: Call store action instead of prop callback
+    customerActions.clearCustomerMatches()
+    customerActions.clearScannedData()
+    checkoutUIActions.closeModal()
   }
 
   // Get title based on confidence

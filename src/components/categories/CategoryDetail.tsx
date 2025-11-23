@@ -12,7 +12,7 @@ import { layout } from '@/theme/layout'
 import { supabase } from '@/lib/supabase/client'
 import { logger } from '@/utils/logger'
 import { useAuth } from '@/stores/auth.store'
-import type { Category } from '@/hooks/useCategories'
+import type { Category } from '@/types/categories'
 import { EditablePricingTemplatesSection } from './EditablePricingTemplatesSection'
 import { EditableCustomFieldsSection } from './EditableCustomFieldsSection'
 

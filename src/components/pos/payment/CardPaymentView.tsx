@@ -1,35 +1,68 @@
 /**
- * Card Payment View - CLEAN VERSION
+ * Card Payment View - TRUE ZERO PROPS ✅
  * Two-Phase Commit Architecture
  *
  * DOES NOT process payments itself.
  * Just triggers the checkout flow which calls Edge Function.
  * Edge Function handles: create order → process payment → complete atomically
+ *
+ * ZERO DATA PROPS - Reads from stores:
+ * - total (calculated from subtotal + tax)
+ * - subtotal, itemCount → cart.store
+ * - taxAmount → tax.store
+ * - currentProcessor, processorStatus → payment-processor.store
+ * - locationId, registerId → posSession.store
  */
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native'
 import { LiquidGlassView } from '@callstack/liquid-glass'
 import { Ionicons } from '@expo/vector-icons'
 import * as Haptics from 'expo-haptics'
-import type { ProcessorInfo } from '@/stores/payment-processor.store'
-import type { BasePaymentViewProps, PaymentData } from './PaymentTypes'
+import { useCartTotals } from '@/stores/cart.store'
+import { usePOSSession } from '@/stores/posSession.store'
+import { taxActions } from '@/stores/tax.store'
+import { useLoyaltyState } from '@/stores/loyalty.store'
+import { usePaymentProcessor } from '@/stores/payment-processor.store'
+import type { PaymentData } from './PaymentTypes'
 
-interface CardPaymentViewProps extends BasePaymentViewProps {
-  currentProcessor: ProcessorInfo | null
-  processorStatus: string
-  locationId?: string
-  registerId?: string
-  onComplete: (paymentData: PaymentData) => Promise<import('./PaymentTypes').SaleCompletionData>
+interface CardPaymentViewProps {
+  onComplete: (paymentData: PaymentData) => Promise<import('./PaymentTypes').SaleCompletionData>  // ✅ Coordination callback only
 }
 
 export function CardPaymentView({
-  total,
-  itemCount,
-  currentProcessor,
-  processorStatus,
   onComplete,
 }: CardPaymentViewProps) {
+  // ========================================
+  // STORES - TRUE ZERO PROPS (read from environment)
+  // ========================================
+  const { subtotal, itemCount } = useCartTotals()
+  const { sessionInfo } = usePOSSession()
+  const { loyaltyProgram, pointsToRedeem } = useLoyaltyState()
+  const currentProcessor = usePaymentProcessor((state) => state.currentProcessor)
+  const processorStatus = usePaymentProcessor((state) => state.status)
+
+  // Calculate tax
+  const { taxAmount, taxRate, taxName } = useMemo(() => {
+    if (!sessionInfo?.locationId) return { taxAmount: 0, taxRate: 0, taxName: undefined }
+    return taxActions.calculateTax(subtotal, sessionInfo.locationId)
+  }, [subtotal, sessionInfo?.locationId])
+
+  // Calculate loyalty discount
+  const loyaltyDiscountAmount = useMemo(() => {
+    if (!loyaltyProgram || pointsToRedeem === 0) return 0
+    return (pointsToRedeem * (loyaltyProgram.point_value || 0.01))
+  }, [loyaltyProgram, pointsToRedeem])
+
+  // Calculate total
+  const total = useMemo(() => {
+    const subtotalAfterDiscount = Math.max(0, subtotal - loyaltyDiscountAmount)
+    return subtotalAfterDiscount + taxAmount
+  }, [subtotal, loyaltyDiscountAmount, taxAmount])
+
+  // ========================================
+  // LOCAL STATE (UI only)
+  // ========================================
   const [processing, setProcessing] = useState(false)
 
   const hasActiveProcessor = !!currentProcessor

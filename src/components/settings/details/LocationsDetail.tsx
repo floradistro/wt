@@ -12,7 +12,8 @@ import * as Haptics from "expo-haptics"
 import { colors, typography, spacing, radius } from "@/theme/tokens"
 import { layout } from "@/theme/layout"
 import type { UserLocationAccess } from "@/hooks/useUserLocations"
-import type { PaymentProcessor } from "@/hooks/usePaymentProcessors"
+import { useUserLocations } from "@/hooks/useUserLocations"
+import { usePaymentProcessors, usePaymentProcessorsLoading, usePaymentProcessorsError } from "@/stores/payment-processors-settings.store"
 import { LocationConfigurationDetail } from "./LocationConfigurationDetail"
 
 function LocationIcon({ color }: { color: string }) {
@@ -38,55 +39,27 @@ function LocationIcon({ color }: { color: string }) {
 }
 
 function LocationsDetail({
-  userLocations,
   headerOpacity,
-  paymentProcessors,
-  processorsLoading,
-  processorsError,
-  createProcessor,
-  updateProcessor,
-  deleteProcessor,
-  testConnection,
-  setAsDefault,
-  toggleProcessorStatus,
-  reloadProcessors,
   vendorLogo,
 }: {
-  userLocations: UserLocationAccess[]
   headerOpacity: Animated.Value
-  paymentProcessors: PaymentProcessor[]
-  processorsLoading: boolean
-  processorsError: string | null
-  createProcessor: any
-  updateProcessor: any
-  deleteProcessor: any
-  testConnection: any
-  setAsDefault: any
-  toggleProcessorStatus: any
-  reloadProcessors: () => void
   vendorLogo?: string | null
 }) {
+  // ✅ Read from stores instead of props
+  const { locations: userLocations } = useUserLocations()
+  const paymentProcessors = usePaymentProcessors()
+  const processorsLoading = usePaymentProcessorsLoading()
+  const processorsError = usePaymentProcessorsError()
+
   const [selectedLocation, setSelectedLocation] = useState<UserLocationAccess | null>(null)
 
   // If location selected, show detailed view
   if (selectedLocation) {
-    const locationProcessors = paymentProcessors.filter(p => p.location_id === selectedLocation.location.id)
-
     return (
       <LocationConfigurationDetail
         location={selectedLocation}
-        processors={locationProcessors}
-        processorsLoading={processorsLoading}
-        processorsError={processorsError}
         headerOpacity={headerOpacity}
         onBack={() => setSelectedLocation(null)}
-        onCreateProcessor={createProcessor}
-        onUpdateProcessor={updateProcessor}
-        onDeleteProcessor={deleteProcessor}
-        onTestConnection={testConnection}
-        onSetAsDefault={setAsDefault}
-        onToggleStatus={toggleProcessorStatus}
-        onReload={reloadProcessors}
       />
     )
   }

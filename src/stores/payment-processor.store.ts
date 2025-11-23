@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { devtools } from 'zustand/middleware'
 import { useAuthStore } from './auth.store'
 import { Sentry } from '@/utils/sentry'
 import { supabase } from '@/lib/supabase/client'
@@ -52,7 +53,9 @@ type ProcessorStore = ProcessorState & ProcessorActions
 
 // JOBS PRINCIPLE: Mission-critical payment processor status tracking
 // Bulletproof health monitoring with automatic retries
-export const usePaymentProcessor = create<ProcessorStore>((set, get) => ({
+export const usePaymentProcessor = create<ProcessorStore>()(
+  devtools(
+    (set, get) => ({
   // State
   status: 'checking',
   lastCheck: null,
@@ -318,7 +321,10 @@ export const usePaymentProcessor = create<ProcessorStore>((set, get) => ({
       activityLog: [],
     })
   },
-}))
+    }),
+    { name: 'PaymentProcessorStore' }
+  )
+)
 
 // JOBS PRINCIPLE: Auto-retry mechanism with exponential backoff
 // Check status with adaptive intervals based on connection stability

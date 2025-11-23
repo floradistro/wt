@@ -10,7 +10,7 @@ import { LiquidGlassView, isLiquidGlassSupported } from '@callstack/liquid-glass
 import * as Haptics from 'expo-haptics'
 import { spacing, radius } from '@/theme/tokens'
 import { layout } from '@/theme/layout'
-import type { UserLocationAccess } from '@/hooks/useUserLocations'
+import type { UserLocationAccess } from '@/types/users'
 
 interface LocationSelectorProps {
   visible: boolean

@@ -17,12 +17,11 @@ import * as Haptics from 'expo-haptics'
 import { colors, typography, spacing, radius } from '@/theme/tokens'
 import { layout } from '@/theme/layout'
 import { useAuth, useAuthActions } from '@/stores/auth.store'
+import { useUsersManagementStore } from '@/stores/users-management.store'
+import { useSuppliersManagementStore } from '@/stores/suppliers-management.store'
+import { useLoyaltyCampaignsStore, startLoyaltyCampaignsRealtimeMonitoring, stopLoyaltyCampaignsRealtimeMonitoring } from '@/stores/loyalty-campaigns.store'
+import { usePaymentProcessorsSettingsStore } from '@/stores/payment-processors-settings.store'
 import { useUserLocations } from '@/hooks/useUserLocations'
-import { useUsers } from '@/hooks/useUsers'
-import { useSuppliers } from '@/hooks/useSuppliers'
-import { useLoyalty } from '@/hooks/useLoyalty'
-import { useCampaigns } from '@/hooks/useCampaigns'
-import { usePaymentProcessors } from '@/hooks/usePaymentProcessors'
 import { NavSidebar, type NavItem } from '@/components/NavSidebar'
 import { supabase } from '@/lib/supabase/client'
 import { logger } from '@/utils/logger'
@@ -124,13 +123,28 @@ function SettingsScreen() {
   const { user } = useAuth()
   const { logout } = useAuthActions()
   const { locations: userLocations } = useUserLocations()
-  const { users, isLoading: usersLoading, createUser, updateUser, deleteUser, setUserPassword, assignLocations, toggleUserStatus, reload: reloadUsers } = useUsers()
-  const { suppliers, isLoading: suppliersLoading, createSupplier, updateSupplier, deleteSupplier, toggleSupplierStatus, reload: reloadSuppliers } = useSuppliers()
-  const { program: loyaltyProgram, isLoading: loyaltyLoading, createProgram: createLoyaltyProgram, updateProgram: updateLoyaltyProgram, toggleProgramStatus: toggleLoyaltyStatus } = useLoyalty()
-  const { campaigns, stats: campaignStats, isLoading: campaignsLoading, createCampaign, updateCampaign, deleteCampaign, toggleCampaignStatus } = useCampaigns()
-  const { processors: paymentProcessors, isLoading: processorsLoading, error: processorsError, createProcessor, updateProcessor, deleteProcessor, testConnection, setAsDefault, toggleStatus: toggleProcessorStatus, reload: reloadProcessors } = usePaymentProcessors()
 
   const [vendorLogo, setVendorLogo] = useState<string | null>(null)
+
+  // ✅ Load all Settings data on mount (Apple pattern: data lives in stores)
+  useEffect(() => {
+    if (!user?.id) return
+
+    // Load data from all Settings stores
+    useUsersManagementStore.getState().loadUsers(user.id)
+    useSuppliersManagementStore.getState().loadSuppliers(user.id)
+    useLoyaltyCampaignsStore.getState().loadProgram(user.id)
+    useLoyaltyCampaignsStore.getState().loadCampaigns(user.id)
+    usePaymentProcessorsSettingsStore.getState().loadProcessors(user.id)
+
+    // Start real-time monitoring for loyalty & campaigns
+    startLoyaltyCampaignsRealtimeMonitoring(user.id)
+
+    return () => {
+      // Clean up subscriptions when component unmounts
+      stopLoyaltyCampaignsRealtimeMonitoring()
+    }
+  }, [user?.id])
 
   // iOS-style collapsing headers - instant transitions
   const accountHeaderOpacity = useRef(new Animated.Value(0)).current
@@ -185,78 +199,36 @@ function SettingsScreen() {
       title: 'Locations & Access',
       icon: LocationIcon,
       badge: userLocations.length > 0 ? userLocations.length : undefined,
-      renderDetail: () => <LocationsDetail 
-        userLocations={userLocations} 
-        headerOpacity={locationsHeaderOpacity} 
-        paymentProcessors={paymentProcessors} 
-        processorsLoading={processorsLoading} 
-        processorsError={processorsError} 
-        createProcessor={createProcessor} 
-        updateProcessor={updateProcessor} 
-        deleteProcessor={deleteProcessor} 
-        testConnection={testConnection} 
-        setAsDefault={setAsDefault} 
-        toggleProcessorStatus={toggleProcessorStatus} 
-        reloadProcessors={reloadProcessors} 
-        vendorLogo={vendorLogo} 
+      renderDetail: () => <LocationsDetail
+        headerOpacity={locationsHeaderOpacity}
+        vendorLogo={vendorLogo}
       />
     },
     {
       id: 'team',
       title: 'Team',
       icon: TeamIcon,
-      badge: users.length > 0 ? users.length : undefined,
-      renderDetail: () => <UserManagementDetail 
-        users={users} 
-        isLoading={usersLoading} 
-        headerOpacity={teamHeaderOpacity} 
-        onCreateUser={createUser} 
-        onUpdateUser={updateUser} 
-        onDeleteUser={deleteUser} 
-        onSetPassword={setUserPassword} 
-        onAssignLocations={assignLocations} 
-        onToggleStatus={toggleUserStatus} 
-        onReload={reloadUsers} 
-        locations={userLocations} 
-        vendorLogo={vendorLogo} 
+      renderDetail: () => <UserManagementDetail
+        headerOpacity={teamHeaderOpacity}
+        vendorLogo={vendorLogo}
       />
     },
     {
       id: 'suppliers',
       title: 'Suppliers',
       icon: SuppliersIcon,
-      badge: suppliers.length > 0 ? suppliers.length : undefined,
-      renderDetail: () => <SupplierManagementDetail 
-        suppliers={suppliers} 
-        isLoading={suppliersLoading} 
-        headerOpacity={suppliersHeaderOpacity} 
-        onCreateSupplier={createSupplier} 
-        onUpdateSupplier={updateSupplier} 
-        onDeleteSupplier={deleteSupplier} 
-        onToggleStatus={toggleSupplierStatus} 
-        onReload={reloadSuppliers} 
-        vendorLogo={vendorLogo} 
+      renderDetail: () => <SupplierManagementDetail
+        headerOpacity={suppliersHeaderOpacity}
+        vendorLogo={vendorLogo}
       />
     },
     {
       id: 'loyalty',
       title: 'Loyalty & Rewards',
       icon: LoyaltyIcon,
-      renderDetail: () => <LoyaltyManagementDetail 
-        program={loyaltyProgram} 
-        isLoading={loyaltyLoading} 
-        headerOpacity={loyaltyHeaderOpacity} 
-        onCreateProgram={createLoyaltyProgram} 
-        onUpdateProgram={updateLoyaltyProgram} 
-        onToggleStatus={toggleLoyaltyStatus} 
-        vendorLogo={vendorLogo} 
-        campaigns={campaigns} 
-        campaignStats={campaignStats} 
-        campaignsLoading={campaignsLoading} 
-        onCreateCampaign={createCampaign} 
-        onUpdateCampaign={updateCampaign} 
-        onDeleteCampaign={deleteCampaign} 
-        onToggleCampaignStatus={toggleCampaignStatus} 
+      renderDetail: () => <LoyaltyManagementDetail
+        headerOpacity={loyaltyHeaderOpacity}
+        vendorLogo={vendorLogo}
       />
     },
     {
@@ -266,16 +238,11 @@ function SettingsScreen() {
       renderDetail: () => <DeveloperToolsDetail headerOpacity={devToolsHeaderOpacity} vendorLogo={vendorLogo} />
     },
   ], [
-    user, userName, userLocations, users, usersLoading, suppliers, suppliersLoading,
-    loyaltyProgram, loyaltyLoading, campaigns, campaignStats, campaignsLoading,
-    paymentProcessors, processorsLoading, processorsError, vendorLogo,
+    // ✅ Minimal dependencies - only visual props needed
+    // All data comes from stores, so no need for data/callback dependencies
+    user, userName, userLocations, vendorLogo,
     accountHeaderOpacity, locationsHeaderOpacity, teamHeaderOpacity,
     suppliersHeaderOpacity, loyaltyHeaderOpacity, devToolsHeaderOpacity,
-    createUser, updateUser, deleteUser, setUserPassword, assignLocations, toggleUserStatus, reloadUsers,
-    createSupplier, updateSupplier, deleteSupplier, toggleSupplierStatus, reloadSuppliers,
-    createLoyaltyProgram, updateLoyaltyProgram, toggleLoyaltyStatus,
-    createCampaign, updateCampaign, deleteCampaign, toggleCampaignStatus,
-    createProcessor, updateProcessor, deleteProcessor, testConnection, setAsDefault, toggleProcessorStatus, reloadProcessors
   ])
 
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>('account')
@@ -351,19 +318,19 @@ const styles = StyleSheet.create({
   footerWrapper: {
     padding: spacing.md,
     borderTopWidth: 0.5,
-    borderTopColor: 'rgba(235,235,245,0.1)',
+    borderTopColor: colors.border.regular, // ✅ Using token
   },
   signOutButton: {
     paddingVertical: spacing.md,
     paddingHorizontal: spacing.lg,
-    backgroundColor: 'rgba(255,59,48,0.1)',
+    backgroundColor: colors.semantic.errorBg, // ✅ Using token instead of hardcoded rgba
     borderRadius: radius.md,
     alignItems: 'center',
   },
   signOutText: {
     ...typography.body,
     fontWeight: '600',
-    color: '#FF3B30',
+    color: colors.semantic.error, // ✅ Using token (close to #FF3B30)
   },
   
   // Icon Styles
