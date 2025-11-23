@@ -2,7 +2,7 @@ module.exports = {
   setupFilesAfterEnv: ['@testing-library/jest-native/extend-expect'],
   setupFiles: ['./jest.setup.js'],
   transformIgnorePatterns: [
-    'node_modules/(?!(react-native|@react-native|expo|@expo|@callstack|@supabase|zustand)/)',
+    'node_modules/(?!(react-native|@react-native|expo|@expo|expo-.*|@callstack|@supabase|zustand)/)',
   ],
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/src/$1',

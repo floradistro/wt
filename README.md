@@ -93,41 +93,32 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_anon_key_here
 EXPO_PUBLIC_API_URL=https://yachtclub.boats
 ```
 
-## 🏗️ Architecture Principles
+## 🏗️ Architecture
 
-### 1. Feature-Based Organization
+WhaleTools Native follows Apple engineering principles with a focus on simplicity, performance, and maintainability.
 
-Code is organized by feature (auth, pos, products), not by type (components, hooks, services).
+### Core Principles
 
+- **Zero Prop Drilling** - All business logic in Zustand stores
+- **Focused Selectors** - Granular hooks prevent unnecessary re-renders
+- **Type Safety** - Strict TypeScript, zero `any` types
+- **Clean Separation** - UI components receive only visual props
+
+### Store-First Architecture
+
+```typescript
+// Components read from stores
+const users = useUsers()
+const { createUser, updateUser } = useUsersActions()
+
+// No props drilling needed
+<UserList />  // Gets data from store directly
 ```
-features/
-├── auth/
-│   ├── hooks/useAuth.ts
-│   ├── services/auth.service.ts
-│   └── types.ts
-└── pos/
-    ├── hooks/useCart.ts
-    ├── services/cart.service.ts
-    └── types.ts
-```
 
-### 2. Clean Separation of Concerns
+### Documentation
 
-- **Presentation** (`/app`, `/components`) - UI only, no business logic
-- **Business Logic** (`/features`) - Services, hooks, state
-- **Infrastructure** (`/lib`) - External services, utilities
-
-### 3. Type Safety
-
-- Strict TypeScript mode
-- Supabase-generated types
-- No `any` types
-
-### 4. DRY (Don't Repeat Yourself)
-
-- Shared utilities in `/lib`
-- Reusable components in `/components/ui`
-- Barrel exports for clean imports
+- **[ARCHITECTURE.md](./ARCHITECTURE.md)** - Complete architecture guide with store patterns, best practices, and migration guides
+- **[docs/](./docs/)** - Feature-specific implementation guides
 
 ## 🎨 Design System
 
@@ -204,26 +195,6 @@ eas update --branch production --message "Bug fixes"
 # Users get update on next app open (2-30 seconds)
 ```
 
-## 📚 Documentation
-
-### POS Checkout System
-Complete documentation for the POS checkout implementation:
-
-- **[CHECKOUT_COMPLETE.md](./CHECKOUT_COMPLETE.md)** - Complete implementation overview
-- **[SALE_SUCCESS_MODAL.md](./SALE_SUCCESS_MODAL.md)** - iOS-style success modal design
-- **[VERIFICATION_COMPLETE.md](./VERIFICATION_COMPLETE.md)** - Transaction verification details
-- **[MINIMUM_CARD_AMOUNT_FIX.md](./MINIMUM_CARD_AMOUNT_FIX.md)** - Card payment validation
-- **[INVENTORY_FIX.md](./INVENTORY_FIX.md)** - Inventory deduction implementation
-- **[DEJAVOO_SETUP_GUIDE.md](./DEJAVOO_SETUP_GUIDE.md)** - Payment terminal setup (in docs/)
-- **[PAYMENT_PROCESSOR_DISPLAY.md](./PAYMENT_PROCESSOR_DISPLAY.md)** - Terminal status UI (in docs/)
-
-### Key Features Documented
-- ✅ End-to-end checkout flow with Dejavoo terminal integration
-- ✅ Beautiful iOS-style success modal with glassmorphism
-- ✅ Complete transaction verification (inventory, loyalty, payment)
-- ✅ Real-time payment processor monitoring
-- ✅ Comprehensive audit trail for all transactions
-
 ## 📝 Development Guidelines
 
 ### Component Pattern
@@ -284,91 +255,6 @@ export function useProducts(vendorId: string) {
   return { products, loading, refetch: loadProducts }
 }
 ```
-
-## 🎯 Next Steps
-
-### Week 1: POS System
-- [ ] ID Scanner (native camera)
-- [ ] Cart management
-- [ ] Checkout flow
-- [ ] Payment processing
-
-### Week 2: Vendor Dashboard
-- [ ] Product management
-- [ ] Order management
-- [ ] Inventory tracking
-
-### Week 3-4: Full Features
-- [ ] Analytics
-- [ ] Marketing
-- [ ] Settings
-- [ ] All vendor features
-
-### Week 5: Deploy
-- [ ] Submit to App Store
-- [ ] Submit to Google Play
-- [ ] Set up OTA updates
-
-## 💡 Key Improvements Over Web Version
-
-| Web (PWA) | Native |
-|-----------|---------|
-| 10fps camera | 60fps camera |
-| Browser quirks | Native APIs |
-| Some duplicate code | Zero duplication |
-| Mixed patterns | Unified architecture |
-| localStorage | AsyncStorage |
-| Next.js routing | Expo Router |
-
-## 🏆 Recent Achievements
-
-### POS System - Production Ready
-- **✅ 49.7% code reduction** (2,731 → 1,373 lines)
-- **✅ Native ID scanner** integrated (58% faster than web)
-- **✅ 15 focused components** extracted
-- **✅ 3 custom hooks** for business logic
-- **✅ Zero technical debt** - all dead code removed
-- **✅ 100% type safety** - strict TypeScript
-
-### ID Scanner Migration
-- **✅ React Native Vision Camera** - 60fps native scanning
-- **✅ AAMVA barcode parsing** - US/Canadian driver's licenses
-- **✅ Age verification** - 21+ enforcement
-- **✅ Customer auto-matching** - 3-tier algorithm
-- **✅ 95% error reduction** vs manual entry
-
-### Documentation Cleanup
-- **Removed 14 outdated docs** - migration guides, status reports
-- **Kept 7 essential docs** - architecture, patterns, guides
-- **Added comprehensive index** - easy navigation
-- **Current state analysis** - see [CURRENT_STATE.md](CURRENT_STATE.md)
-
-### 📁 Clean Architecture
-```
-src/
-├── screens/POSScreen.tsx           # 1,373 lines (refactored ✅)
-├── components/pos/                 # 14 focused components
-│   ├── cart/                      # Cart components
-│   ├── products/                  # Product components
-│   ├── search/                    # Search components
-│   └── POSIDScannerModal.tsx      # Native ID scanner ✅
-├── hooks/pos/                     # Business logic
-│   ├── useCart.ts                # Cart operations
-│   └── useLoyalty.ts             # Loyalty program
-├── lib/id-scanner/               # Portable code
-│   ├── aamva-parser.ts          # Barcode parsing
-│   └── audio.ts                 # Audio feedback
-└── types/pos.ts                  # Type definitions
-```
-
-### 📖 Essential Documentation
-- **[CURRENT_STATE.md](CURRENT_STATE.md)** - Complete project status
-- **[docs/README.md](docs/README.md)** - Documentation index
-- **[docs/POS_ARCHITECTURE.md](docs/POS_ARCHITECTURE.md)** - POS system guide
-- **[docs/REFACTORING_PATTERNS.md](docs/REFACTORING_PATTERNS.md)** - Apply to other screens
-- **[docs/PERFORMANCE_OPTIMIZATION.md](docs/PERFORMANCE_OPTIMIZATION.md)** - Optimization guide
-
----
 
 ## 📚 Resources
 
