@@ -29,6 +29,7 @@ import { ProductsListView } from '@/components/products/views/ProductsListView'
 import { CategoriesView } from '@/components/products/views/CategoriesView'
 import { PurchaseOrdersViewWrapper } from '@/components/products/views/PurchaseOrdersViewWrapper'
 import { AuditsViewWrapper } from '@/components/products/views/AuditsViewWrapper'
+import { ProductDetail } from '@/components/products/detail/ProductDetail'
 
 // Stores
 import {
@@ -52,6 +53,7 @@ function ProductsScreenComponent() {
   // ✅ Read from Zustand stores
   const activeNav = useActiveNav()
   const searchQuery = useProductsSearchQuery()
+  const selectedProduct = useProductsScreenStore(state => state.selectedProduct)
   const { selectedLocationIds } = useLocationFilter()
 
   // Products store - products AND categories
@@ -211,10 +213,26 @@ function ProductsScreenComponent() {
           userName={user?.email || 'User'}
         />
 
-        {/* CONTENT AREA */}
+        {/* CONTENT AREA - List View */}
         <View style={styles.contentArea}>
           {renderContent()}
         </View>
+
+        {/* DETAIL PANEL - Product Detail */}
+        {selectedProduct && (
+          <View style={styles.detailPanel}>
+            <ProductDetail
+              product={selectedProduct}
+              onBack={() => productsScreenActions.selectProduct(null)}
+              onProductUpdated={() => {
+                // Reload products after update
+                if (locations.length > 0) {
+                  loadProducts(locations[0].id)
+                }
+              }}
+            />
+          </View>
+        )}
       </View>
 
       {/* MODALS - TODO: These need to be refactored to read from stores */}
@@ -245,5 +263,11 @@ const styles = StyleSheet.create({
     flex: 1,
     position: 'relative',
     overflow: 'hidden',
+  },
+  detailPanel: {
+    width: layout.detailPanelWidth,
+    borderLeftWidth: 1,
+    borderLeftColor: colors.border.subtle,
+    backgroundColor: colors.background.secondary,
   },
 })
