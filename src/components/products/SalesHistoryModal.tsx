@@ -15,7 +15,7 @@ import * as Haptics from 'expo-haptics'
 import { colors, spacing, radius, typography } from '@/theme/tokens'
 import { layout } from '@/theme/layout'
 import { logger } from '@/utils/logger'
-import { useProductSalesHistory } from '@/hooks/useSalesHistory'
+import { useSalesHistory } from '@/hooks/useSalesHistory'
 import { useOriginalProduct } from '@/stores/product-edit.store'
 import { useActiveModal, productUIActions } from '@/stores/product-ui.store'
 
@@ -62,10 +62,9 @@ export function SalesHistoryModal() {
     setEndDate(end)
   }, [dateRange])
 
-  const { salesRecords, stats, loading } = useProductSalesHistory(
+  const { sales: salesRecords, stats, isLoading: loading } = useSalesHistory(
     product?.id,
-    startDate,
-    endDate
+    { startDate, endDate }
   )
 
   const handleClose = () => {
