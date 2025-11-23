@@ -13,6 +13,7 @@ import { layout } from '@/theme/layout'
 import { runAllSentryTests, quickSentryTest } from '@/utils/test-sentry'
 import { DetailRow } from './DetailRow'
 import { detailCommonStyles } from './detailCommon.styles'
+import { posSessionActions } from '@/stores/posSession.store'
 
 interface DeveloperToolsDetailProps {
   headerOpacity: Animated.Value
@@ -53,6 +54,29 @@ export function DeveloperToolsDetail({ headerOpacity, vendorLogo }: DeveloperToo
               '• Breadcrumbs & context\n' +
               '• Tags for filtering\n\n' +
               'Dashboard: https://sentry.io/',
+              [{ text: 'OK' }]
+            )
+          },
+        },
+      ]
+    )
+  }
+
+  const handleClearPOSSession = () => {
+    Alert.alert(
+      'Clear POS Session?',
+      'This will clear your current POS session and return you to the setup screen.\n\nUse this if you\'re stuck in a broken state.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Clear Session',
+          style: 'destructive',
+          onPress: () => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+            posSessionActions.clearSession()
+            Alert.alert(
+              'Session Cleared',
+              'POS session has been reset. You can now start a new session.',
               [{ text: 'OK' }]
             )
           },
@@ -160,6 +184,40 @@ export function DeveloperToolsDetail({ headerOpacity, vendorLogo }: DeveloperToo
                   After running tests, check your Sentry dashboard at:
                 </Text>
                 <Text style={styles.infoBoxLink}>https://sentry.io/</Text>
+              </View>
+            </View>
+          </LiquidGlassView>
+        </LiquidGlassContainerView>
+
+        <LiquidGlassContainerView spacing={12} style={styles.cardWrapper}>
+          <LiquidGlassView
+            effect="regular"
+            colorScheme="dark"
+            style={[styles.detailCard, !isLiquidGlassSupported && styles.cardFallback]}
+          >
+            <View style={styles.cardInner}>
+              <Text style={styles.cardTitle}>POS Session</Text>
+              <Text style={styles.cardDescription}>
+                Clear stuck POS session state
+              </Text>
+              <View style={styles.cardDivider} />
+
+              <Pressable
+                onPress={handleClearPOSSession}
+                style={[styles.testButton, styles.testButtonLast]}
+                accessible={true}
+                accessibilityRole="button"
+                accessibilityLabel="Clear POS session"
+                accessibilityHint="Double tap to reset POS session and return to setup"
+              >
+                <Text style={[styles.testButtonText, { color: '#ff3b30' }]} accessible={false}>Clear POS Session</Text>
+                <Text style={styles.testButtonSubtext} accessible={false}>Reset session state (use if stuck)</Text>
+              </Pressable>
+
+              <View style={styles.infoBox}>
+                <Text style={styles.infoBoxText}>
+                  Use this if you're stuck in a partial session state after app restart. This will clear location, register, and session data.
+                </Text>
               </View>
             </View>
           </LiquidGlassView>
