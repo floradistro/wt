@@ -276,6 +276,14 @@ export const usePOSSessionStore = create<POSSessionState>()(
       }
 
       // No active session - needs cash drawer
+      // CRITICAL FIX: Must set registerId in store before returning!
+      set((state) => ({
+        sessionInfo: {
+          ...state.sessionInfo!,
+          registerId,
+          registerName,
+        },
+      }));
       return { needsCashDrawer: true, registerId, registerName };
     } catch (err) {
       logger.error('Error selecting register:', err);
