@@ -38,6 +38,7 @@ import {
 } from '@/stores/products-list.store'
 import { useProductsStore } from '@/stores/products.store'
 import { useLocationFilter } from '@/stores/location-filter.store'
+import { useSuppliersManagementStore } from '@/stores/suppliers-management.store'
 
 // Modals
 import { CreateProductModal, CreateAuditModal } from '@/components/products'
@@ -45,7 +46,7 @@ import { CategoryModal } from '@/components/categories'
 import { CreatePOModal, ReceivePOModal } from '@/components/purchase-orders'
 
 function ProductsScreenComponent() {
-  const { user, vendor } = useAppAuth()
+  const { user, vendor, locations } = useAppAuth()
   const { width } = useWindowDimensions()
 
   // ✅ Read from Zustand stores
@@ -53,22 +54,38 @@ function ProductsScreenComponent() {
   const searchQuery = useProductsSearchQuery()
   const { selectedLocationIds } = useLocationFilter()
 
-  // Products store
+  // Products store - products AND categories
   const allProducts = useProductsStore(state => state.products)
+  const productsCategories = useProductsStore(state => state.categories)
   const productsLoading = useProductsStore(state => state.loading)
   const loadProducts = useProductsStore(state => state.loadProducts)
 
-  // Load products on mount when location is selected
+  // Suppliers store (for purchase orders view)
+  const suppliersLoading = useSuppliersManagementStore(state => state.loading)
+  const loadSuppliers = useSuppliersManagementStore(state => state.loadSuppliers)
+
+  // Load products when vendor locations are available
   useEffect(() => {
-    if (selectedLocationIds.length > 0) {
+    if (locations.length > 0 && !selectedLocationIds.length) {
+      // Load products for first location by default
+      loadProducts(locations[0].id)
+    } else if (selectedLocationIds.length > 0) {
+      // Load for selected location
       loadProducts(selectedLocationIds[0])
     }
-  }, [selectedLocationIds, loadProducts])
+  }, [locations, selectedLocationIds, loadProducts])
 
-  // Placeholder for other data (TODO: create proper stores)
-  const categories: any[] = []
+  // Load suppliers for purchase orders view
+  useEffect(() => {
+    if (user?.id) {
+      loadSuppliers(user.id)
+    }
+  }, [user?.id, loadSuppliers])
+
+  // Placeholder for data that needs proper implementation
+  const categories: any[] = [] // TODO: Load actual categories from products or separate endpoint
   const categoriesLoading = false
-  const purchaseOrders: any[] = []
+  const purchaseOrders: any[] = [] // TODO: Create purchase orders store
   const poLoading = false
   const poStats = { pending: 0, received: 0, total: 0 }
 
