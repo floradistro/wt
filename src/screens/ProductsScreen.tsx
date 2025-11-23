@@ -30,18 +30,13 @@ import { CategoriesView } from '@/components/products/views/CategoriesView'
 import { PurchaseOrdersViewWrapper } from '@/components/products/views/PurchaseOrdersViewWrapper'
 import { AuditsViewWrapper } from '@/components/products/views/AuditsViewWrapper'
 
-// Store
+// Stores
 import {
   useActiveNav,
   useProductsSearchQuery,
   productsScreenActions,
 } from '@/stores/products-list.store'
-
-// Hooks
-import { useProducts } from '@/hooks/useProducts'
-import { useCategories } from '@/hooks/useCategories'
-import { usePurchaseOrders } from '@/hooks/usePurchaseOrders'
-import { useUserLocations } from '@/hooks/useUserLocations'
+import { useProductsStore } from '@/stores/products.store'
 import { useLocationFilter } from '@/stores/location-filter.store'
 
 // Modals
@@ -56,13 +51,26 @@ function ProductsScreenComponent() {
   // ✅ Read from Zustand stores
   const activeNav = useActiveNav()
   const searchQuery = useProductsSearchQuery()
-
-  // Data hooks
-  const { products: allProducts, isLoading: productsLoading } = useProducts({ search: '' })
-  const { categories, isLoading: categoriesLoading } = useCategories({ includeGlobal: true, parentId: null })
   const { selectedLocationIds } = useLocationFilter()
-  const { purchaseOrders, isLoading: poLoading, stats: poStats } = usePurchaseOrders({ locationIds: selectedLocationIds })
-  const { locations: userLocations } = useUserLocations()
+
+  // Products store
+  const allProducts = useProductsStore(state => state.products)
+  const productsLoading = useProductsStore(state => state.loading)
+  const loadProducts = useProductsStore(state => state.loadProducts)
+
+  // Load products on mount when location is selected
+  useEffect(() => {
+    if (selectedLocationIds.length > 0) {
+      loadProducts(selectedLocationIds[0])
+    }
+  }, [selectedLocationIds, loadProducts])
+
+  // Placeholder for other data (TODO: create proper stores)
+  const categories: any[] = []
+  const categoriesLoading = false
+  const purchaseOrders: any[] = []
+  const poLoading = false
+  const poStats = { pending: 0, received: 0, total: 0 }
 
   // Animations
   const slideAnim = useRef(new Animated.Value(0)).current
