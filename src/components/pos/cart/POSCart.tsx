@@ -36,6 +36,7 @@ import {
   useShowDiscountSelector,
   checkoutUIActions,
 } from '@/stores/checkout-ui.store'
+import { useProducts } from '@/stores/products.store'
 
 // Hooks
 import { useCampaigns } from '@/hooks/useCampaigns'
@@ -49,9 +50,6 @@ interface POSCartProps {
   loyaltyProgram: LoyaltyProgram | null
   loyaltyDiscountAmount: number
   maxRedeemablePoints: number
-
-  // Data needed for tier selector
-  products: Product[]
 
   // Orchestration callbacks (complex multi-store operations)
   onSelectCustomer: () => void
@@ -70,7 +68,6 @@ function POSCart({
   loyaltyProgram,
   loyaltyDiscountAmount,
   maxRedeemablePoints,
-  products,
   onSelectCustomer,
   onClearCustomer,
   onSetLoyaltyPoints,
@@ -84,6 +81,11 @@ function POSCart({
   const cart = useCartItems()
   const { subtotal, itemCount } = useCartTotals()
   const discountingItemId = useDiscountingItemId()
+
+  // ========================================
+  // STORES - Products (Zero Prop Drilling!)
+  // ========================================
+  const products = useProducts()
 
   // ========================================
   // STORES - Checkout UI State
@@ -557,7 +559,6 @@ const POSCartMemo = memo(POSCart, (prevProps, nextProps) => {
     prevProps.loyaltyProgram?.id === nextProps.loyaltyProgram?.id &&
     prevProps.loyaltyDiscountAmount === nextProps.loyaltyDiscountAmount &&
     prevProps.maxRedeemablePoints === nextProps.maxRedeemablePoints &&
-    prevProps.products === nextProps.products &&
     prevProps.onSelectCustomer === nextProps.onSelectCustomer &&
     prevProps.onClearCustomer === nextProps.onClearCustomer &&
     prevProps.onSetLoyaltyPoints === nextProps.onSetLoyaltyPoints &&

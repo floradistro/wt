@@ -394,14 +394,13 @@ export function POSCheckout({
         onCloseErrorModal={() => setErrorModal({ visible: false, title: '', message: '' })}
       />
 
-      {/* Cart Display - Minimal Props (from 30+ to 12) */}
+      {/* Cart Display - Minimal Props (from 30+ to 11) - Zero prop drilling for products! */}
       <POSCart
         selectedCustomer={selectedCustomer}
         loyaltyPointsToRedeem={loyaltyPointsToRedeem}
         loyaltyProgram={loyaltyProgram}
         loyaltyDiscountAmount={loyaltyDiscountAmount}
         maxRedeemablePoints={getMaxRedeemablePoints(subtotal)}
-        products={products}
         onSelectCustomer={handleSelectCustomer}
         onClearCustomer={handleClearCustomerWithLoyalty}
         onSetLoyaltyPoints={setLoyaltyPointsToRedeem}
