@@ -361,9 +361,6 @@ function OrdersScreenComponent() {
               </View>
             ) : flatListData.length === 0 ? (
               <View style={styles.emptyState}>
-                <View style={styles.emptyStateIconContainer}>
-                  <Text style={styles.emptyStateIcon}>􀈂</Text>
-                </View>
                 <Text style={styles.emptyStateTitle}>No Orders Found</Text>
                 <Text style={styles.emptyStateText}>
                   {searchQuery

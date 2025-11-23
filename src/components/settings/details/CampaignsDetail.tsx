@@ -120,9 +120,6 @@ function CampaignsDetail({
   if (campaigns.length === 0 && editingId !== 'new') {
     return (
       <View style={[styles.emptyState, { paddingTop: spacing.xxxl }]}>
-        <View style={styles.emptyStateIcon}>
-          <Text style={{ fontSize: 24 }}>💰</Text>
-        </View>
         <Text style={styles.emptyStateText}>No discounts yet</Text>
         <Text style={styles.emptyStateSubtext}>Create automatic discounts for your customers</Text>
         <Pressable

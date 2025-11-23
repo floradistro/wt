@@ -65,7 +65,6 @@ export function CategoriesView({
   if (filteredCategories.length === 0) {
     return (
       <View style={styles.emptyState}>
-        <Text style={styles.emptyStateIcon}>􀈄</Text>
         <Text style={styles.emptyStateTitle}>No Categories</Text>
         <Text style={styles.emptyStateText}>
           {searchQuery ? 'Try adjusting your search' : 'Create your first category to get started'}

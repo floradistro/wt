@@ -281,7 +281,6 @@ export function ProductsListView({
           {/* Empty State */}
           {products.length === 0 ? (
             <View style={styles.emptyState}>
-              <Text style={styles.emptyStateIcon}>􀈂</Text>
               <Text style={styles.emptyStateTitle}>No Products Found</Text>
               <Text style={styles.emptyStateText}>
                 {activeNav === 'low-stock'

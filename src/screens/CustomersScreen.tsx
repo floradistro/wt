@@ -191,9 +191,6 @@ function CustomersScreenComponent() {
     if (filteredCustomers.length === 0) {
       return (
         <View style={styles.emptyState}>
-          <View style={styles.emptyStateIconContainer}>
-            <Text style={styles.emptyStateIcon}>👤</Text>
-          </View>
           <Text style={styles.emptyStateTitle}>No Customers Found</Text>
           <Text style={styles.emptyStateText}>
             {searchQuery

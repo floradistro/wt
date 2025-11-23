@@ -190,9 +190,6 @@ export function PurchaseOrdersList({
         {/* Empty State */}
         {purchaseOrders.length === 0 ? (
           <View style={styles.emptyState}>
-            <View style={styles.emptyStateIconContainer}>
-              <Text style={styles.emptyStateIcon}>📦</Text>
-            </View>
             <Text style={styles.emptyStateTitle}>No Purchase Orders</Text>
             <Text style={styles.emptyStateText}>{emptyMessage}</Text>
             <Pressable
