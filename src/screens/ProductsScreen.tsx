@@ -25,10 +25,10 @@ import { useAppAuth } from '@/contexts/AppAuthContext'
 import { logger } from '@/utils/logger'
 
 // Views
-import { ProductsContentView } from './products/ProductsContentView'
-import { CategoriesContentView } from './products/CategoriesContentView'
-import { PurchaseOrdersContentView } from './products/PurchaseOrdersContentView'
-import { AuditsContentView } from './products/AuditsContentView'
+import { ProductsListView } from '@/components/products/views/ProductsListView'
+import { CategoriesView } from '@/components/products/views/CategoriesView'
+import { PurchaseOrdersViewWrapper } from '@/components/products/views/PurchaseOrdersViewWrapper'
+import { AuditsViewWrapper } from '@/components/products/views/AuditsViewWrapper'
 
 // Store
 import {
@@ -133,7 +133,7 @@ function ProductsScreenComponent() {
       case 'low-stock':
       case 'out-of-stock':
         return (
-          <ProductsContentView
+          <ProductsListView
             products={allProducts}
             loading={productsLoading}
             vendorLogo={vendor?.logo_url || null}
@@ -142,7 +142,7 @@ function ProductsScreenComponent() {
 
       case 'categories':
         return (
-          <CategoriesContentView
+          <CategoriesView
             categories={categories}
             loading={categoriesLoading}
             vendorLogo={vendor?.logo_url || null}
@@ -151,7 +151,7 @@ function ProductsScreenComponent() {
 
       case 'purchase-orders':
         return (
-          <PurchaseOrdersContentView
+          <PurchaseOrdersViewWrapper
             purchaseOrders={purchaseOrders}
             loading={poLoading}
             vendorLogo={vendor?.logo_url || null}
@@ -160,7 +160,7 @@ function ProductsScreenComponent() {
 
       case 'audits':
         return (
-          <AuditsContentView
+          <AuditsViewWrapper
             vendorLogo={vendor?.logo_url || null}
           />
         )
