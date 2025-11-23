@@ -73,6 +73,7 @@ function OrdersScreenComponent() {
     selectOrder,
     setSearchQuery,
     setDateRange,
+    openLocationSelector,
     closeLocationSelector
   } = useOrdersUIActions()
 
@@ -283,7 +284,7 @@ function OrdersScreenComponent() {
           userName={user?.email?.split('@')[0] || 'User'}
           vendorName={vendor?.store_name || ''}
           vendorLogo={vendor?.logo_url || null}
-          onUserProfilePress={() => useOrdersUIActions().openLocationSelector()}
+          onUserProfilePress={openLocationSelector}
           selectedLocationNames={selectedLocationNames}
         />
 
