@@ -55,6 +55,8 @@ function ProductsScreenComponent() {
   const activeNav = useActiveNav()
   const searchQuery = useProductsSearchQuery()
   const selectedProduct = useProductsScreenStore((state) => state.selectedProduct)
+  const selectedPO = useProductsScreenStore((state) => state.selectedPurchaseOrder)
+  const selectedCategoryId = useProductsScreenStore((state) => state.selectedCategoryId)
   const { selectedLocationIds } = useLocationFilter()
 
   // Products store - products AND categories
@@ -173,6 +175,9 @@ function ProductsScreenComponent() {
           <CategoriesView
             categories={categories}
             isLoading={categoriesLoading}
+            selectedCategoryId={selectedCategoryId}
+            onCategorySelect={(id) => productsScreenActions.selectCategory(id)}
+            onAddCategory={() => productsScreenActions.openModal('createCategory')}
             vendorLogo={vendor?.logo_url || null}
           />
         )
@@ -182,6 +187,9 @@ function ProductsScreenComponent() {
           <PurchaseOrdersViewWrapper
             purchaseOrders={purchaseOrders}
             isLoading={poLoading}
+            selectedPO={selectedPO}
+            onSelect={(po) => productsScreenActions.selectPurchaseOrder(po)}
+            onAddPress={() => productsScreenActions.openModal('createPO')}
             vendorLogo={vendor?.logo_url || null}
           />
         )

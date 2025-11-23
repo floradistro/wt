@@ -52,7 +52,7 @@ function POSCartComponent() {
 
   const handleEndSession = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
-    posSessionActions.endSession()
+    posSessionActions.prepareEndSession()
   }
 
   return (
