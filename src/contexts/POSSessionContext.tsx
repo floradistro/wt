@@ -337,14 +337,26 @@ export function POSSessionProvider({ children, authUserId }: POSSessionProviderP
         throw new Error('Invalid session data')
       }
 
+      // CRITICAL: Use register info from sessionData (not from session state)
+      // React state may not have updated yet when this is called
+      const registerId = sessionData.registerId || session.registerId
+      const registerName = sessionData.registerName || session.registerName
+
       try {
-        // Ensure registerId and registerName are set (should be from selectRegister)
-        if (!session.registerId || !session.registerName) {
-          logger.warn('[POSSessionContext] Missing register info when joining session')
+        if (!registerId || !registerName) {
+          logger.error('[POSSessionContext] Missing register info when joining session:', {
+            sessionDataRegisterId: sessionData.registerId,
+            sessionDataRegisterName: sessionData.registerName,
+            sessionRegisterId: session.registerId,
+            sessionRegisterName: session.registerName,
+          })
+          throw new Error('Missing register information')
         }
 
         const updatedSession: POSSession = {
           ...session,
+          registerId,
+          registerName,
           sessionId: sessionData.sessionId,
         }
 
