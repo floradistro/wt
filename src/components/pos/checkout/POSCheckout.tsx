@@ -274,22 +274,22 @@ export function POSCheckout({
     }
 
     // CRITICAL VALIDATION: Ensure all session fields are present
-    logger.debug('💰 POSCheckout: Validating session data before payment:', {
-      hasSession: !!session,
-      locationId: session.locationId,
-      registerId: session.registerId,
-      sessionId: session.sessionId,
-      hasVendor: !!vendor,
-      vendorId: vendor?.id,
-      hasCustomUserId: !!customUserId,
-    })
+    logger.error('💰 POSCheckout: Validating session data before payment:')
+    logger.error('  hasSession:', !!session)
+    logger.error('  locationId:', session.locationId, typeof session.locationId, 'empty?', !session.locationId)
+    logger.error('  registerId:', session.registerId, typeof session.registerId, 'empty?', !session.registerId)
+    logger.error('  sessionId:', session.sessionId, typeof session.sessionId, 'empty?', !session.sessionId)
+    logger.error('  hasVendor:', !!vendor)
+    logger.error('  vendorId:', vendor?.id, typeof vendor?.id, 'empty?', !vendor?.id)
+    logger.error('  hasCustomUserId:', !!customUserId)
+    logger.error('  FULL SESSION OBJECT:', JSON.stringify(session, null, 2))
+    logger.error('  FULL VENDOR OBJECT:', JSON.stringify(vendor, null, 2))
 
     if (!session.locationId || !session.registerId || !session.sessionId) {
-      logger.error('❌ CRITICAL: Incomplete session data!', {
-        locationId: session.locationId,
-        registerId: session.registerId,
-        sessionId: session.sessionId,
-      })
+      logger.error('❌ CRITICAL: Incomplete session data!')
+      logger.error('  FAILING CHECK - locationId:', session.locationId)
+      logger.error('  FAILING CHECK - registerId:', session.registerId)
+      logger.error('  FAILING CHECK - sessionId:', session.sessionId)
       throw new Error('Session incomplete. Please restart your POS session by selecting location and register again.')
     }
 

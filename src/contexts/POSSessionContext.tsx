@@ -368,22 +368,28 @@ export function POSSessionProvider({ children, authUserId }: POSSessionProviderP
           totalCash: sessionData.totalCash || 0,
         }
 
+        logger.error('[POSSessionContext] ⚡ ABOUT TO SET SESSION STATE:')
+        logger.error('  updatedSession:', JSON.stringify(updatedSession, null, 2))
+        logger.error('  updatedApiConfig:', JSON.stringify(updatedApiConfig, null, 2))
+
         setSession(updatedSession)
         setApiConfig(updatedApiConfig)
+
+        logger.error('[POSSessionContext] ⚡ CALLED setSession() - React will re-render')
 
         // Persist to AsyncStorage
         await AsyncStorage.setItem(STORAGE_KEY_SESSION, JSON.stringify(updatedSession))
         await AsyncStorage.setItem(STORAGE_KEY_API_CONFIG, JSON.stringify(updatedApiConfig))
 
-        logger.info('[POSSessionContext] ✅ JOINED EXISTING SESSION - Full state:', {
-          sessionId: sessionData.sessionId,
-          registerId: updatedSession.registerId,
-          registerName: updatedSession.registerName,
-          locationId: updatedSession.locationId,
-          locationName: updatedSession.locationName,
-          sessionNumber: updatedApiConfig.sessionNumber,
-          openingCash: updatedApiConfig.openingCash,
-        })
+        logger.error('[POSSessionContext] ✅ PERSISTED TO ASYNC STORAGE')
+        logger.error('[POSSessionContext] ✅ JOINED EXISTING SESSION - Full state:')
+        logger.error('  sessionId:', sessionData.sessionId)
+        logger.error('  registerId:', updatedSession.registerId)
+        logger.error('  registerName:', updatedSession.registerName)
+        logger.error('  locationId:', updatedSession.locationId)
+        logger.error('  locationName:', updatedSession.locationName)
+        logger.error('  sessionNumber:', updatedApiConfig.sessionNumber)
+        logger.error('  openingCash:', updatedApiConfig.openingCash)
       } catch (err) {
         logger.error('[POSSessionContext] Error joining session:', err)
         throw err

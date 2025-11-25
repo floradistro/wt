@@ -172,17 +172,36 @@ export const usePaymentStore = create<PaymentState>()(
           validateRealPaymentData(paymentData)
 
           // Prepare order items
-          const items = cart.map((item: CartItem) => ({
-            productId: item.productId,
-            productName: item.productName || item.name,
-            productSku: item.sku || item.productSku || '',
-            unitPrice: item.adjustedPrice !== undefined ? item.adjustedPrice : item.price,
-            quantity: item.quantity,
-            tierName: item.tierName || item.tier || '1 Unit',
-            discountAmount: item.manualDiscountValue || 0,
-            lineTotal: (item.adjustedPrice !== undefined ? item.adjustedPrice : item.price) * item.quantity,
-            inventoryId: item.inventoryId,
-          }))
+          const items = cart.map((item: CartItem) => {
+            // CRITICAL: Use tierQuantity for inventory deduction
+            // tierQuantity comes from pricing_data.tiers[].quantity in database
+            // Examples: 28 for "28g", 3.5 for "3.5g", 2 for "2 units", 1 for single items
+            const tierLabel = item.tierLabel || item.tierName || item.tier || '1 Unit'
+            const gramsToDeduct = item.tierQuantity
+              ? item.tierQuantity * item.quantity
+              : item.quantity
+
+            logger.debug('[PaymentStore] Preparing order item:', {
+              productName: item.productName || item.name,
+              tierLabel,
+              cartQuantity: item.quantity,
+              tierQuantity: item.tierQuantity,
+              gramsToDeduct,
+            })
+
+            return {
+              productId: item.productId,
+              productName: item.productName || item.name,
+              productSku: item.sku || item.productSku || '',
+              unitPrice: item.adjustedPrice !== undefined ? item.adjustedPrice : item.price,
+              quantity: item.quantity, // Keep as cart quantity (1) for lineTotal validation
+              tierName: tierLabel, // Store the tier label for order_items
+              discountAmount: item.manualDiscountValue || 0,
+              lineTotal: (item.adjustedPrice !== undefined ? item.adjustedPrice : item.price) * item.quantity,
+              inventoryId: item.inventoryId,
+              gramsToDeduct, // Pass actual quantity to deduct (e.g., 28 for "28g (Ounce)")
+            }
+          })
 
           // Normalize payment method for database constraint
           const normalizedPaymentMethod = normalizePaymentMethod(paymentData.paymentMethod)
@@ -212,7 +231,9 @@ export const usePaymentStore = create<PaymentState>()(
 
           const controller = new AbortController()
           const timeoutId = setTimeout(() => {
-            logger.warn('⏱️ Edge Function timeout (90s) - aborting request')
+            logger.error('⏱️ EDGE FUNCTION TIMEOUT (90s) - This means the backend is hanging!')
+            logger.error('Check Supabase Edge Function logs for errors')
+            logger.error('Request data:', edgeFunctionPayload)
             controller.abort()
           }, 90000)
 
@@ -243,6 +264,13 @@ export const usePaymentStore = create<PaymentState>()(
           const supabaseUrl = Constants.expoConfig?.extra?.supabaseUrl || process.env.EXPO_PUBLIC_SUPABASE_URL
           const supabaseAnonKey = Constants.expoConfig?.extra?.supabaseAnonKey || process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY
           const edgeFunctionUrl = `${supabaseUrl}/functions/v1/process-checkout`
+
+          logger.error('🌐 NETWORK REQUEST DETAILS:')
+          logger.error('  URL:', edgeFunctionUrl)
+          logger.error('  Method: POST')
+          logger.error('  Has Auth Token:', !!freshSession.access_token)
+          logger.error('  Has Anon Key:', !!supabaseAnonKey)
+          logger.error('  Payload size:', JSON.stringify(edgeFunctionPayload).length, 'bytes')
 
           const response = await fetch(edgeFunctionUrl, {
             method: 'POST',
