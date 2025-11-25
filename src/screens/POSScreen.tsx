@@ -20,6 +20,7 @@ import { LiquidGlassView, isLiquidGlassSupported } from '@callstack/liquid-glass
 import { startPaymentProcessorMonitoring, stopPaymentProcessorMonitoring } from '@/stores/payment-processor.store'
 import { useDockOffset } from '@/navigation/DockOffsetContext'
 import { layout } from '@/theme/layout'
+import { useRealtimeInventory } from '@/hooks/useRealtimeInventory'
 
 // Context - Zero prop drilling!
 import { usePOSSession } from '@/contexts/POSSessionContext'
@@ -43,6 +44,10 @@ function POSScreenComponent() {
 
   // Context - Session data (no prop drilling!)
   const { session } = usePOSSession()
+
+  // ✅ REAL-TIME INVENTORY: Subscribe to inventory updates for current POS location
+  // Critical for POS: When a sale completes, all product cards update instantly
+  useRealtimeInventory(session?.locationId)
 
   // ========================================
   // LOCAL STATE (Minimal!)

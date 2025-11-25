@@ -148,6 +148,7 @@ interface OrderItem {
   lineTotal: number
   discountAmount?: number
   inventoryId?: string
+  gramsToDeduct?: number // For cannabis products with pricing tiers (e.g., 28g, 3.5g)
 }
 
 interface SPINSaleRequest {
@@ -220,10 +221,48 @@ const ALLOWED_ORIGINS = [
 // ============================================================================
 
 async function getDbClient(): Promise<Client> {
+  // CRITICAL: Edge Functions MUST use connection pooler URL, not direct connection
+  // Direct connections timeout because Edge Functions run in IPv6-only environment
+  // Use transaction mode pooler: postgresql://postgres.[project-ref]:[password]@aws-0-us-east-2.pooler.supabase.com:6543/postgres
   const databaseUrl = Deno.env.get('SUPABASE_DB_URL')!
-  const client = new Client(databaseUrl)
-  await client.connect()
-  return client
+
+  // Add connection timeout and configure for pooler
+  const client = new Client({
+    connection: {
+      attempts: 1, // Don't retry, fail fast
+    },
+    ...(() => {
+      // Parse URL to add pooler settings
+      const url = new URL(databaseUrl)
+      return {
+        user: url.username,
+        password: url.password,
+        hostname: url.hostname,
+        port: parseInt(url.port || '5432'),
+        database: url.pathname.slice(1), // Remove leading slash
+      }
+    })(),
+  })
+
+  console.log('[DB] Attempting to connect to:', {
+    hostname: new URL(databaseUrl).hostname,
+    port: new URL(databaseUrl).port || '5432',
+  })
+
+  const timeout = setTimeout(() => {
+    throw new Error('Database connection timeout after 10s')
+  }, 10000)
+
+  try {
+    await client.connect()
+    clearTimeout(timeout)
+    console.log('[DB] Connected successfully')
+    return client
+  } catch (error) {
+    clearTimeout(timeout)
+    console.error('[DB] Failed to connect to database:', error)
+    throw new Error(`Database connection failed: ${error.message}`)
+  }
 }
 
 // ============================================================================
@@ -780,18 +819,28 @@ serve(async (req) => {
     // ========================================================================
     // STEP 7: CREATE ORDER ITEMS
     // ========================================================================
-    const orderItems = body.items.map(item => ({
-      order_id: order.id,
-      product_id: item.productId,
-      product_name: item.productName,
-      product_sku: item.productSku,
-      quantity: item.quantity,
-      unit_price: item.unitPrice,
-      line_subtotal: item.lineTotal, // Subtotal before tax
-      line_total: item.lineTotal, // Total including tax
-      tax_amount: 0, // Tax is calculated at order level
-      inventory_id: item.inventoryId,
-    }))
+    const orderItems = body.items.map(item => {
+      // MISSION CRITICAL: No fallback for gramsToDeduct!
+      if (!item.gramsToDeduct) {
+        throw new Error(`CRITICAL: Missing gramsToDeduct for item ${item.productName}. Inventory deduction would be incorrect!`)
+      }
+
+      return {
+        order_id: order.id,
+        product_id: item.productId,
+        product_name: item.productName,
+        product_sku: item.productSku,
+        quantity: item.quantity,
+        unit_price: item.unitPrice,
+        line_subtotal: item.lineTotal, // Subtotal before tax
+        line_total: item.lineTotal, // Total including tax
+        tax_amount: 0, // Tax is calculated at order level
+        inventory_id: item.inventoryId,
+        tier_name: item.tierName || null, // e.g., "28g (Ounce)", "3.5g (Eighth)"
+        quantity_grams: item.gramsToDeduct, // CRITICAL: Actual quantity to deduct (grams, units, etc.)
+        quantity_display: item.tierName || `${item.quantity}`, // Display string for UI
+      }
+    })
 
     const { error: itemsError } = await supabaseAdmin
       .from('order_items')

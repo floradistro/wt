@@ -20,6 +20,25 @@ import * as Haptics from 'expo-haptics'
 import type { CartItem, Product, PricingTier } from '@/types/pos'
 import { logger } from '@/utils/logger'
 
+// ============================================================================
+// CRITICAL VALIDATION: Prevent inventory deduction bugs
+// ============================================================================
+/**
+ * MISSION CRITICAL: Validate that tierQuantity exists and is valid
+ * This prevents silent failures that cause incorrect inventory deduction
+ */
+function assertTierQuantityExists(item: Partial<CartItem>, context: string): void {
+  if (!item.tierQuantity || item.tierQuantity <= 0) {
+    const error = `CRITICAL CART ERROR [${context}]: Missing or invalid tierQuantity for "${item.name}". This would cause incorrect inventory deduction! tierQuantity=${item.tierQuantity}`
+    logger.error(error, item)
+
+    // Fail loudly in production too - this is MISSION CRITICAL
+    throw new Error(error)
+  }
+
+  logger.debug(`[Cart Validation] ✅ tierQuantity OK for ${item.name}: ${item.tierQuantity}`)
+}
+
 interface CartState {
   // State
   items: CartItem[]
@@ -90,20 +109,26 @@ export const useCartStore = create<CartState>()(
             return state // Don't add
           }
 
+          const newItem: CartItem = {
+            id: itemId,
+            name: tierLabel ? `${product.name} (${tierLabel})` : product.name,
+            price,
+            quantity: 1, // Cart quantity (how many of this tier are in cart)
+            tierLabel: tierLabel || undefined,
+            tierQuantity: tier ? (tier.qty || 1) : 1, // CRITICAL: Actual quantity to deduct from inventory (e.g., 28 for "28g", 3 for "3 units")
+            productName: product.name,
+            productId: product.id,
+            inventoryId: product.inventory_id || product.id, // Use actual inventory record ID
+            availableInventory, // Store for future validation
+          }
+
+          // CRITICAL VALIDATION: Ensure tierQuantity exists before adding to cart
+          assertTierQuantityExists(newItem, 'addToCart')
+
           return {
             items: [
               ...state.items,
-              {
-                id: itemId,
-                name: tierLabel ? `${product.name} (${tierLabel})` : product.name,
-                price,
-                quantity: 1,
-                tierLabel: tierLabel || undefined,
-                productName: product.name,
-                productId: product.id,
-                inventoryId: product.inventory_id || product.id, // Use actual inventory record ID
-                availableInventory, // Store for future validation
-              },
+              newItem,
             ]
           }
         }, false, 'cart/addToCart')
@@ -169,20 +194,26 @@ export const useCartStore = create<CartState>()(
             }
           }
 
+          const newItem: CartItem = {
+            id: itemId,
+            name: tierLabel ? `${product.name} (${tierLabel})` : product.name,
+            price,
+            quantity: 1,
+            tierLabel: tierLabel || undefined,
+            tierQuantity: newTier.qty || 1, // CRITICAL: Actual quantity to deduct from inventory
+            productName: product.name,
+            productId: product.id,
+            inventoryId: product.inventory_id || product.id, // Use actual inventory record ID
+            availableInventory, // Store for validation
+          }
+
+          // CRITICAL VALIDATION: Ensure tierQuantity exists before changing tier
+          assertTierQuantityExists(newItem, 'changeTier')
+
           return {
             items: [
               ...filtered,
-              {
-                id: itemId,
-                name: tierLabel ? `${product.name} (${tierLabel})` : product.name,
-                price,
-                quantity: 1,
-                tierLabel: tierLabel || undefined,
-                productName: product.name,
-                productId: product.id,
-                inventoryId: product.inventory_id || product.id, // Use actual inventory record ID
-                availableInventory, // Store for validation
-              },
+              newItem,
             ]
           }
         }, false, 'cart/changeTier')

@@ -36,30 +36,19 @@ export function DashboardNavigator() {
   const contentWidth = screenWidth - leftOffset
   const dockCenterX = leftOffset + (contentWidth / 2)
 
+  // Render active screen component
+  const ActiveScreen = screens[activeTab]
+
   return (
     <SafeAreaProvider>
       <DockOffsetContext.Provider value={{ setFullWidth: setIsFullWidth }}>
         <View style={styles.container}>
-          {screens.map((Screen, index) => {
-            const isActive = activeTab === index
-
-            return (
-              <View
-                key={index}
-                style={[
-                  styles.screen,
-                  { display: isActive ? 'flex' : 'none' }
-                ]}
-                pointerEvents={isActive ? 'auto' : 'none'}
-                removeClippedSubviews={!isActive}
-                collapsable={false}
-              >
-                <ErrorBoundary>
-                  <Screen />
-                </ErrorBoundary>
-              </View>
-            )
-          })}
+          {/* Only render the active screen (huge performance improvement) */}
+          <View style={styles.screen}>
+            <ErrorBoundary>
+              <ActiveScreen />
+            </ErrorBoundary>
+          </View>
           <Dock activeTab={activeTab} onTabChange={setActiveTab} centerX={dockCenterX} />
         </View>
       </DockOffsetContext.Provider>

@@ -171,15 +171,30 @@ export const usePaymentStore = create<PaymentState>()(
           set({ stage: 'sending' }, false, 'payment/validating')
           validateRealPaymentData(paymentData)
 
+          // VALIDATION: Check all cart items BEFORE processing
+          logger.info('[PaymentStore] Validating cart items before checkout...')
+          cart.forEach((item: CartItem, index: number) => {
+            if (!item.tierQuantity || item.tierQuantity <= 0) {
+              const error = `CRITICAL CHECKOUT VALIDATION FAILED: Item #${index + 1} "${item.productName || item.name}" has invalid tierQuantity=${item.tierQuantity}. Cannot proceed with checkout!`
+              logger.error(error, item)
+              throw new Error(error)
+            }
+            logger.debug(`[PaymentStore] ✅ Item #${index + 1} validation passed: ${item.productName || item.name} (tierQuantity=${item.tierQuantity})`)
+          })
+
           // Prepare order items
           const items = cart.map((item: CartItem) => {
             // CRITICAL: Use tierQuantity for inventory deduction
             // tierQuantity comes from pricing_data.tiers[].quantity in database
             // Examples: 28 for "28g", 3.5 for "3.5g", 2 for "2 units", 1 for single items
             const tierLabel = item.tierLabel || item.tierName || item.tier || '1 Unit'
-            const gramsToDeduct = item.tierQuantity
-              ? item.tierQuantity * item.quantity
-              : item.quantity
+
+            // This should never happen now due to validation above, but keep as safety
+            if (!item.tierQuantity) {
+              throw new Error(`CRITICAL: Missing tierQuantity for item ${item.productName || item.name}. This will cause incorrect inventory deduction!`)
+            }
+
+            const gramsToDeduct = item.tierQuantity * item.quantity
 
             logger.debug('[PaymentStore] Preparing order item:', {
               productName: item.productName || item.name,
@@ -258,19 +273,18 @@ export const usePaymentStore = create<PaymentState>()(
             campaignId: selectedDiscountId || null,
           }
 
-          logger.debug('📤 Sending to Edge Function:', edgeFunctionPayload)
+          logger.debug('📤 Sending to Edge Function:', JSON.stringify(edgeFunctionPayload, null, 2))
 
           const authHeader = `Bearer ${freshSession.access_token}`
           const supabaseUrl = Constants.expoConfig?.extra?.supabaseUrl || process.env.EXPO_PUBLIC_SUPABASE_URL
           const supabaseAnonKey = Constants.expoConfig?.extra?.supabaseAnonKey || process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY
           const edgeFunctionUrl = `${supabaseUrl}/functions/v1/process-checkout`
 
-          logger.error('🌐 NETWORK REQUEST DETAILS:')
-          logger.error('  URL:', edgeFunctionUrl)
-          logger.error('  Method: POST')
-          logger.error('  Has Auth Token:', !!freshSession.access_token)
-          logger.error('  Has Anon Key:', !!supabaseAnonKey)
-          logger.error('  Payload size:', JSON.stringify(edgeFunctionPayload).length, 'bytes')
+          logger.debug('🌐 Network request', {
+            url: edgeFunctionUrl,
+            hasAuth: !!freshSession.access_token,
+            payloadSize: JSON.stringify(edgeFunctionPayload).length,
+          })
 
           const response = await fetch(edgeFunctionUrl, {
             method: 'POST',

@@ -59,6 +59,15 @@ export interface ProductField {
   type: 'text' | 'number'
 }
 
+export interface InventoryItem {
+  id: string
+  location_id: string
+  location_name: string
+  quantity: number
+  available_quantity: number
+  reserved_quantity: number
+}
+
 export interface Product {
   id: string
   name: string
@@ -84,14 +93,17 @@ export interface Product {
   description?: string | null
   short_description?: string | null
   inventory_id?: string
+  // Multi-location inventory support
+  inventory?: InventoryItem[]
 }
 
 export interface CartItem {
   id: string
   name: string
   price: number
-  quantity: number
+  quantity: number // Number of THIS tier in cart (usually 1)
   tierLabel?: string
+  tierQuantity: number // CRITICAL: REQUIRED! Actual quantity to deduct from inventory (e.g., 28 for "28g", 3.5 for "3.5g", 2 for "2 units")
   productName?: string
   productId: string
   inventoryId: string

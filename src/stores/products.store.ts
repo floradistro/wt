@@ -18,6 +18,7 @@ import { logger } from '@/utils/logger'
 import { transformInventoryToProducts, extractCategories } from '@/utils/product-transformers'
 import { eventLogger } from '@/services/event-logger.service'
 import type { Product } from '@/types/pos'
+import type { RealtimeChannel } from '@supabase/supabase-js'
 
 // ========================================
 // TYPES
@@ -30,6 +31,7 @@ interface ProductsState {
   error: string | null
   locationId: string | null
   currentController: AbortController | null
+  inventoryChannel: RealtimeChannel | null
 
   // Actions
   loadProducts: (locationId: string) => Promise<void>
@@ -37,6 +39,8 @@ interface ProductsState {
   setLocationId: (locationId: string) => void
   getProductById: (id: string) => Product | undefined
   cancelLoadProducts: () => void
+  subscribeToInventoryUpdates: (locationId: string) => void
+  unsubscribeFromInventoryUpdates: () => void
   reset: () => void
 }
 
@@ -54,6 +58,7 @@ export const useProductsStore = create<ProductsState>()(
   error: null,
   locationId: null,
   currentController: null,
+  inventoryChannel: null,
 
   // Actions
   /**
@@ -95,13 +100,15 @@ export const useProductsStore = create<ProductsState>()(
           products (
             id,
             name,
+            sku,
             regular_price,
+            sale_price,
+            on_sale,
             featured_image,
-            description,
-            short_description,
             custom_fields,
             pricing_data,
             vendor_id,
+            primary_category_id,
             primary_category:categories!primary_category_id(id, name),
             product_categories (
               categories (
@@ -196,9 +203,71 @@ export const useProductsStore = create<ProductsState>()(
     return products.find((p) => p.id === id)
   },
 
+  /**
+   * Subscribe to real-time inventory updates
+   * APPLE PRINCIPLE: Instant feedback - no page refresh needed
+   */
+  subscribeToInventoryUpdates: (locationId: string) => {
+    // Unsubscribe from previous channel
+    get().unsubscribeFromInventoryUpdates()
+
+    logger.debug('[Products Store] Subscribing to inventory updates for location:', locationId)
+
+    const channel = supabase
+      .channel(`inventory:location:${locationId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*', // Listen to INSERT, UPDATE, DELETE
+          schema: 'public',
+          table: 'inventory',
+          filter: `location_id=eq.${locationId}`,
+        },
+        (payload) => {
+          logger.debug('[Products Store] Inventory update received:', payload)
+
+          if (payload.eventType === 'UPDATE' && payload.new) {
+            // Reload products when inventory changes
+            const { locationId: currentLocationId } = get()
+            if (currentLocationId) {
+              logger.info('[Products Store] ✅ Inventory updated, reloading products')
+              get().loadProducts(currentLocationId)
+            }
+          }
+        }
+      )
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          logger.info('[Products Store] ✅ Subscribed to inventory updates')
+        } else if (status === 'CHANNEL_ERROR') {
+          logger.error('[Products Store] ❌ Inventory subscription error')
+        } else if (status === 'TIMED_OUT') {
+          logger.error('[Products Store] ⏱️ Inventory subscription timed out')
+        }
+      })
+
+    set({ inventoryChannel: channel })
+  },
+
+  /**
+   * Unsubscribe from inventory updates
+   */
+  unsubscribeFromInventoryUpdates: () => {
+    const { inventoryChannel } = get()
+
+    if (inventoryChannel) {
+      logger.debug('[Products Store] Unsubscribing from inventory updates')
+      supabase.removeChannel(inventoryChannel)
+      set({ inventoryChannel: null })
+    }
+  },
+
   reset: () => {
     // Cancel any in-flight requests before reset
     get().cancelLoadProducts()
+
+    // Unsubscribe from realtime
+    get().unsubscribeFromInventoryUpdates()
 
     set({
       products: [],
@@ -206,6 +275,7 @@ export const useProductsStore = create<ProductsState>()(
       loading: false,
       error: null,
       currentController: null,
+      inventoryChannel: null,
     })
   },
     }),
@@ -247,5 +317,7 @@ export const productsActions = {
   get setLocationId() { return useProductsStore.getState().setLocationId },
   get getProductById() { return useProductsStore.getState().getProductById },
   get cancelLoadProducts() { return useProductsStore.getState().cancelLoadProducts },
+  get subscribeToInventoryUpdates() { return useProductsStore.getState().subscribeToInventoryUpdates },
+  get unsubscribeFromInventoryUpdates() { return useProductsStore.getState().unsubscribeFromInventoryUpdates },
   get reset() { return useProductsStore.getState().reset },
 }
