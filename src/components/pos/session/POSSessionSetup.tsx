@@ -29,7 +29,7 @@ import { logger } from '@/utils/logger'
 function POSSessionSetup() {
   // Context - Environmental data (no prop drilling!)
   const { vendor, locations } = useAppAuth()
-  const { session, selectLocation, selectRegister, openCashDrawer } = usePOSSession()
+  const { session, selectLocation, selectRegister, joinExistingSession, openCashDrawer } = usePOSSession()
 
   // Local UI state
   const [selectedRegister, setSelectedRegister] = useState<{ id: string; name: string } | null>(null)
@@ -66,9 +66,14 @@ function POSSessionSetup() {
         logger.debug('[POSSessionSetup] No active session - opening cash drawer modal')
         setSelectedRegister({ id: registerId, name: registerName })
         openModal('cashDrawerOpen')
+      } else if (result && result.sessionId) {
+        // Existing session found - join it
+        logger.debug('[POSSessionSetup] Joining existing session:', result.sessionId)
+        await joinExistingSession(result)
+        closeModal()
       } else {
-        // Session joined - parent will handle navigation
-        logger.debug('[POSSessionSetup] Session joined successfully')
+        // Unexpected state
+        logger.error('[POSSessionSetup] Unexpected result from selectRegister:', result)
         closeModal()
       }
     } catch (error) {

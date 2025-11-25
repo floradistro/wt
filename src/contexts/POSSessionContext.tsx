@@ -18,6 +18,7 @@ import { supabase } from '@/lib/supabase/client'
 import { logger } from '@/utils/logger'
 import * as Haptics from 'expo-haptics'
 import type { Location } from '@/types/pos'
+import { useLoyaltyCampaignsStore, startLoyaltyCampaignsRealtimeMonitoring, stopLoyaltyCampaignsRealtimeMonitoring } from '@/stores/loyalty-campaigns.store'
 
 // ========================================
 // TYPES
@@ -40,6 +41,17 @@ export interface POSApiConfig {
   totalCash?: number
 }
 
+interface SelectRegisterResult {
+  needsCashDrawer: boolean
+  registerId?: string
+  registerName?: string
+  sessionId?: string
+  sessionNumber?: string
+  openingCash?: number
+  totalSales?: number
+  totalCash?: number
+}
+
 interface POSSessionContextValue {
   // State
   session: POSSession | null
@@ -50,7 +62,8 @@ interface POSSessionContextValue {
 
   // Actions
   selectLocation: (locationId: string, locationName: string) => Promise<void>
-  selectRegister: (registerId: string, registerName: string) => Promise<{ needsCashDrawer: boolean; registerId?: string; registerName?: string } | void>
+  selectRegister: (registerId: string, registerName: string) => Promise<SelectRegisterResult | void>
+  joinExistingSession: (sessionData: SelectRegisterResult) => Promise<void>
   openCashDrawer: (openingCash: number, notes: string) => Promise<void>
   closeCashDrawer: (closingCash: number, notes: string) => Promise<void>
   clearSession: () => void
@@ -88,7 +101,7 @@ export function POSSessionProvider({ children, vendorId, authUserId }: POSSessio
   const [error, setError] = useState<string | null>(null)
 
   /**
-   * Load custom user ID when auth user changes
+   * Load custom user ID and campaigns when auth user changes
    */
   useEffect(() => {
     async function loadCustomUserId() {
@@ -108,12 +121,27 @@ export function POSSessionProvider({ children, vendorId, authUserId }: POSSessio
           setCustomUserId(userData.id)
           await AsyncStorage.setItem(STORAGE_KEY_USER_ID, userData.id)
         }
+
+        // Load campaigns for POS
+        const { loadCampaigns, loadProgram } = useLoyaltyCampaignsStore.getState()
+        await Promise.all([
+          loadCampaigns(authUserId),
+          loadProgram(authUserId)
+        ])
+
+        // Start realtime monitoring
+        startLoyaltyCampaignsRealtimeMonitoring(authUserId)
       } catch (err) {
-        logger.error('[POSSessionContext] Failed to load custom user ID:', err)
+        logger.error('[POSSessionContext] Failed to load custom user ID or campaigns:', err)
       }
     }
 
     loadCustomUserId()
+
+    // Cleanup realtime monitoring on unmount
+    return () => {
+      stopLoyaltyCampaignsRealtimeMonitoring()
+    }
   }, [authUserId])
 
   /**
@@ -239,33 +267,30 @@ export function POSSessionProvider({ children, vendorId, authUserId }: POSSessio
 
         if (activeSession) {
           // Join existing session
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
-
+          // Update session with register info FIRST
           const updatedSession: POSSession = {
             ...session!,
             registerId,
             registerName,
-            sessionId: activeSession.id,
+            sessionId: '', // Will be set by joinExistingSession
           }
 
-          const updatedApiConfig: POSApiConfig = {
-            ...apiConfig!,
+          setSession(updatedSession)
+
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+
+          logger.info('[POSSessionContext] Found existing session:', activeSession.id)
+
+          return {
+            needsCashDrawer: false,
+            registerId,
+            registerName,
+            sessionId: activeSession.id,
             sessionNumber: activeSession.session_number,
             openingCash: activeSession.opening_cash,
             totalSales: activeSession.total_sales || 0,
             totalCash: activeSession.total_cash || 0,
           }
-
-          setSession(updatedSession)
-          setApiConfig(updatedApiConfig)
-
-          // Persist to AsyncStorage
-          await AsyncStorage.setItem(STORAGE_KEY_SESSION, JSON.stringify(updatedSession))
-          await AsyncStorage.setItem(STORAGE_KEY_API_CONFIG, JSON.stringify(updatedApiConfig))
-
-          logger.info('[POSSessionContext] Joined existing session:', activeSession.id)
-
-          return { needsCashDrawer: false }
         }
 
         // No active session - needs cash drawer
@@ -284,6 +309,54 @@ export function POSSessionProvider({ children, vendorId, authUserId }: POSSessio
       } catch (err) {
         logger.error('[POSSessionContext] Error selecting register:', err)
         setError(err instanceof Error ? err.message : 'Failed to select register')
+        throw err
+      }
+    },
+    [session, apiConfig]
+  )
+
+  /**
+   * Join an existing session (called by POSSessionSetup after user confirms)
+   */
+  const joinExistingSession = useCallback(
+    async (sessionData: SelectRegisterResult) => {
+      if (!session || !sessionData.sessionId) {
+        throw new Error('Invalid session data')
+      }
+
+      try {
+        // Ensure registerId and registerName are set (should be from selectRegister)
+        if (!session.registerId || !session.registerName) {
+          logger.warn('[POSSessionContext] Missing register info when joining session')
+        }
+
+        const updatedSession: POSSession = {
+          ...session,
+          sessionId: sessionData.sessionId,
+        }
+
+        const updatedApiConfig: POSApiConfig = {
+          ...apiConfig!,
+          sessionNumber: sessionData.sessionNumber,
+          openingCash: sessionData.openingCash,
+          totalSales: sessionData.totalSales || 0,
+          totalCash: sessionData.totalCash || 0,
+        }
+
+        setSession(updatedSession)
+        setApiConfig(updatedApiConfig)
+
+        // Persist to AsyncStorage
+        await AsyncStorage.setItem(STORAGE_KEY_SESSION, JSON.stringify(updatedSession))
+        await AsyncStorage.setItem(STORAGE_KEY_API_CONFIG, JSON.stringify(updatedApiConfig))
+
+        logger.info('[POSSessionContext] Joined existing session:', {
+          sessionId: sessionData.sessionId,
+          registerId: session.registerId,
+          registerName: session.registerName
+        })
+      } catch (err) {
+        logger.error('[POSSessionContext] Error joining session:', err)
         throw err
       }
     },
@@ -434,6 +507,7 @@ export function POSSessionProvider({ children, vendorId, authUserId }: POSSessio
     error,
     selectLocation,
     selectRegister,
+    joinExistingSession,
     openCashDrawer,
     closeCashDrawer,
     clearSession,
