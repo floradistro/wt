@@ -273,6 +273,31 @@ export function POSCheckout({
       throw new Error('Missing session information')
     }
 
+    // CRITICAL VALIDATION: Ensure all session fields are present
+    logger.debug('💰 POSCheckout: Validating session data before payment:', {
+      hasSession: !!session,
+      locationId: session.locationId,
+      registerId: session.registerId,
+      sessionId: session.sessionId,
+      hasVendor: !!vendor,
+      vendorId: vendor?.id,
+      hasCustomUserId: !!customUserId,
+    })
+
+    if (!session.locationId || !session.registerId || !session.sessionId) {
+      logger.error('❌ CRITICAL: Incomplete session data!', {
+        locationId: session.locationId,
+        registerId: session.registerId,
+        sessionId: session.sessionId,
+      })
+      throw new Error('Session incomplete. Please restart your POS session by selecting location and register again.')
+    }
+
+    if (!vendor.id) {
+      logger.error('❌ CRITICAL: Missing vendor ID!')
+      throw new Error('Vendor information missing. Please log out and log back in.')
+    }
+
     logger.debug('💰 POSCheckout: Processing payment via Payment Store')
 
     // Convert POSSession to SessionInfo for payment store
@@ -394,20 +419,8 @@ export function POSCheckout({
         onCloseErrorModal={() => setErrorModal({ visible: false, title: '', message: '' })}
       />
 
-      {/* Cart Display - Minimal Props (from 30+ to 11) - Zero prop drilling for products! */}
-      <POSCart
-        selectedCustomer={selectedCustomer}
-        loyaltyPointsToRedeem={loyaltyPointsToRedeem}
-        loyaltyProgram={loyaltyProgram}
-        loyaltyDiscountAmount={loyaltyDiscountAmount}
-        maxRedeemablePoints={getMaxRedeemablePoints(subtotal)}
-        onSelectCustomer={handleSelectCustomer}
-        onClearCustomer={handleClearCustomerWithLoyalty}
-        onSetLoyaltyPoints={setLoyaltyPointsToRedeem}
-        onCheckout={handleCheckout}
-        onEndSession={handleEndSessionClick}
-        taxRate={taxRate}
-      />
+      {/* Cart Display - Nearly zero props (just coordination callback) */}
+      <POSCart onEndSession={handleEndSessionClick} />
     </View>
   )
 }

@@ -215,7 +215,7 @@ function App() {
         <StatusBar barStyle="light-content" backgroundColor="#000000" />
         {/* Context Providers - Zero Prop Drilling Architecture */}
         <AppAuthProvider>
-          <POSSessionProvider vendorId={user?.user_metadata?.vendor_id || null} authUserId={user?.id || null}>
+          <POSSessionProvider authUserId={user?.id || null}>
             <DashboardNavigator />
           </POSSessionProvider>
         </AppAuthProvider>

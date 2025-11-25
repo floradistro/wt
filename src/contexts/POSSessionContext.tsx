@@ -19,6 +19,7 @@ import { logger } from '@/utils/logger'
 import * as Haptics from 'expo-haptics'
 import type { Location } from '@/types/pos'
 import { useLoyaltyCampaignsStore, startLoyaltyCampaignsRealtimeMonitoring, stopLoyaltyCampaignsRealtimeMonitoring } from '@/stores/loyalty-campaigns.store'
+import { useAppAuth } from './AppAuthContext'
 
 // ========================================
 // TYPES
@@ -89,11 +90,23 @@ const STORAGE_KEY_USER_ID = '@pos_custom_user_id'
 // ========================================
 interface POSSessionProviderProps {
   children: ReactNode
-  vendorId: string | null // From AppAuthContext
-  authUserId: string | null // From AppAuthContext
+  authUserId: string | null // From auth.store
 }
 
-export function POSSessionProvider({ children, vendorId, authUserId }: POSSessionProviderProps) {
+export function POSSessionProvider({ children, authUserId }: POSSessionProviderProps) {
+  // Get vendorId from AppAuthContext (nested inside AppAuthProvider)
+  const { vendor } = useAppAuth()
+  const vendorId = vendor?.id || null
+
+  // Log when vendorId changes
+  useEffect(() => {
+    logger.info('[POSSessionContext] vendorId updated from AppAuthContext:', {
+      hasVendor: !!vendor,
+      vendorId,
+      storeName: vendor?.store_name,
+    })
+  }, [vendorId, vendor])
+
   const [session, setSession] = useState<POSSession | null>(null)
   const [apiConfig, setApiConfig] = useState<POSApiConfig | null>(null)
   const [customUserId, setCustomUserId] = useState<string | null>(null)
@@ -350,10 +363,14 @@ export function POSSessionProvider({ children, vendorId, authUserId }: POSSessio
         await AsyncStorage.setItem(STORAGE_KEY_SESSION, JSON.stringify(updatedSession))
         await AsyncStorage.setItem(STORAGE_KEY_API_CONFIG, JSON.stringify(updatedApiConfig))
 
-        logger.info('[POSSessionContext] Joined existing session:', {
+        logger.info('[POSSessionContext] ✅ JOINED EXISTING SESSION - Full state:', {
           sessionId: sessionData.sessionId,
-          registerId: session.registerId,
-          registerName: session.registerName
+          registerId: updatedSession.registerId,
+          registerName: updatedSession.registerName,
+          locationId: updatedSession.locationId,
+          locationName: updatedSession.locationName,
+          sessionNumber: updatedApiConfig.sessionNumber,
+          openingCash: updatedApiConfig.openingCash,
         })
       } catch (err) {
         logger.error('[POSSessionContext] Error joining session:', err)
@@ -425,7 +442,15 @@ export function POSSessionProvider({ children, vendorId, authUserId }: POSSessio
         await AsyncStorage.setItem(STORAGE_KEY_SESSION, JSON.stringify(updatedSession))
         await AsyncStorage.setItem(STORAGE_KEY_API_CONFIG, JSON.stringify(updatedApiConfig))
 
-        logger.info('[POSSessionContext] Session created:', sessionData.id)
+        logger.info('[POSSessionContext] ✅ NEW SESSION CREATED - Full state:', {
+          sessionId: sessionData.id,
+          registerId: updatedSession.registerId,
+          registerName: updatedSession.registerName,
+          locationId: updatedSession.locationId,
+          locationName: updatedSession.locationName,
+          sessionNumber: sessionData.session_number,
+          openingCash,
+        })
       } catch (err) {
         logger.error('[POSSessionContext] Error opening cash drawer:', err)
         setError(err instanceof Error ? err.message : 'Failed to open cash drawer')
