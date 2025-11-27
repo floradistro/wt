@@ -1,8 +1,8 @@
-import { View, Text, StyleSheet, Image, TouchableOpacity, Dimensions, Animated, Modal, ScrollView, Pressable } from 'react-native'
+import { View, Text, StyleSheet, Image, TouchableOpacity, Dimensions, Animated, Modal, ScrollView, Pressable, ActivityIndicator } from 'react-native'
 import { BlurView } from 'expo-blur'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import * as Haptics from 'expo-haptics'
-import { useState, useRef, memo, forwardRef, useImperativeHandle, useMemo } from 'react'
+import { useState, useRef, memo, forwardRef, useImperativeHandle, useMemo, useEffect } from 'react'
 
 // Stores (ZERO PROP DRILLING - Apple Engineering Standard)
 import { cartActions, useCartItems } from '@/stores/cart.store'
@@ -11,8 +11,11 @@ import { useTierSelectorProductId, checkoutUIActions } from '@/stores/checkout-u
 
 // Utils
 import { getMatchingFilters } from '@/utils/product-transformers'
+import { supabase } from '@/lib/supabase/client'
+import { logger } from '@/utils/logger'
 
 import { layout } from '@/theme/layout'
+import type { Product, ProductVariant } from '@/types/pos'
 
 const { width } = Dimensions.get('window')
 // Jobs Principle: 3-column grid accounting for cart sidebar
@@ -30,20 +33,6 @@ interface PricingTier {
   price: string | number
   weight?: string
   label?: string
-}
-
-interface Product {
-  id: string
-  name: string
-  image_url?: string | null
-  vendor_logo_url?: string | null
-  primary_category?: { name: string; slug: string }
-  inventory_quantity?: number
-  meta_data?: {
-    pricing_mode?: 'single' | 'tiered'
-    pricing_tiers?: PricingTier[]
-  }
-  regular_price?: number
 }
 
 interface POSProductCardProps {
@@ -64,12 +53,26 @@ const POSProductCard = forwardRef<any, POSProductCardProps>(({ product }, ref) =
   )
   const [showPricingModal, setShowPricingModal] = useState(false)
   const [selectedTier, setSelectedTier] = useState<number | null>(null)
+  const [selectedVariant, setSelectedVariant] = useState<ProductVariant | null>(null)
+  const [availableVariants, setAvailableVariants] = useState<ProductVariant[]>([])
+  const [loadingVariants, setLoadingVariants] = useState(false)
+  const [variantTiers, setVariantTiers] = useState<PricingTier[]>([])
+  const [loadingVariantTiers, setLoadingVariantTiers] = useState(false)
   const scaleAnim = useRef(new Animated.Value(1)).current
   const modalSlideAnim = useRef(new Animated.Value(600)).current
   const modalOpacity = useRef(new Animated.Value(0)).current
 
-  const _pricingMode = product.meta_data?.pricing_mode || 'single'
-  const customTiers = product.meta_data?.pricing_tiers || []
+  // SINGLE SOURCE OF TRUTH: Read from live pricing template
+  const productTiers = product.pricing_template?.default_tiers?.map(t => ({
+    break_id: t.id,
+    label: t.label,
+    qty: t.quantity,
+    price: t.default_price,
+    sort_order: t.sort_order,
+  })) || []
+
+  // Use variant tiers if variant is selected and has custom pricing, otherwise use product tiers
+  const customTiers = selectedVariant && variantTiers.length > 0 ? variantTiers : productTiers
   const inStock = (product.inventory_quantity || 0) > 0
 
   // Jobs Principle: Show "From $X.XX"
@@ -84,6 +87,49 @@ const POSProductCard = forwardRef<any, POSProductCardProps>(({ product }, ref) =
     const weightLower = weight.toLowerCase()
     return weightLower.includes('3.5') || weightLower.includes('eighth')
   })
+
+  // Load available variants when modal opens
+  useEffect(() => {
+    const loadVariants = async () => {
+      if (!showPricingModal) return
+
+      try {
+        setLoadingVariants(true)
+
+        // Force fresh query by adding timestamp (prevents Supabase cache)
+        const timestamp = Date.now()
+        logger.info('🔄 Loading variants (forced fresh)...', { timestamp })
+
+        const { data, error } = await supabase
+          .from('v_product_variants')
+          .select('*')
+          .eq('product_id', product.id)
+          .eq('is_enabled', true)
+          .order('display_order', { ascending: true })
+
+        if (error) throw error
+
+        setAvailableVariants(data || [])
+        logger.info('🔍 Loaded product variants with FULL DATA:', {
+          productId: product.id,
+          productName: product.name,
+          variantsCount: data?.length,
+          variants: data?.map(v => ({
+            variant_name: v.variant_name,
+            pricing_template_id: v.pricing_template_id,
+            has_custom_pricing: !!v.pricing_template_id
+          }))
+        })
+      } catch (error) {
+        logger.error('Failed to load product variants:', error)
+        setAvailableVariants([])
+      } finally {
+        setLoadingVariants(false)
+      }
+    }
+
+    loadVariants()
+  }, [showPricingModal, product.id])
 
   const openPricingModal = () => {
     if (!inStock) return
@@ -130,6 +176,9 @@ const POSProductCard = forwardRef<any, POSProductCardProps>(({ product }, ref) =
     ]).start(() => {
       setShowPricingModal(false)
       setSelectedTier(null)
+      setSelectedVariant(null)
+      setAvailableVariants([])
+      setVariantTiers([])
     })
   }
 
@@ -151,8 +200,8 @@ const POSProductCard = forwardRef<any, POSProductCardProps>(({ product }, ref) =
       // Clear tier selector mode
       checkoutUIActions.setTierSelectorProductId(null)
     } else {
-      // Normal mode: Add to cart
-      cartActions.addToCart(product, tier)
+      // Normal mode: Add to cart with optional variant
+      cartActions.addToCart(product, tier, selectedVariant || undefined)
     }
 
     // Jobs Principle: Auto-dismiss after brief visual confirmation
@@ -160,6 +209,96 @@ const POSProductCard = forwardRef<any, POSProductCardProps>(({ product }, ref) =
       closePricingModal()
     }, 250)
   }
+
+  const handleVariantSelect = (variant: ProductVariant | null) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+
+    logger.info('🎯 Variant selected:', {
+      variantName: variant?.variant_name || 'None (parent product)',
+      pricing_template_id: variant?.pricing_template_id || 'null',
+      will_load_custom_pricing: !!variant?.pricing_template_id
+    })
+
+    setSelectedVariant(variant)
+    setSelectedTier(null) // Reset tier selection when variant changes
+  }
+
+  // Load variant-specific pricing tiers when variant is selected
+  useEffect(() => {
+    const loadVariantPricing = async () => {
+      // Reset if no variant or variant has no custom pricing
+      if (!selectedVariant || !selectedVariant.pricing_template_id) {
+        setVariantTiers([])
+        return
+      }
+
+      try {
+        setLoadingVariantTiers(true)
+        logger.info('💰 Loading variant pricing tiers...', {
+          variantName: selectedVariant.variant_name,
+          pricingTemplateId: selectedVariant.pricing_template_id,
+        })
+
+        // Load pricing template with its tiers
+        const { data, error } = await supabase
+          .from('pricing_tier_templates')
+          .select('id, name, default_tiers')
+          .eq('id', selectedVariant.pricing_template_id)
+          .single()
+
+        if (error) {
+          logger.error('❌ Error loading pricing template:', error)
+          throw error
+        }
+
+        logger.info('📦 Raw pricing template data:', {
+          templateId: data?.id,
+          templateName: data?.name,
+          hasTiers: !!data?.default_tiers,
+          tiersCount: data?.default_tiers?.length || 0,
+          rawTiers: data?.default_tiers,
+          firstTier: data?.default_tiers?.[0]
+        })
+
+        if (data?.default_tiers && Array.isArray(data.default_tiers)) {
+          // Transform DB tiers to PricingTier format
+          // Note: DB stores price as 'default_price', not 'price'
+          const tiers = data.default_tiers
+            .sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0))
+            .map((tier: any) => ({
+              qty: tier.quantity || 1,
+              price: parseFloat(tier.default_price || tier.price) || 0, // Try default_price first, fallback to price
+              label: tier.label || 'N/A',
+              weight: tier.label || 'N/A', // For compatibility
+            }))
+
+          setVariantTiers(tiers)
+          logger.info('✅ Loaded variant pricing tiers', {
+            variantName: selectedVariant.variant_name,
+            templateName: data.name,
+            tiersCount: tiers.length,
+            tiers: tiers.map(t => ({
+              label: t.label,
+              weight: t.weight,
+              price: t.price,
+              qty: t.qty
+            })),
+            fullTiers: tiers
+          })
+        } else {
+          logger.warn('⚠️ No tiers found in pricing template')
+          setVariantTiers([])
+        }
+      } catch (error) {
+        logger.error('❌ Failed to load variant pricing:', error)
+        setVariantTiers([])
+      } finally {
+        setLoadingVariantTiers(false)
+      }
+    }
+
+    loadVariantPricing()
+  }, [selectedVariant])
 
   const handleCardPress = () => {
     Animated.spring(scaleAnim, {
@@ -263,7 +402,7 @@ const POSProductCard = forwardRef<any, POSProductCardProps>(({ product }, ref) =
             </Text>
             <View style={styles.metadataRow}>
               <Text style={styles.category} numberOfLines={1}>
-                {product.primary_category?.name || 'Uncategorized'}
+                {product.category || 'Uncategorized'}
               </Text>
               <Text style={styles.dot}>•</Text>
               {/* JOBS PRINCIPLE: Show starting price */}
@@ -323,15 +462,70 @@ const POSProductCard = forwardRef<any, POSProductCardProps>(({ product }, ref) =
               {product.name}
             </Text>
 
+            {/* VARIANT SELECTOR - Show if variants available */}
+            {loadingVariants ? (
+              <View style={styles.variantLoadingContainer}>
+                <ActivityIndicator size="small" color="rgba(255,255,255,0.5)" />
+              </View>
+            ) : availableVariants.length > 0 ? (
+              <View style={styles.variantSelectorContainer}>
+                <Text style={styles.variantSelectorTitle}>VARIANT</Text>
+                <View style={styles.variantOptions}>
+                  {/* Parent product option (no variant) */}
+                  <TouchableOpacity
+                    activeOpacity={0.7}
+                    onPress={() => handleVariantSelect(null)}
+                    style={[
+                      styles.variantOptionButton,
+                      !selectedVariant && styles.variantOptionButtonActive
+                    ]}
+                  >
+                    <Text style={[
+                      styles.variantOptionText,
+                      !selectedVariant && styles.variantOptionTextActive
+                    ]}>
+                      Original
+                    </Text>
+                  </TouchableOpacity>
+
+                  {/* Variant options */}
+                  {availableVariants.map((variant) => (
+                    <TouchableOpacity
+                      key={variant.variant_template_id}
+                      activeOpacity={0.7}
+                      onPress={() => handleVariantSelect(variant)}
+                      style={[
+                        styles.variantOptionButton,
+                        selectedVariant?.variant_template_id === variant.variant_template_id && styles.variantOptionButtonActive
+                      ]}
+                    >
+                      <Text style={[
+                        styles.variantOptionText,
+                        selectedVariant?.variant_template_id === variant.variant_template_id && styles.variantOptionTextActive
+                      ]}>
+                        {variant.variant_name}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+            ) : null}
+
             {/* JOBS PRINCIPLE: Large, scannable pricing options */}
-            <ScrollView
-              style={styles.tiersScroll}
-              contentContainerStyle={styles.tiersContainer}
-              showsVerticalScrollIndicator={false}
-            >
-              {/* iOS 26 Grouped List Container */}
-              <View style={styles.tierGroupContainer}>
-                {customTiers.length > 0 ? (
+            {loadingVariantTiers ? (
+              <View style={styles.tiersLoadingContainer}>
+                <ActivityIndicator size="small" color="rgba(255,255,255,0.5)" />
+                <Text style={styles.tiersLoadingText}>Loading pricing...</Text>
+              </View>
+            ) : (
+              <ScrollView
+                style={styles.tiersScroll}
+                contentContainerStyle={styles.tiersContainer}
+                showsVerticalScrollIndicator={false}
+              >
+                {/* iOS 26 Grouped List Container */}
+                <View style={styles.tierGroupContainer}>
+                  {customTiers.length > 0 ? (
                   customTiers.map((tier: PricingTier, index: number) => {
                       const price = parseFloat(String(tier.price))
                       const isSelected = selectedTier === index
@@ -379,9 +573,10 @@ const POSProductCard = forwardRef<any, POSProductCardProps>(({ product }, ref) =
                       </Text>
                     </View>
                   </TouchableOpacity>
-                )}
-              </View>
-            </ScrollView>
+                  )}
+                </View>
+              </ScrollView>
+            )}
           </View>
           </Animated.View>
         </Animated.View>
@@ -617,5 +812,62 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#fff',
     letterSpacing: -0.5,
+  },
+
+  // Variant Selector
+  variantLoadingContainer: {
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
+  variantSelectorContainer: {
+    paddingHorizontal: 24,
+    paddingBottom: 20,
+  },
+  variantSelectorTitle: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.5)',
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+    marginBottom: 12,
+  },
+  variantOptions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  variantOptionButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+    borderCurve: 'continuous' as const,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  variantOptionButtonActive: {
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    borderColor: 'rgba(255,255,255,0.3)',
+  },
+  variantOptionText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.6)',
+    letterSpacing: -0.2,
+  },
+  variantOptionTextActive: {
+    color: '#fff',
+  },
+
+  // Tiers Loading
+  tiersLoadingContainer: {
+    paddingVertical: 40,
+    alignItems: 'center',
+    gap: 12,
+  },
+  tiersLoadingText: {
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.5)',
+    letterSpacing: -0.2,
   },
 })

@@ -9,10 +9,11 @@
  * - Smooth scrolling even with 1000+ products
  *
  * ZERO PROP DRILLING:
- * - No products prop - reads from products.store
- * - No loading prop - reads from products.store
+ * - No products prop - reads from pos-products.store (POS-specific)
+ * - No loading prop - reads from pos-products.store
  * - Computes filteredProducts internally from filters
  *
+ * CRITICAL: Uses POS-specific store to prevent conflicts with ProductsScreen
  * All data read directly from stores
  */
 
@@ -25,17 +26,17 @@ import { layout } from '@/theme/layout'
 
 // Stores (ZERO PROP DRILLING - Apple Standard)
 import { useProductFilters } from '@/stores/product-filter.store'
-import { useProductsStore } from '@/stores/products.store'
+import { usePOSProductsStore } from '@/stores/pos-products.store'
 
 // Utils
 import { applyFilters } from '@/utils/product-transformers'
 
 export function POSProductGrid() {
   // ========================================
-  // STORE - TRUE ZERO PROPS (read from environment)
+  // STORE - TRUE ZERO PROPS (read from POS-specific store)
   // ========================================
-  const products = useProductsStore((state) => state.products)
-  const loading = useProductsStore((state) => state.loading)
+  const products = usePOSProductsStore((state) => state.products)
+  const loading = usePOSProductsStore((state) => state.loading)
   const filters = useProductFilters()
 
   // Compute filtered products internally (Apple pattern)
@@ -46,46 +47,28 @@ export function POSProductGrid() {
   const insets = useSafeAreaInsets()
 
   // ========================================
-  // PRODUCT TRANSFORMATION (Memoized)
-  // ========================================
-  const transformProduct = useCallback((product: Product) => {
-    return {
-      ...product,
-      image_url: product.image_url,
-      vendor_logo_url: product.vendor?.logo_url || null,
-      primary_category: product.category
-        ? { name: product.category, slug: product.category.toLowerCase() }
-        : undefined,
-      meta_data: {
-        pricing_mode: product.pricing_tiers && product.pricing_tiers.length > 0
-          ? 'tiered' as const
-          : 'single' as const,
-        pricing_tiers: product.pricing_tiers?.map((tier: PricingTier) => ({
-          qty: tier.qty,
-          price: String(tier.price),
-          weight: tier.label
-        }))
-      }
-    }
-  }, [])
-
-  // ========================================
   // RENDER ITEM (Memoized for performance)
   // ========================================
   const renderItem = useCallback(({ item }: { item: Product }) => {
-    const transformedProduct = transformProduct(item)
-
+    // SINGLE SOURCE: Product already has pricing_template from query
+    // No transformation needed - POSProductCard reads directly from it
     return (
       <View style={styles.productCardWrapper}>
-        <POSProductCard product={transformedProduct} />
+        <POSProductCard product={item} />
       </View>
     )
-  }, [transformProduct])
+  }, [])
 
   // ========================================
-  // KEY EXTRACTOR
+  // KEY EXTRACTOR - Include pricing hash to force re-render on price changes
   // ========================================
-  const keyExtractor = useCallback((item: Product) => item.id, [])
+  const keyExtractor = useCallback((item: Product) => {
+    // SINGLE SOURCE: Use template ID for re-render on template changes
+    // When template updates, this key changes, forcing card re-render
+    const templateId = item.pricing_template_id || 'none'
+    const pricingHash = item.pricing_template?.default_tiers?.map(t => `${t.default_price}`).join('-') || 'single'
+    return `${item.id}-${templateId}-${pricingHash}`
+  }, [])
 
   // ========================================
   // EMPTY STATE

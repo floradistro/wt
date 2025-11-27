@@ -25,10 +25,11 @@ import { POSProductGrid } from './POSProductGrid'
 
 // Context - Zero prop drilling!
 import { usePOSSession } from '@/contexts/POSSessionContext'
+import { useAppAuth } from '@/contexts/AppAuthContext'
 
 // Stores (ZERO PROP DRILLING - Apple Engineering Standard)
-import { productsActions, useProductsState } from '@/stores/products.store'
-import { useProductsStore } from '@/stores/products.store'
+import { posProductsActions, usePOSProductsState } from '@/stores/pos-products.store'
+import { usePOSProductsStore } from '@/stores/pos-products.store'
 import {
   useProductFilters,
   useActiveFilterCount,
@@ -46,14 +47,15 @@ export function POSProductBrowser() {
   // CONTEXT - Zero prop drilling!
   // ========================================
   const { session } = usePOSSession()
+  const { vendor } = useAppAuth()
 
   // ========================================
   // STORES - ZERO PROP DRILLING (Apple Standard)
   // ========================================
-  const { categories, loading: storeLoading } = useProductsState()
+  const { categories, loading: storeLoading } = usePOSProductsState()
 
   // Read raw data from stores
-  const products = useProductsStore((state) => state.products)
+  const products = usePOSProductsStore((state) => state.products)
   const filters = useProductFilters()
   const activeFilterCount = useActiveFilterCount()
 
@@ -93,12 +95,18 @@ export function POSProductBrowser() {
   // ========================================
   // EFFECTS
   // ========================================
-  // Load products into products.store
+  // Load products into POS-specific store (ONLY in-stock products at current location)
   useEffect(() => {
-    if (session?.locationId) {
-      productsActions.loadProducts(session.locationId)
+    if (session?.locationId && vendor?.id) {
+      // CRITICAL: POS uses separate store to prevent conflicts with ProductsScreen
+      // This ensures POS ONLY shows in-stock products for current vendor at current location
+      posProductsActions.loadProducts(session.locationId, vendor.id)
+      logger.info('[POSProductBrowser] Loading POS products for location + vendor', {
+        locationId: session.locationId,
+        vendorId: vendor.id,
+      })
     }
-  }, [session?.locationId])
+  }, [session?.locationId, vendor?.id])
 
   // No need to sync products - filter store reads directly from products store! (Apple pattern)
 
@@ -160,9 +168,12 @@ export function POSProductBrowser() {
   // ========================================
   // RENDER
   // ========================================
-  // Guard: Ensure session data exists (after all hooks)
-  if (!session) {
-    logger.warn('POSProductBrowser: Missing session from context')
+  // Guard: Ensure session and vendor data exists (after all hooks)
+  if (!session || !vendor) {
+    logger.warn('POSProductBrowser: Missing session or vendor from context', {
+      hasSession: !!session,
+      hasVendor: !!vendor,
+    })
     return null
   }
 
