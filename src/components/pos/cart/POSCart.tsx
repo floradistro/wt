@@ -1,109 +1,66 @@
 /**
- * POSCart Component (REFACTORED)
- * Apple Engineering Standard: Reduced prop drilling via store usage
+ * POSCart Component - ZERO PROPS ARCHITECTURE ✨
+ * Apple Engineering Standard: Complete store-based architecture
  *
  * BEFORE: 25+ props (15+ callback handlers)
- * AFTER: 11 props (focused on data/orchestration)
+ * AFTER: 0 props (100% store-based)
  *
- * Changes:
- * - Uses cart.store for cart data and actions
- * - Uses checkout-ui.store for UI state (discounting, tier selector, discount selector)
- * - Uses useCampaigns() for active discounts
- * - Uses useModalState() for opening modals
+ * Store usage:
+ * - cart.store: Cart data and actions
+ * - checkout-ui.store: UI state (discounting, tier selector, discount selector, modals)
+ * - customer.store: Customer selection and actions
+ * - loyalty-campaigns.store: Discounts/campaigns
+ * - products.store: Products (zero prop drilling!)
+ * - posSession.store: Session management
  *
- * Remaining props are for:
- * - Loyalty state (managed by parent's useLoyalty hook)
- * - Customer state (managed by parent's customer selection)
- * - Complex orchestration callbacks
+ * All state and actions read/dispatched through stores = zero prop drilling!
  */
 
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions } from 'react-native'
-import { memo, useRef, useMemo, useCallback } from 'react'
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native'
+import { useMemo, useCallback } from 'react'
 import { LiquidGlassView, isLiquidGlassSupported } from '@callstack/liquid-glass'
-import Slider from '@react-native-community/slider'
 import * as Haptics from 'expo-haptics'
-import type { Customer, LoyaltyProgram, Product } from '@/types/pos'
 import { POSCartItem } from './POSCartItem'
 import { POSTotalsSection } from './POSTotalsSection'
-import { POSProductCard } from '../POSProductCard'
 import { layout } from '@/theme/layout'
 
 // Stores
-import { useCartItems, cartActions, useCartTotals, useDiscountingItemId } from '@/stores/cart.store'
+import { useCartItems, cartActions, useCartTotals } from '@/stores/cart.store'
 import {
   useSelectedDiscountId,
-  useTierSelectorProductId,
   useShowDiscountSelector,
   checkoutUIActions,
 } from '@/stores/checkout-ui.store'
-import { useProducts } from '@/stores/products.store'
-
-// Hooks
-import { useCampaigns } from '@/hooks/useCampaigns'
-
-const { width: _width } = Dimensions.get('window')
+import { useCampaigns } from '@/stores/loyalty-campaigns.store'
+import { useSelectedCustomer, customerActions } from '@/stores/customer.store'
 
 interface POSCartProps {
-  // Customer & Loyalty (from parent's useLoyalty hook)
-  selectedCustomer: Customer | null
-  loyaltyPointsToRedeem: number
-  loyaltyProgram: LoyaltyProgram | null
-  loyaltyDiscountAmount: number
-  maxRedeemablePoints: number
-
-  // Orchestration callbacks (complex multi-store operations)
-  onSelectCustomer: () => void
-  onClearCustomer: () => void
-  onSetLoyaltyPoints: (points: number) => void
-  onCheckout: () => void
-  onEndSession: () => void
-
-  // Tax display (could be from tax.store later)
-  taxRate: number
+  onEndSession?: () => void
 }
 
-function POSCart({
-  selectedCustomer,
-  loyaltyPointsToRedeem,
-  loyaltyProgram,
-  loyaltyDiscountAmount,
-  maxRedeemablePoints,
-  onSelectCustomer,
-  onClearCustomer,
-  onSetLoyaltyPoints,
-  onCheckout,
-  onEndSession,
-  taxRate,
-}: POSCartProps) {
+export function POSCart({ onEndSession }: POSCartProps) {
   // ========================================
   // STORES - Cart Data
   // ========================================
   const cart = useCartItems()
   const { subtotal, itemCount } = useCartTotals()
-  const discountingItemId = useDiscountingItemId()
 
   // ========================================
-  // STORES - Products (Zero Prop Drilling!)
+  // STORES - Customer
   // ========================================
-  const products = useProducts()
+  const selectedCustomer = useSelectedCustomer()
 
   // ========================================
   // STORES - Checkout UI State
   // ========================================
   const selectedDiscountId = useSelectedDiscountId()
-  const tierSelectorProductId = useTierSelectorProductId()
   const showDiscountSelector = useShowDiscountSelector()
 
   // ========================================
-  // HOOKS - Discounts
+  // STORES - Discounts
   // ========================================
-  const { campaigns: discounts } = useCampaigns()
-  const activeDiscounts = useMemo(() => discounts.filter(d => d.is_active), [discounts])
-
-  // ========================================
-  // REFS
-  // ========================================
-  const productCardRef = useRef<any>(null)
+  const campaigns = useCampaigns()
+  const activeDiscounts = useMemo(() => campaigns.filter(d => d.is_active), [campaigns])
 
   // ========================================
   // COMPUTED VALUES
@@ -113,31 +70,25 @@ function POSCart({
     [activeDiscounts, selectedDiscountId]
   )
 
-  const discountAmount = useMemo(() => {
-    if (!selectedDiscount) return 0
-
-    const subtotalAfterLoyalty = Math.max(0, subtotal - loyaltyDiscountAmount)
-
-    if (selectedDiscount.discount_type === 'percentage') {
-      return subtotalAfterLoyalty * (selectedDiscount.discount_value / 100)
-    } else {
-      return Math.min(selectedDiscount.discount_value, subtotalAfterLoyalty)
-    }
-  }, [selectedDiscount, subtotal, loyaltyDiscountAmount])
-
-  const subtotalAfterLoyalty = Math.max(0, subtotal - loyaltyDiscountAmount)
-  const subtotalAfterDiscount = Math.max(0, subtotalAfterLoyalty - discountAmount)
-  const taxAmount = subtotalAfterDiscount * taxRate
-  const total = subtotalAfterDiscount + taxAmount
-
-  // Find the product for the tier selector
-  const tierSelectorProduct = tierSelectorProductId
-    ? products.find(p => p.id === tierSelectorProductId)
-    : null
-
   // ========================================
   // HANDLERS (MEMOIZED to prevent re-render loops)
   // ========================================
+  const handleSelectCustomer = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    checkoutUIActions.openModal('customerSelector')
+  }, [])
+
+  const handleClearCustomer = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    customerActions.clearCustomer()
+  }, [])
+
+  const handleEndSession = useCallback(() => {
+    if (onEndSession) {
+      onEndSession()
+    }
+  }, [onEndSession])
+
   const handleClearCart = useCallback(() => {
     cartActions.clearCart()
     cartActions.setDiscountingItemId(null)
@@ -153,6 +104,7 @@ function POSCart({
         {/* Customer Section - iOS 26 Rounded Container or Pill Button */}
         {!selectedCustomer ? (
           <LiquidGlassView
+            key="customer-pill-empty"
             effect="regular"
             colorScheme="dark"
             tintColor="rgba(255,255,255,0.05)"
@@ -163,7 +115,7 @@ function POSCart({
             ]}
           >
             <TouchableOpacity
-              onPress={onSelectCustomer}
+              onPress={handleSelectCustomer}
               style={styles.customerPillButtonPressable}
               activeOpacity={0.7}
               accessibilityRole="button"
@@ -175,6 +127,7 @@ function POSCart({
           </LiquidGlassView>
         ) : (
           <LiquidGlassView
+            key={`customer-pill-${selectedCustomer.id}`}
             effect="regular"
             colorScheme="dark"
             interactive
@@ -184,7 +137,7 @@ function POSCart({
             ]}
           >
             <TouchableOpacity
-              onPress={onSelectCustomer}
+              onPress={handleSelectCustomer}
               style={styles.customerPillPressable}
               activeOpacity={0.8}
               accessibilityRole="button"
@@ -207,8 +160,7 @@ function POSCart({
               <TouchableOpacity
                 onPress={(e) => {
                   e.stopPropagation()
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                  onClearCustomer()
+                  handleClearCustomer()
                 }}
                 style={styles.customerPillClearButton}
                 activeOpacity={0.6}
@@ -223,11 +175,12 @@ function POSCart({
           </LiquidGlassView>
         )}
 
-        {/* Discount Selector */}
-        {cart.length > 0 && activeDiscounts.length > 0 && (
+        {/* Discount Selector - Pill Style */}
+        {cart.length > 0 && (
           <>
             {!selectedDiscount ? (
               <LiquidGlassView
+                key="discount-pill-empty"
                 effect="regular"
                 colorScheme="dark"
                 tintColor="rgba(255,255,255,0.05)"
@@ -239,19 +192,31 @@ function POSCart({
               >
                 <TouchableOpacity
                   onPress={() => {
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                    checkoutUIActions.setShowDiscountSelector(!showDiscountSelector)
+                    if (activeDiscounts.length > 0) {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                      checkoutUIActions.setShowDiscountSelector(!showDiscountSelector)
+                    }
                   }}
                   style={styles.customerPillButtonPressable}
-                  activeOpacity={0.7}
+                  activeOpacity={activeDiscounts.length > 0 ? 0.7 : 1}
+                  accessibilityRole="button"
+                  accessibilityLabel="Apply discount"
+                  accessibilityHint={activeDiscounts.length > 0 ? "Opens discount selection" : "No discounts available"}
+                  disabled={activeDiscounts.length === 0}
                 >
-                  <Text style={styles.customerPillText}>
-                    {showDiscountSelector ? 'Hide Discounts' : 'Apply Discount'}
+                  <Text style={[
+                    styles.customerPillText,
+                    activeDiscounts.length === 0 && styles.customerPillTextDisabled
+                  ]}>
+                    {activeDiscounts.length === 0
+                      ? 'No Discounts Available'
+                      : showDiscountSelector ? 'Hide Discounts' : 'Apply Discount'}
                   </Text>
                 </TouchableOpacity>
               </LiquidGlassView>
             ) : (
               <LiquidGlassView
+                key={`discount-pill-${selectedDiscount.id}`}
                 effect="regular"
                 colorScheme="dark"
                 interactive
@@ -267,6 +232,9 @@ function POSCart({
                   }}
                   style={styles.customerPillPressable}
                   activeOpacity={0.8}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Selected discount: ${selectedDiscount.name}`}
+                  accessibilityHint="Tap to change or remove discount"
                 >
                   <View style={styles.customerPillContent}>
                     <View style={styles.customerPillTextContainer}>
@@ -286,6 +254,9 @@ function POSCart({
                       }}
                       style={styles.customerPillClearButton}
                       activeOpacity={0.6}
+                      accessibilityRole="button"
+                      accessibilityLabel="Clear discount selection"
+                      accessibilityHint="Removes discount from transaction"
                     >
                       <Text style={styles.customerPillClearText}>×</Text>
                     </TouchableOpacity>
@@ -293,69 +264,71 @@ function POSCart({
                 </TouchableOpacity>
               </LiquidGlassView>
             )}
-
-            {/* Discount List */}
-            {showDiscountSelector && (
-              <View style={styles.discountList}>
-                {activeDiscounts.map(discount => (
-                  <LiquidGlassView
-                    key={discount.id}
-                    effect="regular"
-                    colorScheme="dark"
-                    interactive
-                    style={[
-                      styles.discountItem,
-                      !isLiquidGlassSupported && styles.discountItemFallback
-                    ]}
-                  >
-                    <TouchableOpacity
-                      onPress={() => {
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                        checkoutUIActions.setSelectedDiscountId(discount.id)
-                        checkoutUIActions.setShowDiscountSelector(false)
-                      }}
-                      style={styles.discountItemPressable}
-                      activeOpacity={0.8}
-                    >
-                      <View style={styles.discountItemContent}>
-                        <Text style={styles.discountItemName}>{discount.name}</Text>
-                        <Text style={styles.discountItemBadge}>{discount.badge_text}</Text>
-                      </View>
-                    </TouchableOpacity>
-                  </LiquidGlassView>
-                ))}
-              </View>
-            )}
           </>
         )}
 
-        {/* Clear Cart Button */}
+        {/* Clear Cart Button - Pill Style */}
         {cart.length > 0 && (
-          <View style={styles.headerActions}>
-            <LiquidGlassView
-              effect="regular"
-              colorScheme="dark"
-              tintColor="rgba(255,255,255,0.05)"
-              interactive
-              style={[
-                styles.actionButton,
-                !isLiquidGlassSupported && styles.actionButtonFallback
-              ]}
+          <LiquidGlassView
+            key="clear-cart-button"
+            effect="regular"
+            colorScheme="dark"
+            tintColor="rgba(255,255,255,0.05)"
+            interactive
+            style={[
+              styles.customerPillButton,
+              !isLiquidGlassSupported && styles.customerPillButtonFallback
+            ]}
+          >
+            <TouchableOpacity
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+                handleClearCart()
+              }}
+              style={styles.customerPillButtonPressable}
+              activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel="Clear cart"
+              accessibilityHint="Removes all items from cart"
             >
-              <TouchableOpacity
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
-                  handleClearCart()
-                }}
-                style={styles.actionButtonPressable}
-                activeOpacity={0.7}
-                accessibilityRole="button"
-                accessibilityLabel="Clear cart"
-                accessibilityHint="Removes all items from cart"
+              <Text style={styles.customerPillText}>Clear Cart</Text>
+            </TouchableOpacity>
+          </LiquidGlassView>
+        )}
+
+        {/* Discount List */}
+        {showDiscountSelector && activeDiscounts.length > 0 && (
+          <View style={styles.discountList}>
+            {activeDiscounts.map(discount => (
+              <LiquidGlassView
+                key={discount.id}
+                effect="regular"
+                colorScheme="dark"
+                interactive
+                style={[
+                  styles.discountItem,
+                  !isLiquidGlassSupported && styles.discountItemFallback
+                ]}
               >
-                <Text style={styles.actionButtonText}>Clear Cart</Text>
-              </TouchableOpacity>
-            </LiquidGlassView>
+                <TouchableOpacity
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                    checkoutUIActions.setSelectedDiscountId(discount.id)
+                    checkoutUIActions.setShowDiscountSelector(false)
+                  }}
+                  style={styles.discountItemPressable}
+                  activeOpacity={0.8}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Apply ${discount.name} discount`}
+                  accessibilityHint={`Applies ${discount.badge_text} discount to transaction`}
+                >
+                  <View style={styles.discountItemContent}>
+                    <Text style={styles.discountItemName}>{discount.name}</Text>
+                    <Text style={styles.discountItemBadge}>{discount.badge_text}</Text>
+                  </View>
+                </TouchableOpacity>
+              </LiquidGlassView>
+            ))}
           </View>
         )}
       </View>
@@ -374,38 +347,12 @@ function POSCart({
             <Text style={styles.emptyCartSubtext}>Add items to get started</Text>
           </View>
         ) : (
-          cart.map((item) => {
-            // Find the product for this cart item
-            const product = products.find(p => p.id === item.productId)
-            const hasTiers = product && ((product.meta_data?.pricing_tiers?.length ?? 0) > 0 || (product.pricing_tiers?.length ?? 0) > 0)
-
-            return (
-              <POSCartItem
-                key={item.id}
-                item={item}
-                onAdd={() => cartActions.updateQuantity(item.id, 1)}
-                onRemove={() => cartActions.updateQuantity(item.id, -1)}
-                onOpenTierSelector={
-                  hasTiers && product
-                    ? () => {
-                        checkoutUIActions.setTierSelectorProductId(product.id)
-                        // Trigger the product card modal to open
-                        setTimeout(() => {
-                          if (productCardRef.current?.openPricingModal) {
-                            productCardRef.current.openPricingModal()
-                          }
-                        }, 100)
-                      }
-                    : undefined
-                }
-                onApplyDiscount={(type, value) => cartActions.applyManualDiscount(item.id, type, value)}
-                onRemoveDiscount={() => cartActions.removeManualDiscount(item.id)}
-                isDiscounting={discountingItemId === item.id}
-                onStartDiscounting={() => cartActions.setDiscountingItemId(item.id)}
-                onCancelDiscounting={() => cartActions.setDiscountingItemId(null)}
-              />
-            )
-          })
+          cart.map((item) => (
+            <POSCartItem
+              key={item.id}
+              item={item}
+            />
+          ))
         )}
       </ScrollView>
 
@@ -413,107 +360,14 @@ function POSCart({
         <>
           <View style={styles.cartDivider} />
 
-          {/* JOBS PRINCIPLE: Loyalty Points - Minimal, Elegant */}
-          {loyaltyProgram && selectedCustomer && selectedCustomer.loyalty_points > 0 && (
-            <View style={styles.loyaltySection}>
-              <View style={styles.loyaltySectionHeader}>
-                <Text style={styles.loyaltySectionTitle}>Loyalty Points</Text>
-                <Text style={styles.loyaltySectionAvailable}>
-                  {selectedCustomer.loyalty_points} pts ($
-                  {(selectedCustomer.loyalty_points * (loyaltyProgram.point_value || 0.01)).toFixed(
-                    2
-                  )}{' '}
-                  value)
-                </Text>
-              </View>
-
-              {loyaltyPointsToRedeem > 0 && (
-                <View style={styles.loyaltyValueDisplay}>
-                  <Text style={styles.loyaltyPointsText}>
-                    {loyaltyPointsToRedeem} {loyaltyPointsToRedeem === 1 ? 'point' : 'points'}
-                  </Text>
-                  <Text style={styles.loyaltyDiscountValue}>
-                    -${loyaltyDiscountAmount.toFixed(2)}
-                  </Text>
-                </View>
-              )}
-
-              <Slider
-                style={styles.loyaltySlider}
-                minimumValue={0}
-                maximumValue={maxRedeemablePoints}
-                step={1}
-                value={loyaltyPointsToRedeem}
-                onValueChange={onSetLoyaltyPoints}
-                minimumTrackTintColor="rgba(255,255,255,0.3)"
-                maximumTrackTintColor="rgba(255,255,255,0.1)"
-                thumbTintColor="#fff"
-                accessibilityLabel="Loyalty points to redeem"
-                accessibilityValue={{
-                  min: 0,
-                  max: maxRedeemablePoints,
-                  now: loyaltyPointsToRedeem,
-                  text: `${loyaltyPointsToRedeem} points, ${loyaltyDiscountAmount.toFixed(2)} dollars off`
-                }}
-                accessibilityHint={`Slide to redeem loyalty points. Maximum ${maxRedeemablePoints} points available`}
-              />
-
-              <View style={styles.loyaltyButtons}>
-                <TouchableOpacity
-                  onPress={() => {
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                    onSetLoyaltyPoints(0)
-                  }}
-                  style={styles.loyaltyButtonClear}
-                  accessibilityRole="button"
-                  accessibilityLabel="Clear loyalty points"
-                  accessibilityHint="Sets redeemed points to zero"
-                >
-                  <Text style={styles.loyaltyButtonClearText}>Clear</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={() => {
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                    onSetLoyaltyPoints(maxRedeemablePoints)
-                  }}
-                  style={styles.loyaltyButtonMax}
-                  accessibilityRole="button"
-                  accessibilityLabel="Redeem maximum loyalty points"
-                  accessibilityHint={`Redeems all ${maxRedeemablePoints} available points for ${(maxRedeemablePoints * (loyaltyProgram?.point_value || 0.01)).toFixed(2)} dollars off`}
-                >
-                  <Text style={styles.loyaltyButtonMaxText}>Max</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          )}
-
-          {loyaltyProgram && selectedCustomer && selectedCustomer.loyalty_points > 0 && (
-            <View style={styles.cartDivider} />
-          )}
-
           {/* Totals and Checkout */}
-          <POSTotalsSection
-            subtotal={subtotal}
-            loyaltyDiscountAmount={loyaltyDiscountAmount}
-            discountAmount={discountAmount}
-            selectedDiscount={selectedDiscount}
-            taxAmount={taxAmount}
-            taxRate={taxRate}
-            total={total}
-            selectedCustomer={selectedCustomer}
-            loyaltyProgram={loyaltyProgram}
-            loyaltyPointsToRedeem={loyaltyPointsToRedeem}
-            maxRedeemablePoints={maxRedeemablePoints}
-            onSetLoyaltyPoints={onSetLoyaltyPoints}
-            onCheckout={onCheckout}
-            disabled={false}
-          />
+          <POSTotalsSection />
         </>
       )}
 
       {/* Jobs Principle: End Session - Bottom of cart, subtle, out of the way */}
       <TouchableOpacity
-        onPress={onEndSession}
+        onPress={handleEndSession}
         style={styles.endSessionFooter}
         accessibilityRole="button"
         accessibilityLabel="End session"
@@ -521,61 +375,14 @@ function POSCart({
       >
         <Text style={styles.endSessionFooterText}>End Session</Text>
       </TouchableOpacity>
-
-      {/* Hidden product card for tier selection - reuses existing modal */}
-      {tierSelectorProduct && (
-        <View style={{ position: 'absolute', opacity: 0, pointerEvents: 'none' }}>
-          <POSProductCard
-            ref={productCardRef}
-            product={{
-              ...tierSelectorProduct,
-              // Force inventory to show as in stock
-              inventory_quantity: 999
-            }}
-            onAddToCart={(product, tier) => {
-              if (tier && tierSelectorProductId) {
-                // Find the cart item with this product ID
-                const cartItem = cart.find(item => item.productId === tierSelectorProductId)
-                if (cartItem) {
-                  cartActions.changeTier(cartItem.id, product, tier)
-                }
-              }
-              checkoutUIActions.setTierSelectorProductId(null)
-            }}
-          />
-        </View>
-      )}
     </View>
   )
 }
 
-// Memoize with comparison function to prevent unnecessary re-renders
-const POSCartMemo = memo(POSCart, (prevProps, nextProps) => {
-  // Only re-render if these props change
-  return (
-    prevProps.selectedCustomer?.id === nextProps.selectedCustomer?.id &&
-    prevProps.selectedCustomer?.loyalty_points === nextProps.selectedCustomer?.loyalty_points &&
-    prevProps.loyaltyPointsToRedeem === nextProps.loyaltyPointsToRedeem &&
-    prevProps.loyaltyProgram?.id === nextProps.loyaltyProgram?.id &&
-    prevProps.loyaltyDiscountAmount === nextProps.loyaltyDiscountAmount &&
-    prevProps.maxRedeemablePoints === nextProps.maxRedeemablePoints &&
-    prevProps.onSelectCustomer === nextProps.onSelectCustomer &&
-    prevProps.onClearCustomer === nextProps.onClearCustomer &&
-    prevProps.onSetLoyaltyPoints === nextProps.onSetLoyaltyPoints &&
-    prevProps.onCheckout === nextProps.onCheckout &&
-    prevProps.onEndSession === nextProps.onEndSession &&
-    prevProps.taxRate === nextProps.taxRate
-  )
-})
-
-export { POSCartMemo as POSCart }
-
 const styles = StyleSheet.create({
   cartCard: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    borderRadius: 16,
-    overflow: 'hidden',
+    // No background - let LiquidGlassView container handle it
   },
   cartHeader: {
     padding: 12,
@@ -600,6 +407,9 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: 'rgba(255,255,255,0.9)',
     textAlign: 'center',
+  },
+  customerPillTextDisabled: {
+    color: 'rgba(255,255,255,0.3)',
   },
   customerPill: {
     borderRadius: 20,
@@ -687,31 +497,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: 'rgba(255,255,255,0.6)',
   },
-  headerActions: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  actionButton: {
-    flex: 1,
-    borderRadius: 16,
-    overflow: 'hidden',
-    minHeight: 40,
-  },
-  actionButtonFallback: {
-    backgroundColor: 'rgba(255,255,255,0.05)',
-  },
-  actionButtonPressable: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    minHeight: 40,
-    justifyContent: 'center',
-  },
-  actionButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.9)',
-    textAlign: 'center',
-  },
   cartItems: {
     flex: 1,
   },
@@ -735,73 +520,6 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: 'rgba(255,255,255,0.06)',
     marginHorizontal: 12,
-  },
-  loyaltySection: {
-    padding: 16,
-    gap: 12,
-  },
-  loyaltySectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  loyaltySectionTitle: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.7)',
-  },
-  loyaltySectionAvailable: {
-    fontSize: 12,
-    fontWeight: '500',
-    color: 'rgba(255,255,255,0.5)',
-  },
-  loyaltyValueDisplay: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 4,
-  },
-  loyaltyPointsText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#fff',
-  },
-  loyaltyDiscountValue: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#4ade80',
-  },
-  loyaltySlider: {
-    width: '100%',
-    height: 40,
-  },
-  loyaltyButtons: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  loyaltyButtonClear: {
-    flex: 1,
-    paddingVertical: 8,
-    borderRadius: 8,
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    alignItems: 'center',
-  },
-  loyaltyButtonClearText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.6)',
-  },
-  loyaltyButtonMax: {
-    flex: 1,
-    paddingVertical: 8,
-    borderRadius: 8,
-    backgroundColor: 'rgba(74, 222, 128, 0.15)',
-    alignItems: 'center',
-  },
-  loyaltyButtonMaxText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#4ade80',
   },
   endSessionFooter: {
     paddingVertical: 12,

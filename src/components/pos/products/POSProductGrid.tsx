@@ -17,7 +17,7 @@
  */
 
 import { View, Text, StyleSheet, FlatList, ActivityIndicator } from 'react-native'
-import { memo, useCallback, useMemo } from 'react'
+import { useCallback, useMemo } from 'react'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import type { Product, PricingTier } from '@/types/pos'
 import { POSProductCard } from '../POSProductCard'
@@ -30,7 +30,7 @@ import { useProductsStore } from '@/stores/products.store'
 // Utils
 import { applyFilters } from '@/utils/product-transformers'
 
-function POSProductGrid() {
+export function POSProductGrid() {
   // ========================================
   // STORE - TRUE ZERO PROPS (read from environment)
   // ========================================
@@ -205,10 +205,6 @@ function POSProductGrid() {
     />
   )
 }
-
-// Memoize to prevent unnecessary re-renders
-const POSProductGridMemo = memo(POSProductGrid)
-export { POSProductGridMemo as POSProductGrid }
 
 // ========================================
 // STYLES

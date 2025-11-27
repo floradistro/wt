@@ -13,7 +13,7 @@
  * - POSCheckout: Cart, customer, payment processing
  */
 
-import { useState, useEffect, useRef, useCallback, memo } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { View, StyleSheet, Animated } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { LiquidGlassView, isLiquidGlassSupported } from '@callstack/liquid-glass'
@@ -38,8 +38,10 @@ import { colors } from '@/theme'
 /**
  * POSScreen Component (Context Architecture)
  * Jobs Principle: Simplified orchestrator - zero prop drilling
+ *
+ * NOTE: NOT memoized to ensure proper re-rendering after navigation/hot reload
  */
-function POSScreenComponent() {
+export function POSScreen() {
   const { setFullWidth } = useDockOffset()
 
   // Context - Session data (no prop drilling!)
@@ -59,6 +61,8 @@ function POSScreenComponent() {
   // EFFECTS
   // ========================================
   useEffect(() => {
+    // Reset animation on mount to ensure clean state after hot reload
+    fadeAnim.setValue(0)
     Animated.timing(fadeAnim, {
       toValue: 1,
       duration: 400,
@@ -102,26 +106,23 @@ function POSScreenComponent() {
         {/* Left Column - Checkout (same container as NavSidebar) */}
         <View style={styles.leftColumn}>
           <LiquidGlassView
+            key={`pos-cart-${session?.sessionId || 'no-session'}`}
             effect="regular"
             colorScheme="dark"
             style={[styles.cartContainer, !isLiquidGlassSupported && styles.cartContainerFallback]}
           >
-            <POSCheckout />
+            <POSCheckout key={`pos-checkout-${session?.sessionId || 'no-session'}`} />
           </LiquidGlassView>
         </View>
 
         {/* Right Column - Products */}
         <View style={styles.rightColumn}>
-          <POSProductBrowser />
+          <POSProductBrowser key={`pos-products-${session?.sessionId || 'no-session'}`} />
         </View>
       </Animated.View>
     </SafeAreaView>
   )
 }
-
-// Export memoized version for performance
-export const POSScreen = memo(POSScreenComponent)
-POSScreen.displayName = 'POSScreen'
 
 // ========================================
 // STYLES - Minimal layout styles
@@ -150,7 +151,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   cartContainerFallback: {
-    backgroundColor: 'rgba(118,118,128,0.12)',
+    backgroundColor: 'rgba(255,255,255,0.03)', // Match POSProductCard background
   },
   rightColumn: {
     flex: 1,

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { View, StyleSheet, useWindowDimensions } from 'react-native'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { Dock } from '../components/Dock'
@@ -11,13 +11,26 @@ import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { DockOffsetContext } from './DockOffsetContext'
 import { layout } from '@/theme/layout'
 import { device } from '@/theme'
+import { useOrderNotifications, setNotificationNavigator, clearNotificationNavigator } from '@/hooks/useOrderNotifications'
 
 const screens = [POSScreen, ProductsScreen, OrdersScreen, CustomersScreen, SettingsScreen]
 
 export function DashboardNavigator() {
+  // Enable location-aware order notifications globally
+  useOrderNotifications()
+
   const [activeTab, setActiveTab] = useState(0)
   const [isFullWidth, setIsFullWidth] = useState(false)
   const { width: screenWidth } = useWindowDimensions()
+
+  // Register navigation callback for notifications
+  useEffect(() => {
+    setNotificationNavigator(setActiveTab)
+    return () => {
+      clearNotificationNavigator()
+    }
+    // setActiveTab is stable (from useState), won't cause re-runs
+  }, [setActiveTab])
 
   // Dynamic POS cart width based on current screen size (adapts to orientation)
   const posCartWidth = screenWidth > 600 ? 380 : 320
@@ -36,19 +49,24 @@ export function DashboardNavigator() {
   const contentWidth = screenWidth - leftOffset
   const dockCenterX = leftOffset + (contentWidth / 2)
 
-  // Render active screen component
-  const ActiveScreen = screens[activeTab]
-
   return (
     <SafeAreaProvider>
       <DockOffsetContext.Provider value={{ setFullWidth: setIsFullWidth }}>
         <View style={styles.container}>
-          {/* Only render the active screen (huge performance improvement) */}
-          <View style={styles.screen}>
-            <ErrorBoundary>
-              <ActiveScreen />
-            </ErrorBoundary>
-          </View>
+          {/* Render ALL screens but hide inactive ones - prevents unmount/remount issues */}
+          {screens.map((Screen, index) => (
+            <View
+              key={`screen-${index}`}
+              style={[
+                styles.screen,
+                { display: activeTab === index ? 'flex' : 'none' }
+              ]}
+            >
+              <ErrorBoundary>
+                <Screen />
+              </ErrorBoundary>
+            </View>
+          ))}
           <Dock activeTab={activeTab} onTabChange={setActiveTab} centerX={dockCenterX} />
         </View>
       </DockOffsetContext.Provider>

@@ -8,7 +8,7 @@
  */
 
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator } from 'react-native'
-import { memo, type ReactNode, useMemo } from 'react'
+import { type ReactNode, useMemo } from 'react'
 import { LiquidGlassView, isLiquidGlassSupported } from '@callstack/liquid-glass'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import * as Haptics from 'expo-haptics'
@@ -28,7 +28,7 @@ interface POSSearchBarProps {
   placeholder?: string
 }
 
-function POSSearchBar({
+export function POSSearchBar({
   onSearchChange,
   onFilterPress,
   onClearFilters,
@@ -63,6 +63,7 @@ function POSSearchBar({
     <View style={containerStyle}>
       <View style={styles.unifiedSearchBar}>
         <LiquidGlassView
+          key="pos-search-bar-container"
           style={[
             styles.unifiedSearchBarPill,
             !isLiquidGlassSupported && styles.fallback,
@@ -72,6 +73,7 @@ function POSSearchBar({
         >
           {/* Filter Button - Left Side - iOS 26 Style with Liquid Glass */}
           <LiquidGlassView
+            key={`filter-button-${activeFilterCount}`}
             effect="regular"
             colorScheme="dark"
             interactive
@@ -109,6 +111,7 @@ function POSSearchBar({
 
           {activeFilterCount > 0 && (
             <LiquidGlassView
+              key="filter-clear-button"
               effect="regular"
               colorScheme="dark"
               interactive
@@ -182,9 +185,6 @@ function POSSearchBar({
     </View>
   )
 }
-
-const POSSearchBarMemo = memo(POSSearchBar)
-export { POSSearchBarMemo as POSSearchBar }
 
 const styles = StyleSheet.create({
   // Note: Position styles moved to dynamic containerStyle (uses safe area insets)

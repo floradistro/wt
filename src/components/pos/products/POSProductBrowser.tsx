@@ -13,7 +13,7 @@
  * - Filter dropdown UI
  */
 
-import { useState, useEffect, useRef, useCallback, memo, useMemo } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { View, Text, StyleSheet, ScrollView, Pressable, Animated } from 'react-native'
 import * as Haptics from 'expo-haptics'
 import { LiquidGlassView, isLiquidGlassSupported } from '@callstack/liquid-glass'
@@ -41,7 +41,7 @@ import { applyFilters, extractFieldValues } from '@/utils/product-transformers'
 // Types
 import { logger } from '@/utils/logger'
 
-function POSProductBrowser() {
+export function POSProductBrowser() {
   // ========================================
   // CONTEXT - Zero prop drilling!
   // ========================================
@@ -200,6 +200,7 @@ function POSProductBrowser() {
             ]}
           >
             <LiquidGlassView
+              key="pos-filter-dropdown-container"
               effect="regular"
               colorScheme="dark"
               style={[
@@ -222,7 +223,7 @@ function POSProductBrowser() {
                       const isLast = index === categories.length - 1
                       return (
                         <LiquidGlassView
-                          key={category}
+                          key={`filter-category-${category}-${isSelected}`}
                           effect="clear"
                           colorScheme="dark"
                           interactive
@@ -261,7 +262,7 @@ function POSProductBrowser() {
                         const isLast = index === availableStrainTypes.length - 1
                         return (
                           <LiquidGlassView
-                            key={strainType}
+                            key={`filter-strain-${strainType}-${isSelected}`}
                             effect="clear"
                             colorScheme="dark"
                             interactive
@@ -304,7 +305,7 @@ function POSProductBrowser() {
                         const isLast = index === availableConsistencies.length - 1
                         return (
                           <LiquidGlassView
-                            key={consistency}
+                            key={`filter-consistency-${consistency}-${isSelected}`}
                             effect="clear"
                             colorScheme="dark"
                             interactive
@@ -347,7 +348,7 @@ function POSProductBrowser() {
                         const isLast = index === availableFlavors.length - 1
                         return (
                           <LiquidGlassView
-                            key={flavor}
+                            key={`filter-flavor-${flavor}-${isSelected}`}
                             effect="clear"
                             colorScheme="dark"
                             interactive
@@ -396,9 +397,6 @@ function POSProductBrowser() {
     </View>
   )
 }
-
-const POSProductBrowserMemo = memo(POSProductBrowser)
-export { POSProductBrowserMemo as POSProductBrowser }
 
 // ========================================
 // STYLES - Exact copy from POSScreen
