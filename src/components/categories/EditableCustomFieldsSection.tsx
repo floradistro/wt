@@ -123,7 +123,7 @@ export function EditableCustomFieldsSection({
     )
   }
 
-  const handleSaveFields = async () => {
+  const handleSaveFields = useCallback(async () => {
     if (!user?.email) return
 
     try {
@@ -137,6 +137,12 @@ export function EditableCustomFieldsSection({
 
       if (userError || !userData) throw userError || new Error('User record not found')
 
+      logger.info('[EditableCustomFieldsSection] Saving custom fields', {
+        categoryId,
+        fieldCount: editedFields.length,
+        fields: editedFields.map(f => ({ id: f.id, name: f.name, type: f.field_type }))
+      })
+
       // Save to vendor_product_fields table with field_definition JSONB
       for (const field of editedFields) {
         const fieldDefinition = {
@@ -149,6 +155,7 @@ export function EditableCustomFieldsSection({
 
         if (field.id) {
           // Update existing
+          logger.info('[EditableCustomFieldsSection] Updating existing field', { fieldId: field.id, name: field.name })
           const { error } = await supabase
             .from('vendor_product_fields')
             .update({
@@ -158,10 +165,14 @@ export function EditableCustomFieldsSection({
             .eq('id', field.id)
             .eq('vendor_id', userData.vendor_id)
 
-          if (error) throw error
+          if (error) {
+            logger.error('[EditableCustomFieldsSection] Failed to update field', { fieldId: field.id, error })
+            throw error
+          }
         } else {
           // Insert new field for this category
           const fieldId = field.name.toLowerCase().replace(/[^a-z0-9]+/g, '_')
+          logger.info('[EditableCustomFieldsSection] Inserting new field', { fieldId, name: field.name })
           const { error } = await supabase
             .from('vendor_product_fields')
             .insert({
@@ -173,25 +184,29 @@ export function EditableCustomFieldsSection({
               sort_order: editedFields.length + 1,
             })
 
-          if (error) throw error
+          if (error) {
+            logger.error('[EditableCustomFieldsSection] Failed to insert field', { fieldId, error })
+            throw error
+          }
         }
       }
 
+      logger.info('[EditableCustomFieldsSection] ✅ All fields saved successfully')
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
-      reload()
+      await loadAllFields()
       onFieldsUpdated()
     } catch (error) {
-      logger.error('Failed to save custom fields:', error)
+      logger.error('[EditableCustomFieldsSection] ❌ Failed to save custom fields:', error)
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
     }
-  }
+  }, [user, categoryId, editedFields, loadAllFields, onFieldsUpdated])
 
   // Auto-save when exiting edit mode
   useEffect(() => {
     if (!isEditing && editedFields.length > 0) {
       handleSaveFields()
     }
-  }, [isEditing])
+  }, [isEditing, editedFields.length, handleSaveFields])
 
   const reload = loadAllFields
 
@@ -219,9 +234,8 @@ export function EditableCustomFieldsSection({
             ) : (
               <>
                 {editedFields.map((field, index) => {
-                  const isLast = index === editedFields.length - 1
                   return (
-                    <View key={field.id || `field-${index}`} style={[styles.fieldEditRow, isLast && styles.fieldEditRowLast]}>
+                    <View key={field.id || `field-${index}`} style={styles.fieldEditRow}>
                       {/* Field Header */}
                       <View style={styles.fieldEditHeader}>
                         <TextInput
@@ -307,6 +321,10 @@ export function EditableCustomFieldsSection({
                     </View>
                   )
                 })}
+                {/* Add field button at bottom */}
+                <Pressable onPress={handleAddField} style={[styles.addFieldButton, styles.fieldEditRowLast]}>
+                  <Text style={styles.addFieldText}>+ Add Another Field</Text>
+                </Pressable>
               </>
             )}
           </>
@@ -377,6 +395,18 @@ const styles = StyleSheet.create({
   emptyText: {
     fontSize: 15,
     color: 'rgba(235,235,245,0.6)',
+    fontWeight: '500',
+  },
+  addFieldButton: {
+    paddingVertical: 14,
+    paddingHorizontal: layout.rowPaddingHorizontal,
+    alignItems: 'center',
+    borderTopWidth: 0.5,
+    borderTopColor: 'rgba(255,255,255,0.08)',
+  },
+  addFieldText: {
+    fontSize: 15,
+    color: '#60A5FA',
     fontWeight: '500',
   },
 
