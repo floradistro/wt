@@ -1210,6 +1210,7 @@ serve(async (req) => {
 
       return {
         order_id: order.id,
+        vendor_id: body.vendorId, // REQUIRED: vendor_id is a required column in order_items
         product_id: item.productId,
         product_name: item.productName,
         product_sku: item.productSku,
@@ -1225,6 +1226,8 @@ serve(async (req) => {
       }
     })
 
+    console.log(`[${requestId}] Inserting order items:`, JSON.stringify(orderItems, null, 2))
+
     const { error: itemsError } = await supabaseAdmin
       .from('order_items')
       .insert(orderItems)
@@ -1232,7 +1235,14 @@ serve(async (req) => {
     if (itemsError) {
       // Rollback order
       await supabaseAdmin.from('orders').delete().eq('id', order.id)
-      console.error(`[${requestId}] Failed to create order items:`, itemsError)
+      console.error(`[${requestId}] Failed to create order items:`, {
+        error: itemsError,
+        message: itemsError.message,
+        details: itemsError.details,
+        hint: itemsError.hint,
+        code: itemsError.code,
+      })
+      console.error(`[${requestId}] Order items that failed:`, JSON.stringify(orderItems, null, 2))
 
       Sentry.captureException(itemsError, {
         tags: { operation: 'order_items_creation', requestId },
