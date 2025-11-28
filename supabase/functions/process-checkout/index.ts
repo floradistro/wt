@@ -2071,9 +2071,13 @@ serve(async (req) => {
       paymentStatus: PaymentStatus.PAID,
       total: body.total,
       paymentMethod: body.paymentMethod,
-      authorizationCode: paymentResult?.GeneralResponse.AuthCode,
-      cardType: paymentResult?.CardData?.CardType,
-      cardLastFour: paymentResult?.CardData?.Last4,
+      // Support both SPIN/Dejavoo and Authorize.Net response formats
+      authorizationCode: (paymentResult as any)?.GeneralResponse?.AuthCode
+        || (paymentResult as any)?.transactionResponse?.authCode,
+      cardType: (paymentResult as any)?.CardData?.CardType
+        || (paymentResult as any)?.transactionResponse?.accountType,
+      cardLastFour: (paymentResult as any)?.CardData?.Last4
+        || (paymentResult as any)?.transactionResponse?.accountNumber?.replace('XXXX', ''),
       loyaltyPointsEarned: loyaltyPointsEarned,
       loyaltyPointsRedeemed: loyaltyPointsRedeemed,
       message: 'Payment processed successfully',
