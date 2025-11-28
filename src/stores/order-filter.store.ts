@@ -75,34 +75,48 @@ export const useOrderFilterStore = create<OrderFilterState>()(
           // IMPORTANT: E-commerce orders have null pickup_location_id, show them regardless of location filter
           if (selectedLocationIds.length > 0) {
             const isEcommerceOrder = order.order_type === 'shipping'
+            console.log('[OrderFilter] Checking location for order:', {
+              orderId: order.id,
+              orderNumber: order.order_number,
+              orderType: order.order_type,
+              isEcommerceOrder,
+              orderLocation: order.pickup_location_id,
+              selectedLocations: selectedLocationIds
+            })
             if (!isEcommerceOrder && (!order.pickup_location_id || !selectedLocationIds.includes(order.pickup_location_id))) {
-              console.log('[OrderFilter] Filtered out by location:', {
-                orderId: order.id,
-                orderLocation: order.pickup_location_id,
-                selectedLocations: selectedLocationIds
-              })
+              console.log('[OrderFilter] ❌ FILTERED OUT by location')
               return false
             }
+            console.log('[OrderFilter] ✅ PASSED location filter')
           }
 
           // Order Type filter - Order type-based navigation (The Apple Way)
           if (activeNav !== 'all') {
+            console.log('[OrderFilter] Checking nav filter:', {
+              orderId: order.id,
+              orderType: order.order_type,
+              activeNav
+            })
             if (activeNav === 'in-store') {
               // "In-Store Sales" = POS walk-in transactions
               if (order.order_type !== 'walk_in') {
+                console.log('[OrderFilter] ❌ FILTERED OUT by nav (not walk_in)')
                 return false
               }
             } else if (activeNav === 'pickup') {
               // "Store Pickup" = Online orders for pickup
               if (order.order_type !== 'pickup') {
+                console.log('[OrderFilter] ❌ FILTERED OUT by nav (not pickup)')
                 return false
               }
             } else if (activeNav === 'ecommerce') {
               // "E-Commerce" = Shipping orders
               if (order.order_type !== 'shipping') {
+                console.log('[OrderFilter] ❌ FILTERED OUT by nav (not shipping)')
                 return false
               }
             }
+            console.log('[OrderFilter] ✅ PASSED nav filter')
           }
 
           // Date range filter
