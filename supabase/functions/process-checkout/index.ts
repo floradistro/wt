@@ -147,10 +147,12 @@ interface CheckoutRequest {
   // E-commerce specific
   is_ecommerce?: boolean
   shipping_address?: {
+    name?: string
     address: string
     city: string
     state: string
     zip: string
+    phone?: string
   }
 
   // Loyalty
@@ -1131,7 +1133,17 @@ serve(async (req) => {
         payment_method: body.paymentMethod,
         idempotency_key: idempotencyKey,
         created_by_user_id: createdByUserId, // ✅ APPLE WAY: Validated FK before insert
-        billing_address: body.is_ecommerce ? body.shipping_address : {},
+        // E-commerce shipping address and cost
+        ...(body.is_ecommerce && body.shipping_address ? {
+          shipping_name: body.shipping_address.name,
+          shipping_address_line1: body.shipping_address.address,
+          shipping_city: body.shipping_address.city,
+          shipping_state: body.shipping_address.state,
+          shipping_zip: body.shipping_address.zip,
+          shipping_phone: body.shipping_address.phone,
+          shipping_country: 'US',
+          shipping_cost: body.shipping || 0,
+        } : {}),
         metadata: {
           ...body.metadata,
           customer_name: body.customerName || (body.is_ecommerce ? 'Online Customer' : 'Walk-In'),
