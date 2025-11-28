@@ -1219,15 +1219,19 @@ serve(async (req) => {
         line_subtotal: item.lineTotal, // Subtotal before tax
         line_total: item.lineTotal, // Total including tax
         tax_amount: 0, // Tax is calculated at order level
+        discount_amount: 0, // No item-level discounts for e-commerce
         inventory_id: item.inventoryId,
         tier_name: item.tierName || null, // e.g., "28g (Ounce)", "3.5g (Eighth)"
         quantity_grams: item.gramsToDeduct, // CRITICAL: Actual quantity to deduct (grams, units, etc.)
         quantity_display: item.tierName || `${item.quantity}`, // Display string for UI
         // Required fields for order item tracking
         order_type: body.is_ecommerce ? 'delivery' : 'pickup',
+        pickup_location_id: body.is_ecommerce ? null : body.locationId, // Only for pickup orders
         fulfillment_status: 'unfulfilled',
         fulfilled_quantity: 0,
         vendor_payout_status: 'pending',
+        commission_rate: null,
+        commission_amount: null,
       }
     })
 
