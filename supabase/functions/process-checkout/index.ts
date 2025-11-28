@@ -1118,11 +1118,11 @@ serve(async (req) => {
       .from('orders')
       .insert({
         vendor_id: body.vendorId,
-        pickup_location_id: body.locationId,
+        pickup_location_id: body.is_ecommerce ? null : body.locationId, // E-commerce orders don't have pickup location
         customer_id: body.customerId || null,
         order_number: orderNumber,
-        order_type: 'walk_in',
-        delivery_type: 'pickup',
+        order_type: body.is_ecommerce ? 'shipping' : 'walk_in', // E-commerce = shipping, POS = walk_in
+        delivery_type: body.is_ecommerce ? 'shipping' : 'pickup', // E-commerce = shipping, POS = pickup
         status: OrderStatus.PENDING,
         payment_status: PaymentStatus.PENDING,
         subtotal: body.subtotal,
@@ -1131,10 +1131,10 @@ serve(async (req) => {
         payment_method: body.paymentMethod,
         idempotency_key: idempotencyKey,
         created_by_user_id: createdByUserId, // ✅ APPLE WAY: Validated FK before insert
-        billing_address: {},
+        billing_address: body.is_ecommerce ? body.shipping_address : {},
         metadata: {
           ...body.metadata,
-          customer_name: body.customerName || 'Walk-In',
+          customer_name: body.customerName || (body.is_ecommerce ? 'Online Customer' : 'Walk-In'),
           loyalty_points_redeemed: body.loyaltyPointsRedeemed || 0,
           loyalty_discount_amount: body.loyaltyDiscountAmount || 0,
           campaign_discount_amount: body.campaignDiscountAmount || 0,
@@ -1142,6 +1142,7 @@ serve(async (req) => {
           session_id: body.sessionId,
           register_id: body.registerId,
           request_id: requestId,
+          is_ecommerce: body.is_ecommerce || false,
         },
       })
       .select()
@@ -1268,7 +1269,7 @@ serve(async (req) => {
         quantity_display: item.tierName || `${item.quantity}`, // Display string for UI
         meta_data: {},
         // Required fields for order item tracking
-        order_type: body.is_ecommerce ? 'delivery' : 'pickup',
+        order_type: body.is_ecommerce ? 'shipping' : 'pickup',
         pickup_location_id: body.is_ecommerce ? null : body.locationId, // Only for pickup orders
         pickup_location_name: null,
         fulfillment_status: 'unfulfilled',

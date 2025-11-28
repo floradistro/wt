@@ -72,8 +72,10 @@ export const useOrderFilterStore = create<OrderFilterState>()(
         // Apply all filters
         return allOrders.filter((order) => {
           // Location filter (FIRST - most important for staff users)
+          // IMPORTANT: E-commerce orders have null pickup_location_id, show them regardless of location filter
           if (selectedLocationIds.length > 0) {
-            if (!order.pickup_location_id || !selectedLocationIds.includes(order.pickup_location_id)) {
+            const isEcommerceOrder = order.order_type === 'shipping'
+            if (!isEcommerceOrder && (!order.pickup_location_id || !selectedLocationIds.includes(order.pickup_location_id))) {
               console.log('[OrderFilter] Filtered out by location:', {
                 orderId: order.id,
                 orderLocation: order.pickup_location_id,
@@ -153,6 +155,7 @@ export const useOrderFilterStore = create<OrderFilterState>()(
       /**
        * Get location-filtered orders (for badge counts)
        * Only filters by location, not by status/date/search
+       * IMPORTANT: E-commerce orders (order_type: 'shipping') are always included
        */
       getLocationFilteredOrders: () => {
         const allOrders = useOrdersStore.getState().orders
@@ -162,9 +165,10 @@ export const useOrderFilterStore = create<OrderFilterState>()(
           return allOrders
         }
 
-        return allOrders.filter(order =>
-          order.pickup_location_id && selectedLocationIds.includes(order.pickup_location_id)
-        )
+        return allOrders.filter(order => {
+          const isEcommerceOrder = order.order_type === 'shipping'
+          return isEcommerceOrder || (order.pickup_location_id && selectedLocationIds.includes(order.pickup_location_id))
+        })
       },
 
       /**
