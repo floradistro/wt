@@ -15,7 +15,7 @@ import { devtools } from 'zustand/middleware'
 import { useShallow } from 'zustand/react/shallow'
 import { supabase } from '@/lib/supabase/client'
 import { logger } from '@/utils/logger'
-import { transformInventoryToProducts, extractCategories } from '@/utils/product-transformers'
+import { transformProductsData, extractCategories } from '@/utils/product-transformers'
 import { eventLogger } from '@/services/event-logger.service'
 import type { Product } from '@/types/pos'
 import type { RealtimeChannel } from '@supabase/supabase-js'
@@ -31,16 +31,19 @@ interface ProductsState {
   error: string | null
   locationId: string | null
   currentController: AbortController | null
-  inventoryChannel: RealtimeChannel | null
+  inventoryChannels: Map<string, RealtimeChannel> // Map of locationId -> channel
+  pricingChannel: RealtimeChannel | null // Real-time pricing updates
 
   // Actions
-  loadProducts: (locationId: string) => Promise<void>
+  loadProducts: (locationId: string, vendorId?: string) => Promise<void>
   refreshProducts: () => Promise<void>
   setLocationId: (locationId: string) => void
   getProductById: (id: string) => Product | undefined
   cancelLoadProducts: () => void
   subscribeToInventoryUpdates: (locationId: string) => void
-  unsubscribeFromInventoryUpdates: () => void
+  unsubscribeFromInventoryUpdates: (locationId?: string) => void
+  subscribeToPricingUpdates: (vendorId: string) => void
+  unsubscribeFromPricingUpdates: () => void
   reset: () => void
 }
 
@@ -58,7 +61,8 @@ export const useProductsStore = create<ProductsState>()(
   error: null,
   locationId: null,
   currentController: null,
-  inventoryChannel: null,
+  inventoryChannels: new Map(),
+  pricingChannel: null,
 
   // Actions
   /**
@@ -76,7 +80,7 @@ export const useProductsStore = create<ProductsState>()(
     }
   },
 
-  loadProducts: async (locationId: string) => {
+  loadProducts: async (locationId: string, vendorId?: string, onlyInStock: boolean = false) => {
     // Cancel any previous request
     get().cancelLoadProducts()
 
@@ -87,44 +91,76 @@ export const useProductsStore = create<ProductsState>()(
     set({ loading: true, error: null, locationId, currentController: controller })
 
     try {
-      logger.debug('[Products Store] Loading products for location:', locationId)
+      logger.debug('[Products Store] Loading ALL products (including out of stock)', { vendorId })
 
-      const { data: inventoryData, error } = await supabase
-        .from('inventory')
+      // Query from products table to get ALL products, then fetch inventory separately
+      // This ensures products without inventory records still appear
+      let query = supabase
+        .from('products')
+        .select(`
+          id,
+          name,
+          sku,
+          regular_price,
+          sale_price,
+          on_sale,
+          featured_image,
+          custom_fields,
+          pricing_data,
+          vendor_id,
+          primary_category_id,
+          pricing_template_id,
+          primary_category:categories!primary_category_id(id, name),
+          product_categories (
+            categories (
+              name
+            )
+          ),
+          vendors (
+            id,
+            store_name,
+            logo_url
+          ),
+          pricing_template:pricing_tier_templates (
+            id,
+            name,
+            default_tiers
+          )
+        `)
+
+      // Add vendor filter if provided
+      if (vendorId) {
+        query = query.eq('vendor_id', vendorId)
+      }
+
+      const { data: productsData, error } = await query.abortSignal(controller.signal)
+
+      // Fetch inventory separately for all products
+      const productIds = productsData?.map(p => p.id) || []
+
+      const { data: inventoryData } = productIds.length > 0 ? await supabase
+        .from('inventory_with_holds')
         .select(`
           id,
           product_id,
-          quantity,
-          reserved_quantity,
+          location_id,
+          total_quantity,
+          held_quantity,
           available_quantity,
-          products (
-            id,
-            name,
-            sku,
-            regular_price,
-            sale_price,
-            on_sale,
-            featured_image,
-            custom_fields,
-            pricing_data,
-            vendor_id,
-            primary_category_id,
-            primary_category:categories!primary_category_id(id, name),
-            product_categories (
-              categories (
-                name
-              )
-            ),
-            vendors (
-              id,
-              store_name,
-              logo_url
-            )
+          locations (
+            name
           )
         `)
+        .in('product_id', productIds)
         .eq('location_id', locationId)
-        .gt('quantity', 0)
-        .abortSignal(controller.signal)
+        : { data: [] }
+
+      // Merge inventory data into products
+      if (productsData && inventoryData) {
+        productsData.forEach((product: any) => {
+          product.inventory = inventoryData.filter(inv => inv.product_id === product.id)
+        })
+      }
 
       // Check if request was aborted
       if (controller.signal.aborted) {
@@ -134,8 +170,18 @@ export const useProductsStore = create<ProductsState>()(
 
       if (error) throw error
 
-      // Transform inventory data to products
-      const transformedProducts = transformInventoryToProducts(inventoryData || [])
+      // Transform products data (ALL products including out of stock)
+      // Filter inventory to only selected location
+      let transformedProducts = transformProductsData(productsData || [], locationId)
+
+      // Filter to only in-stock products if requested (for POS)
+      if (onlyInStock) {
+        transformedProducts = transformedProducts.filter(p => (p.inventory_quantity || 0) > 0)
+        logger.debug('[Products Store] Filtered to in-stock only:', {
+          totalProducts: productsData?.length || 0,
+          inStockProducts: transformedProducts.length,
+        })
+      }
 
       // Extract unique categories
       const uniqueCategories = extractCategories(transformedProducts)
@@ -143,6 +189,7 @@ export const useProductsStore = create<ProductsState>()(
       logger.debug('[Products Store] Loaded products:', {
         count: transformedProducts.length,
         categories: uniqueCategories.length,
+        onlyInStock,
       })
 
       // Log successful product load
@@ -180,7 +227,7 @@ export const useProductsStore = create<ProductsState>()(
     const { locationId } = get()
 
     if (!locationId) {
-      logger.warn('[Products Store] Cannot refresh: no locationId set')
+      // Silently skip refresh if no locationId (management view doesn't need real-time refresh)
       return
     }
 
@@ -204,17 +251,26 @@ export const useProductsStore = create<ProductsState>()(
   },
 
   /**
-   * Subscribe to real-time inventory updates
+   * Subscribe to real-time inventory updates for a location
    * APPLE PRINCIPLE: Instant feedback - no page refresh needed
+   *
+   * Listens to BOTH inventory AND inventory_holds tables
+   * because available quantity = total - held
+   *
+   * Supports MULTIPLE location subscriptions simultaneously
    */
   subscribeToInventoryUpdates: (locationId: string) => {
-    // Unsubscribe from previous channel
-    get().unsubscribeFromInventoryUpdates()
+    const { inventoryChannels } = get()
 
-    logger.debug('[Products Store] Subscribing to inventory updates for location:', locationId)
+    // Don't subscribe if already subscribed to this location
+    if (inventoryChannels.has(locationId)) {
+      logger.debug('[Products Store] Already subscribed to location:', locationId)
+      return
+    }
 
     const channel = supabase
       .channel(`inventory:location:${locationId}`)
+      // Listen to inventory table changes (quantity updates)
       .on(
         'postgres_changes',
         {
@@ -223,42 +279,141 @@ export const useProductsStore = create<ProductsState>()(
           table: 'inventory',
           filter: `location_id=eq.${locationId}`,
         },
-        (payload) => {
-          logger.debug('[Products Store] Inventory update received:', payload)
-
-          if (payload.eventType === 'UPDATE' && payload.new) {
-            // Reload products when inventory changes
-            const { locationId: currentLocationId } = get()
-            if (currentLocationId) {
-              logger.info('[Products Store] ✅ Inventory updated, reloading products')
-              get().loadProducts(currentLocationId)
-            }
-          }
+        () => {
+          get().refreshProducts()
+        }
+      )
+      // Listen to inventory_holds changes (holds created/released)
+      .on(
+        'postgres_changes',
+        {
+          event: '*', // INSERT (hold created), UPDATE (hold released)
+          schema: 'public',
+          table: 'inventory_holds',
+          filter: `location_id=eq.${locationId}`,
+        },
+        () => {
+          get().refreshProducts()
         }
       )
       .subscribe((status) => {
-        if (status === 'SUBSCRIBED') {
-          logger.info('[Products Store] ✅ Subscribed to inventory updates')
-        } else if (status === 'CHANNEL_ERROR') {
-          logger.error('[Products Store] ❌ Inventory subscription error')
+        if (status === 'CHANNEL_ERROR') {
+          logger.error('[Products Store] ❌ Subscription error for location:', locationId)
         } else if (status === 'TIMED_OUT') {
-          logger.error('[Products Store] ⏱️ Inventory subscription timed out')
+          logger.error('[Products Store] ⏱️ Subscription timed out for location:', locationId)
         }
       })
 
-    set({ inventoryChannel: channel })
+    // Store the channel
+    inventoryChannels.set(locationId, channel)
+    set({ inventoryChannels: new Map(inventoryChannels) })
   },
 
   /**
    * Unsubscribe from inventory updates
+   * If locationId provided, unsubscribe from that location only
+   * If no locationId, unsubscribe from ALL locations
    */
-  unsubscribeFromInventoryUpdates: () => {
-    const { inventoryChannel } = get()
+  unsubscribeFromInventoryUpdates: (locationId?: string) => {
+    const { inventoryChannels } = get()
 
-    if (inventoryChannel) {
-      logger.debug('[Products Store] Unsubscribing from inventory updates')
-      supabase.removeChannel(inventoryChannel)
-      set({ inventoryChannel: null })
+    if (locationId) {
+      // Unsubscribe from specific location
+      const channel = inventoryChannels.get(locationId)
+      if (channel) {
+        logger.debug('[Products Store] Unsubscribing from location:', locationId)
+        supabase.removeChannel(channel)
+        inventoryChannels.delete(locationId)
+        set({ inventoryChannels: new Map(inventoryChannels) })
+      }
+    } else {
+      // Unsubscribe from ALL locations
+      if (inventoryChannels.size > 0) {
+        logger.debug('[Products Store] Unsubscribing from all locations:', inventoryChannels.size)
+        inventoryChannels.forEach((channel) => {
+          supabase.removeChannel(channel)
+        })
+        set({ inventoryChannels: new Map() })
+      }
+    }
+  },
+
+  /**
+   * Subscribe to pricing template and product meta_data changes
+   * When a pricing template is updated, ALL products refresh instantly
+   */
+  subscribeToPricingUpdates: (vendorId: string) => {
+    const { pricingChannel } = get()
+
+    // Don't subscribe if already subscribed
+    if (pricingChannel) {
+      logger.debug('[Products Store] Already subscribed to pricing updates')
+      return
+    }
+
+    const channel = supabase
+      .channel(`pricing:vendor:${vendorId}`)
+      // Listen to pricing_tier_templates changes
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'pricing_tier_templates',
+          filter: `vendor_id=eq.${vendorId}`,
+        },
+        (payload) => {
+          logger.info('🔔 PRICING TEMPLATE UPDATED (real-time)', {
+            templateId: payload.new?.id,
+            templateName: payload.new?.name,
+          })
+          get().refreshProducts()
+        }
+      )
+      // Listen to products table changes (for any product updates including pricing_template_id changes)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'products',
+          filter: `vendor_id=eq.${vendorId}`,
+        },
+        (payload) => {
+          // Refresh if pricing_template_id or meta_data changed
+          const oldTemplateId = payload.old?.pricing_template_id
+          const newTemplateId = payload.new?.pricing_template_id
+          const oldMetaData = JSON.stringify(payload.old?.meta_data)
+          const newMetaData = JSON.stringify(payload.new?.meta_data)
+
+          if (oldTemplateId !== newTemplateId || oldMetaData !== newMetaData) {
+            logger.info('🔔 PRODUCT UPDATED (real-time)', {
+              productId: payload.new?.id,
+              templateChanged: oldTemplateId !== newTemplateId,
+            })
+            get().refreshProducts()
+          }
+        }
+      )
+      .subscribe((status) => {
+        if (status === 'CHANNEL_ERROR') {
+          logger.error('[Products Store] ❌ Error subscribing to pricing updates')
+        }
+      })
+
+    set({ pricingChannel: channel })
+  },
+
+  /**
+   * Unsubscribe from pricing updates
+   */
+  unsubscribeFromPricingUpdates: () => {
+    const { pricingChannel } = get()
+
+    if (pricingChannel) {
+      logger.debug('[Products Store] Unsubscribing from pricing updates')
+      supabase.removeChannel(pricingChannel)
+      set({ pricingChannel: null })
     }
   },
 
@@ -266,8 +421,11 @@ export const useProductsStore = create<ProductsState>()(
     // Cancel any in-flight requests before reset
     get().cancelLoadProducts()
 
-    // Unsubscribe from realtime
+    // Unsubscribe from ALL locations
     get().unsubscribeFromInventoryUpdates()
+
+    // Unsubscribe from pricing updates
+    get().unsubscribeFromPricingUpdates()
 
     set({
       products: [],
@@ -275,7 +433,7 @@ export const useProductsStore = create<ProductsState>()(
       loading: false,
       error: null,
       currentController: null,
-      inventoryChannel: null,
+      inventoryChannels: new Map(),
     })
   },
     }),
@@ -319,5 +477,7 @@ export const productsActions = {
   get cancelLoadProducts() { return useProductsStore.getState().cancelLoadProducts },
   get subscribeToInventoryUpdates() { return useProductsStore.getState().subscribeToInventoryUpdates },
   get unsubscribeFromInventoryUpdates() { return useProductsStore.getState().unsubscribeFromInventoryUpdates },
+  get subscribeToPricingUpdates() { return useProductsStore.getState().subscribeToPricingUpdates },
+  get unsubscribeFromPricingUpdates() { return useProductsStore.getState().unsubscribeFromPricingUpdates },
   get reset() { return useProductsStore.getState().reset },
 }

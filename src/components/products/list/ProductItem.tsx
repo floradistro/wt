@@ -34,15 +34,41 @@ function ProductItemComponent({
 }: ProductItemProps) {
   // Calculate location-aware inventory display
   const inventoryDisplay = useMemo(() => {
-    // Use inventory_quantity from the current product (single location data from store)
-    const qty = item.inventory_quantity ?? 0
+    // When NO locations selected (All Locations view), hide stock quantities (catalog view)
+    if (selectedLocationIds.length === 0) {
+      return {
+        type: 'none' as const,
+      }
+    }
 
+    // When specific locations are selected, show inventory breakdown
+    if (item.inventory && item.inventory.length > 0) {
+      // Filter to selected locations
+      const relevantInventory = item.inventory.filter(inv =>
+        selectedLocationIds.includes(inv.location_id)
+      )
+
+      // Sort by location name for consistent display
+      const sortedInventory = [...relevantInventory].sort((a, b) =>
+        a.location_name.localeCompare(b.location_name)
+      )
+
+      // Show per-location breakdown when we have inventory data
+      if (sortedInventory.length > 0) {
+        return {
+          type: 'multi' as const,
+          locations: sortedInventory,
+          totalStock: sortedInventory.reduce((sum, inv) => sum + inv.available_quantity, 0),
+        }
+      }
+    }
+
+    // Fallback: No inventory data - show 0 stock
     return {
       type: 'single' as const,
-      stock: qty,
-      isInStock: qty > 0,
+      stock: 0,
     }
-  }, [item])
+  }, [item, selectedLocationIds])
 
   return (
     <Pressable
@@ -54,21 +80,26 @@ function ProductItemComponent({
       onPress={onPress}
       accessibilityRole="button"
     >
-      {/* Icon/Thumbnail */}
-      <View style={styles.productIcon}>
-        {item.featured_image ? (
-          <Image
-            source={{ uri: item.featured_image }}
-            style={styles.productIconImage}
-          />
-        ) : (
-          <View style={[styles.productIconPlaceholder, styles.productIconImage]}>
-            <Text style={styles.productIconText}>
-              {item.name.charAt(0).toUpperCase()}
-            </Text>
-          </View>
-        )}
-      </View>
+      {/* Icon/Thumbnail - Apple Music Style: Full-height, zero padding */}
+      {item.featured_image ? (
+        <Image
+          source={{ uri: item.featured_image }}
+          style={styles.productIconImage}
+          resizeMode="cover"
+        />
+      ) : item.vendor_logo_url ? (
+        <Image
+          source={{ uri: item.vendor_logo_url }}
+          style={styles.productIconImage}
+          resizeMode="contain"
+        />
+      ) : (
+        <View style={[styles.productIconPlaceholder, styles.productIconImage]}>
+          <Text style={styles.productIconText}>
+            {item.name.charAt(0).toUpperCase()}
+          </Text>
+        </View>
+      )}
 
       {/* Product Name & Category */}
       <View style={styles.productInfo}>
@@ -81,75 +112,70 @@ function ProductItemComponent({
       </View>
 
       {/* Inventory Display - Adapts based on filter */}
-      {inventoryDisplay.type === 'aggregate' && (
-        <>
-          <View style={styles.dataColumn}>
-            <Text style={styles.dataLabel}>STOCK</Text>
-            <Text
-              style={[
-                styles.dataValue,
-                styles.stockValue,
-                inventoryDisplay.totalStock === 0 && styles.stockOut,
-                inventoryDisplay.totalStock > 0 && inventoryDisplay.totalStock < 10 && styles.stockLow,
-                inventoryDisplay.totalStock >= 10 && styles.stockOk,
-              ]}
-            >
-              {inventoryDisplay.totalStock}g
-            </Text>
-          </View>
-          <View style={styles.dataColumn}>
-            <Text style={styles.dataLabel}>LOCATIONS</Text>
-            <Text style={styles.dataValue}>{inventoryDisplay.locationsCount}</Text>
-          </View>
-        </>
-      )}
-
-      {inventoryDisplay.type === 'single' && (
-        <>
-          <View style={styles.dataColumn}>
-            <Text style={styles.dataLabel}>STOCK</Text>
-            <Text
-              style={[
-                styles.dataValue,
-                styles.stockValue,
-                inventoryDisplay.stock === 0 && styles.stockOut,
-                inventoryDisplay.stock > 0 && inventoryDisplay.stock < 10 && styles.stockLow,
-                inventoryDisplay.stock >= 10 && styles.stockOk,
-              ]}
-            >
-              {inventoryDisplay.stock}g
-            </Text>
-          </View>
-          <View style={styles.dataColumn}>
-            <Text style={styles.dataLabel}>STATUS</Text>
-            <Text style={[styles.dataValue, inventoryDisplay.isInStock ? styles.stockOk : styles.stockOut]}>
-              {inventoryDisplay.isInStock ? 'In Stock' : 'Out'}
-            </Text>
-          </View>
-        </>
-      )}
-
-      {inventoryDisplay.type === 'multi' && (
-        <View style={styles.locationBreakdown}>
-          {inventoryDisplay.topLocations.map((loc, idx) => (
-            <View key={idx} style={styles.locationRow}>
-              <Text style={styles.locationName} numberOfLines={1}>{loc.name}</Text>
+      {inventoryDisplay.type !== 'none' && (
+        <View style={styles.inventoryColumn}>
+          {inventoryDisplay.type === 'single' && (
+            <>
+              <Text style={styles.dataLabel}>STOCK</Text>
               <Text
                 style={[
-                  styles.locationQty,
-                  loc.quantity === 0 && styles.stockOut,
-                  loc.quantity > 0 && loc.quantity < 10 && styles.stockLow,
-                  loc.quantity >= 10 && styles.stockOk,
+                  styles.dataValue,
+                  styles.stockValue,
+                  inventoryDisplay.stock === 0 && styles.stockOut,
+                  inventoryDisplay.stock > 0 && inventoryDisplay.stock < 10 && styles.stockLow,
+                  inventoryDisplay.stock >= 10 && styles.stockOk,
                 ]}
               >
-                {loc.quantity}g
+                {inventoryDisplay.stock}g
               </Text>
+            </>
+          )}
+
+          {inventoryDisplay.type === 'multi' && (
+            <View style={styles.locationsContainer}>
+              {/* Show total if multiple locations */}
+              {inventoryDisplay.locations.length > 1 && (
+                <>
+                  <View style={styles.totalRow}>
+                    <Text style={styles.totalLabel}>TOTAL</Text>
+                    <Text
+                      style={[
+                        styles.totalQty,
+                        inventoryDisplay.totalStock === 0 && styles.stockOut,
+                        inventoryDisplay.totalStock > 0 && inventoryDisplay.totalStock < 10 && styles.stockLow,
+                        inventoryDisplay.totalStock >= 10 && styles.stockOk,
+                      ]}
+                    >
+                      {inventoryDisplay.totalStock}g
+                    </Text>
+                  </View>
+                  <View style={styles.totalDivider} />
+                </>
+              )}
+              {/* Per-location breakdown */}
+              {inventoryDisplay.locations.map((loc, index) => (
+                <View key={loc.id}>
+                  <View style={styles.locationRow}>
+                    <Text style={styles.locationName} numberOfLines={1}>
+                      {loc.location_name}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.locationQty,
+                        loc.available_quantity === 0 && styles.stockOut,
+                        loc.available_quantity > 0 && loc.available_quantity < 10 && styles.stockLow,
+                        loc.available_quantity >= 10 && styles.stockOk,
+                      ]}
+                    >
+                      {loc.available_quantity}g
+                    </Text>
+                  </View>
+                  {index < inventoryDisplay.locations.length - 1 && (
+                    <View style={styles.locationDivider} />
+                  )}
+                </View>
+              ))}
             </View>
-          ))}
-          {inventoryDisplay.totalLocations > 2 && (
-            <Text style={styles.moreLocations}>
-              +{inventoryDisplay.totalLocations - 2} more
-            </Text>
           )}
         </View>
       )}
@@ -161,19 +187,20 @@ export const ProductItem = memo(ProductItemComponent)
 ProductItem.displayName = 'ProductItem'
 
 // ========================================
-// STYLES
+// STYLES - Apple Music Style
 // ========================================
 const styles = StyleSheet.create({
   productItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: layout.rowPaddingVertical,
-    paddingHorizontal: layout.rowPaddingHorizontal,
+    paddingVertical: 6, // Small vertical padding - Apple Music style
+    paddingLeft: 12, // Small left padding for album art spacing
+    paddingRight: layout.rowPaddingHorizontal,
     gap: 12,
     backgroundColor: 'transparent',
     borderBottomWidth: 0.5,
     borderBottomColor: 'rgba(255,255,255,0.05)',
-    minHeight: layout.minTouchTarget,
+    minHeight: 72,
   },
   productItemActive: {
     backgroundColor: 'rgba(99,99,102,0.2)',
@@ -181,14 +208,10 @@ const styles = StyleSheet.create({
   productItemLast: {
     borderBottomWidth: 0,
   },
-  productIcon: {
-    width: 44,
-    height: 44,
-  },
   productIconImage: {
-    width: 44,
-    height: 44,
-    borderRadius: 8,
+    width: 60, // Slightly smaller to account for padding
+    height: 60,
+    borderRadius: 8, // iOS rounded corners - Apple Music style
   },
   productIconPlaceholder: {
     backgroundColor: 'rgba(118,118,128,0.24)',
@@ -196,13 +219,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   productIconText: {
-    fontSize: 20,
+    fontSize: 24,
+    fontWeight: '600',
     color: 'rgba(235,235,245,0.6)',
   },
   productInfo: {
     flex: 1,
     gap: 2,
     minWidth: 180,
+    paddingVertical: 0,
   },
   productName: {
     fontSize: 15,
@@ -218,30 +243,79 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
 
-  // Multi-location breakdown
-  locationBreakdown: {
-    gap: 3,
-    minWidth: 140,
+  // Inventory column wrapper
+  inventoryColumn: {
+    minWidth: 240,
+    alignItems: 'flex-end',
   },
+  // Multi-location breakdown
+  locationsContainer: {
+    gap: 0,
+    width: 240,
+  },
+  // Total row (shown when multiple locations)
+  totalRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 2,
+    paddingHorizontal: 8,
+    gap: 12,
+  },
+  totalLabel: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: 'rgba(235,235,245,0.4)',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+    flex: 1,
+    textAlign: 'left',
+  },
+  totalQty: {
+    fontSize: 15,
+    fontWeight: '800',
+    letterSpacing: -0.4,
+    minWidth: 55,
+    textAlign: 'right',
+    fontVariant: ['tabular-nums'],
+  },
+  totalDivider: {
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    marginVertical: 4,
+    marginHorizontal: 8,
+  },
+  // Individual location rows
   locationRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    paddingVertical: 3,
+    paddingHorizontal: 8,
     gap: 12,
+  },
+  locationDivider: {
+    height: 0.5,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    marginVertical: 1,
+    marginHorizontal: 8,
   },
   locationName: {
     fontSize: 11,
     fontWeight: '500',
-    color: 'rgba(235,235,245,0.6)',
-    letterSpacing: -0.1,
+    color: 'rgba(235,235,245,0.5)',
+    letterSpacing: 0.2,
+    textTransform: 'uppercase',
     flex: 1,
+    textAlign: 'left',
   },
   locationQty: {
-    fontSize: 13,
-    fontWeight: '600',
-    letterSpacing: -0.2,
-    minWidth: 45,
+    fontSize: 14,
+    fontWeight: '700',
+    letterSpacing: -0.3,
+    minWidth: 55,
     textAlign: 'right',
+    fontVariant: ['tabular-nums'],
   },
   moreLocations: {
     fontSize: 10,
@@ -251,12 +325,6 @@ const styles = StyleSheet.create({
     marginTop: 1,
   },
 
-  // Data Columns
-  dataColumn: {
-    minWidth: 80,
-    alignItems: 'flex-end',
-    gap: 2,
-  },
   dataLabel: {
     fontSize: 9,
     fontWeight: '600',
