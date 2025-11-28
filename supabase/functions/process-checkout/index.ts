@@ -1720,7 +1720,9 @@ serve(async (req) => {
             const { error: cardUpdateError } = await supabaseAdmin
               .from('orders')
               .update({
-                status: OrderStatus.COMPLETED,
+                // E-commerce orders start as 'pending' for staff fulfillment workflow
+                // POS orders go straight to 'completed'
+                status: body.is_ecommerce ? 'pending' : OrderStatus.COMPLETED,
                 payment_status: PaymentStatus.PAID,
                 processor_transaction_id: paymentResult.transactionResponse.transId,
                 payment_authorization_code: paymentResult.transactionResponse.authCode,
@@ -2060,15 +2062,17 @@ serve(async (req) => {
       },
     })
 
+    const finalOrderStatus = body.is_ecommerce ? 'pending' : OrderStatus.COMPLETED
+
     return await successResponse({
       order: {
         id: order.id,
         order_number: order.order_number,
-        status: OrderStatus.COMPLETED,
+        status: finalOrderStatus,
       },
       orderId: order.id,
       orderNumber: order.order_number,
-      orderStatus: OrderStatus.COMPLETED,
+      orderStatus: finalOrderStatus,
       paymentStatus: PaymentStatus.PAID,
       total: body.total,
       paymentMethod: body.paymentMethod,
