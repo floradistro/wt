@@ -2,7 +2,7 @@
  * Payment Processor Types
  */
 
-export type ProcessorType = 'pax' | 'stripe' | 'square' | 'clover'
+export type ProcessorType = 'pax' | 'stripe' | 'square' | 'clover' | 'authorizenet'
 
 export interface PaymentProcessor {
   id: string

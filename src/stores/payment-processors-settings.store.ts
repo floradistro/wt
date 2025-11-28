@@ -87,17 +87,45 @@ export const usePaymentProcessorsSettingsStore = create<PaymentProcessorsSetting
         try {
           logger.debug('[PaymentProcessorsSettings] Creating processor:', data)
 
+          // Build insert data based on processor type
+          const insertData: any = {
+            vendor_id: vendorId,
+            processor_type: data.processor_type,
+            processor_name: data.name,
+            is_active: data.is_active,
+            is_default: data.is_primary,
+            environment: data.config?.environment || 'sandbox',
+          }
+
+          // Only include location_id if it's provided (omit for e-commerce processors)
+          if (data.location_id) {
+            insertData.location_id = data.location_id
+          }
+
+          // Map Authorize.Net credentials to prefixed columns
+          if (data.processor_type === 'authorizenet') {
+            insertData.authorizenet_api_login_id = data.config?.authorizenet_api_login_id
+            insertData.authorizenet_transaction_key = data.config?.authorizenet_transaction_key
+            insertData.authorizenet_public_client_key = data.config?.authorizenet_public_client_key || null
+            insertData.authorizenet_signature_key = data.config?.authorizenet_signature_key || null
+            insertData.is_ecommerce_processor = data.config?.is_ecommerce_processor || false
+          }
+
+          // Map Dejavoo credentials to prefixed columns
+          if (data.processor_type === 'dejavoo') {
+            insertData.dejavoo_authkey = data.config?.dejavoo_authkey
+            insertData.dejavoo_tpn = data.config?.dejavoo_tpn
+          }
+
+          // Store remaining config in settings JSONB
+          const { authorizenet_api_login_id, authorizenet_transaction_key, authorizenet_public_client_key, authorizenet_signature_key,
+                  dejavoo_authkey, dejavoo_tpn, environment, is_ecommerce_processor,
+                  ...remainingConfig } = data.config || {}
+          insertData.settings = remainingConfig
+
           const { error } = await supabase
             .from('payment_processors')
-            .insert({
-              vendor_id: vendorId,
-              processor_type: data.processor_type,
-              processor_name: data.name,
-              is_active: data.is_active,
-              is_primary: data.is_primary,
-              location_id: data.location_id || null,
-              config: data.config || {},
-            })
+            .insert(insertData)
 
           if (error) throw error
 
@@ -130,9 +158,48 @@ export const usePaymentProcessorsSettingsStore = create<PaymentProcessorsSetting
           if (data.processor_type) updateData.processor_type = data.processor_type
           if (data.name) updateData.processor_name = data.name
           if (data.is_active !== undefined) updateData.is_active = data.is_active
-          if (data.is_primary !== undefined) updateData.is_primary = data.is_primary
+          if (data.is_primary !== undefined) updateData.is_default = data.is_primary
           if (data.location_id !== undefined) updateData.location_id = data.location_id
-          if (data.config) updateData.config = data.config
+
+          // Map Authorize.Net credentials to prefixed columns
+          if (data.config) {
+            if (data.processor_type === 'authorizenet') {
+              if (data.config.authorizenet_api_login_id) {
+                updateData.authorizenet_api_login_id = data.config.authorizenet_api_login_id
+              }
+              if (data.config.authorizenet_transaction_key) {
+                updateData.authorizenet_transaction_key = data.config.authorizenet_transaction_key
+              }
+              if (data.config.authorizenet_public_client_key !== undefined) {
+                updateData.authorizenet_public_client_key = data.config.authorizenet_public_client_key || null
+              }
+              if (data.config.authorizenet_signature_key !== undefined) {
+                updateData.authorizenet_signature_key = data.config.authorizenet_signature_key || null
+              }
+              if (data.config.is_ecommerce_processor !== undefined) {
+                updateData.is_ecommerce_processor = data.config.is_ecommerce_processor
+              }
+            }
+
+            // Map Dejavoo credentials to prefixed columns
+            if (data.processor_type === 'dejavoo') {
+              if (data.config.dejavoo_authkey) updateData.dejavoo_authkey = data.config.dejavoo_authkey
+              if (data.config.dejavoo_tpn) updateData.dejavoo_tpn = data.config.dejavoo_tpn
+            }
+
+            // Environment
+            if (data.config.environment) {
+              updateData.environment = data.config.environment
+            }
+
+            // Store remaining config in settings JSONB
+            const { authorizenet_api_login_id, authorizenet_transaction_key, authorizenet_public_client_key, authorizenet_signature_key,
+                    dejavoo_authkey, dejavoo_tpn, environment, is_ecommerce_processor,
+                    ...remainingConfig } = data.config
+            if (Object.keys(remainingConfig).length > 0) {
+              updateData.settings = remainingConfig
+            }
+          }
 
           const { error } = await supabase
             .from('payment_processors')
