@@ -7,13 +7,14 @@
  */
 
 import { View, Text, StyleSheet, Pressable, ActivityIndicator, ScrollView, Linking, Alert } from 'react-native'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import * as Haptics from 'expo-haptics'
 import { Ionicons } from '@expo/vector-icons'
 import { colors, spacing, radius } from '@/theme/tokens'
 import { layout } from '@/theme/layout'
 import { logger } from '@/utils/logger'
 import type { Order } from '@/services/orders.service'
+import { ordersService, type OrderItem } from '@/services/orders.service'
 import { useOrders, useOrdersStore, useOrdersActions } from '@/stores/orders.store'
 import { useSelectedOrderId, useOrdersUIActions } from '@/stores/orders-ui.store'
 import {
@@ -35,6 +36,27 @@ export function ECommerceDetail() {
   const [showShipModal, setShowShipModal] = useState(false)
   const [showDeliveredModal, setShowDeliveredModal] = useState(false)
   const [isUpdating, setIsUpdating] = useState(false)
+  const [orderItems, setOrderItems] = useState<OrderItem[]>([])
+  const [loadingItems, setLoadingItems] = useState(false)
+
+  // Load order items
+  useEffect(() => {
+    if (!order) return
+
+    const loadItems = async () => {
+      try {
+        setLoadingItems(true)
+        const fullOrder = await ordersService.getOrderById(order.id)
+        setOrderItems(fullOrder.items || [])
+      } catch (error) {
+        logger.error('Failed to load order items:', error)
+      } finally {
+        setLoadingItems(false)
+      }
+    }
+
+    loadItems()
+  }, [order?.id])
 
   const handleBack = () => {
     selectOrder(null)
@@ -245,22 +267,57 @@ export function ECommerceDetail() {
         )}
 
         {/* Shipping Address */}
-        {order.shipping_address_line1 && (
+        {(order.billing_address as any)?.address && (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Shipping Address</Text>
             <View style={styles.cardGlass}>
               <View style={[styles.infoRow, styles.lastRow]}>
                 <Text style={styles.infoLabel}>Address</Text>
                 <Text style={styles.infoValue}>
-                  {order.shipping_address_line1}
-                  {order.shipping_address_line2 && `, ${order.shipping_address_line2}`}
+                  {(order.billing_address as any).address}
                   {'\n'}
-                  {order.shipping_city}, {order.shipping_state} {order.shipping_zip}
+                  {(order.billing_address as any).city}, {(order.billing_address as any).state} {(order.billing_address as any).zip}
                 </Text>
               </View>
             </View>
           </View>
         )}
+
+        {/* Order Items */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Order Items</Text>
+          <View style={styles.cardGlass}>
+            {loadingItems ? (
+              <View style={{ padding: 20, alignItems: 'center' }}>
+                <ActivityIndicator size="small" color={colors.text.secondary} />
+              </View>
+            ) : orderItems.length > 0 ? (
+              orderItems.map((item, index) => (
+                <View
+                  key={item.id}
+                  style={[
+                    styles.infoRow,
+                    index === orderItems.length - 1 && styles.lastRow
+                  ]}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.infoValue}>{item.product_name}</Text>
+                    <Text style={[styles.infoLabel, { marginTop: 4 }]}>
+                      Qty: {item.quantity} × ${item.unit_price.toFixed(2)}
+                    </Text>
+                  </View>
+                  <Text style={styles.infoValue}>
+                    ${item.line_total.toFixed(2)}
+                  </Text>
+                </View>
+              ))
+            ) : (
+              <View style={{ padding: 20, alignItems: 'center' }}>
+                <Text style={styles.infoLabel}>No items found</Text>
+              </View>
+            )}
+          </View>
+        </View>
 
         {/* Order Information */}
         <View style={styles.section}>
