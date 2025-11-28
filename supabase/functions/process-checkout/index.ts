@@ -1200,7 +1200,42 @@ serve(async (req) => {
     console.log(`[${requestId}] Draft order created:`, order.id)
 
     // ========================================================================
-    // STEP 7: CREATE ORDER ITEMS
+    // STEP 7: LOOKUP INVENTORY IDS FOR E-COMMERCE ORDERS
+    // ========================================================================
+    // For e-commerce orders, we need to find actual inventory records
+    // because frontend only sends product IDs
+    if (body.is_ecommerce) {
+      console.log(`[${requestId}] Looking up inventory records for e-commerce order`)
+      for (const item of body.items) {
+        // Find an inventory record with available stock for this product
+        const inventoryResult = await dbClient.queryObject(
+          `SELECT id FROM inventory
+           WHERE product_id = $1
+             AND vendor_id = $2
+             AND available_quantity > 0
+           ORDER BY available_quantity DESC
+           LIMIT 1`,
+          [item.productId, body.vendorId]
+        )
+
+        const inventoryRows = inventoryResult.rows as any[]
+        if (!inventoryRows || inventoryRows.length === 0) {
+          return await errorResponse(
+            `No inventory found for product: ${item.productName}`,
+            400,
+            requestId,
+            allowedOrigin
+          )
+        }
+
+        // Update the item with the actual inventory ID
+        item.inventoryId = inventoryRows[0].id
+        console.log(`[${requestId}] Found inventory ${item.inventoryId} for product ${item.productId}`)
+      }
+    }
+
+    // ========================================================================
+    // STEP 8: CREATE ORDER ITEMS
     // ========================================================================
     const orderItems = body.items.map(item => {
       // MISSION CRITICAL: No fallback for gramsToDeduct!
@@ -1221,7 +1256,7 @@ serve(async (req) => {
         line_subtotal: item.lineTotal, // Subtotal before tax
         line_total: item.lineTotal, // Total including tax
         tax_amount: 0, // Tax is calculated at order level
-        inventory_id: item.inventoryId,
+        inventory_id: item.inventoryId, // Now populated with actual inventory record ID
         stock_movement_id: null,
         tier_name: item.tierName || null, // e.g., "28g (Ounce)", "3.5g (Eighth)"
         tier_qty: item.gramsToDeduct, // Same as quantity_grams
