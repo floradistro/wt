@@ -64,16 +64,61 @@ const POSProductCard = forwardRef<any, POSProductCardProps>(({ product }, ref) =
   const modalOpacity = useRef(new Animated.Value(0)).current
 
   // SINGLE SOURCE OF TRUTH: Read from live pricing template
-  const productTiers = product.pricing_template?.default_tiers?.map(t => ({
-    break_id: t.id,
-    label: t.label,
-    qty: t.quantity,
-    price: t.default_price,
-    sort_order: t.sort_order,
-  })) || []
+  // FALLBACK: Support legacy pricing for products not yet migrated to templates
+  // IMPORTANT: Memoized to prevent re-creating arrays on every render
+  const productTiers = useMemo(() => {
+    return product.pricing_template?.default_tiers?.map(t => ({
+      break_id: t.id,
+      label: t.label,
+      qty: t.quantity,
+      price: t.default_price,
+      sort_order: t.sort_order,
+    })) ||
+    // Legacy fallback: Read from meta_data.pricing_tiers or pricing_data.tiers
+    // Normalize legacy data: support both 'qty' and 'quantity' fields
+    product.meta_data?.pricing_tiers?.map((t: any) => ({
+      ...t,
+      qty: t.qty || t.quantity || 1,
+    })) ||
+    product.pricing_data?.tiers?.map((t: any) => ({
+      ...t,
+      qty: t.qty || t.quantity || 1,
+    })) ||
+    product.pricing_tiers?.map((t: any) => ({
+      ...t,
+      qty: t.qty || t.quantity || 1,
+    })) ||
+    // Ultimate fallback: Create single-unit tier from regular_price
+    (product.regular_price ? [{
+      qty: 1,
+      price: product.regular_price,
+      label: '1 Unit',
+      weight: '1',
+    }] : [])
+  }, [product])
 
   // Use variant tiers if variant is selected and has custom pricing, otherwise use product tiers
-  const customTiers = selectedVariant && variantTiers.length > 0 ? variantTiers : productTiers
+  // CRITICAL: Only use variant tiers if selectedVariant is NOT null
+  const customTiers = (selectedVariant !== null && variantTiers.length > 0) ? variantTiers : productTiers
+
+  // DEBUG: Log pricing source EVERY TIME it changes
+  useEffect(() => {
+    if (showPricingModal) {
+      logger.info('🎨 [POSProductCard] Pricing source UPDATE:', {
+        productName: product.name,
+        selectedVariant: selectedVariant?.variant_name || 'NULL (Product tab)',
+        hasSelectedVariant: selectedVariant !== null,
+        variantTiersCount: variantTiers.length,
+        productTiersCount: productTiers.length,
+        customTiersCount: customTiers.length,
+        usingVariantPricing: selectedVariant !== null && variantTiers.length > 0,
+        firstProductTier: productTiers[0],
+        firstVariantTier: variantTiers[0],
+        firstCustomTier: customTiers[0],
+      })
+    }
+  }, [selectedVariant, variantTiers, customTiers, showPricingModal])
+
   const inStock = (product.inventory_quantity || 0) > 0
 
   // Jobs Principle: Show "From $X.XX"
@@ -214,14 +259,30 @@ const POSProductCard = forwardRef<any, POSProductCardProps>(({ product }, ref) =
   const handleVariantSelect = (variant: ProductVariant | null) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
 
-    logger.info('🎯 Variant selected:', {
-      variantName: variant?.variant_name || 'None (parent product)',
+    logger.info('🎯 Variant tab clicked:', {
+      clickedVariant: variant?.variant_name || 'PRODUCT TAB (null)',
       pricing_template_id: variant?.pricing_template_id || 'null',
-      will_load_custom_pricing: !!variant?.pricing_template_id
+      will_load_custom_pricing: !!variant?.pricing_template_id,
+      currentSelectedVariant: selectedVariant?.variant_name || 'null',
+      currentVariantTiersCount: variantTiers.length,
     })
+
+    // CRITICAL: Clear variant tiers immediately when switching to Product tab
+    if (variant === null) {
+      logger.info('🔄 Switching to Product tab - clearing variant pricing NOW')
+      setVariantTiers([])
+      logger.info('✅ Variant tiers cleared - should show product pricing now')
+    } else {
+      logger.info('🔄 Switching to variant tab - will load variant pricing')
+    }
 
     setSelectedVariant(variant)
     setSelectedTier(null) // Reset tier selection when variant changes
+
+    logger.info('✅ State updated:', {
+      newSelectedVariant: variant?.variant_name || 'NULL',
+      stateUpdateComplete: true,
+    })
   }
 
   // Load variant-specific pricing tiers when variant is selected

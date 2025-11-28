@@ -408,11 +408,16 @@ export class EmailService {
 
       const { data, error } = await supabase
         .from('vendor_email_settings')
-        .upsert({
-          vendor_id: vendorId,
-          ...settings,
-          updated_by_user_id: userId,
-        })
+        .upsert(
+          {
+            vendor_id: vendorId,
+            ...settings,
+            updated_by_user_id: userId,
+          },
+          {
+            onConflict: 'vendor_id',
+          }
+        )
         .select()
         .single()
 
@@ -528,11 +533,12 @@ export class EmailService {
       .map(
         item => `
         <tr>
-          <td style="padding: 12px 0; border-bottom: 1px solid #222;">
-            <span style="color: #ffffff; font-size: 15px;">${item.name}</span>
-            <span style="color: #666; font-size: 14px; margin-left: 8px;">× ${item.quantity}</span>
+          <td style="padding: 16px 0; border-bottom: 1px solid #d2d2d7;">
+            <span style="color: #1d1d1f; font-size: 17px; font-weight: 500;">${item.name}</span>
+            <br>
+            <span style="color: #86868b; font-size: 15px;">Qty: ${item.quantity}</span>
           </td>
-          <td style="padding: 12px 0; border-bottom: 1px solid #222; text-align: right; color: #ffffff; font-size: 15px;">
+          <td style="padding: 16px 0; border-bottom: 1px solid #d2d2d7; text-align: right; color: #1d1d1f; font-size: 17px; font-weight: 500; vertical-align: top;">
             $${item.price.toFixed(2)}
           </td>
         </tr>
@@ -547,51 +553,91 @@ export class EmailService {
           <meta charset="utf-8">
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
           <title>Receipt #${params.orderNumber}</title>
-          <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+          <style>
+            @font-face {
+              font-family: 'DonGraffiti';
+              src: url('https://floradistro.com/DonGraffiti.otf') format('opentype');
+              font-weight: normal;
+              font-style: normal;
+            }
+
+            @media only screen and (max-width: 600px) {
+              .brand-name {
+                font-size: 32px !important;
+              }
+              .receipt-header {
+                font-size: 24px !important;
+              }
+            }
+          </style>
         </head>
-        <body style="font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; line-height: 1.6; background-color: #000000; color: #ffffff; margin: 0; padding: 0;">
-          <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
+        <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif; line-height: 1.5; background-color: #f5f5f7; color: #1d1d1f; margin: 0; padding: 0;">
 
-            <!-- Header -->
-            <div style="text-align: center; margin-bottom: 40px;">
-              ${params.vendorLogo ? `
-                <img src="${params.vendorLogo}" alt="${params.vendorName}" style="height: 48px; margin-bottom: 16px;" />
-              ` : `
-                <h1 style="margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -0.5px; color: #ffffff;">${params.vendorName}</h1>
-              `}
-              <p style="margin: 8px 0 0 0; font-size: 14px; color: #666; letter-spacing: 0.5px;">RECEIPT</p>
-            </div>
+          <!-- Container -->
+          <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff;">
 
-            <!-- Order Number -->
-            <div style="background: #0a0a0a; border: 1px solid #1a1a1a; border-radius: 8px; padding: 20px; margin-bottom: 24px;">
-              <p style="margin: 0; font-size: 13px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;">Order Number</p>
-              <p style="margin: 0; font-size: 20px; font-weight: 600; color: #ffffff;">#${params.orderNumber}</p>
-            </div>
-
-            <!-- Items -->
-            <div style="background: #0a0a0a; border: 1px solid #1a1a1a; border-radius: 8px; padding: 24px; margin-bottom: 24px;">
-              <table style="width: 100%; border-collapse: collapse;">
-                ${itemsHTML}
+            <!-- Header with Logo -->
+            <div style="text-align: center; padding: 50px 20px; background-color: #000000;">
+              <table cellpadding="0" cellspacing="0" border="0" style="margin: 0 auto;">
                 <tr>
-                  <td colspan="2" style="padding: 20px 0 12px 0;">
-                    <div style="border-top: 1px solid #222;"></div>
-                  </td>
-                </tr>
-                <tr>
-                  <td style="padding: 0; font-weight: 600; font-size: 16px; color: #ffffff;">Total</td>
-                  <td style="padding: 0; text-align: right; font-weight: 600; font-size: 20px; color: #ffffff;">
-                    $${params.total.toFixed(2)}
+                  ${params.vendorLogo ? `
+                    <td style="vertical-align: middle; padding-right: 16px;">
+                      <img src="${params.vendorLogo}" alt="${params.vendorName}" width="56" height="56" style="display: block; max-width: 56px; max-height: 56px;" />
+                    </td>
+                  ` : ``}
+                  <td style="vertical-align: middle;">
+                    <h1 class="brand-name" style="margin: 0; font-size: 48px; font-weight: 400; letter-spacing: 1px; color: #ffffff; font-family: 'DonGraffiti', -apple-system, serif; line-height: 56px;">
+                      ${params.vendorName}
+                    </h1>
                   </td>
                 </tr>
               </table>
             </div>
 
+            <!-- Receipt Content -->
+            <div style="padding: 40px 20px;">
+
+              <!-- Receipt Header -->
+              <div style="text-align: center; margin-bottom: 48px;">
+                <h2 class="receipt-header" style="margin: 0 0 8px 0; font-size: 28px; font-weight: 600; color: #1d1d1f; letter-spacing: -0.5px;">
+                  Receipt
+                </h2>
+                <p style="margin: 0; font-size: 15px; color: #86868b;">
+                  Order #${params.orderNumber}
+                </p>
+              </div>
+
+              <!-- Items Table -->
+              <div style="margin-bottom: 40px;">
+                <table style="width: 100%; border-collapse: collapse;">
+                  ${itemsHTML}
+                </table>
+              </div>
+
+              <!-- Total -->
+              <div style="background-color: #f5f5f7; border-radius: 12px; padding: 24px; margin-bottom: 40px;">
+                <table style="width: 100%;">
+                  <tr>
+                    <td style="font-size: 19px; font-weight: 600; color: #1d1d1f;">Total</td>
+                    <td style="text-align: right; font-size: 24px; font-weight: 600; color: #1d1d1f;">
+                      $${params.total.toFixed(2)}
+                    </td>
+                  </tr>
+                </table>
+              </div>
+
+              <!-- Thank You Message -->
+              <div style="text-align: center;">
+                <p style="margin: 0; font-size: 17px; color: #86868b; line-height: 1.5;">
+                  Thank you for your purchase
+                </p>
+              </div>
+
+            </div>
+
             <!-- Footer -->
-            <div style="text-align: center; padding-top: 32px; border-top: 1px solid #1a1a1a;">
-              <p style="margin: 0; font-size: 14px; color: #666;">
-                Thank you for your purchase
-              </p>
-              <p style="margin: 16px 0 0 0; font-size: 13px; color: #444;">
+            <div style="text-align: center; padding: 32px 20px; background-color: #f5f5f7; border-top: 1px solid #d2d2d7;">
+              <p style="margin: 0; font-size: 12px; color: #86868b; letter-spacing: 0.2px;">
                 ${params.vendorName} © ${new Date().getFullYear()}
               </p>
             </div>
@@ -856,57 +902,96 @@ Your package is on its way!
           <meta charset="utf-8">
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
           <title>Test Email</title>
-          <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-        </head>
-        <body style="font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; line-height: 1.6; background-color: #000000; color: #ffffff; margin: 0; padding: 0;">
-          <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
+          <style>
+            @font-face {
+              font-family: 'DonGraffiti';
+              src: url('https://floradistro.com/DonGraffiti.otf') format('opentype');
+              font-weight: normal;
+              font-style: normal;
+            }
 
-            <!-- Header -->
-            <div style="text-align: center; margin-bottom: 40px;">
-              ${params.vendorLogo ? `
-                <img src="${params.vendorLogo}" alt="${params.vendorName}" style="height: 48px; margin-bottom: 16px;" />
-              ` : `
-                <h1 style="margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -0.5px; color: #ffffff;">${params.vendorName}</h1>
-              `}
-              <p style="margin: 8px 0 0 0; font-size: 14px; color: #666; letter-spacing: 0.5px;">EMAIL TEST</p>
+            @media only screen and (max-width: 600px) {
+              .brand-name {
+                font-size: 32px !important;
+              }
+              .receipt-header {
+                font-size: 24px !important;
+              }
+            }
+          </style>
+        </head>
+        <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif; line-height: 1.5; background-color: #f5f5f7; color: #1d1d1f; margin: 0; padding: 0;">
+
+          <!-- Container -->
+          <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff;">
+
+            <!-- Header with Logo -->
+            <div style="text-align: center; padding: 50px 20px; background-color: #000000;">
+              <table cellpadding="0" cellspacing="0" border="0" style="margin: 0 auto;">
+                <tr>
+                  ${params.vendorLogo ? `
+                    <td style="vertical-align: middle; padding-right: 16px;">
+                      <img src="${params.vendorLogo}" alt="${params.vendorName}" width="56" height="56" style="display: block; max-width: 56px; max-height: 56px;" />
+                    </td>
+                  ` : ``}
+                  <td style="vertical-align: middle;">
+                    <h1 class="brand-name" style="margin: 0; font-size: 48px; font-weight: 400; letter-spacing: 1px; color: #ffffff; font-family: 'DonGraffiti', -apple-system, serif; line-height: 56px;">
+                      ${params.vendorName}
+                    </h1>
+                  </td>
+                </tr>
+              </table>
             </div>
 
             <!-- Success Message -->
-            <div style="background: #0a0a0a; border: 1px solid #1a1a1a; border-radius: 8px; padding: 32px; margin-bottom: 24px; text-align: center;">
-              <div style="width: 56px; height: 56px; background: #ffffff; border-radius: 50%; margin: 0 auto 20px; display: inline-flex; align-items: center; justify-content: center;">
-                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M20 6L9 17L4 12" stroke="#000000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <div style="text-align: center; padding: 40px 20px;">
+              <div style="width: 72px; height: 72px; background-color: #000000; border-radius: 50%; margin: 0 auto 24px; display: flex; align-items: center; justify-content: center;">
+                <svg width="36" height="36" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M20 6L9 17L4 12" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
               </div>
-              <h2 style="margin: 0 0 12px 0; font-size: 20px; font-weight: 600; color: #ffffff;">Email Configured Successfully</h2>
-              <p style="margin: 0; font-size: 15px; color: #999; line-height: 1.6;">
-                Your email system is now active and ready to send transactional emails to your customers.
+
+              <h2 style="margin: 0 0 16px 0; font-size: 28px; font-weight: 600; color: #1d1d1f; letter-spacing: -0.5px;">
+                Your email is ready
+              </h2>
+
+              <p style="margin: 0 0 40px 0; font-size: 17px; color: #86868b; line-height: 1.6; max-width: 460px; margin-left: auto; margin-right: auto;">
+                Your email system is now configured and ready to send beautiful transactional emails to your customers.
               </p>
-            </div>
 
-            <!-- Features List -->
-            <div style="background: #0a0a0a; border: 1px solid #1a1a1a; border-radius: 8px; padding: 24px; margin-bottom: 24px;">
-              <p style="margin: 0 0 20px 0; font-size: 13px; color: #666; text-transform: uppercase; letter-spacing: 0.5px;">AUTOMATED EMAILS</p>
+              <!-- Features -->
+              <div style="text-align: left; max-width: 460px; margin: 0 auto;">
 
-              <div style="margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid #1a1a1a;">
-                <p style="margin: 0 0 4px 0; font-size: 15px; color: #ffffff; font-weight: 500;">Receipts</p>
-                <p style="margin: 0; font-size: 14px; color: #666;">Sent automatically after every sale</p>
-              </div>
+                <div style="margin-bottom: 24px;">
+                  <div style="display: inline-block; width: 6px; height: 6px; background-color: #000000; border-radius: 50%; margin-right: 12px; vertical-align: middle;"></div>
+                  <span style="font-size: 17px; color: #1d1d1f; font-weight: 500;">Receipts</span>
+                  <p style="margin: 8px 0 0 18px; font-size: 15px; color: #86868b; line-height: 1.5;">
+                    Sent automatically after every sale
+                  </p>
+                </div>
 
-              <div style="margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid #1a1a1a;">
-                <p style="margin: 0 0 4px 0; font-size: 15px; color: #ffffff; font-weight: 500;">Order Confirmations</p>
-                <p style="margin: 0; font-size: 14px; color: #666;">For pickup and shipping orders</p>
-              </div>
+                <div style="margin-bottom: 24px;">
+                  <div style="display: inline-block; width: 6px; height: 6px; background-color: #000000; border-radius: 50%; margin-right: 12px; vertical-align: middle;"></div>
+                  <span style="font-size: 17px; color: #1d1d1f; font-weight: 500;">Order Confirmations</span>
+                  <p style="margin: 8px 0 0 18px; font-size: 15px; color: #86868b; line-height: 1.5;">
+                    For pickup and shipping orders
+                  </p>
+                </div>
 
-              <div>
-                <p style="margin: 0 0 4px 0; font-size: 15px; color: #ffffff; font-weight: 500;">Status Updates</p>
-                <p style="margin: 0; font-size: 14px; color: #666;">When orders are ready or shipped</p>
+                <div style="margin-bottom: 0;">
+                  <div style="display: inline-block; width: 6px; height: 6px; background-color: #000000; border-radius: 50%; margin-right: 12px; vertical-align: middle;"></div>
+                  <span style="font-size: 17px; color: #1d1d1f; font-weight: 500;">Status Updates</span>
+                  <p style="margin: 8px 0 0 18px; font-size: 15px; color: #86868b; line-height: 1.5;">
+                    When orders are ready or shipped
+                  </p>
+                </div>
+
               </div>
             </div>
 
             <!-- Footer -->
-            <div style="text-align: center; padding-top: 32px; border-top: 1px solid #1a1a1a;">
-              <p style="margin: 0; font-size: 13px; color: #444;">
+            <div style="text-align: center; padding: 32px 20px; background-color: #f5f5f7; border-top: 1px solid #d2d2d7;">
+              <p style="margin: 0; font-size: 12px; color: #86868b; letter-spacing: 0.2px;">
                 ${params.vendorName} © ${new Date().getFullYear()}
               </p>
             </div>
