@@ -457,9 +457,8 @@ class AuthorizeNetClient {
             invoiceNumber: request.invoiceNumber,
             description: request.description || 'POS Sale',
           },
-          customer: request.customerId ? {
-            id: request.customerId,
-          } : undefined,
+          // NOTE: Removed customerId - UUID exceeds Authorize.Net's 20-char limit
+          // Customer is already tracked in our orders table
           customerIP: request.customerIp,
           processingOptions: {
             isSubsequentAuth: 'false',
