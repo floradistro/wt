@@ -1214,23 +1214,33 @@ serve(async (req) => {
         product_id: item.productId,
         product_name: item.productName,
         product_sku: item.productSku,
+        product_image: null,
+        product_type: null,
         quantity: item.quantity,
         unit_price: item.unitPrice,
         line_subtotal: item.lineTotal, // Subtotal before tax
         line_total: item.lineTotal, // Total including tax
         tax_amount: 0, // Tax is calculated at order level
         inventory_id: item.inventoryId,
+        stock_movement_id: null,
         tier_name: item.tierName || null, // e.g., "28g (Ounce)", "3.5g (Eighth)"
+        tier_qty: item.gramsToDeduct, // Same as quantity_grams
+        tier_price: item.unitPrice, // Price for this tier
         quantity_grams: item.gramsToDeduct, // CRITICAL: Actual quantity to deduct (grams, units, etc.)
         quantity_display: item.tierName || `${item.quantity}`, // Display string for UI
+        meta_data: {},
         // Required fields for order item tracking
         order_type: body.is_ecommerce ? 'delivery' : 'pickup',
         pickup_location_id: body.is_ecommerce ? null : body.locationId, // Only for pickup orders
+        pickup_location_name: null,
         fulfillment_status: 'unfulfilled',
         fulfilled_quantity: 0,
         vendor_payout_status: 'pending',
         commission_rate: null,
         commission_amount: null,
+        cost_per_unit: null,
+        profit_per_unit: null,
+        margin_percentage: null,
       }
     })
 
