@@ -267,18 +267,31 @@ export function ECommerceDetail() {
         )}
 
         {/* Shipping Address */}
-        {(order.billing_address as any)?.address && (
+        {order.shipping_address_line1 && (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Shipping Address</Text>
             <View style={styles.cardGlass}>
-              <View style={[styles.infoRow, styles.lastRow]}>
+              {order.shipping_name && (
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Name</Text>
+                  <Text style={styles.infoValue}>{order.shipping_name}</Text>
+                </View>
+              )}
+              <View style={[styles.infoRow, !order.shipping_phone && styles.lastRow]}>
                 <Text style={styles.infoLabel}>Address</Text>
                 <Text style={styles.infoValue}>
-                  {(order.billing_address as any).address}
+                  {order.shipping_address_line1}
+                  {order.shipping_address_line2 && `\n${order.shipping_address_line2}`}
                   {'\n'}
-                  {(order.billing_address as any).city}, {(order.billing_address as any).state} {(order.billing_address as any).zip}
+                  {order.shipping_city}, {order.shipping_state} {order.shipping_zip}
                 </Text>
               </View>
+              {order.shipping_phone && (
+                <View style={[styles.infoRow, styles.lastRow]}>
+                  <Text style={styles.infoLabel}>Phone</Text>
+                  <Text style={styles.infoValue}>{order.shipping_phone}</Text>
+                </View>
+              )}
             </View>
           </View>
         )}

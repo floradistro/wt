@@ -94,12 +94,14 @@ export interface OrderItem {
   id: string
   order_id: string
   product_id: string
+  product_name: string
   quantity: number
   unit_price: number
   subtotal: number
   tax_amount: number
   discount_amount: number
   total: number
+  line_total: number
 }
 
 export interface CreateOrderParams {
