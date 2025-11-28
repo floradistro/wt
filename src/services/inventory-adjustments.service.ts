@@ -39,6 +39,8 @@ export interface InventoryAdjustment {
   created_by_user?: {
     id: string;
     email: string;
+    first_name?: string;
+    last_name?: string;
   };
 }
 
@@ -116,6 +118,28 @@ export async function fetchInventoryAdjustments(
       return { data: null, error };
     }
 
+    // Fetch user data separately for adjustments that have created_by
+    if (data && data.length > 0) {
+      const userIds = [...new Set(data.map(adj => adj.created_by).filter(Boolean))] as string[]
+
+      if (userIds.length > 0) {
+        const { data: users, error: usersError } = await supabase
+          .from('users')
+          .select('id, email, first_name, last_name')
+          .in('id', userIds)
+
+        if (!usersError && users) {
+          // Map users to adjustments
+          const usersMap = new Map(users.map(u => [u.id, u]))
+          data.forEach(adj => {
+            if (adj.created_by) {
+              adj.created_by_user = usersMap.get(adj.created_by)
+            }
+          })
+        }
+      }
+    }
+
     return { data: data as InventoryAdjustment[], error: null };
   } catch (error) {
     logger.error('Error in fetchInventoryAdjustments:', error);
@@ -130,7 +154,15 @@ export async function fetchInventoryAdjustments(
 export async function createInventoryAdjustment(
   vendorId: string,
   input: CreateAdjustmentInput
-): Promise<{ data: InventoryAdjustment | null; error: any }> {
+): Promise<{
+  data: InventoryAdjustment | null;
+  error: any;
+  metadata?: {
+    quantity_before: number;
+    quantity_after: number;
+    product_total_stock: number;
+  }
+}> {
   try {
     // Get current user
     const { data: { user } } = await supabase.auth.getUser();
@@ -191,7 +223,15 @@ export async function createInventoryAdjustment(
       product_total_stock: adjustmentResult.product_total_stock,
     });
 
-    return { data: adjustmentData as InventoryAdjustment, error: null };
+    return {
+      data: adjustmentData as InventoryAdjustment,
+      error: null,
+      metadata: {
+        quantity_before: adjustmentResult.quantity_before,
+        quantity_after: adjustmentResult.quantity_after,
+        product_total_stock: adjustmentResult.product_total_stock,
+      }
+    };
   } catch (error) {
     logger.error('Error in createInventoryAdjustment:', error);
     return { data: null, error };

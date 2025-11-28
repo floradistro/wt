@@ -43,6 +43,7 @@ import { formatRelativeTime } from '@/utils/time'
 import { useAppAuth } from '@/contexts/AppAuthContext'
 import { useActiveModal, checkoutUIActions } from '@/stores/checkout-ui.store'
 import { customerActions } from '@/stores/customer.store'
+import { logger } from '@/utils/logger'
 
 /**
  * POSUnifiedCustomerSelector - TRUE ZERO PROPS ✅✅✅
@@ -154,6 +155,56 @@ function POSUnifiedCustomerSelector() {
       setIsSearchFocused(false)
     }
   }, [visible])
+
+  // Process scanned ID data automatically
+  useEffect(() => {
+    if (!parsedData || !visible) return
+
+    logger.info('[POSUnifiedCustomerSelector] Processing scanned ID data:', {
+      name: `${parsedData.firstName} ${parsedData.lastName}`,
+      dob: parsedData.dateOfBirth,
+    })
+
+    // Automatically match and select customer
+    const processScannedData = async () => {
+      try {
+        const { customer, matchType } = await customerActions.findMatchingCustomer(parsedData)
+
+        if (customer && matchType) {
+          logger.info('[POSUnifiedCustomerSelector] Found matching customer:', {
+            matchType,
+            customerId: customer.id,
+            name: `${customer.first_name} ${customer.last_name}`,
+          })
+
+          // Create match object
+          const match = customerActions.createCustomerMatch(customer, matchType)
+
+          if (matchType === 'exact') {
+            // Exact match - auto-select customer immediately
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+            addRecentCustomer(customer)
+            customerActions.selectCustomer(customer)
+            checkoutUIActions.closeModal()
+          } else {
+            // High confidence - show confirmation modal
+            customerActions.setCustomerMatches([match])
+            checkoutUIActions.closeModal()
+            checkoutUIActions.openModal('customerMatch')
+          }
+        } else {
+          // No match found - go to add customer with pre-filled data
+          logger.info('[POSUnifiedCustomerSelector] No matching customer found, opening add customer modal')
+          checkoutUIActions.closeModal()
+          checkoutUIActions.openModal('addCustomer')
+        }
+      } catch (error) {
+        logger.error('[POSUnifiedCustomerSelector] Error processing scanned data:', error)
+      }
+    }
+
+    processScannedData()
+  }, [parsedData, visible, addRecentCustomer])
 
   // ========================================
   // HANDLERS - Memoized to prevent re-renders

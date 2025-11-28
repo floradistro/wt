@@ -21,9 +21,7 @@ export const loyaltyManagementStyles = StyleSheet.create({
     paddingVertical: spacing.xs,
     paddingHorizontal: spacing.xxs,
     borderRadius: radius.sm,
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: 'rgba(255,255,255,0.05)', // Match product list - borderless
     alignItems: 'center',
     justifyContent: 'center',
   },

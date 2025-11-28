@@ -21,9 +21,10 @@ import { useUsersManagementStore } from '@/stores/users-management.store'
 import { useSuppliersManagementStore } from '@/stores/suppliers-management.store'
 import { useLoyaltyCampaignsStore, startLoyaltyCampaignsRealtimeMonitoring, stopLoyaltyCampaignsRealtimeMonitoring } from '@/stores/loyalty-campaigns.store'
 import { usePaymentProcessorsSettingsStore } from '@/stores/payment-processors-settings.store'
-import { useUserLocations } from '@/hooks/useUserLocations'
+import { useAppAuth } from '@/contexts/AppAuthContext'
+import { useLocationFilter } from '@/stores/location-filter.store'
 import { NavSidebar, type NavItem } from '@/components/NavSidebar'
-import { supabase } from '@/lib/supabase/client'
+import { LocationSelectorModal } from '@/components/shared'
 import { logger } from '@/utils/logger'
 
 // Import all detail components
@@ -34,6 +35,7 @@ import {
   UserManagementDetail,
   SupplierManagementDetail,
   LoyaltyManagementDetail,
+  EmailSettingsDetail,
 } from '@/components/settings/details'
 
 // Monochrome Icons for Settings Categories
@@ -107,6 +109,16 @@ function LoyaltyIcon({ color }: { color: string }) {
   )
 }
 
+function EmailIcon({ color }: { color: string }) {
+  return (
+    <View style={styles.iconContainer}>
+      <View style={[styles.emailIconEnvelope, { borderColor: color }]}>
+        <View style={[styles.emailIconFlap, { borderColor: color }]} />
+      </View>
+    </View>
+  )
+}
+
 interface SettingsCategory {
   id: string
   title: string
@@ -122,64 +134,54 @@ interface SettingsCategory {
 function SettingsScreen() {
   const { user } = useAuth()
   const { logout } = useAuthActions()
-  const { locations: userLocations } = useUserLocations()
+  const { vendor, locations } = useAppAuth()
+  const { selectedLocationIds } = useLocationFilter()
 
-  const [vendorLogo, setVendorLogo] = useState<string | null>(null)
+  const [showLocationSelector, setShowLocationSelector] = useState(false)
+  const [selectedCategoryId, setSelectedCategoryId] = useState<string>('account')
+  const [searchQuery, setSearchQuery] = useState('')
 
-  // ✅ Load all Settings data on mount (Apple pattern: data lives in stores)
+  // ⚡ PERFORMANCE: Lazy load - only load data when tab is selected
+  // This prevents loading ALL settings data on mount (6+ API calls)
   useEffect(() => {
     if (!user?.id) return
 
-    // Load data from all Settings stores
-    useUsersManagementStore.getState().loadUsers(user.id)
-    useSuppliersManagementStore.getState().loadSuppliers(user.id)
-    useLoyaltyCampaignsStore.getState().loadProgram(user.id)
-    useLoyaltyCampaignsStore.getState().loadCampaigns(user.id)
-    usePaymentProcessorsSettingsStore.getState().loadProcessors(user.id)
-
-    // Start real-time monitoring for loyalty & campaigns
-    startLoyaltyCampaignsRealtimeMonitoring(user.id)
+    // Only load data for the currently selected tab
+    switch (selectedCategoryId) {
+      case 'team':
+        useUsersManagementStore.getState().loadUsers(user.id)
+        break
+      case 'suppliers':
+        useSuppliersManagementStore.getState().loadSuppliers(user.id)
+        break
+      case 'loyalty':
+        useLoyaltyCampaignsStore.getState().loadProgram(user.id)
+        useLoyaltyCampaignsStore.getState().loadCampaigns(user.id)
+        // Start real-time monitoring for loyalty
+        startLoyaltyCampaignsRealtimeMonitoring(user.id)
+        break
+      case 'locations':
+        usePaymentProcessorsSettingsStore.getState().loadProcessors(user.id)
+        break
+      // account and devtools don't need to load data
+    }
 
     return () => {
-      // Clean up subscriptions when component unmounts
-      stopLoyaltyCampaignsRealtimeMonitoring()
+      // Clean up subscriptions when tab changes or component unmounts
+      if (selectedCategoryId === 'loyalty') {
+        stopLoyaltyCampaignsRealtimeMonitoring()
+      }
     }
-  }, [user?.id])
+  }, [user?.id, selectedCategoryId])
 
   // iOS-style collapsing headers - instant transitions
   const accountHeaderOpacity = useRef(new Animated.Value(0)).current
   const locationsHeaderOpacity = useRef(new Animated.Value(0)).current
+  const emailHeaderOpacity = useRef(new Animated.Value(0)).current
   const teamHeaderOpacity = useRef(new Animated.Value(0)).current
   const suppliersHeaderOpacity = useRef(new Animated.Value(0)).current
   const loyaltyHeaderOpacity = useRef(new Animated.Value(0)).current
   const devToolsHeaderOpacity = useRef(new Animated.Value(0)).current
-
-  // Load vendor info
-  useEffect(() => {
-    async function loadVendorInfo() {
-      if (!user?.email) return
-      try {
-        const { data: userData, error: userError } = await supabase
-          .from('users')
-          .select('vendor_id, vendors(id, store_name, logo_url)')
-          .eq('auth_user_id', user.id)
-          .maybeSingle()
-
-        if (userError || !userData) {
-          logger.error('[SettingsScreen] User query error', { error: userError })
-          return
-        }
-
-        if (userData?.vendors) {
-          const vendor = userData.vendors as { logo_url?: string | null }
-          setVendorLogo(vendor.logo_url || null)
-        }
-      } catch (error) {
-        logger.error('Failed to load vendor info', { error })
-      }
-    }
-    loadVendorInfo()
-  }, [user])
 
   const userName = useMemo(() => {
     if (!user) return 'Account'
@@ -188,20 +190,30 @@ function SettingsScreen() {
 
   // Categories configuration
   const categories: SettingsCategory[] = useMemo(() => [
-    { 
+    {
       id: 'account',
       title: userName,
       icon: UserIcon,
-      renderDetail: () => <AccountDetail user={user!} headerOpacity={accountHeaderOpacity} vendorLogo={vendorLogo} /> 
+      renderDetail: () => <AccountDetail user={user!} headerOpacity={accountHeaderOpacity} vendorLogo={vendor?.logo_url || null} />
     },
     {
       id: 'locations',
       title: 'Locations & Access',
       icon: LocationIcon,
-      badge: userLocations.length > 0 ? userLocations.length : undefined,
+      badge: locations.length > 0 ? locations.length : undefined,
       renderDetail: () => <LocationsDetail
         headerOpacity={locationsHeaderOpacity}
-        vendorLogo={vendorLogo}
+        vendorLogo={vendor?.logo_url || null}
+        locations={locations}
+      />
+    },
+    {
+      id: 'email',
+      title: 'Email & Notifications',
+      icon: EmailIcon,
+      renderDetail: () => <EmailSettingsDetail
+        headerOpacity={emailHeaderOpacity}
+        vendorLogo={vendor?.logo_url || null}
       />
     },
     {
@@ -210,7 +222,7 @@ function SettingsScreen() {
       icon: TeamIcon,
       renderDetail: () => <UserManagementDetail
         headerOpacity={teamHeaderOpacity}
-        vendorLogo={vendorLogo}
+        vendorLogo={vendor?.logo_url || null}
       />
     },
     {
@@ -219,7 +231,7 @@ function SettingsScreen() {
       icon: SuppliersIcon,
       renderDetail: () => <SupplierManagementDetail
         headerOpacity={suppliersHeaderOpacity}
-        vendorLogo={vendorLogo}
+        vendorLogo={vendor?.logo_url || null}
       />
     },
     {
@@ -228,25 +240,22 @@ function SettingsScreen() {
       icon: LoyaltyIcon,
       renderDetail: () => <LoyaltyManagementDetail
         headerOpacity={loyaltyHeaderOpacity}
-        vendorLogo={vendorLogo}
+        vendorLogo={vendor?.logo_url || null}
       />
     },
     {
       id: 'devtools',
       title: 'Developer Tools',
       icon: DevToolsIcon,
-      renderDetail: () => <DeveloperToolsDetail headerOpacity={devToolsHeaderOpacity} vendorLogo={vendorLogo} />
+      renderDetail: () => <DeveloperToolsDetail headerOpacity={devToolsHeaderOpacity} vendorLogo={vendor?.logo_url || null} />
     },
   ], [
     // ✅ Minimal dependencies - only visual props needed
     // All data comes from stores, so no need for data/callback dependencies
-    user, userName, userLocations, vendorLogo,
-    accountHeaderOpacity, locationsHeaderOpacity, teamHeaderOpacity,
+    user, userName, locations, vendor,
+    accountHeaderOpacity, locationsHeaderOpacity, emailHeaderOpacity, teamHeaderOpacity,
     suppliersHeaderOpacity, loyaltyHeaderOpacity, devToolsHeaderOpacity,
   ])
-
-  const [selectedCategoryId, setSelectedCategoryId] = useState<string>('account')
-  const [searchQuery, setSearchQuery] = useState('')
 
   // Convert categories to NavItems
   const navItems: NavItem[] = useMemo(() =>
@@ -269,6 +278,21 @@ function SettingsScreen() {
     await logout()
   }
 
+  // Handle user profile press (opens location selector)
+  const handleUserProfilePress = () => {
+    setShowLocationSelector(true)
+  }
+
+  // Compute selected location names for display
+  const selectedLocationNames = useMemo(() => {
+    if (selectedLocationIds.length === 0) {
+      return ['All locations']
+    }
+    return locations
+      .filter(loc => selectedLocationIds.includes(loc.id))
+      .map(loc => loc.name)
+  }, [selectedLocationIds, locations])
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.layout}>
@@ -276,9 +300,14 @@ function SettingsScreen() {
           width={layout.sidebarWidth}
           searchValue={searchQuery}
           onSearchChange={setSearchQuery}
+          searchPlaceholder="Search..."
           items={navItems}
           activeItemId={selectedCategoryId}
           onItemPress={setSelectedCategoryId}
+          vendorLogo={vendor?.logo_url || null}
+          vendorName={vendor?.store_name || 'Settings'}
+          selectedLocationNames={selectedLocationNames}
+          onUserProfilePress={handleUserProfilePress}
           footer={
             <View style={styles.footerWrapper}>
               <Pressable
@@ -298,6 +327,12 @@ function SettingsScreen() {
           {selectedCategory.renderDetail()}
         </View>
       </View>
+
+      {/* Location Selector Modal */}
+      <LocationSelectorModal
+        visible={showLocationSelector}
+        onClose={() => setShowLocationSelector(false)}
+      />
     </SafeAreaView>
   )
 }
@@ -471,6 +506,25 @@ const styles = StyleSheet.create({
     marginTop: -4,
     marginLeft: -4,
     transform: [{ rotate: '45deg' }],
+  },
+  emailIconEnvelope: {
+    width: 20,
+    height: 14,
+    borderRadius: radius.xs,
+    borderWidth: 1.5,
+    position: 'relative',
+  },
+  emailIconFlap: {
+    width: 12,
+    height: 12,
+    borderLeftWidth: 1.5,
+    borderRightWidth: 1.5,
+    borderBottomWidth: 0,
+    borderTopWidth: 0,
+    position: 'absolute',
+    top: -1,
+    left: 3,
+    transform: [{ rotate: '45deg' }, { scaleY: 0.7 }],
   },
 })
 

@@ -23,6 +23,7 @@
         "NSCameraUsageDescription": "Whaletools needs camera access to scan ID barcodes for age verification and product barcodes.",
         "NSPhotoLibraryUsageDescription": "Whaletools needs photo library access to select product images.",
         "NSLocationWhenInUseUsageDescription": "Whaletools does not access your location. This permission is required by iOS for compliance purposes.",
+        "NSUserNotificationsUsageDescription": "Whaletools sends notifications for new pickup and shipping orders at your location.",
         "ITSAppUsesNonExemptEncryption": false,
         "UIViewControllerBasedStatusBarAppearance": false,
         "UIStatusBarStyle": "UIStatusBarStyleLightContent"
@@ -41,7 +42,8 @@
       "permissions": [
         "CAMERA",
         "READ_EXTERNAL_STORAGE",
-        "WRITE_EXTERNAL_STORAGE"
+        "WRITE_EXTERNAL_STORAGE",
+        "POST_NOTIFICATIONS"
       ],
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false
@@ -56,6 +58,15 @@
         {
           "organization": "whaletools",
           "project": "whaletools-native"
+        }
+      ],
+      "expo-audio",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#0a84ff",
+          "sounds": []
         }
       ]
     ]

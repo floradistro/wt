@@ -2,23 +2,23 @@
  * AdjustInventoryModal Component
  * Manual inventory adjustments with reason tracking
  *
+ * REUSES FullScreenModal (our STANDARD reusable modal component)
+ *
  * State Management:
  * - Reads product data from product-edit.store
  * - Reads modal visibility and location from product-ui.store
  * - Stores adjustment result in product-ui.store to trigger parent reload
  */
 
-import { View, Text, StyleSheet, Modal, Pressable, TextInput, ScrollView, ActivityIndicator } from 'react-native'
+import { View, Text, StyleSheet, Pressable, TextInput, ScrollView, ActivityIndicator } from 'react-native'
 import { useState, useEffect } from 'react'
-import { LiquidGlassView, isLiquidGlassSupported } from '@callstack/liquid-glass'
 import * as Haptics from 'expo-haptics'
-import { colors, spacing, radius, typography } from '@/theme/tokens'
-import { layout } from '@/theme/layout'
 import { logger } from '@/utils/logger'
 import { useInventoryAdjustments } from '@/hooks/useInventoryAdjustments'
 import type { AdjustmentType } from '@/services/inventory-adjustments.service'
 import { useOriginalProduct } from '@/stores/product-edit.store'
 import { useActiveModal, useSelectedLocation, productUIActions } from '@/stores/product-ui.store'
+import { FullScreenModal, modalStyles } from '@/components/shared/modals/FullScreenModal'
 
 const ADJUSTMENT_TYPES: { value: AdjustmentType; label: string; description: string; quickReasons: string[] }[] = [
   {
@@ -79,6 +79,7 @@ export function AdjustInventoryModal() {
 
   const [selectedLocationId, setSelectedLocationId] = useState(storeLocationId)
   const [selectedLocationName, setSelectedLocationName] = useState(storeLocationName)
+  const [searchValue, setSearchValue] = useState('')
 
   const { createAdjustment } = useInventoryAdjustments(product?.id, selectedLocationId)
   const [adjustmentType, setAdjustmentType] = useState<AdjustmentType>('count_correction')
@@ -113,6 +114,7 @@ export function AdjustInventoryModal() {
       setNotes('')
       setShowCustomReason(false)
       setShowLocationPicker(false)
+      setSearchValue('')
     }
   }, [visible])
 
@@ -121,6 +123,10 @@ export function AdjustInventoryModal() {
     setReason('')
     setShowCustomReason(false)
   }, [adjustmentType])
+
+  const handleClose = () => {
+    productUIActions.closeModal()
+  }
 
   // Number pad handlers
   const handleNumberPress = (num: string) => {
@@ -148,18 +154,7 @@ export function AdjustInventoryModal() {
   }
 
   const handleSave = async () => {
-    if (!product || !selectedLocationId) {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
-      return
-    }
-
-    if (!quantityChange || parseFloat(quantityChange) === 0) {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
-      return
-    }
-
-    if (!reason.trim()) {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
+    if (!product || !selectedLocationId || !quantityChange || !reason) {
       return
     }
 
@@ -167,641 +162,447 @@ export function AdjustInventoryModal() {
       setSaving(true)
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy)
 
-      const result = await createAdjustment({
+      const { data, error, metadata } = await createAdjustment({
         product_id: product.id,
         location_id: selectedLocationId,
         adjustment_type: adjustmentType,
         quantity_change: quantityChangeNum,
-        reason: reason.trim(),
-        notes: notes.trim() || undefined,
+        reason,
+        notes: notes || undefined,
       })
 
+      if (error) {
+        throw error
+      }
+
+      logger.info('[AdjustInventoryModal] Adjustment created successfully', {
+        adjustmentId: data?.id,
+        quantityBefore: metadata?.quantity_before,
+        quantityAfter: metadata?.quantity_after,
+        productTotalStock: metadata?.product_total_stock,
+      })
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
 
-      // Store result to trigger parent reload
-      productUIActions.setAdjustmentResult(result ? {
-        quantity_after: result.quantity_after,
-      } : null)
+      // Set success result to trigger parent reload
+      logger.info('[AdjustInventoryModal] Setting adjustment result to trigger reload', {
+        quantity_after: metadata?.quantity_after,
+        product_total_stock: metadata?.product_total_stock,
+      })
+      productUIActions.setAdjustmentResult({
+        quantity_after: metadata?.quantity_after || 0,
+        product_total_stock: metadata?.product_total_stock || 0,
+      })
 
-      productUIActions.closeModal()
+      logger.info('[AdjustInventoryModal] Closing modal')
+      handleClose()
     } catch (error) {
-      logger.error('Failed to create adjustment', { error })
+      logger.error('[AdjustInventoryModal] Failed to create adjustment:', error)
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
     } finally {
       setSaving(false)
     }
   }
 
-  const handleLocationChange = (invLocationId: string, invLocationName: string) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-    setSelectedLocationId(invLocationId)
-    setSelectedLocationName(invLocationName)
-    setShowLocationPicker(false)
-    // Update store so location persists across modal sessions
-    productUIActions.setLocation(invLocationId, invLocationName)
-  }
-
-  const handleCancel = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-    productUIActions.closeModal()
-  }
-
   const selectedType = ADJUSTMENT_TYPES.find(t => t.value === adjustmentType)
+  const canSave = quantityChange && reason && !saving
+
+  if (!product) return null
 
   return (
-    <Modal
+    <FullScreenModal
       visible={visible}
-      animationType="slide"
-      presentationStyle="pageSheet"
-      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
+      onClose={handleClose}
+      searchValue={searchValue}
+      onSearchChange={setSearchValue}
+      searchPlaceholder={`Adjust ${product.name}`}
     >
-      <View style={styles.container}>
-        <LiquidGlassView
-          effect="regular"
-          colorScheme="dark"
-          style={[styles.background, !isLiquidGlassSupported && styles.backgroundFallback]}
-        >
-          {/* Header */}
-          <View style={styles.header}>
-            <Pressable onPress={handleCancel} style={styles.headerButton}>
-              <Text style={styles.headerButtonText}>Cancel</Text>
-            </Pressable>
-            <Text style={styles.headerTitle}>Adjust Inventory</Text>
-            <Pressable onPress={handleSave} style={styles.headerButton} disabled={saving}>
-              {saving ? (
-                <ActivityIndicator size="small" color="#60A5FA" />
-              ) : (
-                <Text style={[styles.headerButtonText, styles.headerButtonTextPrimary]}>Save</Text>
-              )}
-            </Pressable>
-          </View>
+      {/* Location Selector */}
+      {product.inventory && product.inventory.length > 1 && (
+        <View style={modalStyles.section}>
+          <Text style={modalStyles.sectionLabel}>LOCATION</Text>
+          <Pressable
+            style={[modalStyles.card, styles.locationCard]}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+              setShowLocationPicker(!showLocationPicker)
+            }}
+          >
+            <Text style={styles.locationText}>{selectedLocationName}</Text>
+            <Text style={styles.chevron}>{showLocationPicker ? '▲' : '▼'}</Text>
+          </Pressable>
 
-          <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-            {/* Product Info */}
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>PRODUCT</Text>
-              <View style={styles.card}>
-                <Text style={styles.productName}>{product?.name || 'Unknown'}</Text>
-                <Text style={styles.productSKU}>{product?.sku || 'No SKU'}</Text>
-              </View>
-            </View>
-
-            {/* Location Picker */}
-            {product?.inventory && product.inventory.length > 1 && (
-              <View style={styles.section}>
-                <Text style={styles.sectionTitle}>LOCATION</Text>
+          {showLocationPicker && (
+            <View style={styles.pickerContainer}>
+              {product.inventory.map(inv => (
                 <Pressable
-                  style={styles.picker}
+                  key={inv.location_id}
+                  style={[
+                    styles.pickerItem,
+                    inv.location_id === selectedLocationId && styles.pickerItemSelected,
+                  ]}
                   onPress={() => {
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                    setShowLocationPicker(!showLocationPicker)
+                    setSelectedLocationId(inv.location_id)
+                    setSelectedLocationName(inv.location_name)
+                    setShowLocationPicker(false)
                   }}
                 >
-                  <View>
-                    <Text style={styles.pickerLabel}>{selectedLocationName || 'Select Location'}</Text>
-                    <Text style={styles.pickerDescription}>Current: {currentQuantity}g in stock</Text>
-                  </View>
-                  <Text style={styles.chevron}>{showLocationPicker ? 'v' : '>'}</Text>
+                  <Text style={styles.pickerItemText}>{inv.location_name}</Text>
+                  <Text style={styles.pickerItemQty}>{inv.quantity}g in stock</Text>
                 </Pressable>
-
-                {showLocationPicker && (
-                  <View style={styles.pickerOptions}>
-                    {product.inventory.map((inv, index) => (
-                      <Pressable
-                        key={inv.location_id}
-                        style={[
-                          styles.pickerOption,
-                          selectedLocationId === inv.location_id && styles.pickerOptionSelected,
-                          index === product.inventory!.length - 1 && styles.pickerOptionLast,
-                        ]}
-                        onPress={() => handleLocationChange(inv.location_id, inv.location_name)}
-                      >
-                        <View>
-                          <Text style={styles.pickerOptionLabel}>{inv.location_name}</Text>
-                          <Text style={styles.pickerOptionDescription}>{inv.quantity || 0}g in stock</Text>
-                        </View>
-                        {selectedLocationId === inv.location_id && <Text style={styles.checkmark}>✓</Text>}
-                      </Pressable>
-                    ))}
-                  </View>
-                )}
-              </View>
-            )}
-
-            {/* Current & New Stock */}
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>STOCK LEVELS</Text>
-              <View style={styles.card}>
-                <View style={styles.stockRow}>
-                  <Text style={styles.stockLabel}>Current Stock</Text>
-                  <Text style={styles.stockValue}>{currentQuantity}g</Text>
-                </View>
-                <View style={styles.divider} />
-                <View style={styles.stockRow}>
-                  <Text style={styles.stockLabel}>Adjustment</Text>
-                  <Text style={[
-                    styles.stockValue,
-                    quantityChangeNum > 0 && styles.stockPositive,
-                    quantityChangeNum < 0 && styles.stockNegative,
-                  ]}>
-                    {quantityChangeNum > 0 ? '+' : ''}{quantityChangeNum}g
-                  </Text>
-                </View>
-                <View style={styles.divider} />
-                <View style={styles.stockRow}>
-                  <Text style={styles.stockLabelBold}>New Stock</Text>
-                  <Text style={[
-                    styles.stockValueBold,
-                    newQuantity < 0 && styles.stockError,
-                  ]}>
-                    {newQuantity}g
-                  </Text>
-                </View>
-              </View>
+              ))}
             </View>
+          )}
+        </View>
+      )}
 
-            {/* Adjustment Type */}
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>TYPE</Text>
+      {/* Current Inventory */}
+      <View style={modalStyles.section}>
+        <Text style={modalStyles.sectionLabel}>CURRENT INVENTORY</Text>
+        <View style={modalStyles.card}>
+          <Text style={styles.currentQtyLabel}>On hand</Text>
+          <Text style={styles.currentQty}>{currentQuantity}g</Text>
+        </View>
+      </View>
+
+      {/* Adjustment Type Picker */}
+      <View style={modalStyles.section}>
+        <Text style={modalStyles.sectionLabel}>ADJUSTMENT TYPE</Text>
+        <Pressable
+          style={[modalStyles.card, styles.typeCard]}
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+            setShowTypePicker(!showTypePicker)
+          }}
+        >
+          <View>
+            <Text style={styles.typeLabel}>{selectedType?.label}</Text>
+            <Text style={styles.typeDescription}>{selectedType?.description}</Text>
+          </View>
+          <Text style={styles.chevron}>{showTypePicker ? '▲' : '▼'}</Text>
+        </Pressable>
+
+        {showTypePicker && (
+          <View style={styles.pickerContainer}>
+            {ADJUSTMENT_TYPES.map(type => (
               <Pressable
-                style={styles.picker}
+                key={type.value}
+                style={[
+                  styles.pickerItem,
+                  type.value === adjustmentType && styles.pickerItemSelected,
+                ]}
                 onPress={() => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                  setShowTypePicker(!showTypePicker)
+                  setAdjustmentType(type.value)
+                  setShowTypePicker(false)
                 }}
               >
-                <View>
-                  <Text style={styles.pickerLabel}>{selectedType?.label}</Text>
-                  <Text style={styles.pickerDescription}>{selectedType?.description}</Text>
-                </View>
-                <Text style={styles.chevron}>{showTypePicker ? 'v' : '>'}</Text>
+                <Text style={styles.pickerItemText}>{type.label}</Text>
+                <Text style={styles.pickerItemDescription}>{type.description}</Text>
               </Pressable>
-
-              {showTypePicker && (
-                <View style={styles.pickerOptions}>
-                  {ADJUSTMENT_TYPES.map((type, index) => (
-                    <Pressable
-                      key={type.value}
-                      style={[
-                        styles.pickerOption,
-                        adjustmentType === type.value && styles.pickerOptionSelected,
-                        index === ADJUSTMENT_TYPES.length - 1 && styles.pickerOptionLast,
-                      ]}
-                      onPress={() => {
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                        setAdjustmentType(type.value)
-                        setShowTypePicker(false)
-                      }}
-                    >
-                      <View>
-                        <Text style={styles.pickerOptionLabel}>{type.label}</Text>
-                        <Text style={styles.pickerOptionDescription}>{type.description}</Text>
-                      </View>
-                      {adjustmentType === type.value && <Text style={styles.checkmark}>✓</Text>}
-                    </Pressable>
-                  ))}
-                </View>
-              )}
-            </View>
-
-            {/* Quantity Change */}
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>QUANTITY CHANGE</Text>
-              <View style={styles.numberPadDisplay}>
-                <Text style={styles.numberPadValue}>{quantityChange || '0'}g</Text>
-              </View>
-
-              {/* Number Pad */}
-              <View style={styles.numberPad}>
-                <View style={styles.numberPadRow}>
-                  {['7', '8', '9'].map(num => (
-                    <Pressable key={num} style={styles.numberPadButton} onPress={() => handleNumberPress(num)}>
-                      <Text style={styles.numberPadButtonText}>{num}</Text>
-                    </Pressable>
-                  ))}
-                </View>
-                <View style={styles.numberPadRow}>
-                  {['4', '5', '6'].map(num => (
-                    <Pressable key={num} style={styles.numberPadButton} onPress={() => handleNumberPress(num)}>
-                      <Text style={styles.numberPadButtonText}>{num}</Text>
-                    </Pressable>
-                  ))}
-                </View>
-                <View style={styles.numberPadRow}>
-                  {['1', '2', '3'].map(num => (
-                    <Pressable key={num} style={styles.numberPadButton} onPress={() => handleNumberPress(num)}>
-                      <Text style={styles.numberPadButtonText}>{num}</Text>
-                    </Pressable>
-                  ))}
-                </View>
-                <View style={styles.numberPadRow}>
-                  <Pressable style={styles.numberPadButton} onPress={handleToggleSign}>
-                    <Text style={styles.numberPadButtonText}>+/-</Text>
-                  </Pressable>
-                  <Pressable style={styles.numberPadButton} onPress={() => handleNumberPress('0')}>
-                    <Text style={styles.numberPadButtonText}>0</Text>
-                  </Pressable>
-                  <Pressable style={styles.numberPadButton} onPress={handleBackspace}>
-                    <Text style={styles.numberPadButtonText}>←</Text>
-                  </Pressable>
-                </View>
-              </View>
-            </View>
-
-            {/* Reason (Required) */}
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>REASON * REQUIRED</Text>
-              {!showCustomReason ? (
-                <>
-                  <View style={styles.quickReasons}>
-                    {selectedType?.quickReasons.map((quickReason) => (
-                      <Pressable
-                        key={quickReason}
-                        style={[
-                          styles.quickReasonButton,
-                          reason === quickReason && styles.quickReasonButtonSelected
-                        ]}
-                        onPress={() => {
-                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                          setReason(quickReason)
-                        }}
-                      >
-                        <Text style={[
-                          styles.quickReasonText,
-                          reason === quickReason && styles.quickReasonTextSelected
-                        ]}>
-                          {quickReason}
-                        </Text>
-                      </Pressable>
-                    ))}
-                  </View>
-                  <Pressable
-                    style={styles.customReasonButton}
-                    onPress={() => {
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                      setShowCustomReason(true)
-                      setReason('')
-                    }}
-                  >
-                    <Text style={styles.customReasonButtonText}>+ Custom Reason</Text>
-                  </Pressable>
-                </>
-              ) : (
-                <>
-                  <TextInput
-                    style={styles.textArea}
-                    placeholder="Enter custom reason..."
-                    placeholderTextColor={colors.text.placeholder}
-                    value={reason}
-                    onChangeText={setReason}
-                    multiline
-                    numberOfLines={3}
-                    returnKeyType="next"
-                    autoFocus
-                  />
-                  <Pressable
-                    style={styles.backToQuickButton}
-                    onPress={() => {
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                      setShowCustomReason(false)
-                      setReason('')
-                    }}
-                  >
-                    <Text style={styles.backToQuickButtonText}>← Back to Quick Reasons</Text>
-                  </Pressable>
-                </>
-              )}
-            </View>
-
-            {/* Notes (Optional) */}
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>NOTES (OPTIONAL)</Text>
-              <TextInput
-                style={styles.textArea}
-                placeholder="Additional details..."
-                placeholderTextColor={colors.text.placeholder}
-                value={notes}
-                onChangeText={setNotes}
-                multiline
-                numberOfLines={3}
-                returnKeyType="done"
-              />
-            </View>
-
-            {/* Warning for negative stock */}
-            {newQuantity < 0 && (
-              <View style={styles.warningCard}>
-                <Text style={styles.warningText}>
-                  Warning: This adjustment will result in negative inventory
-                </Text>
-              </View>
-            )}
-
-            <View style={{ height: 40 }} />
-          </ScrollView>
-        </LiquidGlassView>
+            ))}
+          </View>
+        )}
       </View>
-    </Modal>
+
+      {/* Quantity Change */}
+      <View style={modalStyles.section}>
+        <Text style={modalStyles.sectionLabel}>QUANTITY CHANGE</Text>
+        <View style={[modalStyles.card, styles.quantityCard]}>
+          <Text style={styles.quantityDisplay}>
+            {quantityChange || '0'}g
+          </Text>
+          {quantityChange && (
+            <Text style={styles.newQuantityPreview}>
+              New total: {newQuantity}g
+            </Text>
+          )}
+        </View>
+
+        {/* Number Pad */}
+        <View style={styles.numberPad}>
+          <View style={styles.numberRow}>
+            {['7', '8', '9'].map(num => (
+              <Pressable key={num} style={styles.numberButton} onPress={() => handleNumberPress(num)}>
+                <Text style={styles.numberText}>{num}</Text>
+              </Pressable>
+            ))}
+          </View>
+          <View style={styles.numberRow}>
+            {['4', '5', '6'].map(num => (
+              <Pressable key={num} style={styles.numberButton} onPress={() => handleNumberPress(num)}>
+                <Text style={styles.numberText}>{num}</Text>
+              </Pressable>
+            ))}
+          </View>
+          <View style={styles.numberRow}>
+            {['1', '2', '3'].map(num => (
+              <Pressable key={num} style={styles.numberButton} onPress={() => handleNumberPress(num)}>
+                <Text style={styles.numberText}>{num}</Text>
+              </Pressable>
+            ))}
+          </View>
+          <View style={styles.numberRow}>
+            <Pressable style={styles.numberButton} onPress={handleToggleSign}>
+              <Text style={styles.numberText}>+/−</Text>
+            </Pressable>
+            <Pressable style={styles.numberButton} onPress={() => handleNumberPress('0')}>
+              <Text style={styles.numberText}>0</Text>
+            </Pressable>
+            <Pressable style={styles.numberButton} onPress={handleBackspace}>
+              <Text style={styles.numberText}>⌫</Text>
+            </Pressable>
+          </View>
+        </View>
+      </View>
+
+      {/* Reason Picker */}
+      <View style={modalStyles.section}>
+        <Text style={modalStyles.sectionLabel}>REASON</Text>
+        <View style={styles.reasonButtons}>
+          {selectedType?.quickReasons.map(quickReason => (
+            <Pressable
+              key={quickReason}
+              style={[
+                styles.reasonButton,
+                reason === quickReason && styles.reasonButtonSelected,
+              ]}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                setReason(quickReason)
+                setShowCustomReason(false)
+              }}
+            >
+              <Text
+                style={[
+                  styles.reasonButtonText,
+                  reason === quickReason && styles.reasonButtonTextSelected,
+                ]}
+              >
+                {quickReason}
+              </Text>
+            </Pressable>
+          ))}
+          <Pressable
+            style={[
+              styles.reasonButton,
+              showCustomReason && styles.reasonButtonSelected,
+            ]}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+              setShowCustomReason(true)
+              setReason('')
+            }}
+          >
+            <Text
+              style={[
+                styles.reasonButtonText,
+                showCustomReason && styles.reasonButtonTextSelected,
+              ]}
+            >
+              Custom reason...
+            </Text>
+          </Pressable>
+        </View>
+
+        {showCustomReason && (
+          <TextInput
+            style={styles.customReasonInput}
+            value={reason}
+            onChangeText={setReason}
+            placeholder="Enter custom reason"
+            placeholderTextColor="rgba(235,235,245,0.3)"
+            autoFocus
+          />
+        )}
+      </View>
+
+      {/* Notes (Optional) */}
+      <View style={modalStyles.section}>
+        <Text style={modalStyles.sectionLabel}>NOTES (OPTIONAL)</Text>
+        <TextInput
+          style={[modalStyles.card, styles.notesInput]}
+          value={notes}
+          onChangeText={setNotes}
+          placeholder="Add additional notes..."
+          placeholderTextColor="rgba(235,235,245,0.3)"
+          multiline
+          numberOfLines={3}
+        />
+      </View>
+
+      {/* Save Button */}
+      <Pressable
+        style={[
+          modalStyles.button,
+          !canSave && modalStyles.buttonDisabled,
+        ]}
+        onPress={handleSave}
+        disabled={!canSave}
+      >
+        {saving ? (
+          <ActivityIndicator size="small" color="#fff" />
+        ) : (
+          <Text style={modalStyles.buttonText}>SAVE ADJUSTMENT</Text>
+        )}
+      </Pressable>
+    </FullScreenModal>
   )
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.background.primary,
-  },
-  background: {
-    flex: 1,
-  },
-  backgroundFallback: {
-    backgroundColor: colors.background.primary,
-  },
-  header: {
+  // Location picker
+  locationCard: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderBottomWidth: 0.5,
-    borderBottomColor: colors.border.subtle,
+    alignItems: 'center',
   },
-  headerButton: {
-    minWidth: 70,
-    paddingVertical: spacing.xs,
-  },
-  headerButtonText: {
-    ...typography.body,
-    color: colors.text.secondary,
-  },
-  headerButtonTextPrimary: {
-    color: '#60A5FA',
+  locationText: {
+    fontSize: 17,
     fontWeight: '600',
-  },
-  headerTitle: {
-    ...typography.headline,
-    color: colors.text.primary,
-  },
-  content: {
-    flex: 1,
-    paddingHorizontal: spacing.md,
-  },
-  section: {
-    marginTop: spacing.lg,
-  },
-  sectionTitle: {
-    ...typography.uppercaseLabel,
-    color: colors.text.tertiary,
-    marginBottom: spacing.xs,
-    marginLeft: spacing.xs,
-  },
-  card: {
-    backgroundColor: colors.glass.regular,
-    borderRadius: radius.xxl,
-    padding: spacing.md,
-    borderWidth: 0.5,
-    borderColor: colors.border.subtle,
-  },
-  productName: {
-    ...typography.title3,
-    color: colors.text.primary,
-    marginBottom: spacing.xxs,
-  },
-  productSKU: {
-    ...typography.footnote,
-    color: colors.text.tertiary,
-  },
-  productLocation: {
-    ...typography.footnote,
-    color: colors.text.quaternary,
-    marginTop: spacing.xxs,
-  },
-  stockRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: spacing.sm,
-  },
-  stockLabel: {
-    ...typography.body,
-    color: colors.text.secondary,
-  },
-  stockLabelBold: {
-    ...typography.headline,
-    color: colors.text.primary,
-  },
-  stockValue: {
-    ...typography.body,
-    color: colors.text.secondary,
-  },
-  stockValueBold: {
-    ...typography.title3,
-    color: colors.text.primary,
-  },
-  stockPositive: {
-    color: colors.semantic.success,
-  },
-  stockNegative: {
-    color: colors.semantic.error,
-  },
-  stockError: {
-    color: colors.semantic.error,
-  },
-  divider: {
-    height: 0.5,
-    backgroundColor: colors.border.subtle,
-  },
-  picker: {
-    backgroundColor: colors.glass.regular,
-    borderRadius: radius.xxl,
-    padding: spacing.md,
-    borderWidth: 0.5,
-    borderColor: colors.border.subtle,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  pickerLabel: {
-    ...typography.body,
-    color: colors.text.primary,
-    marginBottom: spacing.xxs,
-  },
-  pickerDescription: {
-    ...typography.footnote,
-    color: colors.text.tertiary,
+    color: '#fff',
   },
   chevron: {
-    ...typography.caption1,
-    color: colors.text.quaternary,
+    fontSize: 14,
+    color: 'rgba(235,235,245,0.6)',
   },
-  pickerOptions: {
-    backgroundColor: colors.glass.regular,
-    borderRadius: radius.xxl,
-    marginTop: spacing.xs,
-    borderWidth: 0.5,
-    borderColor: colors.border.subtle,
+
+  // Pickers
+  pickerContainer: {
+    marginTop: 12,
+    borderRadius: 16,
     overflow: 'hidden',
+    backgroundColor: 'rgba(118, 118, 128, 0.24)',
   },
-  pickerOption: {
+  pickerItem: {
+    padding: 16,
+    borderBottomWidth: 0.5,
+    borderBottomColor: 'rgba(255,255,255,0.05)',
+  },
+  pickerItemSelected: {
+    backgroundColor: 'rgba(255,255,255,0.1)',
+  },
+  pickerItemText: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: '#fff',
+    marginBottom: 4,
+  },
+  pickerItemDescription: {
+    fontSize: 14,
+    color: 'rgba(235,235,245,0.6)',
+  },
+  pickerItemQty: {
+    fontSize: 14,
+    color: 'rgba(235,235,245,0.6)',
+  },
+
+  // Current inventory
+  currentQtyLabel: {
+    fontSize: 15,
+    color: 'rgba(235,235,245,0.6)',
+    marginBottom: 8,
+  },
+  currentQty: {
+    fontSize: 34,
+    fontWeight: '700',
+    color: '#fff',
+  },
+
+  // Type picker
+  typeCard: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: spacing.md,
-    borderBottomWidth: 0.5,
-    borderBottomColor: colors.border.subtle,
   },
-  pickerOptionLast: {
-    borderBottomWidth: 0,
-  },
-  pickerOptionSelected: {
-    backgroundColor: colors.interactive.active,
-  },
-  pickerOptionLabel: {
-    ...typography.body,
-    color: colors.text.primary,
-    marginBottom: spacing.xxs,
-  },
-  pickerOptionDescription: {
-    ...typography.footnote,
-    color: colors.text.tertiary,
-  },
-  checkmark: {
-    ...typography.title2,
-    color: '#60A5FA',
-  },
-  inputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.glass.regular,
-    borderRadius: radius.xxl,
-    borderWidth: 0.5,
-    borderColor: colors.border.subtle,
-    paddingHorizontal: spacing.md,
-  },
-  input: {
-    flex: 1,
-    ...typography.input,
-    color: colors.text.primary,
-    paddingVertical: spacing.sm,
-  },
-  inputSuffix: {
-    ...typography.body,
-    color: colors.text.quaternary,
-    marginLeft: spacing.xs,
-  },
-  inputHint: {
-    ...typography.footnote,
-    color: colors.text.quaternary,
-    marginTop: spacing.xs,
-    marginLeft: spacing.xs,
-  },
-  textArea: {
-    backgroundColor: colors.glass.regular,
-    borderRadius: radius.xxl,
-    padding: spacing.md,
-    borderWidth: 0.5,
-    borderColor: colors.border.subtle,
-    ...typography.input,
-    color: colors.text.primary,
-    minHeight: 90,
-    textAlignVertical: 'top',
-  },
-  warningCard: {
-    backgroundColor: colors.semantic.warningBg,
-    borderRadius: radius.xxl,
-    padding: spacing.md,
-    marginTop: spacing.lg,
-    borderWidth: 0.5,
-    borderColor: colors.semantic.warningBorder,
-  },
-  warningText: {
-    ...typography.footnote,
-    color: colors.semantic.warning,
-    textAlign: 'center',
-  },
-  numberPadDisplay: {
-    backgroundColor: colors.glass.regular,
-    borderRadius: radius.xxl,
-    padding: spacing.lg,
-    borderWidth: 0.5,
-    borderColor: colors.border.subtle,
-    alignItems: 'center',
-    marginBottom: spacing.md,
-  },
-  numberPadValue: {
-    ...typography.largeTitle,
-    color: colors.text.primary,
+  typeLabel: {
+    fontSize: 17,
     fontWeight: '600',
+    color: '#fff',
+    marginBottom: 4,
   },
+  typeDescription: {
+    fontSize: 14,
+    color: 'rgba(235,235,245,0.6)',
+  },
+
+  // Quantity
+  quantityCard: {
+    alignItems: 'center',
+    paddingVertical: 24,
+  },
+  quantityDisplay: {
+    fontSize: 48,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  newQuantityPreview: {
+    fontSize: 15,
+    color: 'rgba(235,235,245,0.6)',
+    marginTop: 8,
+  },
+
+  // Number pad
   numberPad: {
-    gap: spacing.xs,
+    marginTop: 16,
+    gap: 12,
   },
-  numberPadRow: {
+  numberRow: {
     flexDirection: 'row',
-    gap: spacing.xs,
+    gap: 12,
   },
-  numberPadButton: {
+  numberButton: {
     flex: 1,
-    backgroundColor: colors.glass.regular,
-    borderRadius: radius.xl,
-    padding: spacing.lg,
-    borderWidth: 0.5,
-    borderColor: colors.border.subtle,
+    height: 56,
+    backgroundColor: 'rgba(118, 118, 128, 0.24)',
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 56,
   },
-  numberPadButtonText: {
-    ...typography.title2,
-    color: colors.text.primary,
+  numberText: {
+    fontSize: 24,
+    fontWeight: '600',
+    color: '#fff',
+  },
+
+  // Reason
+  reasonButtons: {
+    gap: 8,
+  },
+  reasonButton: {
+    padding: 16,
+    backgroundColor: 'rgba(118, 118, 128, 0.24)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+  reasonButtonSelected: {
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    borderColor: 'rgba(255,255,255,0.3)',
+  },
+  reasonButtonText: {
+    fontSize: 15,
     fontWeight: '500',
+    color: 'rgba(235,235,245,0.6)',
+    textAlign: 'center',
   },
-  quickReasons: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.xs,
-  },
-  quickReasonButton: {
-    backgroundColor: colors.glass.regular,
-    borderRadius: radius.lg,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderWidth: 0.5,
-    borderColor: colors.border.subtle,
-  },
-  quickReasonButtonSelected: {
-    backgroundColor: '#60A5FA',
-    borderColor: '#60A5FA',
-  },
-  quickReasonText: {
-    ...typography.footnote,
-    color: colors.text.secondary,
-    fontWeight: '500',
-  },
-  quickReasonTextSelected: {
-    color: colors.text.primary,
+  reasonButtonTextSelected: {
+    color: '#fff',
     fontWeight: '600',
   },
-  customReasonButton: {
-    backgroundColor: colors.glass.regular,
-    borderRadius: radius.xxl,
-    padding: spacing.md,
-    borderWidth: 0.5,
-    borderColor: colors.border.subtle,
-    marginTop: spacing.sm,
-    alignItems: 'center',
+  customReasonInput: {
+    marginTop: 12,
+    padding: 16,
+    backgroundColor: 'rgba(118, 118, 128, 0.24)',
+    borderRadius: 12,
+    fontSize: 15,
+    color: '#fff',
+    minHeight: 50,
   },
-  customReasonButtonText: {
-    ...typography.body,
-    color: '#60A5FA',
-    fontWeight: '500',
-  },
-  backToQuickButton: {
-    marginTop: spacing.sm,
-    padding: spacing.sm,
-    alignItems: 'center',
-  },
-  backToQuickButtonText: {
-    ...typography.footnote,
-    color: colors.text.tertiary,
+
+  // Notes
+  notesInput: {
+    minHeight: 100,
+    textAlignVertical: 'top',
   },
 })

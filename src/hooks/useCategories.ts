@@ -15,6 +15,7 @@ export interface Category {
   slug: string
   description: string | null
   icon: string | null
+  featured_image?: string | null
   vendor_id: string | null
   parent_id: string | null
   field_visibility: Record<string, FieldVisibilityConfig> | null
@@ -63,7 +64,7 @@ export function useCategories(options: UseCategoriesOptions = {}) {
         throw new Error('User record not found')
       }
 
-      logger.info('Loading categories', { vendorId: userData.vendor_id, options })
+      logger.debug('Loading categories', { vendorId: userData.vendor_id, options })
 
       // Build query - Multi-tenant: vendor-specific OR global
       let query = supabase
@@ -108,7 +109,6 @@ export function useCategories(options: UseCategoriesOptions = {}) {
       )
 
       setCategories(categoriesWithCounts)
-      logger.info('Categories loaded', { count: categoriesWithCounts.length })
     } catch (err) {
       logger.error('Failed to load categories', { error: err })
       setError(err instanceof Error ? err.message : 'Failed to load categories')

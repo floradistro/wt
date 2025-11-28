@@ -3,16 +3,15 @@
  * Locations overview - Jobs Principle: Clear location management
  */
 
-import { View, Text, StyleSheet, ScrollView, Pressable, Animated, Image } from "react-native"
+import { View, Text, StyleSheet, ScrollView, Pressable, Animated } from "react-native"
 import { detailCommonStyles } from "./detailCommon.styles"
-import { useState } from "react"
-import { LiquidGlassView, LiquidGlassContainerView, isLiquidGlassSupported } from "@callstack/liquid-glass"
-import { LinearGradient } from "expo-linear-gradient"
+import { useState, useEffect } from "react"
+// Removed LiquidGlassView - using plain View with borderless style
 import * as Haptics from "expo-haptics"
 import { colors, typography, spacing, radius } from "@/theme/tokens"
 import { layout } from "@/theme/layout"
-import type { UserLocationAccess } from "@/hooks/useUserLocations"
-import { useUserLocations } from "@/hooks/useUserLocations"
+import { TitleSection } from "@/components/shared"
+import type { Location } from "@/types/pos"
 import { usePaymentProcessors, usePaymentProcessorsLoading, usePaymentProcessorsError } from "@/stores/payment-processors-settings.store"
 import { LocationConfigurationDetail } from "./LocationConfigurationDetail"
 
@@ -41,17 +40,28 @@ function LocationIcon({ color }: { color: string }) {
 function LocationsDetail({
   headerOpacity,
   vendorLogo,
+  locations,
 }: {
   headerOpacity: Animated.Value
   vendorLogo?: string | null
+  locations: Location[]
 }) {
   // ✅ Read from stores instead of props
-  const { locations: userLocations } = useUserLocations()
   const paymentProcessors = usePaymentProcessors()
   const processorsLoading = usePaymentProcessorsLoading()
   const processorsError = usePaymentProcessorsError()
 
-  const [selectedLocation, setSelectedLocation] = useState<UserLocationAccess | null>(null)
+  const [selectedLocation, setSelectedLocation] = useState<Location | null>(null)
+
+  // Update selectedLocation if locations prop changes (e.g., after save)
+  useEffect(() => {
+    if (selectedLocation) {
+      const updatedLocation = locations.find(loc => loc.id === selectedLocation.id)
+      if (updatedLocation) {
+        setSelectedLocation(updatedLocation)
+      }
+    }
+  }, [locations])
 
   // If location selected, show detailed view
   if (selectedLocation) {
@@ -64,16 +74,7 @@ function LocationsDetail({
     )
   }
 
-  const getRoleDisplay = (role: string) => {
-    const roleMap: Record<string, string> = {
-      owner: 'Owner • Full Access',
-      manager: 'Manager • Full Access',
-      staff: 'Staff • POS Access',
-    }
-    return roleMap[role] || 'Access'
-  }
-
-  const formatAddress = (location: UserLocationAccess['location']) => {
+  const formatAddress = (location: Location) => {
     const parts = [
       location.address_line1,
       location.city,
@@ -82,108 +83,87 @@ function LocationsDetail({
     return parts.join(', ') || 'No address'
   }
 
-  if (userLocations.length === 0) {
+  if (!locations || locations.length === 0) {
     return (
       <View style={styles.detailContainer}>
-        <Text style={styles.detailTitle} accessibilityRole="header">Locations & Access</Text>
-        <View
-          style={styles.emptyState}
-          accessible={true}
-          accessibilityRole="alert"
-          accessibilityLabel="No locations assigned. Contact your administrator to get access."
+        <ScrollView
+          style={styles.detailScroll}
+          showsVerticalScrollIndicator={true}
+          indicatorStyle="white"
+          scrollIndicatorInsets={{ right: 2, top: 0, bottom: layout.dockHeight }}
+          contentContainerStyle={{ paddingTop: 0, paddingBottom: layout.dockHeight, paddingRight: 0 }}
         >
-          <Text style={styles.emptyStateText} accessible={false}>No locations assigned</Text>
-          <Text style={styles.emptyStateSubtext} accessible={false}>Contact your administrator to get access</Text>
-        </View>
+          <TitleSection
+            title="Locations & Access"
+            logo={vendorLogo}
+          />
+
+          <View
+            style={[styles.emptyState, { paddingTop: spacing.xxxl }]}
+            accessible={true}
+            accessibilityRole="alert"
+            accessibilityLabel="No locations assigned. Contact your administrator to get access."
+          >
+            <View style={styles.emptyStateIcon}>
+              <LocationIcon color={colors.text.quaternary} />
+            </View>
+            <Text style={styles.emptyStateText} accessible={false}>No locations assigned</Text>
+            <Text style={styles.emptyStateSubtext} accessible={false}>Contact your administrator to get access</Text>
+          </View>
+        </ScrollView>
       </View>
     )
   }
 
   return (
     <View style={styles.detailContainer}>
-      {/* Fixed Header - appears on scroll */}
-      <Animated.View style={[styles.fixedHeader, { opacity: headerOpacity }]}>
-        <Text style={styles.fixedHeaderTitle}>Locations & Access</Text>
-      </Animated.View>
-
-      {/* Fade Gradient */}
-      <LinearGradient
-        colors={['rgba(0,0,0,0.95)', 'rgba(0,0,0,0.8)', 'rgba(0,0,0,0)']}
-        style={styles.fadeGradient}
-        pointerEvents="none"
-      />
-
       <ScrollView
         style={styles.detailScroll}
         showsVerticalScrollIndicator={true}
         indicatorStyle="white"
-        scrollIndicatorInsets={{ right: 2, top: layout.contentStartTop, bottom: layout.dockHeight }}
-        contentContainerStyle={{ paddingTop: layout.contentStartTop, paddingBottom: layout.dockHeight, paddingRight: 0 }}
-        onScroll={(e) => {
-          const offsetY = e.nativeEvent.contentOffset.y
-          const threshold = 40
-          headerOpacity.setValue(offsetY > threshold ? 1 : 0)
-        }}
-        scrollEventThrottle={16}
+        scrollIndicatorInsets={{ right: 2, top: 0, bottom: layout.dockHeight }}
+        contentContainerStyle={{ paddingTop: 0, paddingBottom: layout.dockHeight, paddingRight: 0 }}
       >
-        {/* Title Section with Vendor Logo */}
-        <View style={styles.cardWrapper}>
-          <View style={styles.titleSectionContainer}>
-            <View style={styles.titleWithLogo}>
-              {vendorLogo ? (
-                <Image
-                  source={{ uri: vendorLogo }}
-                  style={styles.vendorLogoInline}
-                  resizeMode="contain"
-                        fadeDuration={0}
-                />
-              ) : (
-                <View style={[styles.vendorLogoInline, { backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' }]}>
-                  <Text style={{ color: 'rgba(255,255,255,0.3)', fontSize: 12 }}>No Logo</Text>
-                </View>
-              )}
-              <Text style={styles.detailTitleLarge}>Locations & Access</Text>
-            </View>
-          </View>
-        </View>
-        {userLocations.map((userLocation) => {
-          const locationAddress = formatAddress(userLocation.location)
-          const roleDisplay = getRoleDisplay(userLocation.role)
-          const accessibilityLabel = `${userLocation.location.name}. ${locationAddress}. ${roleDisplay}`
+        <TitleSection
+          title="Locations & Access"
+          logo={vendorLogo}
+          subtitle={`${locations.length} ${locations.length === 1 ? 'location' : 'locations'}`}
+        />
 
-          return (
-            <LiquidGlassContainerView key={userLocation.location.id} spacing={12} style={styles.cardWrapper}>
-              <LiquidGlassView
-                effect="regular"
-                colorScheme="dark"
-                interactive
-                style={[styles.detailCard, !isLiquidGlassSupported && styles.cardFallback]}
-              >
+        {/* Locations List - MATCHES ProductsListView Structure */}
+        <View style={styles.cardWrapper}>
+          <View style={styles.listCardGlass}>
+            {locations.map((location, index) => {
+              const isLast = index === locations.length - 1
+              const locationAddress = formatAddress(location)
+
+              return (
                 <Pressable
+                  key={location.id}
                   onPress={() => {
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                    setSelectedLocation(userLocation)
+                    setSelectedLocation(location)
                   }}
-                  style={styles.locationCard}
+                  style={[styles.listItem, isLast && styles.listItemLast]}
                   accessible={true}
                   accessibilityRole="button"
-                  accessibilityLabel={accessibilityLabel}
-                  accessibilityHint="Double tap to view location details"
+                  accessibilityLabel={`${location.name}, ${locationAddress}`}
                 >
-                  <View style={styles.locationIconContainer} accessibilityElementsHidden={true} importantForAccessibility="no">
-                    <LocationIcon color={colors.text.primary} />
+                  {/* Location Icon */}
+                  <View style={styles.locationIcon}>
+                    <LocationIcon color={'rgba(235,235,245,0.6)'} />
                   </View>
-                  <View style={styles.locationInfo} accessible={false}>
-                    <Text style={styles.locationName} accessible={false}>{userLocation.location.name}</Text>
-                    <Text style={styles.locationAddress} accessible={false}>{locationAddress}</Text>
-                    <Text style={styles.locationRole} accessible={false}>{roleDisplay}</Text>
+
+                  {/* Location Info */}
+                  <View style={styles.locationInfo}>
+                    <Text style={styles.locationName} numberOfLines={1}>{location.name}</Text>
+                    <Text style={styles.locationAddress} numberOfLines={1}>{locationAddress}</Text>
                   </View>
-                  <Text style={styles.chevron} accessibilityElementsHidden={true} importantForAccessibility="no">›</Text>
                 </Pressable>
-              </LiquidGlassView>
-            </LiquidGlassContainerView>
-          )
-        })}
+              )
+            })}
+          </View>
+        </View>
       </ScrollView>
     </View>
   )
@@ -191,107 +171,33 @@ function LocationsDetail({
 
 const styles = StyleSheet.create({
   ...detailCommonStyles,
-  titleWithLogo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.lg,
-  },
-  vendorLogoInline: {
-    width: 80,
-    height: 80,
-    borderRadius: radius.xxl,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.25)',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-  },
-  detailTitle: {
-    fontSize: 34,
-    fontWeight: '700',
-    color: '#fff',
-    letterSpacing: -0.5,
-    paddingTop: 16,
-    paddingBottom: 8,
-  },
-  detailTitleLarge: {
-    fontSize: 34,
-    fontWeight: '700',
-    color: colors.text.primary,
-    letterSpacing: -0.5,
-  },
-  detailCard: {
-    borderRadius: radius.xxl,
-    borderCurve: 'continuous',
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-  },
-  cardFallback: {
-    backgroundColor: 'rgba(255,255,255,0.05)',
-  },
-  emptyState: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: spacing.xxxl,
-  },
-  emptyStateText: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: colors.text.secondary,
-    letterSpacing: -0.4,
-    marginBottom: spacing.xxs,
-  },
-  emptyStateSubtext: {
-    fontSize: 15,
-    fontWeight: '400',
-    color: colors.text.tertiary,
-    letterSpacing: -0.2,
-    textAlign: 'center',
-  },
-  locationCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: spacing.md,
-    gap: spacing.sm,
-  },
-  locationIconContainer: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: colors.glass.regular,
+  // Location Icon - Matches ProductItem icon
+  locationIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 8,
+    backgroundColor: 'rgba(118,118,128,0.24)',
     alignItems: 'center',
     justifyContent: 'center',
   },
+  // Location Info - Matches ProductItem productInfo
   locationInfo: {
     flex: 1,
     gap: 2,
+    minWidth: 180,
   },
   locationName: {
-    fontSize: 17,
+    fontSize: 15,
     fontWeight: '600',
-    color: colors.text.primary,
-    letterSpacing: -0.4,
+    color: '#fff',
+    letterSpacing: -0.2,
   },
   locationAddress: {
-    fontSize: 13,
+    fontSize: 11,
     fontWeight: '400',
-    color: colors.text.tertiary,
-    letterSpacing: -0.1,
-  },
-  locationRole: {
-    fontSize: 13,
-    fontWeight: '400',
-    color: colors.text.quaternary,
-    letterSpacing: -0.1,
-  },
-  chevron: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: colors.text.quaternary,
-    marginTop: -2,
+    color: 'rgba(235,235,245,0.6)',
+    letterSpacing: 0.2,
+    textTransform: 'uppercase',
   },
 })
 

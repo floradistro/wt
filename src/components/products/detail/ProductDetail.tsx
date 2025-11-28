@@ -9,18 +9,23 @@
  * - Actions (adjust inventory, sales history)
  */
 
-import React, { useEffect, useRef } from 'react'
-import { View, Text, StyleSheet, Pressable, ScrollView, TextInput, Image, ActivityIndicator } from 'react-native'
+import React, { useEffect, useRef, useState } from 'react'
+import { View, Text, StyleSheet, Pressable, ScrollView, TextInput, Image, ActivityIndicator, Alert } from 'react-native'
 import * as Haptics from 'expo-haptics'
+import * as ImagePicker from 'expo-image-picker'
 import { useAuth } from '@/stores/auth.store'
+import { useAppAuth } from '@/contexts/AppAuthContext'
 import { layout } from '@/theme/layout'
-import { spacing, radius } from '@/theme/tokens'
+import { spacing, radius, colors } from '@/theme/tokens'
+import { logger } from '@/utils/logger'
 import type { Product } from '@/types/products'
 import { EditableDescriptionSection } from '@/components/products/EditableDescriptionSection'
 import { EditablePricingSection } from '@/components/products/EditablePricingSection'
 import { EditableCustomFieldsSection } from '@/components/products/EditableCustomFieldsSection'
+import { EditableVariantConfigSection } from '@/components/products/EditableVariantConfigSection'
 import { AdjustInventoryModal } from '@/components/products/AdjustInventoryModal'
 import { SalesHistoryModal } from '@/components/products/SalesHistoryModal'
+import { MediaPickerModal, ImagePreviewModal, Breadcrumb } from '@/components/shared'
 import {
   useProductEditState,
   useIsEditing,
@@ -31,6 +36,9 @@ import {
   productEditActions,
 } from '@/stores/product-edit.store'
 import { useProductUIState, useLastAdjustmentResult, productUIActions } from '@/stores/product-ui.store'
+import { uploadProductImage, updateProductImage } from '@/services/media.service'
+import { deleteProduct } from '@/services/products.service'
+import { getThumbnailImage } from '@/utils/image-transforms'
 
 interface ProductDetailProps {
   product: Product
@@ -67,6 +75,7 @@ function SettingsRow({ label, value, showChevron = true, onPress }: SettingsRowP
 export function ProductDetail({ product, onBack, onProductUpdated }: ProductDetailProps) {
   // Auth from context
   const { user } = useAuth()
+  const { vendor } = useAppAuth()
 
   // Edit state from product-edit.store
   const isEditing = useIsEditing()
@@ -74,6 +83,16 @@ export function ProductDetail({ product, onBack, onProductUpdated }: ProductDeta
   const storeEditedName = useEditedName()
   const storeEditedSKU = useEditedSKU()
   const originalProduct = useOriginalProduct()
+
+  // Debug logging
+  useEffect(() => {
+    logger.info('[ProductDetail] State update:', {
+      isEditing,
+      saving,
+      hasOriginalProduct: !!originalProduct,
+      productId: product.id,
+    })
+  }, [isEditing, saving, originalProduct, product.id])
 
   // Modal state from product-ui.store
   const { activeModal, selectedLocationId, selectedLocationName } = useProductUIState()
@@ -89,15 +108,25 @@ export function ProductDetail({ product, onBack, onProductUpdated }: ProductDeta
   const isInitialized = useRef(false)
 
   useEffect(() => {
-    // Always initialize on mount or product change
-    productEditActions.startEditing(product)
+    // Initialize product data without entering edit mode
+    // This runs when product ID changes OR when product data is updated (after save)
+    productEditActions.initializeProduct(product)
     isInitialized.current = true
+
+    // Sync current image URL when product changes
+    logger.info('[ProductDetail] Product changed, syncing image:', {
+      productId: product.id,
+      productName: product.name,
+      featured_image: product.featured_image,
+      image_url: product.image_url,
+    })
+    setCurrentImageUrl(product.featured_image || null)
 
     return () => {
       productEditActions.stopEditing()
       isInitialized.current = false
     }
-  }, [product.id])
+  }, [product])
 
   // Set default location to first inventory location
   useEffect(() => {
@@ -109,24 +138,205 @@ export function ProductDetail({ product, onBack, onProductUpdated }: ProductDeta
   // Watch for adjustment results and trigger parent reload
   useEffect(() => {
     if (lastAdjustmentResult) {
+      logger.info('[ProductDetail] Adjustment result detected, triggering reload', {
+        lastAdjustmentResult,
+        productId: product.id,
+      })
       onProductUpdated()
       // Clear the result after handling it
       productUIActions.setAdjustmentResult(null)
     }
-  }, [lastAdjustmentResult, onProductUpdated])
+  }, [lastAdjustmentResult, onProductUpdated, product.id])
 
   const handleSave = async () => {
-    if (!user?.id) return
+    if (!user?.id) {
+      logger.error('[ProductDetail] Cannot save - no user ID')
+      return
+    }
 
-    const vendorId = (user as any).vendor_id || user.id
+    if (!vendor?.id) {
+      logger.error('[ProductDetail] Cannot save - no vendor ID')
+      return
+    }
 
-    await productEditActions.saveProduct(user.id, vendorId, () => {
+    logger.info('[ProductDetail] handleSave called', {
+      userId: user.id,
+      vendorId: vendor.id,
+      productId: product.id,
+      productVendorId: product.vendor?.id,
+    })
+
+    await productEditActions.saveProduct(user.id, vendor.id, () => {
+      logger.info('[ProductDetail] Save success callback - reloading products')
       onProductUpdated()
     })
   }
 
   const handleCancel = () => {
     productEditActions.cancelEdit()
+  }
+
+  // Image state
+  const [showImagePreview, setShowImagePreview] = useState(false)
+  const [showMediaPicker, setShowMediaPicker] = useState(false)
+  const [uploadingImage, setUploadingImage] = useState(false)
+  const [currentImageUrl, setCurrentImageUrl] = useState<string | null>(product.featured_image || null)
+
+  const handleOpenImagePreview = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    setShowImagePreview(true)
+  }
+
+  const handleChangePhoto = () => {
+    setShowImagePreview(false)
+    setTimeout(() => {
+      setShowMediaPicker(true)
+    }, 300)
+  }
+
+  const handleTakePhoto = async () => {
+    if (!vendor?.id) return
+
+    try {
+      setShowImagePreview(false)
+
+      const { status } = await ImagePicker.requestCameraPermissionsAsync()
+      if (status !== 'granted') {
+        logger.warn('[ProductDetail] Camera permission denied')
+        return
+      }
+
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      })
+
+      if (!result.canceled && result.assets[0]) {
+        await handleSelectImage(result.assets[0].uri, true)
+      }
+    } catch (error) {
+      logger.error('[ProductDetail] Failed to take photo:', error)
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
+    }
+  }
+
+  const handleRemovePhoto = async () => {
+    if (!vendor?.id) return
+
+    try {
+      setShowImagePreview(false)
+      setUploadingImage(true)
+
+      logger.info('[ProductDetail] Removing product image')
+      await updateProductImage(product.id, vendor.id, '')
+
+      onProductUpdated()
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+    } catch (error) {
+      logger.error('[ProductDetail] Failed to remove image:', error)
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
+    } finally {
+      setUploadingImage(false)
+    }
+  }
+
+  const handleSelectImage = async (imageUri: string, isFromDevice: boolean) => {
+    if (!vendor?.id) {
+      logger.error('[ProductDetail] Cannot upload - no vendor ID')
+      return
+    }
+
+    try {
+      setUploadingImage(true)
+      setShowMediaPicker(false)
+
+      let imageUrl = imageUri
+
+      // If from device, upload to Supabase first
+      if (isFromDevice) {
+        logger.info('[ProductDetail] Uploading device image to Supabase')
+        const result = await uploadProductImage({
+          vendorId: vendor.id,
+          productId: product.id,
+          uri: imageUri,
+        })
+        imageUrl = result.url
+      }
+
+      // Update product with image URL
+      logger.info('[ProductDetail] Updating product with image URL:', imageUrl)
+      await updateProductImage(product.id, vendor.id, imageUrl)
+
+      // Update local state immediately for instant UI feedback
+      setCurrentImageUrl(imageUrl)
+
+      // Also trigger parent reload to refresh the products list
+      onProductUpdated()
+
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+    } catch (error) {
+      logger.error('[ProductDetail] Failed to set product image:', error)
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
+    } finally {
+      setUploadingImage(false)
+    }
+  }
+
+  const handleDeleteProduct = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+
+    Alert.alert(
+      'Permanently Delete Product',
+      `Are you sure you want to delete "${product.name}"?\n\nThis will permanently remove:\n• The product\n• All inventory records\n• Purchase order history\n• Sales order history\n• Transfer history\n\nThis action CANNOT be undone.`,
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+          onPress: () => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+          }
+        },
+        {
+          text: 'Delete Permanently',
+          style: 'destructive',
+          onPress: async () => {
+            if (!vendor?.id) {
+              logger.error('[ProductDetail] Cannot delete - no vendor ID')
+              return
+            }
+
+            try {
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning)
+              logger.info('[ProductDetail] CASCADE deleting product:', product.id)
+
+              await deleteProduct(product.id, vendor.id)
+
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+              logger.info('[ProductDetail] Product and all related records deleted successfully')
+
+              // Go back first
+              onBack()
+
+              // Then trigger reload
+              setTimeout(() => {
+                onProductUpdated()
+              }, 100)
+            } catch (error) {
+              logger.error('[ProductDetail] Failed to delete product:', error)
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
+
+              Alert.alert(
+                'Delete Failed',
+                error instanceof Error ? error.message : 'Failed to delete product. Please try again.',
+                [{ text: 'OK' }]
+              )
+            }
+          }
+        }
+      ]
+    )
   }
 
   // Don't render until product is provided
@@ -145,16 +355,26 @@ export function ProductDetail({ product, onBack, onProductUpdated }: ProductDeta
       >
         {/* Header with Edit/Save toggle */}
         <View style={styles.detailHeader}>
-          <Pressable onPress={onBack} style={styles.backButton}>
-            <Text style={styles.backButtonText}>‹ Products</Text>
-          </Pressable>
+          <Breadcrumb
+            items={[
+              { label: 'Products', onPress: onBack },
+              { label: editedName || 'Product' },
+            ]}
+          />
 
           {isEditing ? (
             <View style={styles.editActions}>
               <Pressable onPress={handleCancel} style={styles.cancelButton}>
                 <Text style={styles.cancelButtonText}>Cancel</Text>
               </Pressable>
-              <Pressable onPress={handleSave} style={styles.saveButton} disabled={saving}>
+              <Pressable
+                onPress={() => {
+                  logger.info('[ProductDetail] Save button pressed')
+                  handleSave()
+                }}
+                style={styles.saveButton}
+                disabled={saving}
+              >
                 {saving ? (
                   <ActivityIndicator size="small" color="#60A5FA" />
                 ) : (
@@ -165,8 +385,9 @@ export function ProductDetail({ product, onBack, onProductUpdated }: ProductDeta
           ) : (
             <Pressable
               onPress={() => {
+                logger.info('[ProductDetail] Edit button pressed - entering edit mode')
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                productEditActions.updateField('isEditing', true)
+                productEditActions.startEditing(product)
               }}
               style={styles.editButton}
             >
@@ -179,15 +400,21 @@ export function ProductDetail({ product, onBack, onProductUpdated }: ProductDeta
         <View style={styles.headerCardContainer}>
           <View style={styles.headerCardGlass}>
             <View style={styles.headerCard}>
-              {product.featured_image ? (
-                <Image source={{ uri: product.featured_image }} style={styles.headerIcon} />
-              ) : (
-                <View style={[styles.headerIconPlaceholder, styles.headerIcon]}>
-                  <Text style={styles.headerIconText}>
-                    {(isEditing && editedName ? editedName : product.name).charAt(0).toUpperCase()}
-                  </Text>
-                </View>
-              )}
+              <Pressable onPress={handleOpenImagePreview} disabled={uploadingImage}>
+                {uploadingImage ? (
+                  <View style={[styles.headerIconPlaceholder, styles.headerIcon]}>
+                    <ActivityIndicator size="small" color="#fff" />
+                  </View>
+                ) : currentImageUrl ? (
+                  <Image source={{ uri: getThumbnailImage(currentImageUrl) || currentImageUrl }} style={styles.headerIcon} />
+                ) : (
+                  <View style={[styles.headerIconPlaceholder, styles.headerIcon]}>
+                    <Text style={styles.headerIconText}>
+                      {(isEditing && editedName ? editedName : product.name).charAt(0).toUpperCase()}
+                    </Text>
+                  </View>
+                )}
+              </Pressable>
               <View style={styles.headerInfo}>
                 {isEditing ? (
                   <>
@@ -233,7 +460,7 @@ export function ProductDetail({ product, onBack, onProductUpdated }: ProductDeta
         </View>
 
         {/* Pricing Section */}
-        <EditablePricingSection />
+        <EditablePricingSection product={product} />
 
         {/* Inventory Section */}
         <View style={styles.section}>
@@ -279,10 +506,13 @@ export function ProductDetail({ product, onBack, onProductUpdated }: ProductDeta
         </View>
 
         {/* Description */}
-        <EditableDescriptionSection />
+        <EditableDescriptionSection product={product} />
 
         {/* Custom Fields */}
-        <EditableCustomFieldsSection />
+        <EditableCustomFieldsSection product={product} />
+
+        {/* Variant Configuration */}
+        <EditableVariantConfigSection product={product} />
 
         {/* Actions */}
         <View style={styles.section}>
@@ -293,11 +523,41 @@ export function ProductDetail({ product, onBack, onProductUpdated }: ProductDeta
             {hasMultipleLocations && <SettingsRow label="Transfer Stock" />}
           </View>
         </View>
+
+        {/* Danger Zone */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>DANGER ZONE</Text>
+          <View style={styles.cardGlass}>
+            <Pressable
+              style={[styles.row, styles.rowLast]}
+              onPress={handleDeleteProduct}
+              disabled={isEditing}
+            >
+              <Text style={[styles.rowLabel, styles.destructiveText]}>Delete Product</Text>
+              <Text style={styles.rowChevron}>􀆊</Text>
+            </Pressable>
+          </View>
+        </View>
       </ScrollView>
 
       {/* Modals */}
       <AdjustInventoryModal />
       <SalesHistoryModal />
+      <ImagePreviewModal
+        visible={showImagePreview}
+        imageUrl={currentImageUrl}
+        onClose={() => setShowImagePreview(false)}
+        onChangePhoto={handleChangePhoto}
+        onTakePhoto={handleTakePhoto}
+        onRemovePhoto={handleRemovePhoto}
+        loading={uploadingImage}
+        productName={product.name}
+      />
+      <MediaPickerModal
+        visible={showMediaPicker}
+        onClose={() => setShowMediaPicker(false)}
+        onSelect={handleSelectImage}
+      />
     </>
   )
 }
@@ -318,47 +578,50 @@ const styles = StyleSheet.create({
     borderBottomWidth: 0.5,
     borderBottomColor: 'rgba(255,255,255,0.1)',
   },
-  backButton: {
-    paddingVertical: 4,
-  },
-  backButtonText: {
-    fontSize: 15,
-    fontWeight: '400',
-    color: 'rgba(235,235,245,0.6)',
-    letterSpacing: -0.2,
-  },
   editButton: {
-    paddingVertical: 4,
-    paddingHorizontal: 12,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderRadius: 20,
+    backgroundColor: colors.background.secondary,
+    borderWidth: 1,
+    borderColor: colors.border.regular,
   },
   editButtonText: {
-    fontSize: 15,
-    fontWeight: '400',
-    color: 'rgba(235,235,245,0.6)',
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.text.primary,
     letterSpacing: -0.2,
   },
   editActions: {
     flexDirection: 'row',
-    gap: 16,
+    gap: spacing.sm,
   },
   cancelButton: {
-    paddingVertical: 4,
-    paddingHorizontal: 12,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderRadius: 20,
+    backgroundColor: colors.background.secondary,
+    borderWidth: 1,
+    borderColor: colors.border.regular,
   },
   cancelButtonText: {
-    fontSize: 15,
-    fontWeight: '400',
-    color: 'rgba(235,235,245,0.6)',
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.text.primary,
     letterSpacing: -0.2,
   },
   saveButton: {
-    paddingVertical: 4,
-    paddingHorizontal: 12,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderRadius: 20,
+    backgroundColor: colors.glass.thick,
+    borderWidth: 1,
+    borderColor: colors.border.emphasis,
   },
   saveButtonText: {
-    fontSize: 15,
-    fontWeight: '400',
-    color: 'rgba(235,235,245,0.6)',
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.text.primary,
     letterSpacing: -0.2,
   },
   headerCardContainer: {
@@ -379,8 +642,8 @@ const styles = StyleSheet.create({
     gap: layout.containerMargin,
   },
   headerIcon: {
-    width: 60,
-    height: 60,
+    width: 100,
+    height: 100,
     borderRadius: layout.cardRadius,
   },
   headerIconPlaceholder: {
@@ -389,7 +652,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   headerIconText: {
-    fontSize: 28,
+    fontSize: 44,
     color: 'rgba(235,235,245,0.6)',
   },
   headerInfo: {
@@ -488,6 +751,12 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: 'rgba(235,235,245,0.3)',
   },
+  rowLast: {
+    borderBottomWidth: 0,
+  },
+  destructiveText: {
+    color: '#ff3b30',
+  },
   inventoryHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -551,5 +820,62 @@ const styles = StyleSheet.create({
   },
   stockOk: {
     color: '#34c759',
+  },
+
+  // Photo Section
+  photoContainer: {
+    position: 'relative',
+    aspectRatio: 1,
+    borderRadius: radius.xxl,
+    overflow: 'hidden',
+  },
+  productImage: {
+    width: '100%',
+    height: '100%',
+  },
+  photoOverlay: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  photoOverlayText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  addPhotoContainer: {
+    aspectRatio: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 40,
+    gap: 12,
+  },
+  addPhotoIcon: {
+    fontSize: 60,
+  },
+  addPhotoText: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  addPhotoSubtext: {
+    fontSize: 14,
+    color: 'rgba(235,235,245,0.6)',
+    textAlign: 'center',
+    paddingHorizontal: 40,
+  },
+  photoLoading: {
+    aspectRatio: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 16,
+  },
+  photoLoadingText: {
+    fontSize: 15,
+    color: 'rgba(235,235,245,0.6)',
   },
 })

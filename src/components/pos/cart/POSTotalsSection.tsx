@@ -114,33 +114,14 @@ function POSTotalsSection() {
   }, [selectedCustomer, subtotal, loyaltyProgram])
 
   // ========================================
-  // SLIDER OPTIMIZATION - Use throttled updates
+  // SLIDER - INSTANT UPDATES
   // ========================================
-  const sliderTimeoutRef = useRef<NodeJS.Timeout | null>(null)
-
   const handleSliderChange = useCallback((value: number) => {
     const roundedValue = Math.round(value)
-
-    // Clear existing timeout
-    if (sliderTimeoutRef.current) {
-      clearTimeout(sliderTimeoutRef.current)
-    }
-
-    // Throttle updates: only update store after 50ms of no movement
-    sliderTimeoutRef.current = setTimeout(() => {
-      loyaltyActions.setPointsToRedeem(roundedValue)
-    }, 50)
+    loyaltyActions.setPointsToRedeem(roundedValue)
   }, [])
 
-  const handleSliderComplete = useCallback((value: number) => {
-    // Clear any pending throttled update
-    if (sliderTimeoutRef.current) {
-      clearTimeout(sliderTimeoutRef.current)
-    }
-
-    // Immediate final update
-    const roundedValue = Math.round(value)
-    loyaltyActions.setPointsToRedeem(roundedValue)
+  const handleSliderComplete = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
   }, [])
 
@@ -157,183 +138,39 @@ function POSTotalsSection() {
   const showLoyaltyRedemption =
     selectedCustomer &&
     selectedCustomer.loyalty_points > 0 &&
-    loyaltyProgram &&
-    // @ts-expect-error - LoyaltyProgram schema mismatch (enabled property)
-    loyaltyProgram.enabled &&
     maxRedeemablePoints > 0
 
-  // ========================================
-  // DISCOUNT SELECTOR STATE
-  // ========================================
-  const [showDiscountSelector, setShowDiscountSelector] = React.useState(false)
-
-  const handleSelectDiscount = useCallback((discountId: string) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-    checkoutUIActions.setSelectedDiscountId(discountId)
-    setShowDiscountSelector(false)
-  }, [])
-
-  const handleClearDiscount = useCallback(() => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-    checkoutUIActions.setSelectedDiscountId(null)
-  }, [])
+  // Debug: Log why loyalty slider might not be showing
+  logger.debug('🔍 LOYALTY SLIDER VISIBILITY:', {
+    showLoyaltyRedemption,
+    hasSelectedCustomer: !!selectedCustomer,
+    customerPoints: selectedCustomer?.loyalty_points || 0,
+    hasLoyaltyProgram: !!loyaltyProgram,
+    programIsActive: loyaltyProgram?.is_active,
+    maxRedeemablePoints,
+  })
 
   return (
     <View style={styles.container}>
-      {/* Discount Selector - Only show if there are active discounts */}
-      {activeDiscounts.length > 0 && (
-        <View style={styles.discountSection}>
-          {!selectedDiscount ? (
-            <TouchableOpacity
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                setShowDiscountSelector(!showDiscountSelector)
-              }}
-              style={styles.discountButton}
-            >
-              <Text style={styles.discountButtonText}>
-                {showDiscountSelector ? 'Hide Discounts' : 'Apply Discount'}
-              </Text>
-              <Text style={styles.discountButtonCount}>
-                {activeDiscounts.length} available
-              </Text>
-            </TouchableOpacity>
-          ) : (
-            <View style={styles.discountSelected}>
-              <View style={styles.discountSelectedInfo}>
-                <Text style={styles.discountSelectedName}>{selectedDiscount.name}</Text>
-                <Text style={styles.discountSelectedValue}>
-                  {selectedDiscount.discount_type === 'percentage'
-                    ? `-${selectedDiscount.discount_value}%`
-                    : `-$${selectedDiscount.discount_value}`}
-                </Text>
-              </View>
-              <TouchableOpacity onPress={handleClearDiscount} style={styles.discountClearButton}>
-                <Text style={styles.discountClearButtonText}>✕</Text>
-              </TouchableOpacity>
-            </View>
-          )}
 
-          {/* Discount List (when expanded) */}
-          {showDiscountSelector && !selectedDiscount && (
-            <View style={styles.discountList}>
-              {activeDiscounts.map((discount) => (
-                <TouchableOpacity
-                  key={discount.id}
-                  onPress={() => handleSelectDiscount(discount.id)}
-                  style={styles.discountListItem}
-                >
-                  <View style={styles.discountListItemInfo}>
-                    <Text style={styles.discountListItemName}>{discount.name}</Text>
-                    {discount.badge_text && (
-                      <Text style={styles.discountListItemDescription}>
-                        {discount.badge_text}
-                      </Text>
-                    )}
-                  </View>
-                  <Text style={styles.discountListItemValue}>
-                    {discount.discount_type === 'percentage'
-                      ? `-${discount.discount_value}%`
-                      : `-$${discount.discount_value}`}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          )}
-        </View>
-      )}
-
-      {/* Loyalty Points Redemption - Before totals */}
+      {/* Loyalty Points Slider - Minimal, inline */}
       {showLoyaltyRedemption && (
-        <View style={styles.loyaltyRedemptionSection}>
-          <View style={styles.loyaltyRedemptionHeader}>
-            <Text style={styles.loyaltyRedemptionTitle}>Loyalty Points</Text>
-            <Text style={styles.loyaltyRedemptionAvailable}>
-              {selectedCustomer.loyalty_points.toLocaleString()} available
-            </Text>
-          </View>
-
-          {loyaltyPointsToRedeem > 0 ? (
-            <>
-              <View style={styles.loyaltyRedemptionActive}>
-                <Text style={styles.loyaltyRedemptionActiveText}>
-                  Using {loyaltyPointsToRedeem.toLocaleString()} points
-                </Text>
-                <Text style={styles.loyaltyRedemptionActiveValue}>
-                  -${loyaltyDiscountAmount.toFixed(2)}
-                </Text>
-              </View>
-
-              <Slider
-                style={styles.loyaltySlider}
-                minimumValue={0}
-                maximumValue={maxRedeemablePoints}
-                step={loyaltyProgram?.min_redemption_points || 10}
-                value={loyaltyPointsToRedeem}
-                onValueChange={handleSliderChange}
-                onSlidingComplete={handleSliderComplete}
-                minimumTrackTintColor="rgba(255,255,255,0.3)"
-                maximumTrackTintColor="rgba(255,255,255,0.1)"
-                thumbTintColor="#fff"
-                accessible={true}
-                accessibilityRole="adjustable"
-                accessibilityLabel="Loyalty points to redeem"
-                accessibilityValue={{
-                  min: 0,
-                  max: maxRedeemablePoints,
-                  now: loyaltyPointsToRedeem,
-                  text: `${loyaltyPointsToRedeem} points, saving ${loyaltyDiscountAmount.toFixed(2)} dollars`
-                }}
-                accessibilityHint="Swipe up to increase points, swipe down to decrease points"
-              />
-
-              <View style={styles.loyaltyRedemptionActions}>
-                <TouchableOpacity
-                  onPress={() => {
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                    loyaltyActions.setPointsToRedeem(0)
-                  }}
-                  style={styles.loyaltyClearButton}
-                  accessible={true}
-                  accessibilityRole="button"
-                  accessibilityLabel="Clear loyalty points"
-                  accessibilityHint="Double tap to remove all redeemed points"
-                >
-                  <Text style={styles.loyaltyClearButtonText}>Clear</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={() => {
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                    loyaltyActions.setPointsToRedeem(maxRedeemablePoints)
-                  }}
-                  style={styles.loyaltyMaxButton}
-                  accessible={true}
-                  accessibilityRole="button"
-                  accessibilityLabel="Use maximum loyalty points"
-                  accessibilityHint={`Double tap to redeem ${maxRedeemablePoints} points for ${(maxRedeemablePoints * (loyaltyProgram.point_value || 0.01)).toFixed(2)} dollar discount`}
-                >
-                  <Text style={styles.loyaltyMaxButtonText}>Use Maximum</Text>
-                </TouchableOpacity>
-              </View>
-            </>
-          ) : (
-            <TouchableOpacity
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                loyaltyActions.setPointsToRedeem(maxRedeemablePoints)
-              }}
-              style={styles.loyaltyRedeemButton}
-              accessible={true}
-              accessibilityRole="button"
-              accessibilityLabel="Redeem loyalty points"
-              accessibilityHint={`Double tap to redeem ${maxRedeemablePoints} points for ${(maxRedeemablePoints * (loyaltyProgram.point_value || 0.01)).toFixed(2)} dollar discount`}
-            >
-              <Text style={styles.loyaltyRedeemButtonText}>
-                Redeem Points ({maxRedeemablePoints.toLocaleString()} pts = -$
-                {(maxRedeemablePoints * (loyaltyProgram.point_value || 0.01)).toFixed(2)})
-              </Text>
-            </TouchableOpacity>
-          )}
+        <View style={styles.loyaltyInline}>
+          <Text style={styles.loyaltyInlineText}>
+            {loyaltyPointsToRedeem} pts
+          </Text>
+          <Slider
+            style={styles.loyaltySlider}
+            minimumValue={0}
+            maximumValue={maxRedeemablePoints}
+            step={1}
+            value={loyaltyPointsToRedeem}
+            onValueChange={handleSliderChange}
+            onSlidingComplete={handleSliderComplete}
+            minimumTrackTintColor="rgba(255,255,255,0.3)"
+            maximumTrackTintColor="rgba(255,255,255,0.1)"
+            thumbTintColor="#fff"
+          />
         </View>
       )}
 
@@ -458,212 +295,24 @@ const styles = StyleSheet.create({
     marginHorizontal: 16,
     marginBottom: 16, // ✅ Bottom padding - lift off bottom edge
   },
-  // Loyalty Redemption Section
-  loyaltyRedemptionSection: {
-    marginHorizontal: 16,
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-    backgroundColor: 'rgba(255,255,255,0.04)',
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.1)',
-    borderRadius: 16,
+  // Loyalty Points - Minimal inline
+  loyaltyInline: {
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: 12,
   },
-  loyaltyRedemptionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  loyaltyRedemptionTitle: {
+  loyaltyInlineText: {
     fontSize: 11,
     fontWeight: '600',
-    color: 'rgba(255,255,255,0.8)',
-    letterSpacing: 0.6,
-    textTransform: 'uppercase',
-  },
-  loyaltyRedemptionAvailable: {
-    fontSize: 11,
-    fontWeight: '400',
-    color: 'rgba(255,255,255,0.5)',
-    letterSpacing: 0.6,
-  },
-  loyaltyRedemptionActive: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderRadius: 12,
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.1)',
-  },
-  loyaltyRedemptionActiveText: {
-    fontSize: 11,
-    fontWeight: '400',
     color: 'rgba(255,255,255,0.6)',
-    letterSpacing: 0.6,
-  },
-  loyaltyRedemptionActiveValue: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#fff',
-    letterSpacing: -0.1,
+    width: 60,
+    textAlign: 'right',
   },
   loyaltySlider: {
-    width: '100%',
+    flex: 1,
     height: 40,
-  },
-  loyaltyRedemptionActions: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  loyaltyClearButton: {
-    flex: 1,
-    paddingVertical: 10,
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.1)',
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  loyaltyClearButtonText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.6)',
-  },
-  loyaltyMaxButton: {
-    flex: 1,
-    paddingVertical: 10,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.15)',
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  loyaltyMaxButtonText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.9)',
-  },
-  loyaltyRedeemButton: {
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    backgroundColor: 'rgba(16,185,129,0.15)',
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  loyaltyRedeemButtonText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#10b981',
-    letterSpacing: -0.2,
-  },
-  // Discount Selector Section
-  discountSection: {
-    marginHorizontal: 16,
-    gap: 8,
-  },
-  discountButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    backgroundColor: 'rgba(59,130,246,0.15)',
-    borderRadius: 12,
-    borderWidth: 0.5,
-    borderColor: 'rgba(59,130,246,0.3)',
-  },
-  discountButtonText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: 'rgba(59,130,246,0.9)',
-    letterSpacing: -0.1,
-  },
-  discountButtonCount: {
-    fontSize: 11,
-    fontWeight: '500',
-    color: 'rgba(59,130,246,0.6)',
-    letterSpacing: 0.6,
-  },
-  // Selected discount pill
-  discountSelected: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 10,
-    paddingLeft: 16,
-    paddingRight: 10,
-    backgroundColor: 'rgba(59,130,246,0.15)',
-    borderRadius: 12,
-    borderWidth: 0.5,
-    borderColor: 'rgba(59,130,246,0.3)',
-  },
-  discountSelectedInfo: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  discountSelectedName: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.9)',
-    letterSpacing: -0.1,
-  },
-  discountSelectedValue: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: 'rgba(59,130,246,0.9)',
-    letterSpacing: -0.1,
-  },
-  discountClearButton: {
-    width: 28,
-    height: 28,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  discountClearButtonText: {
-    fontSize: 16,
-    color: 'rgba(255,255,255,0.4)',
-  },
-  // Discount list (expanded)
-  discountList: {
-    gap: 6,
-  },
-  discountListItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderRadius: 10,
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.1)',
-  },
-  discountListItemInfo: {
-    flex: 1,
-    marginRight: 12,
-  },
-  discountListItemName: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.9)',
-    letterSpacing: -0.1,
-    marginBottom: 2,
-  },
-  discountListItemDescription: {
-    fontSize: 11,
-    fontWeight: '400',
-    color: 'rgba(255,255,255,0.5)',
-    letterSpacing: -0.05,
-  },
-  discountListItemValue: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: 'rgba(59,130,246,0.9)',
-    letterSpacing: -0.2,
   },
 })

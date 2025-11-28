@@ -1,48 +1,37 @@
 /**
- * CategoriesView Component
+ * CategoriesView Component - REFACTORED
  * Apple Standard: Focused view for category management
  *
- * Handles:
- * - Category list display
- * - Category selection
- * - Add category button
- * - Empty states
+ * ZERO PROP DRILLING:
+ * - Reads from useCategories hook
+ * - Reads from products-list.store for state
+ * - Reads from AppAuthContext for vendor
+ * - Calls store actions directly
  */
 
-import React, { useState, useRef, useMemo } from 'react'
-import { View, Text, StyleSheet, Pressable, ScrollView, ActivityIndicator, Image, Animated } from 'react-native'
-import { LinearGradient } from 'expo-linear-gradient'
+import React, { useState, useMemo } from 'react'
+import { View, Text, StyleSheet, Pressable, ScrollView, ActivityIndicator, Image } from 'react-native'
 import * as Haptics from 'expo-haptics'
 import { layout } from '@/theme/layout'
 import { spacing, radius, colors } from '@/theme/tokens'
+import { useAppAuth } from '@/contexts/AppAuthContext'
+import { useCategories } from '@/hooks/useCategories'
+import { useProductsScreenStore, productsScreenActions } from '@/stores/products-list.store'
+import { TitleSection } from '@/components/shared'
+import { getIconImage } from '@/utils/image-transforms'
 
-interface Category {
-  id: string
-  name: string
-  description?: string | null
-  product_count?: number
-}
-
-interface CategoriesViewProps {
-  categories: Category[]
-  selectedCategoryId: string | null
-  onCategorySelect: (categoryId: string) => void
-  onAddCategory: () => void
-  isLoading: boolean
-  vendorLogo?: string | null
-  searchQuery?: string
-}
-
-export function CategoriesView({
-  categories,
-  selectedCategoryId,
-  onCategorySelect,
-  onAddCategory,
-  isLoading,
-  vendorLogo,
-  searchQuery = '',
-}: CategoriesViewProps) {
-  const headerOpacity = useRef(new Animated.Value(0)).current
+/**
+ * CategoriesView - ZERO PROPS ✅
+ * Reads all state from stores and hooks
+ */
+export function CategoriesView() {
+  // ========================================
+  // STORES - TRUE ZERO PROPS
+  // ========================================
+  const { vendor } = useAppAuth()
+  const searchQuery = useProductsScreenStore((state) => state.searchQuery)
+  const selectedCategoryId = useProductsScreenStore((state) => state.selectedCategoryId)
+  const { categories, isLoading } = useCategories({ includeGlobal: true, parentId: null })
 
   // Filter categories by search
   const filteredCategories = useMemo(() => {
@@ -54,6 +43,18 @@ export function CategoriesView({
     )
   }, [categories, searchQuery])
 
+  // Handle category selection
+  const handleCategorySelect = (categoryId: string) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    productsScreenActions.selectCategory(categoryId)
+  }
+
+  // Handle add category
+  const handleAddCategory = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    productsScreenActions.openModal('createCategory')
+  }
+
   if (isLoading) {
     return (
       <View style={styles.loadingContainer}>
@@ -64,143 +65,117 @@ export function CategoriesView({
 
   if (filteredCategories.length === 0) {
     return (
-      <View style={styles.emptyState}>
-        <Text style={styles.emptyStateTitle}>No Categories</Text>
-        <Text style={styles.emptyStateText}>
-          {searchQuery ? 'Try adjusting your search' : 'Create your first category to get started'}
-        </Text>
-        {!searchQuery && (
-          <Pressable
-            style={styles.emptyStateButton}
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-              onAddCategory()
-            }}
-          >
-            <Text style={styles.emptyStateButtonText}>+ Add Category</Text>
-          </Pressable>
-        )}
-      </View>
+      <ScrollView
+        showsVerticalScrollIndicator={true}
+        indicatorStyle="white"
+        scrollIndicatorInsets={{ right: 2, bottom: layout.dockHeight }}
+        contentContainerStyle={{
+          paddingBottom: layout.dockHeight,
+          paddingRight: 0,
+        }}
+      >
+          {/* Title Section */}
+          <TitleSection
+            title="Categories"
+            logo={vendor?.logo_url}
+            buttonText="+ New Category"
+            onButtonPress={handleAddCategory}
+            buttonAccessibilityLabel="Create new category"
+          />
+
+          {/* Empty State */}
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyTitle}>No Categories</Text>
+            <Text style={styles.emptySubtitle}>
+              {searchQuery ? 'Try adjusting your search' : 'Categories will appear here once created'}
+            </Text>
+          </View>
+        </ScrollView>
     )
   }
 
   return (
-    <View style={styles.container}>
-      {/* Fixed Header */}
-      <Animated.View style={[styles.fixedHeader, { opacity: headerOpacity }]}>
-        <Text style={styles.fixedHeaderTitle}>Categories</Text>
-      </Animated.View>
-
-      {/* Fade Gradient */}
-      <LinearGradient
-        colors={['rgba(0,0,0,0.95)', 'rgba(0,0,0,0.8)', 'rgba(0,0,0,0)']}
-        style={styles.fadeGradient}
-        pointerEvents="none"
-      />
-
       <ScrollView
         showsVerticalScrollIndicator={true}
         indicatorStyle="white"
-        scrollIndicatorInsets={{ right: 2, top: layout.contentStartTop, bottom: layout.dockHeight }}
+        scrollIndicatorInsets={{ right: 2, bottom: layout.dockHeight }}
         contentContainerStyle={{
-          paddingTop: layout.contentStartTop,
           paddingBottom: layout.dockHeight,
           paddingRight: 0,
         }}
-        onScroll={(e) => {
-          const offsetY = e.nativeEvent.contentOffset.y
-          const threshold = 40
-          headerOpacity.setValue(offsetY > threshold ? 1 : 0)
-        }}
-        scrollEventThrottle={16}
       >
-        {/* Large Title */}
-        <View style={styles.cardWrapper}>
-          <View style={styles.titleSectionContainer}>
-            <View style={styles.largeTitleContainer}>
-              <View style={styles.titleWithLogo}>
-                {vendorLogo && (
-                  <Image
-                    source={{ uri: vendorLogo }}
-                    style={styles.vendorLogoInline}
-                    resizeMode="contain"
-                    fadeDuration={0}
-                  />
-                )}
-                <Text style={styles.largeTitleHeader}>Categories</Text>
-              </View>
-              <Pressable
-                style={styles.addButton}
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                  onAddCategory()
-                }}
-              >
-                <Text style={styles.addButtonText}>+</Text>
-              </Pressable>
-            </View>
-          </View>
-        </View>
+        {/* Title Section */}
+        <TitleSection
+          title="Categories"
+          logo={vendor?.logo_url}
+          buttonText="+ New Category"
+          onButtonPress={handleAddCategory}
+          buttonAccessibilityLabel="Create new category"
+        />
 
         {/* Categories List */}
         <View style={styles.cardWrapper}>
-          <View style={styles.categoriesCardGlass}>
+          <View style={styles.categoriesCard}>
             {filteredCategories.map((category, index) => {
+              const isSelected = selectedCategoryId === category.id
               const isLast = index === filteredCategories.length - 1
+
               return (
                 <Pressable
                   key={category.id}
                   style={[
                     styles.categoryItem,
-                    selectedCategoryId === category.id && styles.categoryItemActive,
+                    isSelected && styles.categoryItemActive,
                     isLast && styles.categoryItemLast,
                   ]}
-                  onPress={() => {
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                    onCategorySelect(category.id)
-                  }}
+                  onPress={() => handleCategorySelect(category.id)}
+                  accessibilityRole="button"
                 >
-                  {/* Icon */}
-                  <View style={styles.categoryIcon}>
-                    <Text style={styles.categoryIconText}>
-                      {category.name.charAt(0).toUpperCase()}
-                    </Text>
-                  </View>
+                  {/* Category Image/Icon - Apple Music Style */}
+                  {category.featured_image ? (
+                    <Image
+                      source={{ uri: getIconImage(category.featured_image) || category.featured_image }}
+                      style={styles.categoryIconImage}
+                      resizeMode="cover"
+                    />
+                  ) : (
+                    <View style={[styles.categoryIconPlaceholder, styles.categoryIconImage]}>
+                      <Text style={styles.categoryIconText}>
+                        {category.name.charAt(0).toUpperCase()}
+                      </Text>
+                    </View>
+                  )}
 
                   {/* Category Name & Description */}
                   <View style={styles.categoryInfo}>
                     <Text style={styles.categoryName} numberOfLines={1}>
                       {category.name}
                     </Text>
-                    {category.description && (
-                      <Text style={styles.categoryDescription} numberOfLines={1}>
-                        {category.description}
-                      </Text>
-                    )}
+                    <Text style={styles.categoryDescription} numberOfLines={1}>
+                      {category.description || 'No description'}
+                    </Text>
                   </View>
 
-                  {/* Product Count Badge */}
-                  {category.product_count !== undefined && category.product_count > 0 && (
-                    <View style={styles.categoryBadge}>
-                      <Text style={styles.categoryBadgeText}>{category.product_count}</Text>
-                    </View>
-                  )}
+                  {/* Product Count */}
+                  <View style={styles.countColumn}>
+                    <Text style={styles.countLabel}>PRODUCTS</Text>
+                    <Text style={styles.countValue}>
+                      {category.product_count || 0}
+                    </Text>
+                  </View>
                 </Pressable>
               )
             })}
           </View>
         </View>
       </ScrollView>
-    </View>
   )
 }
 
-// ========================================
-// STYLES
-// ========================================
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: colors.background.primary,
   },
   loadingContainer: {
     flex: 1,
@@ -208,134 +183,50 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: 40,
   },
-  emptyState: {
+  emptyContainer: {
     flex: 1,
-    alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 40,
-    gap: 12,
+    alignItems: 'center',
+    paddingHorizontal: spacing.huge,
+    paddingVertical: 80,
+    gap: spacing.xs,
   },
-  emptyStateIcon: {
-    fontSize: 64,
-    color: 'rgba(235,235,245,0.3)',
-    marginBottom: 8,
-  },
-  emptyStateTitle: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: '#fff',
+  emptyTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: colors.text.primary,
     letterSpacing: -0.3,
   },
-  emptyStateText: {
+  emptySubtitle: {
     fontSize: 15,
-    color: 'rgba(235,235,245,0.6)',
+    fontWeight: '400',
+    color: colors.text.tertiary,
     textAlign: 'center',
-    lineHeight: 22,
-  },
-  emptyStateButton: {
-    marginTop: 20,
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    borderRadius: 10,
-  },
-  emptyStateButtonText: {
-    fontSize: 15,
-    color: '#60A5FA',
-    fontWeight: '600',
-  },
-  fixedHeader: {
-    position: 'absolute',
-    top: layout.headerTop,
-    left: 0,
-    right: 0,
-    height: layout.searchBarHeight,
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 20,
-  },
-  fixedHeaderTitle: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: '#fff',
     letterSpacing: -0.2,
-  },
-  fadeGradient: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: 80,
-    zIndex: 10,
   },
   cardWrapper: {
     paddingHorizontal: layout.containerMargin,
     marginBottom: layout.containerMargin,
   },
-  titleSectionContainer: {
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderRadius: radius.xxl,
-    borderCurve: 'continuous',
-    padding: spacing.lg,
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.12)',
-  },
-  largeTitleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  titleWithLogo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.lg,
-  },
-  vendorLogoInline: {
-    width: 80,
-    height: 80,
-    borderRadius: radius.xxl,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.25)',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-  },
-  largeTitleHeader: {
-    fontSize: 34,
-    fontWeight: '700',
-    color: '#fff',
-    letterSpacing: -0.8,
-  },
-  addButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  addButtonText: {
-    fontSize: 24,
-    color: '#60A5FA',
-    fontWeight: '300',
-  },
-  categoriesCardGlass: {
+  // Apple Music Style Card - Matches ProductsListView
+  categoriesCard: {
     borderRadius: radius.xxl,
     borderCurve: 'continuous',
     overflow: 'hidden',
     backgroundColor: 'rgba(255,255,255,0.05)',
   },
+  // Apple Music Style List Items
   categoryItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: layout.rowPaddingVertical,
-    paddingHorizontal: layout.rowPaddingHorizontal,
+    paddingVertical: 6, // Small vertical padding - Apple Music style
+    paddingLeft: 12, // Small left padding for album art spacing
+    paddingRight: layout.rowPaddingHorizontal,
     gap: 12,
     backgroundColor: 'transparent',
     borderBottomWidth: 0.5,
     borderBottomColor: 'rgba(255,255,255,0.05)',
-    minHeight: layout.minTouchTarget,
+    minHeight: 72,
   },
   categoryItemActive: {
     backgroundColor: 'rgba(99,99,102,0.2)',
@@ -343,21 +234,28 @@ const styles = StyleSheet.create({
   categoryItemLast: {
     borderBottomWidth: 0,
   },
-  categoryIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 8,
+  // Apple Music Style Icon/Image
+  categoryIconImage: {
+    width: 60, // Slightly smaller to account for padding
+    height: 60,
+    borderRadius: 8, // iOS rounded corners - Apple Music style
+  },
+  categoryIconPlaceholder: {
     backgroundColor: 'rgba(118,118,128,0.24)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   categoryIconText: {
-    fontSize: 20,
+    fontSize: 24,
+    fontWeight: '600',
     color: 'rgba(235,235,245,0.6)',
   },
+  // Category Info Section
   categoryInfo: {
     flex: 1,
     gap: 2,
+    minWidth: 180,
+    paddingVertical: 0,
   },
   categoryName: {
     fontSize: 15,
@@ -370,19 +268,23 @@ const styles = StyleSheet.create({
     fontWeight: '400',
     color: 'rgba(235,235,245,0.6)',
     letterSpacing: 0.2,
+    textTransform: 'uppercase',
   },
-  categoryBadge: {
-    minWidth: 24,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 6,
+  // Count Column (matches product data columns)
+  countColumn: {
+    minWidth: 100,
+    alignItems: 'flex-end',
   },
-  categoryBadgeText: {
-    fontSize: 12,
-    fontWeight: '700',
+  countLabel: {
+    fontSize: 9,
+    fontWeight: '600',
+    color: 'rgba(235,235,245,0.4)',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+  },
+  countValue: {
+    fontSize: 15,
+    fontWeight: '600',
     color: '#fff',
     letterSpacing: -0.2,
   },

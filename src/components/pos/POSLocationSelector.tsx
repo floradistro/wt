@@ -8,6 +8,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { BlurView } from 'expo-blur'
 import * as Haptics from 'expo-haptics'
 import { memo, useRef, useEffect } from 'react'
+import { getThumbnailImage } from '@/utils/image-transforms'
 
 const { width } = Dimensions.get('window')
 const isTablet = width > 600
@@ -107,7 +108,7 @@ function LocationCard({
             <View style={styles.logoContainer}>
               <BlurView intensity={20} tint="dark" style={StyleSheet.absoluteFill} />
               <Image
-                source={{ uri: vendorLogo }}
+                source={{ uri: getThumbnailImage(vendorLogo) || vendorLogo }}
                 style={styles.logo}
                 resizeMode="contain"
                 fadeDuration={0}
@@ -303,9 +304,7 @@ const styles = StyleSheet.create({
     flex: 1,
     borderRadius: isTablet ? 32 : 28,
     overflow: 'hidden',
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: 'rgba(255,255,255,0.05)', // Match product list - borderless
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.3,
@@ -325,9 +324,7 @@ const styles = StyleSheet.create({
     borderRadius: isTablet ? 20 : 18,
     marginBottom: isTablet ? 16 : 14,
     overflow: 'hidden',
-    backgroundColor: 'rgba(255,255,255,0.04)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
+    backgroundColor: 'rgba(255,255,255,0.05)', // Match product list - borderless
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -372,9 +369,7 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
     borderRadius: 8,
     overflow: 'hidden',
-    backgroundColor: 'rgba(16,185,129,0.12)',
-    borderWidth: 1,
-    borderColor: 'rgba(16,185,129,0.4)',
+    backgroundColor: 'rgba(16,185,129,0.15)', // Match product list - borderless
   },
   primaryBadgeText: {
     fontSize: 9,

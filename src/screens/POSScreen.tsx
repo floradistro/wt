@@ -21,9 +21,11 @@ import { startPaymentProcessorMonitoring, stopPaymentProcessorMonitoring } from 
 import { useDockOffset } from '@/navigation/DockOffsetContext'
 import { layout } from '@/theme/layout'
 import { useRealtimeInventory } from '@/hooks/useRealtimeInventory'
+import { useRealtimePricing } from '@/hooks/useRealtimePricing'
 
 // Context - Zero prop drilling!
 import { usePOSSession } from '@/contexts/POSSessionContext'
+import { useAppAuth } from '@/contexts/AppAuthContext'
 
 // New Refactored Components
 import {
@@ -41,21 +43,30 @@ import { colors } from '@/theme'
  *
  * NOTE: NOT memoized to ensure proper re-rendering after navigation/hot reload
  */
-export function POSScreen() {
+export function POSScreen({ isActive = true }: { isActive?: boolean }) {
   const { setFullWidth } = useDockOffset()
 
   // Context - Session data (no prop drilling!)
   const { session } = usePOSSession()
+  const { vendor } = useAppAuth()
 
   // ✅ REAL-TIME INVENTORY: Subscribe to inventory updates for current POS location
   // Critical for POS: When a sale completes, all product cards update instantly
   useRealtimeInventory(session?.locationId)
+
+  // ✅ REAL-TIME PRICING: Subscribe to pricing template updates for vendor
+  // Critical for POS: When pricing changes, all product cards update instantly
+  useRealtimePricing(vendor?.id)
 
   // ========================================
   // LOCAL STATE (Minimal!)
   // ========================================
   // Animations
   const fadeAnim = useRef(new Animated.Value(0)).current
+
+  // Force refresh counter - increments when screen becomes visible to force LiquidGlassView re-render
+  const [refreshKey, setRefreshKey] = useState(0)
+  const wasActiveRef = useRef(isActive)
 
   // ========================================
   // EFFECTS
@@ -69,6 +80,16 @@ export function POSScreen() {
       useNativeDriver: true,
     }).start()
   }, [])
+
+  // CRITICAL: Force refresh when screen becomes visible again
+  // This ensures LiquidGlassView components re-initialize properly after navigation
+  useEffect(() => {
+    if (isActive && !wasActiveRef.current) {
+      // Screen just became active - force complete refresh of LiquidGlassView components
+      setRefreshKey(prev => prev + 1)
+    }
+    wasActiveRef.current = isActive
+  }, [isActive])
 
   // Update dock centering based on session state
   useEffect(() => {
@@ -105,19 +126,14 @@ export function POSScreen() {
       <Animated.View style={[styles.mainLayout, { opacity: fadeAnim }]}>
         {/* Left Column - Checkout (same container as NavSidebar) */}
         <View style={styles.leftColumn}>
-          <LiquidGlassView
-            key={`pos-cart-${session?.sessionId || 'no-session'}`}
-            effect="regular"
-            colorScheme="dark"
-            style={[styles.cartContainer, !isLiquidGlassSupported && styles.cartContainerFallback]}
-          >
-            <POSCheckout key={`pos-checkout-${session?.sessionId || 'no-session'}`} />
-          </LiquidGlassView>
+          <View style={styles.cartContainer}>
+            <POSCheckout key={`pos-checkout-${session?.sessionId}-${refreshKey}`} />
+          </View>
         </View>
 
         {/* Right Column - Products */}
         <View style={styles.rightColumn}>
-          <POSProductBrowser key={`pos-products-${session?.sessionId || 'no-session'}`} />
+          <POSProductBrowser key={`pos-products-${session?.sessionId}-${refreshKey}`} />
         </View>
       </Animated.View>
     </SafeAreaView>
@@ -149,9 +165,7 @@ const styles = StyleSheet.create({
     borderRadius: layout.containerRadius,
     borderCurve: 'continuous',
     overflow: 'hidden',
-  },
-  cartContainerFallback: {
-    backgroundColor: 'rgba(255,255,255,0.03)', // Match POSProductCard background
+    backgroundColor: 'rgba(255,255,255,0.05)', // Match product list - borderless
   },
   rightColumn: {
     flex: 1,

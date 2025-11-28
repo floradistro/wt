@@ -3,16 +3,15 @@
  * User management and permissions - Jobs Principle: Clear user roles
  */
 
-import { View, Text, ScrollView, Pressable, ActivityIndicator, Alert, Animated, Image } from "react-native"
-import { LiquidGlassView, LiquidGlassContainerView, isLiquidGlassSupported } from "@callstack/liquid-glass"
-import { LinearGradient } from "expo-linear-gradient"
+import { View, Text, ScrollView, Pressable, ActivityIndicator, Alert, Animated } from "react-native"
+import { useState } from "react"
+// Removed LiquidGlassView - using plain View with borderless style
 import * as Haptics from "expo-haptics"
 import { colors, spacing } from "@/theme/tokens"
 import { layout } from "@/theme/layout"
+import { TitleSection } from "@/components/shared"
 import { useUsers, useUsersLoading, useUsersActions } from "@/stores/users-management.store"
-import { useSettingsUIActions } from "@/stores/settings-ui.store"
-import { useUserLocations } from "@/hooks/useUserLocations"
-import { UserManagementModals } from "../UserManagementModals"
+import { UserDetail } from "./UserDetail"
 import { TeamIcon } from "./icons"
 import { getRoleDisplay, getRoleBadgeColor } from "./userManagement.utils"
 import { styles } from "./userManagement.styles"
@@ -27,29 +26,31 @@ function UserManagementDetail({
   // ✅ Read from stores instead of props
   const users = useUsers()
   const isLoading = useUsersLoading()
-  const { locations } = useUserLocations()
-  const { deleteUser, toggleUserStatus } = useUsersActions()
-  const { openModal } = useSettingsUIActions()
+  const { deleteUser, toggleUserStatus, loadUsers } = useUsersActions()
 
-  // ✅ Use store actions instead of local state/callbacks
+  // Navigation state
+  const [selectedUser, setSelectedUser] = useState<any | null>(null)
+  const [isCreatingNew, setIsCreatingNew] = useState(false)
+
+  // ✅ Use navigation instead of modals
   const handleAddUser = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-    openModal('addUser')
+    setIsCreatingNew(true)
   }
 
   const handleEditUser = (user: any) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-    openModal('editUser', user)
+    setSelectedUser(user)
   }
 
-  const handleSetPassword = (user: any) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-    openModal('setPassword', user)
+  const handleBack = () => {
+    setSelectedUser(null)
+    setIsCreatingNew(false)
   }
 
-  const handleAssignLocations = (user: any) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-    openModal('assignLocations', user)
+  const handleUserSaved = async () => {
+    // Reload users list
+    await loadUsers(users[0]?.vendor_id || '')
   }
 
   const handleToggleStatus = async (user: any) => {
@@ -96,6 +97,17 @@ function UserManagementDetail({
     )
   }
 
+  // Show detail page if user selected or creating new
+  if (selectedUser || isCreatingNew) {
+    return (
+      <UserDetail
+        user={selectedUser}
+        onBack={handleBack}
+        onUserSaved={handleUserSaved}
+      />
+    )
+  }
+
   if (isLoading) {
     return (
       <View style={styles.detailContainer}>
@@ -110,28 +122,19 @@ function UserManagementDetail({
   if (users.length === 0) {
     return (
       <View style={styles.detailContainer}>
-        {/* Fixed Header */}
-        <Animated.View style={[styles.fixedHeader, { opacity: headerOpacity }]}>
-          <Text style={styles.fixedHeaderTitle}>Team</Text>
-        </Animated.View>
-
-        {/* Fade Gradient */}
-        <LinearGradient
-          colors={['rgba(0,0,0,0.95)', 'rgba(0,0,0,0.8)', 'rgba(0,0,0,0)']}
-          style={styles.fadeGradient}
-          pointerEvents="none"
-        />
-
         <ScrollView
           style={styles.detailScroll}
           showsVerticalScrollIndicator={true}
           indicatorStyle="white"
-          scrollIndicatorInsets={{ right: 2, top: layout.contentStartTop, bottom: layout.dockHeight }}
-          contentContainerStyle={{ paddingTop: layout.contentStartTop, paddingBottom: layout.dockHeight, paddingRight: 0 }}
+          scrollIndicatorInsets={{ right: 2, top: 0, bottom: layout.dockHeight }}
+          contentContainerStyle={{ paddingTop: 0, paddingBottom: layout.dockHeight, paddingRight: 0 }}
         >
-          <View style={styles.cardWrapper}>
-            <Text style={styles.detailTitle}>Team</Text>
-          </View>
+          <TitleSection
+            title="Team"
+            logo={vendorLogo}
+            buttonText="Add User"
+            onButtonPress={handleAddUser}
+          />
 
           <View style={[styles.emptyState, { paddingTop: spacing.xxxl }]}>
             <View style={styles.emptyStateIcon}>
@@ -139,203 +142,79 @@ function UserManagementDetail({
             </View>
             <Text style={styles.emptyStateText}>No team members yet</Text>
             <Text style={styles.emptyStateSubtext}>Add users to manage your team</Text>
-            <Pressable
-              onPress={handleAddUser}
-              style={styles.addButton}
-              accessible={true}
-              accessibilityRole="button"
-              accessibilityLabel="Add first team member"
-            >
-              <Text style={styles.addButtonText}>Add User</Text>
-            </Pressable>
           </View>
         </ScrollView>
-
-        {/* ✅ Zero props - modal reads from stores */}
-        <UserManagementModals />
       </View>
     )
   }
 
   return (
     <View style={styles.detailContainer}>
-      {/* Fixed Header */}
-      <Animated.View style={[styles.fixedHeader, { opacity: headerOpacity }]}>
-        <Text style={styles.fixedHeaderTitle}>Team</Text>
-        <Pressable
-          onPress={handleAddUser}
-          style={styles.fixedHeaderButton}
-          accessible={true}
-          accessibilityRole="button"
-          accessibilityLabel="Add new team member"
-        >
-          <Text style={styles.fixedHeaderButtonText}>+</Text>
-        </Pressable>
-      </Animated.View>
-
-      {/* Fade Gradient */}
-      <LinearGradient
-        colors={['rgba(0,0,0,0.95)', 'rgba(0,0,0,0.8)', 'rgba(0,0,0,0)']}
-        style={styles.fadeGradient}
-        pointerEvents="none"
-      />
-
       <ScrollView
         style={styles.detailScroll}
         showsVerticalScrollIndicator={true}
         indicatorStyle="white"
-        scrollIndicatorInsets={{ right: 2, top: layout.contentStartTop, bottom: layout.dockHeight }}
-        contentContainerStyle={{ paddingTop: layout.contentStartTop, paddingBottom: layout.dockHeight, paddingRight: 0 }}
-        onScroll={(e) => {
-          const offsetY = e.nativeEvent.contentOffset.y
-          const threshold = 40
-          headerOpacity.setValue(offsetY > threshold ? 1 : 0)
-        }}
-        scrollEventThrottle={16}
+        scrollIndicatorInsets={{ right: 2, top: 0, bottom: layout.dockHeight }}
+        contentContainerStyle={{ paddingTop: 0, paddingBottom: layout.dockHeight, paddingRight: 0 }}
       >
-        {/* Title Section with Vendor Logo */}
+        <TitleSection
+          title="Team"
+          logo={vendorLogo}
+          subtitle={`${users.length} ${users.length === 1 ? 'team member' : 'team members'}`}
+          buttonText="Add User"
+          onButtonPress={handleAddUser}
+        />
+
+        {/* User List - MATCHES ProductsListView Structure */}
         <View style={styles.cardWrapper}>
-          <View style={styles.titleSectionContainer}>
-            <View style={styles.titleWithLogo}>
-              {vendorLogo ? (
-                <Image
-                  source={{ uri: vendorLogo }}
-                  style={styles.vendorLogoInline}
-                  resizeMode="contain"
-                        fadeDuration={0}
-                />
-              ) : (
-                <View style={[styles.vendorLogoInline, { backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' }]}>
-                  <Text style={{ color: 'rgba(255,255,255,0.3)', fontSize: 12 }}>No Logo</Text>
-                </View>
-              )}
-              <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                <Text style={styles.detailTitleLarge}>Team</Text>
+          <View style={styles.listCardGlass}>
+            {users.map((user, index) => {
+              const isLast = index === users.length - 1
+              const roleBadgeColor = getRoleBadgeColor(user.role)
+
+              return (
                 <Pressable
-                  onPress={handleAddUser}
-                  style={styles.addButton}
+                  key={user.id}
+                  style={[styles.listItem, isLast && styles.listItemLast]}
+                  onPress={() => handleEditUser(user)}
                   accessible={true}
                   accessibilityRole="button"
-                  accessibilityLabel="Add new team member"
+                  accessibilityLabel={`${user.first_name} ${user.last_name}, ${getRoleDisplay(user.role)}`}
                 >
-                  <Text style={styles.addButtonText}>Add User</Text>
+                  {/* Avatar Icon */}
+                  <View style={styles.userAvatar}>
+                    <Text style={styles.userAvatarText}>
+                      {user.first_name[0]}{user.last_name[0]}
+                    </Text>
+                  </View>
+
+                  {/* User Info */}
+                  <View style={styles.userInfo}>
+                    <Text style={styles.userName} numberOfLines={1}>
+                      {user.first_name} {user.last_name}
+                    </Text>
+                    <Text style={styles.userRole} numberOfLines={1}>
+                      {getRoleDisplay(user.role)}
+                    </Text>
+                  </View>
+
+                  {/* Right Side - Status */}
+                  <View style={styles.userMeta}>
+                    {user.status !== 'active' && (
+                      <Text style={styles.inactiveLabel}>INACTIVE</Text>
+                    )}
+                    {user.location_count > 0 && (
+                      <Text style={styles.locationCount}>
+                        {user.location_count} {user.location_count === 1 ? 'loc' : 'locs'}
+                      </Text>
+                    )}
+                  </View>
                 </Pressable>
-              </View>
-            </View>
+              )
+            })}
           </View>
         </View>
-
-        {/* User Cards */}
-        {users.map((user) => {
-          const roleBadgeColor = getRoleBadgeColor(user.role)
-
-          return (
-            <LiquidGlassContainerView key={user.id} spacing={12} style={styles.cardWrapper}>
-              <LiquidGlassView
-                effect="regular"
-                colorScheme="dark"
-                interactive
-                style={[styles.detailCard, !isLiquidGlassSupported && styles.cardFallback]}
-              >
-                <View style={styles.userCard}>
-                  {/* User Info */}
-                  <View style={styles.userCardHeader}>
-                    <View style={styles.userAvatar}>
-                      <Text style={styles.userAvatarText}>
-                        {user.first_name[0]}{user.last_name[0]}
-                      </Text>
-                    </View>
-                    <View style={styles.userCardInfo}>
-                      <View style={styles.userCardTitleRow}>
-                        <Text style={styles.userCardName}>
-                          {user.first_name} {user.last_name}
-                        </Text>
-                        {user.status !== 'active' && (
-                          <View style={styles.inactiveBadge}>
-                            <Text style={styles.inactiveBadgeText}>INACTIVE</Text>
-                          </View>
-                        )}
-                      </View>
-                      <Text style={styles.userCardEmail}>{user.email}</Text>
-                      {user.phone && (
-                        <Text style={styles.userCardPhone}>{user.phone}</Text>
-                      )}
-                    </View>
-                    <View style={[styles.roleBadge, { backgroundColor: roleBadgeColor + '20', borderColor: roleBadgeColor + '40' }]}>
-                      <Text style={[styles.roleBadgeText, { color: roleBadgeColor }]}>
-                        {getRoleDisplay(user.role)}
-                      </Text>
-                    </View>
-                  </View>
-
-                  {/* Location Count */}
-                  {user.location_count > 0 && (
-                    <View style={styles.userCardMeta}>
-                      <Text style={styles.userCardMetaText}>
-                        {user.location_count} {user.location_count === 1 ? 'location' : 'locations'}
-                      </Text>
-                    </View>
-                  )}
-
-                  {/* Actions */}
-                  <View style={styles.userCardActions}>
-                    <Pressable
-                      onPress={() => handleEditUser(user)}
-                      style={styles.userActionButton}
-                      accessible={true}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Edit ${user.first_name} ${user.last_name}`}
-                    >
-                      <Text style={styles.userActionButtonText}>Edit</Text>
-                    </Pressable>
-                    <Pressable
-                      onPress={() => handleSetPassword(user)}
-                      style={styles.userActionButton}
-                      accessible={true}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Set password for ${user.first_name} ${user.last_name}`}
-                    >
-                      <Text style={styles.userActionButtonText}>Password</Text>
-                    </Pressable>
-                    <Pressable
-                      onPress={() => handleAssignLocations(user)}
-                      style={styles.userActionButton}
-                      accessible={true}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Assign locations to ${user.first_name} ${user.last_name}`}
-                    >
-                      <Text style={styles.userActionButtonText}>Locations</Text>
-                    </Pressable>
-                    <Pressable
-                      onPress={() => handleToggleStatus(user)}
-                      style={styles.userActionButton}
-                      accessible={true}
-                      accessibilityRole="button"
-                      accessibilityLabel={user.status === 'active' ? `Deactivate ${user.first_name} ${user.last_name}` : `Activate ${user.first_name} ${user.last_name}`}
-                    >
-                      <Text style={styles.userActionButtonText}>
-                        {user.status === 'active' ? 'Deactivate' : 'Activate'}
-                      </Text>
-                    </Pressable>
-                    <Pressable
-                      onPress={() => handleDeleteUser(user)}
-                      style={[styles.userActionButton, styles.userActionButtonDanger]}
-                      accessible={true}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Delete ${user.first_name} ${user.last_name}`}
-                    >
-                      <Text style={styles.userActionButtonDangerText}>Delete</Text>
-                    </Pressable>
-                  </View>
-                </View>
-              </LiquidGlassView>
-            </LiquidGlassContainerView>
-          )
-        })}
       </ScrollView>
-
-      {/* ✅ Zero props - modal reads from stores */}
-      <UserManagementModals />
     </View>
   )
 }

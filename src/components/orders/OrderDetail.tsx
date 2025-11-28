@@ -22,6 +22,7 @@ import { colors, spacing, radius } from '@/theme/tokens'
 import { layout } from '@/theme/layout'
 import { logger } from '@/utils/logger'
 import type { Order } from '@/services/orders.service'
+import { FullScreenModal, modalStyles } from '@/components/shared'
 
 // ✅ NEW: Import from Context
 import { useAppAuth } from '@/contexts/AppAuthContext'
@@ -427,110 +428,87 @@ export function OrderDetail() {
   const nextStatusButton = getNextStatusButton()
 
   return (
-    <View style={styles.container}>
-      {/* Header with Back Button */}
-      <View style={styles.header}>
-        <Pressable style={styles.backButton} onPress={handleBack}>
-          <Ionicons name="chevron-back" size={28} color={colors.text.primary} />
-          <Text style={styles.backButtonText}>Orders</Text>
-        </Pressable>
-      </View>
-
+    <View style={styles.detail}>
       <ScrollView
-        style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
+        style={{ flex: 1 }}
+        contentContainerStyle={{ paddingBottom: layout.dockHeight, paddingRight: 0 }}
         showsVerticalScrollIndicator={true}
         indicatorStyle="white"
+        scrollIndicatorInsets={{ right: 2, bottom: layout.dockHeight }}
       >
-        {/* Hero Section */}
-        <View style={styles.heroSection}>
-          {/* Vendor Logo */}
-          {vendor?.logo_url && (
-            <Image
-              source={{ uri: vendor.logo_url }}
-              style={styles.vendorLogo}
-              resizeMode="contain"
-            />
-          )}
+      {/* Title Card - Steve Jobs Minimal */}
+      <View style={styles.headerCardContainer}>
+        <View style={styles.headerCardGlass}>
+          <View style={styles.headerCard}>
+            {/* Back Button */}
+            <Pressable style={styles.backButton} onPress={handleBack}>
+              <Ionicons name="chevron-back" size={28} color={colors.text.primary} />
+            </Pressable>
 
-          {/* Order Number */}
-          <Text style={styles.orderNumber}>{order.order_number}</Text>
+            {/* Customer Avatar */}
+            <View style={[styles.headerIconPlaceholder, styles.headerIcon]}>
+              <Text style={styles.headerIconText}>
+                {(order.customer_name || 'G').charAt(0).toUpperCase()}
+              </Text>
+            </View>
 
-          {/* Status Badge */}
-          <View
-            style={[
-              styles.statusBadge,
-              { backgroundColor: `${getStatusColor(order.status)}20` },
-            ]}
-          >
-            <View
-              style={[
-                styles.statusDot,
-                { backgroundColor: getStatusColor(order.status) },
-              ]}
-            />
-            <Text
-              style={[
-                styles.statusText,
-                { color: getStatusColor(order.status) },
-              ]}
-            >
-              {getStatusLabel(order.status)}
-            </Text>
-          </View>
-        </View>
+            {/* Customer Info */}
+            <View style={styles.headerInfo}>
+              <Text style={styles.headerTitle}>{order.customer_name || 'Guest'}</Text>
+              <Text style={styles.headerSubtitle}>
+                {order.pickup_location_name || 'Online Order'}
+              </Text>
+            </View>
 
-        {/* Action Buttons */}
-        {order.status !== 'completed' &&
-          order.status !== 'delivered' &&
-          order.status !== 'cancelled' && (
-            <View style={styles.actionButtonsContainer}>
-              {nextStatusButton && (
-                <Animated.View style={{ transform: [{ scale: buttonScale }] }}>
-                  <Pressable
-                    style={[styles.actionButton, styles.actionButtonPrimary]}
-                    onPress={() =>
-                      handleStatusUpdate(
-                        nextStatusButton.status,
-                        nextStatusButton.label
-                      )
-                    }
-                    disabled={isUpdating}
-                  >
-                    {isUpdating ? (
-                      <ActivityIndicator size="small" color="#fff" />
-                    ) : (
-                      <>
-                        <Ionicons name="checkmark-circle" size={20} color="#fff" />
-                        <Text style={styles.actionButtonText}>
-                          {nextStatusButton.label}
-                        </Text>
-                      </>
-                    )}
-                  </Pressable>
-                </Animated.View>
+            {/* Right Actions */}
+            <View style={styles.headerActions}>
+              {/* Contact Icons */}
+              {order.customer_phone && (
+                <Pressable style={styles.iconButton} onPress={handleCall}>
+                  <Ionicons name="call" size={20} color={colors.text.primary} />
+                </Pressable>
+              )}
+              {order.customer_email && (
+                <Pressable style={styles.iconButton} onPress={handleEmail}>
+                  <Ionicons name="mail" size={20} color={colors.text.primary} />
+                </Pressable>
               )}
 
-              <Pressable
-                style={[styles.actionButton, styles.actionButtonSecondary]}
-                onPress={handleCancelOrder}
-                disabled={isUpdating}
-              >
-                <Ionicons name="close-circle" size={20} color="#ff3b30" />
-                <Text style={[styles.actionButtonText, { color: '#ff3b30' }]}>
-                  Cancel Order
-                </Text>
-              </Pressable>
+              {/* Status Button - Always Visible, Always Actionable */}
+              <Animated.View style={{ transform: [{ scale: buttonScale }] }}>
+                <Pressable
+                  style={[
+                    styles.statusButton,
+                    { backgroundColor: getStatusColor(order.status) }
+                  ]}
+                  onPress={() => {
+                    if (nextStatusButton) {
+                      handleStatusUpdate(nextStatusButton.status, nextStatusButton.label)
+                    }
+                  }}
+                  disabled={isUpdating || !nextStatusButton}
+                >
+                  {isUpdating ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <Text style={styles.statusButtonText}>
+                      {nextStatusButton ? nextStatusButton.label : getStatusLabel(order.status)}
+                    </Text>
+                  )}
+                </Pressable>
+              </Animated.View>
             </View>
-          )}
+          </View>
+        </View>
+      </View>
 
         {/* Order Info Section */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Order Information</Text>
-          <View style={styles.card}>
+          <View style={styles.cardGlass}>
             <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Customer</Text>
-              <Text style={styles.infoValue}>{order.customer_name || 'Guest'}</Text>
+              <Text style={styles.infoLabel}>Order Number</Text>
+              <Text style={styles.infoValue}>{order.order_number}</Text>
             </View>
             <View style={styles.infoRow}>
               <Text style={styles.infoLabel}>Type</Text>
@@ -542,6 +520,14 @@ export function OrderDetail() {
                 {new Date(order.created_at).toLocaleString()}
               </Text>
             </View>
+            {order.created_by_user && (
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Created By</Text>
+                <Text style={styles.infoValue}>
+                  {order.created_by_user.first_name} {order.created_by_user.last_name}
+                </Text>
+              </View>
+            )}
             <View style={styles.infoRow}>
               <Text style={styles.infoLabel}>Payment</Text>
               <Text style={styles.infoValue}>
@@ -555,21 +541,40 @@ export function OrderDetail() {
               </View>
             )}
             <Pressable
-              style={styles.editNotesButton}
+              style={[styles.infoRow, styles.lastRow]}
               onPress={() => openNotesModal(order.staff_notes || '')}
             >
-              <Ionicons name="create-outline" size={20} color={colors.text.secondary} />
-              <Text style={styles.editNotesText}>
+              <Text style={styles.infoLabel}>
                 {order.staff_notes ? 'Edit Notes' : 'Add Notes'}
               </Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Text style={[styles.infoValue, { color: 'rgba(235,235,245,0.3)' }]}>Tap</Text>
+                <Ionicons name="chevron-forward" size={17} color="rgba(235,235,245,0.3)" />
+              </View>
             </Pressable>
           </View>
         </View>
 
         {/* Payment Breakdown */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Payment Breakdown</Text>
-          <View style={styles.card}>
+          <Text style={styles.sectionTitle}>Order Summary</Text>
+          <View style={styles.cardGlass}>
+            {/* Order Items */}
+            {orderItems.map((item, index) => (
+              <View key={item.id} style={styles.infoRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.infoLabel}>{item.product_name}</Text>
+                  <Text style={[styles.infoValue, { fontSize: 13, marginTop: 2 }]}>
+                    {item.quantity} × ${item.unit_price.toFixed(2)}
+                  </Text>
+                </View>
+                <Text style={styles.infoValue}>
+                  ${item.line_total.toFixed(2)}
+                </Text>
+              </View>
+            ))}
+
+            {/* Subtotal */}
             <View style={styles.infoRow}>
               <Text style={styles.infoLabel}>Subtotal</Text>
               <Text style={styles.infoValue}>${order.subtotal.toFixed(2)}</Text>
@@ -611,45 +616,19 @@ export function OrderDetail() {
               </View>
             )}
 
-            <View style={[styles.infoRow, styles.totalRow]}>
+            <View style={[styles.infoRow, styles.totalRow, styles.lastRow]}>
               <Text style={styles.totalLabel}>Total</Text>
               <Text style={styles.totalValue}>${order.total_amount.toFixed(2)}</Text>
             </View>
           </View>
         </View>
 
-        {/* Customer Contact */}
-        {(order.customer_phone || order.customer_email) && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Customer Contact</Text>
-            <View style={styles.contactButtons}>
-              {order.customer_phone && (
-                <>
-                  <Pressable style={styles.contactButton} onPress={handleCall}>
-                    <Ionicons name="call" size={20} color={colors.text.primary} />
-                    <Text style={styles.contactButtonText}>Call</Text>
-                  </Pressable>
-                  <Pressable style={styles.contactButton} onPress={handleText}>
-                    <Ionicons name="chatbubble" size={20} color={colors.text.primary} />
-                    <Text style={styles.contactButtonText}>Text</Text>
-                  </Pressable>
-                </>
-              )}
-              {order.customer_email && (
-                <Pressable style={styles.contactButton} onPress={handleEmail}>
-                  <Ionicons name="mail" size={20} color={colors.text.primary} />
-                  <Text style={styles.contactButtonText}>Email</Text>
-                </Pressable>
-              )}
-            </View>
-          </View>
-        )}
 
         {/* Shipping Info (for shipping orders) */}
         {(order.order_type as string) === 'shipping' && (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Shipping Information</Text>
-            <View style={styles.card}>
+            <View style={styles.cardGlass}>
               {order.tracking_number && (
                 <View style={styles.infoRow}>
                   <Text style={styles.infoLabel}>Tracking</Text>
@@ -674,7 +653,7 @@ export function OrderDetail() {
                 </View>
               )}
               <Pressable
-                style={styles.editNotesButton}
+                style={[styles.infoRow, styles.lastRow]}
                 onPress={() =>
                   openLabelModal(
                     order.tracking_number || '',
@@ -682,34 +661,18 @@ export function OrderDetail() {
                   )
                 }
               >
-                <Ionicons name="create-outline" size={20} color={colors.text.secondary} />
-                <Text style={styles.editNotesText}>
+                <Text style={styles.infoLabel}>
                   {order.tracking_number ? 'Edit Label' : 'Add Label'}
                 </Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <Text style={[styles.infoValue, { color: 'rgba(235,235,245,0.3)' }]}>Tap</Text>
+                  <Ionicons name="chevron-forward" size={17} color="rgba(235,235,245,0.3)" />
+                </View>
               </Pressable>
             </View>
           </View>
         )}
 
-        {/* Order Items */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Order Items</Text>
-          <View style={styles.card}>
-            {orderItems.map((item) => (
-              <View key={item.id} style={styles.orderItemRow}>
-                <View style={styles.orderItemInfo}>
-                  <Text style={styles.orderItemName}>{item.product_name}</Text>
-                  <Text style={styles.orderItemDetails}>
-                    {item.quantity} × ${item.unit_price.toFixed(2)}
-                  </Text>
-                </View>
-                <Text style={styles.orderItemTotal}>
-                  ${item.line_total.toFixed(2)}
-                </Text>
-              </View>
-            ))}
-          </View>
-        </View>
       </ScrollView>
 
       {/* Success Overlay */}
@@ -730,81 +693,75 @@ export function OrderDetail() {
         </Animated.View>
       )}
 
-      {/* Notes Modal */}
-      {showNotesModal && (
-        <View style={styles.modalOverlay}>
-          <BlurView intensity={40} style={styles.modalBlur}>
-            <View style={styles.modal}>
-              <Text style={styles.modalTitle}>Staff Notes</Text>
-              <TextInput
-                style={styles.modalInput}
-                value={staffNotes}
-                onChangeText={setStaffNotes}
-                placeholder="Enter notes..."
-                placeholderTextColor={colors.text.tertiary}
-                multiline
-                numberOfLines={4}
-                autoFocus
-              />
-              <View style={styles.modalButtons}>
-                <Pressable
-                  style={[styles.modalButton, styles.modalButtonCancel]}
-                  onPress={closeNotesModal}
-                >
-                  <Text style={styles.modalButtonTextCancel}>Cancel</Text>
-                </Pressable>
-                <Pressable
-                  style={[styles.modalButton, styles.modalButtonSave]}
-                  onPress={handleSaveNotes}
-                >
-                  <Text style={styles.modalButtonText}>Save</Text>
-                </Pressable>
-              </View>
-            </View>
-          </BlurView>
+      {/* Notes Modal - Standard FullScreenModal */}
+      <FullScreenModal
+        visible={showNotesModal}
+        onClose={closeNotesModal}
+        searchValue={staffNotes}
+        onSearchChange={setStaffNotes}
+        searchPlaceholder="Staff notes..."
+      >
+        <View style={modalStyles.section}>
+          <Text style={modalStyles.sectionLabel}>NOTES</Text>
+          <TextInput
+            style={[modalStyles.card, modalStyles.input, { minHeight: 120, textAlignVertical: 'top' }]}
+            value={staffNotes}
+            onChangeText={setStaffNotes}
+            placeholder="Enter staff notes for this order..."
+            placeholderTextColor="rgba(235,235,245,0.3)"
+            multiline
+            numberOfLines={6}
+          />
         </View>
-      )}
 
-      {/* Shipping Label Modal */}
-      {showLabelModal && (
-        <View style={styles.modalOverlay}>
-          <BlurView intensity={40} style={styles.modalBlur}>
-            <View style={styles.modal}>
-              <Text style={styles.modalTitle}>Shipping Label</Text>
-              <TextInput
-                style={styles.modalInput}
-                value={trackingNumber}
-                onChangeText={setTrackingNumber}
-                placeholder="Tracking number *"
-                placeholderTextColor={colors.text.tertiary}
-                autoFocus
-              />
-              <TextInput
-                style={styles.modalInput}
-                value={shippingCost}
-                onChangeText={setShippingCost}
-                placeholder="Shipping cost (optional)"
-                placeholderTextColor={colors.text.tertiary}
-                keyboardType="decimal-pad"
-              />
-              <View style={styles.modalButtons}>
-                <Pressable
-                  style={[styles.modalButton, styles.modalButtonCancel]}
-                  onPress={closeLabelModal}
-                >
-                  <Text style={styles.modalButtonTextCancel}>Cancel</Text>
-                </Pressable>
-                <Pressable
-                  style={[styles.modalButton, styles.modalButtonSave]}
-                  onPress={handleSaveLabel}
-                >
-                  <Text style={styles.modalButtonText}>Save</Text>
-                </Pressable>
-              </View>
-            </View>
-          </BlurView>
+        <Pressable
+          style={[modalStyles.button, !staffNotes.trim() && modalStyles.buttonDisabled]}
+          onPress={handleSaveNotes}
+          disabled={!staffNotes.trim()}
+        >
+          <Text style={modalStyles.buttonText}>SAVE NOTES</Text>
+        </Pressable>
+      </FullScreenModal>
+
+      {/* Shipping Label Modal - Standard FullScreenModal */}
+      <FullScreenModal
+        visible={showLabelModal}
+        onClose={closeLabelModal}
+        searchValue={trackingNumber}
+        onSearchChange={setTrackingNumber}
+        searchPlaceholder="Tracking number *"
+      >
+        <View style={modalStyles.section}>
+          <Text style={modalStyles.sectionLabel}>TRACKING NUMBER</Text>
+          <TextInput
+            style={[modalStyles.card, modalStyles.input]}
+            value={trackingNumber}
+            onChangeText={setTrackingNumber}
+            placeholder="Enter tracking number..."
+            placeholderTextColor="rgba(235,235,245,0.3)"
+          />
         </View>
-      )}
+
+        <View style={modalStyles.section}>
+          <Text style={modalStyles.sectionLabel}>SHIPPING COST (OPTIONAL)</Text>
+          <TextInput
+            style={[modalStyles.card, modalStyles.input]}
+            value={shippingCost}
+            onChangeText={setShippingCost}
+            placeholder="Enter shipping cost..."
+            placeholderTextColor="rgba(235,235,245,0.3)"
+            keyboardType="decimal-pad"
+          />
+        </View>
+
+        <Pressable
+          style={[modalStyles.button, !trackingNumber.trim() && modalStyles.buttonDisabled]}
+          onPress={handleSaveLabel}
+          disabled={!trackingNumber.trim()}
+        >
+          <Text style={modalStyles.buttonText}>SAVE LABEL</Text>
+        </Pressable>
+      </FullScreenModal>
     </View>
   )
 }
@@ -815,6 +772,9 @@ export function OrderDetail() {
 
 const styles = StyleSheet.create({
   container: {
+    flex: 1,
+  },
+  detail: {
     flex: 1,
     backgroundColor: colors.background.primary,
   },
@@ -828,116 +788,129 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: colors.text.secondary,
   },
-  header: {
-    padding: spacing.lg,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border.regular,
+  headerCardContainer: {
+    marginHorizontal: layout.containerMargin,
+    marginTop: layout.containerMargin,
+    marginBottom: layout.containerMargin,
+  },
+  headerCardGlass: {
+    borderRadius: radius.xxl,
+    borderCurve: 'continuous',
+    overflow: 'hidden',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+  },
+  headerCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: layout.containerMargin,
+    gap: 16,
   },
   backButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-  },
-  backButtonText: {
-    fontSize: 17,
-    color: colors.text.primary,
-  },
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    padding: spacing.lg,
-    paddingBottom: layout.dockHeight + spacing.xl,
-  },
-  heroSection: {
-    alignItems: 'center',
-    marginBottom: spacing.xl,
-  },
-  vendorLogo: {
-    width: 80,
-    height: 80,
-    marginBottom: spacing.md,
-  },
-  orderNumber: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: colors.text.primary,
-    marginBottom: spacing.sm,
-  },
-  statusBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderRadius: radius.round,
-    gap: spacing.xs,
-  },
-  statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  statusText: {
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  actionButtonsContainer: {
-    gap: spacing.sm,
-    marginBottom: spacing.xl,
-  },
-  actionButton: {
-    flexDirection: 'row',
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.08)',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: spacing.md,
-    borderRadius: radius.md,
-    gap: spacing.sm,
   },
-  actionButtonPrimary: {
-    backgroundColor: colors.semantic.info,
+  headerIcon: {
+    width: 80,
+    height: 80,
+    borderRadius: layout.cardRadius,
   },
-  actionButtonSecondary: {
-    backgroundColor: colors.background.secondary,
-    borderWidth: 1,
-    borderColor: '#ff3b30',
+  headerIconPlaceholder: {
+    backgroundColor: 'rgba(118,118,128,0.24)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  actionButtonText: {
-    fontSize: 17,
+  headerIconText: {
+    fontSize: 36,
+    color: 'rgba(235,235,245,0.6)',
+    fontWeight: '600',
+  },
+  headerInfo: {
+    flex: 1,
+  },
+  headerTitle: {
+    fontSize: 20,
     fontWeight: '600',
     color: '#fff',
+    marginBottom: 2,
+    letterSpacing: -0.4,
+  },
+  headerSubtitle: {
+    fontSize: 14,
+    color: 'rgba(235,235,245,0.6)',
+    letterSpacing: -0.2,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  iconButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  statusButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 100,
+    borderCurve: 'continuous',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 120,
+  },
+  statusButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#fff',
+    letterSpacing: -0.2,
   },
   section: {
-    marginBottom: spacing.xl,
+    marginHorizontal: layout.containerMargin,
+    marginBottom: layout.containerMargin,
   },
   sectionTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: colors.text.primary,
-    marginBottom: spacing.md,
+    fontSize: 11,
+    fontWeight: '600',
+    color: 'rgba(235,235,245,0.5)',
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+    marginBottom: 8,
   },
-  card: {
-    backgroundColor: colors.background.secondary,
-    borderRadius: radius.lg,
-    padding: spacing.lg,
+  cardGlass: {
+    borderRadius: radius.xxl,
+    borderCurve: 'continuous',
+    overflow: 'hidden',
+    backgroundColor: 'rgba(255,255,255,0.05)',
   },
   infoRow: {
     flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: spacing.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border.regular,
+    paddingVertical: layout.rowPaddingVertical,
+    paddingHorizontal: layout.containerMargin,
+    minHeight: layout.minTouchTarget,
+    borderBottomWidth: 0.5,
+    borderBottomColor: 'rgba(255,255,255,0.05)',
   },
   infoLabel: {
     fontSize: 15,
-    color: colors.text.secondary,
+    fontWeight: '600',
+    color: '#fff',
+    letterSpacing: -0.2,
   },
   infoValue: {
     fontSize: 15,
-    fontWeight: '500',
-    color: colors.text.primary,
-    textAlign: 'right',
-    flex: 1,
-    marginLeft: spacing.md,
+    color: 'rgba(235,235,245,0.6)',
+  },
+  lastRow: {
+    borderBottomWidth: 0,
   },
   totalRow: {
     borderBottomWidth: 0,
@@ -954,61 +927,7 @@ const styles = StyleSheet.create({
   totalValue: {
     fontSize: 18,
     fontWeight: '700',
-    color: colors.text.primary,
-  },
-  editNotesButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-    marginTop: spacing.md,
-  },
-  editNotesText: {
-    fontSize: 15,
-    color: colors.text.secondary,
-  },
-  contactButtons: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-  },
-  contactButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: spacing.md,
-    backgroundColor: colors.background.secondary,
-    borderRadius: radius.md,
-    gap: spacing.xs,
-  },
-  contactButtonText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: colors.text.primary,
-  },
-  orderItemRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: spacing.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border.regular,
-  },
-  orderItemInfo: {
-    flex: 1,
-  },
-  orderItemName: {
-    fontSize: 15,
-    fontWeight: '500',
-    color: colors.text.primary,
-    marginBottom: spacing.xs,
-  },
-  orderItemDetails: {
-    fontSize: 13,
-    color: colors.text.secondary,
-  },
-  orderItemTotal: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: colors.text.primary,
+    color: '#fff',
   },
   successOverlay: {
     position: 'absolute',
@@ -1030,69 +949,6 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '600',
     color: colors.text.primary,
-  },
-  modalOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 1000,
-  },
-  modalBlur: {
-    flex: 1,
-    width: '100%',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  modal: {
-    width: '80%',
-    maxWidth: 400,
-    backgroundColor: colors.background.secondary,
-    borderRadius: radius.xl,
-    padding: spacing.xl,
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: colors.text.primary,
-    marginBottom: spacing.md,
-  },
-  modalInput: {
-    backgroundColor: colors.background.primary,
-    borderRadius: radius.md,
-    padding: spacing.md,
-    fontSize: 15,
-    color: colors.text.primary,
-    marginBottom: spacing.md,
-  },
-  modalButtons: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-  },
-  modalButton: {
-    flex: 1,
-    padding: spacing.md,
-    borderRadius: radius.md,
-    alignItems: 'center',
-  },
-  modalButtonCancel: {
-    backgroundColor: colors.background.primary,
-  },
-  modalButtonSave: {
-    backgroundColor: colors.semantic.info,
-  },
-  modalButtonText: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: '#fff',
-  },
-  modalButtonTextCancel: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: colors.text.secondary,
   },
   emptyTitle: {
     fontSize: 20,

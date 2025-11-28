@@ -12,6 +12,7 @@ import { layout } from '@/theme/layout'
 import { supabase } from '@/lib/supabase/client'
 import { logger } from '@/utils/logger'
 import { updatePurchaseOrderStatus, deletePurchaseOrder, type PurchaseOrder, type PurchaseOrderItem } from '@/services/purchase-orders.service'
+import { Breadcrumb } from '@/components/shared'
 
 interface PurchaseOrderDetailProps {
   purchaseOrder: PurchaseOrder
@@ -119,9 +120,12 @@ export function PurchaseOrderDetail({
     >
       {/* Header */}
       <View style={styles.header}>
-        <Pressable onPress={onBack} style={styles.backButton}>
-          <Text style={styles.backButtonText}>‹ Purchase Orders</Text>
-        </Pressable>
+        <Breadcrumb
+          items={[
+            { label: 'Purchase Orders', onPress: onBack },
+            { label: `PO #${purchaseOrder.id.substring(0, 8)}` },
+          ]}
+        />
       </View>
 
       {/* Header Card */}
@@ -307,15 +311,6 @@ const styles = StyleSheet.create({
     paddingVertical: layout.containerMargin,
     borderBottomWidth: 0.5,
     borderBottomColor: 'rgba(255,255,255,0.1)',
-  },
-  backButton: {
-    paddingVertical: 4,
-  },
-  backButtonText: {
-    fontSize: 15,
-    fontWeight: '400',
-    color: 'rgba(235,235,245,0.6)',
-    letterSpacing: -0.2,
   },
   cardContainer: {
     marginHorizontal: layout.containerMargin,

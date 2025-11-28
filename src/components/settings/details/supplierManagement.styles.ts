@@ -85,9 +85,7 @@ export const supplierManagementStyles = StyleSheet.create({
     paddingVertical: spacing.xs,
     paddingHorizontal: spacing.xxs,
     borderRadius: radius.sm,
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: 'rgba(255,255,255,0.05)', // Match product list - borderless
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -98,8 +96,7 @@ export const supplierManagementStyles = StyleSheet.create({
     letterSpacing: -0.1,
   },
   userActionButtonDanger: {
-    backgroundColor: 'rgba(255, 59, 48, 0.1)',
-    borderColor: 'rgba(255, 59, 48, 0.2)',
+    backgroundColor: 'rgba(255, 59, 48, 0.15)', // Match product list - borderless
   },
   userActionButtonDangerText: {
     fontSize: 11,
@@ -145,5 +142,45 @@ export const supplierManagementStyles = StyleSheet.create({
     flexDirection: 'row',
     gap: spacing.sm,
     marginTop: spacing.md,
+  },
+
+  // Supplier Icon - Matches ProductItem icon
+  supplierIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 8,
+    backgroundColor: 'rgba(118,118,128,0.24)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  // Supplier Info - Matches ProductItem productInfo
+  supplierInfo: {
+    flex: 1,
+    gap: 2,
+    minWidth: 180,
+  },
+  supplierName: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#fff',
+    letterSpacing: -0.2,
+  },
+  supplierContact: {
+    fontSize: 11,
+    fontWeight: '400',
+    color: 'rgba(235,235,245,0.6)',
+    letterSpacing: 0.2,
+    textTransform: 'uppercase',
+  },
+  supplierMeta: {
+    minWidth: 100,
+    alignItems: 'flex-end',
+  },
+  inactiveLabel: {
+    fontSize: 9,
+    fontWeight: '600',
+    color: '#ff3b30',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
   },
 })

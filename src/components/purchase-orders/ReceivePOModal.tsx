@@ -1,24 +1,19 @@
 /**
- * Receive Purchase Order Modal
- * Built with inline selectors following Settings pattern
+ * ReceivePOModal Component
+ *
+ * Uses FullScreenModal (our STANDARD reusable modal component)
+ * Receives purchase order items
  */
 
-import React, { useState, useMemo, useEffect } from 'react'
-import { View, Text, StyleSheet, Modal, Pressable, ActivityIndicator, TextInput, ScrollView, useWindowDimensions } from 'react-native'
-import { BlurView } from 'expo-blur'
-import { LiquidGlassView, isLiquidGlassSupported } from '@callstack/liquid-glass'
+import { View, Text, TextInput, StyleSheet, Pressable, ActivityIndicator } from 'react-native'
+import { useState, useEffect, useRef } from 'react'
 import * as Haptics from 'expo-haptics'
-import { colors, spacing, radius } from '@/theme/tokens'
 import { supabase } from '@/lib/supabase/client'
+import { receiveItems } from '@/services/purchase-orders.service'
+import { purchaseOrdersActions } from '@/stores/purchase-orders.store'
+import { useProductsScreenStore, productsScreenActions } from '@/stores/products-list.store'
 import { logger } from '@/utils/logger'
-import { receiveItems, type PurchaseOrder, type ItemCondition } from '@/services/purchase-orders.service'
-
-interface ReceivePOModalProps {
-  visible: boolean
-  purchaseOrder: PurchaseOrder
-  onClose: () => void
-  onReceived: () => void
-}
+import { FullScreenModal, modalStyles } from '@/components/shared/modals/FullScreenModal'
 
 interface POItem {
   id: string
@@ -30,42 +25,45 @@ interface POItem {
   unit_price: number
 }
 
-export function ReceivePOModal({
-  visible,
-  purchaseOrder,
-  onClose,
-  onReceived,
-}: ReceivePOModalProps) {
-  const { width, height } = useWindowDimensions()
-  const isLandscape = width > height
+/**
+ * ReceivePOModal - Uses FullScreenModal ✅
+ */
+export function ReceivePOModal() {
+  // ========================================
+  // STORES - ZERO PROP DRILLING ✅
+  // ========================================
+  const showModal = useProductsScreenStore((state) => state.showReceivePO)
+  const selectedPO = useProductsScreenStore((state) => state.selectedPurchaseOrder)
 
+  // ========================================
+  // LOCAL STATE
+  // ========================================
   const [items, setItems] = useState<POItem[]>([])
-  const [receiveQuantities, setReceiveQuantities] = useState<Record<string, string>>({})
-  const [isLoading, setIsLoading] = useState(true)
-  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [receiving, setReceiving] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [receiveQuantities, setReceiveQuantities] = useState<Record<string, string>>({})
+  const [searchValue, setSearchValue] = useState('')
+  const inputRefs = useRef<Record<string, TextInput | null>>({})
 
-  const modalStyle = useMemo(() => ({
-    width: isLandscape ? '75%' : '90%',
-    maxWidth: isLandscape ? 800 : 700,
-    maxHeight: height * 0.92,
-  }), [isLandscape, height])
-
-  const scrollContentStyle = useMemo(() => ({
-    maxHeight: isLandscape ? height * 0.65 : height * 0.7,
-  }), [isLandscape, height])
-
+  // Load PO items when modal opens
   useEffect(() => {
-    if (visible) {
-      loadItems()
-    }
-  }, [visible, purchaseOrder.id])
-
-  const loadItems = async () => {
-    try {
-      setIsLoading(true)
+    if (showModal && selectedPO) {
+      loadPOItems()
+    } else {
+      // Reset when closing
+      setItems([])
+      setReceiveQuantities({})
       setError(null)
+      setSearchValue('')
+    }
+  }, [showModal, selectedPO?.id])
 
+  const loadPOItems = async () => {
+    if (!selectedPO) return
+
+    try {
+      setLoading(true)
       const { data, error: fetchError } = await supabase
         .from('purchase_order_items')
         .select(`
@@ -75,7 +73,7 @@ export function ReceivePOModal({
             sku
           )
         `)
-        .eq('purchase_order_id', purchaseOrder.id)
+        .eq('purchase_order_id', selectedPO.id)
         .order('created_at')
 
       if (fetchError) throw fetchError
@@ -85,7 +83,7 @@ export function ReceivePOModal({
         return {
           id: item.id,
           product_id: item.product_id,
-          product_name: product?.name || 'Unknown Product',
+          product_name: product?.name || '',
           product_sku: product?.sku || '',
           quantity: item.quantity,
           received_quantity: item.received_quantity || 0,
@@ -95,9 +93,9 @@ export function ReceivePOModal({
 
       setItems(itemsWithProducts)
 
-      // Initialize receive quantities to remaining quantity for each item
+      // Initialize receive quantities with remaining amounts
       const initialQuantities: Record<string, string> = {}
-      itemsWithProducts.forEach((item: POItem) => {
+      itemsWithProducts.forEach((item) => {
         const remaining = item.quantity - item.received_quantity
         initialQuantities[item.id] = remaining > 0 ? remaining.toString() : '0'
       })
@@ -106,404 +104,233 @@ export function ReceivePOModal({
       logger.error('Failed to load PO items', { error: err })
       setError(err instanceof Error ? err.message : 'Failed to load items')
     } finally {
-      setIsLoading(false)
+      setLoading(false)
     }
   }
 
-  const handleQuantityChange = (itemId: string, value: string) => {
-    setReceiveQuantities(prev => ({
-      ...prev,
-      [itemId]: value,
-    }))
-    setError(null)
-  }
-
   const handleReceiveAll = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
     const allQuantities: Record<string, string> = {}
-    items.forEach(item => {
+    items.forEach((item) => {
       const remaining = item.quantity - item.received_quantity
       allQuantities[item.id] = remaining > 0 ? remaining.toString() : '0'
     })
     setReceiveQuantities(allQuantities)
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
   }
 
-  const handleClearAll = () => {
-    const clearedQuantities: Record<string, string> = {}
-    items.forEach(item => {
-      clearedQuantities[item.id] = '0'
-    })
-    setReceiveQuantities(clearedQuantities)
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-  }
+  const handleReceive = async () => {
+    if (!selectedPO) return
 
-  const handleSubmit = async () => {
     try {
+      setReceiving(true)
       setError(null)
 
-      // Validate and collect receive items
-      const itemsToReceive: Array<{
-        item_id: string
-        quantity: number
-        condition: ItemCondition
-        quality_notes?: string
-      }> = []
-
-      for (const item of items) {
-        const qtyStr = receiveQuantities[item.id] || '0'
-        const qty = parseFloat(qtyStr)
-
-        if (isNaN(qty) || qty < 0) {
-          setError(`Invalid quantity for ${item.product_name}`)
-          return
-        }
-
-        if (qty > 0) {
-          const remaining = item.quantity - item.received_quantity
-          if (qty > remaining) {
-            setError(`Cannot receive more than ${remaining} for ${item.product_name}`)
-            return
-          }
-          itemsToReceive.push({
-            item_id: item.id,
-            quantity: qty,
-            condition: 'good', // Default to good condition
-            quality_notes: undefined,
-          })
-        }
+      // Validate location
+      if (!selectedPO.location_id) {
+        setError('Purchase order has no location assigned')
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
+        return
       }
+
+      // Build items array for API
+      const itemsToReceive = Object.entries(receiveQuantities)
+        .map(([itemId, qty]) => {
+          const parsedQty = parseInt(qty, 10)
+          if (isNaN(parsedQty) || parsedQty <= 0) return null
+          return {
+            item_id: itemId,
+            quantity: parsedQty,
+            condition: 'good' as const, // Default to good condition
+          }
+        })
+        .filter(Boolean) as { item_id: string; quantity: number; condition: 'good' }[]
 
       if (itemsToReceive.length === 0) {
-        setError('Please enter quantities to receive')
+        setError('Enter quantities to receive')
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
         return
       }
 
-      if (!purchaseOrder.location_id) {
-        setError('Purchase order must have a location to receive items')
-        return
-      }
+      // Call receive API with location ID
+      await receiveItems(selectedPO.id, itemsToReceive, selectedPO.location_id)
 
-      setIsSubmitting(true)
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy)
-
-      // Use service layer for transactional receive
-      const result = await receiveItems(
-        purchaseOrder.id,
-        itemsToReceive,
-        purchaseOrder.location_id
-      )
-
-      logger.info('Items received successfully', {
-        poId: purchaseOrder.id,
-        itemsProcessed: result.itemsProcessed,
-        newStatus: result.newStatus,
-      })
+      // Reload PO list via store
+      await purchaseOrdersActions.loadPurchaseOrders({})
 
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
-      onReceived()
-      onClose()
+      logger.info('[ReceivePOModal] Items received successfully', {
+        poId: selectedPO.id,
+        locationId: selectedPO.location_id,
+        itemCount: itemsToReceive.length,
+      })
+
+      productsScreenActions.closeAllModals()
     } catch (err) {
-      logger.error('Failed to receive items in modal', { error: err, poId: purchaseOrder.id })
+      logger.error('Failed to receive items', { error: err })
       setError(err instanceof Error ? err.message : 'Failed to receive items')
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
     } finally {
-      setIsSubmitting(false)
+      setReceiving(false)
     }
   }
 
-  const totalToReceive = useMemo(() => {
-    return items.reduce((sum, item) => {
-      const qty = parseFloat(receiveQuantities[item.id] || '0')
-      return sum + (isNaN(qty) ? 0 : qty)
-    }, 0)
-  }, [items, receiveQuantities])
+  const handleClose = () => {
+    productsScreenActions.closeAllModals()
+  }
 
-  const canSubmit = totalToReceive > 0 && !isSubmitting && !isLoading
+  const totalToReceive = Object.values(receiveQuantities).reduce((sum, qty) => {
+    const parsed = parseInt(qty, 10)
+    return sum + (isNaN(parsed) ? 0 : parsed)
+  }, 0)
 
-  if (!visible) return null
+  const filteredItems = items.filter((item) =>
+    item.product_name.toLowerCase().includes(searchValue.toLowerCase())
+  )
 
   return (
-    <Modal
-      visible={true}
-      transparent
-      animationType="fade"
-      onRequestClose={onClose}
-      statusBarTranslucent
-      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
+    <FullScreenModal
+      visible={showModal}
+      onClose={handleClose}
+      searchValue={searchValue}
+      onSearchChange={setSearchValue}
+      searchPlaceholder={`Receive ${selectedPO?.po_number || 'PO'}`}
     >
-      <Pressable style={styles.modalOverlay} onPress={onClose}>
-        <BlurView intensity={40} style={StyleSheet.absoluteFill} tint="dark" pointerEvents="none" />
-        <Pressable style={[styles.modalContainer, modalStyle]} onPress={(e) => e.stopPropagation()}>
-          <LiquidGlassView
-            effect="regular"
-            colorScheme="dark"
-            style={[styles.modalContent, !isLiquidGlassSupported && styles.modalContentFallback]}
-          >
-            {/* Header */}
-            <View style={styles.modalHeader}>
-              <View>
-                <Text style={styles.modalTitle}>Receive Items</Text>
-                <Text style={styles.modalSubtitle}>{purchaseOrder.po_number}</Text>
-              </View>
-              <Pressable onPress={onClose} style={styles.closeButton}>
-                <Text style={styles.closeButtonText}>×</Text>
-              </Pressable>
-            </View>
-
-            <ScrollView
-              style={[styles.modalScroll, scrollContentStyle]}
-              contentContainerStyle={styles.modalScrollContent}
-              showsVerticalScrollIndicator={false}
-              keyboardShouldPersistTaps="handled"
+      {loading ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator color="rgba(235,235,245,0.6)" />
+        </View>
+      ) : error ? (
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorText}>{error}</Text>
+        </View>
+      ) : (
+        <>
+          {/* Receive All Button */}
+          <View style={modalStyles.section}>
+            <Pressable
+              onPress={handleReceiveAll}
+              style={[modalStyles.card, { padding: 16, alignItems: 'center' }]}
             >
-              {isLoading ? (
-                <View style={styles.loadingContainer}>
-                  <ActivityIndicator size="large" color={colors.text.secondary} />
-                  <Text style={styles.loadingText}>Loading items...</Text>
-                </View>
-              ) : (
-                <>
-                  {/* Quick Actions */}
-                  <View style={styles.quickActions}>
-                    <Pressable
-                      style={styles.quickActionButton}
-                      onPress={handleReceiveAll}
-                      disabled={isSubmitting}
-                    >
-                      <Text style={styles.quickActionText}>Receive All</Text>
-                    </Pressable>
-                    <Pressable
-                      style={styles.quickActionButton}
-                      onPress={handleClearAll}
-                      disabled={isSubmitting}
-                    >
-                      <Text style={styles.quickActionText}>Clear All</Text>
-                    </Pressable>
-                  </View>
+              <Text style={styles.receiveAllText}>Receive All Remaining</Text>
+            </Pressable>
+          </View>
 
-                  {/* Items */}
-                  <View style={styles.itemsSection}>
-                    <Text style={styles.fieldLabel}>ITEMS TO RECEIVE</Text>
-                    <View style={styles.itemsCard}>
-                      {items.map((item, index) => {
-                        const remaining = item.quantity - item.received_quantity
-                        const isFullyReceived = remaining <= 0
+          {/* Items Section */}
+          <View style={modalStyles.section}>
+            <Text style={modalStyles.sectionLabel}>ITEMS ({filteredItems.length})</Text>
 
-                        return (
-                          <View
-                            key={item.id}
-                            style={[
-                              styles.itemRow,
-                              index === items.length - 1 && styles.itemRowLast,
-                              isFullyReceived && styles.itemRowDisabled,
-                            ]}
-                          >
-                            <View style={styles.itemInfo}>
-                              <Text style={styles.itemName}>{item.product_name}</Text>
-                              {item.product_sku && (
-                                <Text style={styles.itemSku}>SKU: {item.product_sku}</Text>
-                              )}
-                              <View style={styles.itemMeta}>
-                                <Text style={styles.itemMetaText}>
-                                  Ordered: {item.quantity}
-                                </Text>
-                                <Text style={styles.itemMetaDot}>•</Text>
-                                <Text style={styles.itemMetaText}>
-                                  Received: {item.received_quantity}
-                                </Text>
-                                <Text style={styles.itemMetaDot}>•</Text>
-                                <Text style={[styles.itemMetaText, remaining > 0 && styles.itemMetaHighlight]}>
-                                  Remaining: {remaining}
-                                </Text>
-                              </View>
-                            </View>
-                            <View style={styles.quantityInput}>
-                              <Text style={styles.inputLabel}>Receive</Text>
-                              <TextInput
-                                style={[
-                                  styles.input,
-                                  isFullyReceived && styles.inputDisabled,
-                                ]}
-                                value={receiveQuantities[item.id] || '0'}
-                                onChangeText={(value) => handleQuantityChange(item.id, value)}
-                                keyboardType="decimal-pad"
-                                placeholder="0"
-                                placeholderTextColor="rgba(235,235,245,0.3)"
-                                editable={!isFullyReceived && !isSubmitting}
-                                selectTextOnFocus
-                              />
-                            </View>
-                          </View>
-                        )
-                      })}
+            <View style={styles.itemsCard}>
+              {filteredItems.map((item, index) => {
+                const remaining = item.quantity - item.received_quantity
+
+                return (
+                  <View key={item.id}>
+                    <View style={styles.itemRow}>
+                      {/* Left: Product Info */}
+                      <View style={styles.itemInfo}>
+                        <Text style={styles.itemName}>{item.product_name}</Text>
+                        {item.product_sku && <Text style={styles.itemSKU}>SKU: {item.product_sku}</Text>}
+                        <Text style={styles.itemMeta}>
+                          Ordered: {item.quantity} • Received: {item.received_quantity} • Remaining: {remaining}
+                        </Text>
+                      </View>
+
+                      {/* Right: Quantity Input */}
+                      <View style={styles.itemRight}>
+                        <TextInput
+                          ref={(ref) => {
+                            inputRefs.current[item.id] = ref
+                          }}
+                          style={styles.quantityInput}
+                          value={receiveQuantities[item.id] || ''}
+                          onChangeText={(text) => {
+                            setReceiveQuantities((prev) => ({
+                              ...prev,
+                              [item.id]: text,
+                            }))
+                          }}
+                          keyboardType="number-pad"
+                          placeholder="0"
+                          placeholderTextColor="rgba(235,235,245,0.3)"
+                          returnKeyType={index === filteredItems.length - 1 ? 'done' : 'next'}
+                          selectTextOnFocus
+                          onSubmitEditing={() => {
+                            if (index < filteredItems.length - 1) {
+                              const nextItem = filteredItems[index + 1]
+                              inputRefs.current[nextItem.id]?.focus()
+                            }
+                          }}
+                          blurOnSubmit={index === filteredItems.length - 1}
+                        />
+                      </View>
                     </View>
+                    {index < filteredItems.length - 1 && <View style={styles.divider} />}
                   </View>
+                )
+              })}
 
-                  {/* Summary */}
-                  <View style={styles.summaryCard}>
-                    <View style={styles.summaryRow}>
-                      <Text style={styles.summaryLabel}>Total Items to Receive</Text>
-                      <Text style={styles.summaryValue}>{totalToReceive}</Text>
-                    </View>
-                  </View>
-
-                  {error && (
-                    <View style={styles.errorBox}>
-                      <Text style={styles.errorText}>{error}</Text>
-                    </View>
-                  )}
-                </>
-              )}
-            </ScrollView>
-
-            {/* Footer */}
-            <View style={styles.modalFooter}>
-              <Pressable
-                onPress={onClose}
-                disabled={isSubmitting}
-                style={[styles.button, styles.buttonSecondary]}
-              >
-                <Text style={styles.buttonSecondaryText}>Cancel</Text>
-              </Pressable>
-              <Pressable
-                onPress={handleSubmit}
-                disabled={!canSubmit}
-                style={[styles.button, styles.buttonPrimary, !canSubmit && styles.buttonDisabled]}
-              >
-                {isSubmitting ? (
-                  <ActivityIndicator color={colors.text.primary} />
-                ) : (
-                  <Text style={styles.buttonPrimaryText}>Receive {totalToReceive} Items</Text>
-                )}
-              </Pressable>
+              <View style={styles.divider} />
+              <View style={styles.totalRow}>
+                <Text style={styles.totalLabel}>Total to Receive</Text>
+                <Text style={styles.totalValue}>{totalToReceive}</Text>
+              </View>
             </View>
-          </LiquidGlassView>
-        </Pressable>
-      </Pressable>
-    </Modal>
+          </View>
+
+          {/* Receive Button */}
+          <Pressable
+            onPress={handleReceive}
+            style={[modalStyles.button, !totalToReceive && modalStyles.buttonDisabled]}
+            disabled={!totalToReceive || receiving}
+          >
+            {receiving ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={modalStyles.buttonText}>RECEIVE ITEMS</Text>
+            )}
+          </Pressable>
+        </>
+      )}
+    </FullScreenModal>
   )
 }
 
+// ========================================
+// CUSTOM STYLES (extend modalStyles)
+// ========================================
 const styles = StyleSheet.create({
-  modalOverlay: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  modalContainer: {},
-  modalContent: {
-    borderRadius: radius.xxl,
-    borderCurve: 'continuous',
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-  },
-  modalContentFallback: {
-    backgroundColor: 'rgba(20, 20, 20, 0.95)',
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: spacing.lg,
-    borderBottomWidth: 0.5,
-    borderBottomColor: 'rgba(255,255,255,0.1)',
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: colors.text.primary,
-    letterSpacing: -0.4,
-  },
-  modalSubtitle: {
-    fontSize: 13,
-    fontWeight: '400',
-    color: colors.text.tertiary,
-    letterSpacing: -0.1,
-    marginTop: 2,
-  },
-  closeButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  closeButtonText: {
-    fontSize: 28,
-    fontWeight: '300',
-    color: colors.text.primary,
-    marginTop: -4,
-  },
-  modalScroll: {},
-  modalScrollContent: {
-    padding: spacing.lg,
-  },
   loadingContainer: {
     padding: 40,
     alignItems: 'center',
-    gap: spacing.md,
   },
-  loadingText: {
-    fontSize: 13,
+  errorContainer: {
+    padding: 16,
+    margin: 16,
+    backgroundColor: 'rgba(255,69,58,0.1)',
+    borderRadius: 20,
+  },
+  errorText: {
+    fontSize: 15,
     fontWeight: '400',
-    color: colors.text.tertiary,
-    letterSpacing: -0.1,
+    color: '#ff453a',
+    textAlign: 'center',
   },
-  quickActions: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    marginBottom: spacing.md,
-  },
-  quickActionButton: {
-    flex: 1,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-    borderRadius: radius.lg,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.15)',
-    alignItems: 'center',
-  },
-  quickActionText: {
-    fontSize: 13,
+  receiveAllText: {
+    fontSize: 15,
     fontWeight: '600',
-    color: colors.text.primary,
-    letterSpacing: -0.1,
-  },
-  itemsSection: {
-    marginBottom: spacing.md,
-  },
-  fieldLabel: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: 'rgba(235,235,245,0.5)',
-    letterSpacing: 0.6,
-    textTransform: 'uppercase',
-    marginBottom: 8,
+    color: '#fff',
+    letterSpacing: 0.5,
   },
   itemsCard: {
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderRadius: radius.xxl,
-    borderCurve: 'continuous',
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.1)',
-    overflow: 'hidden',
+    backgroundColor: 'rgba(118, 118, 128, 0.24)',
+    borderRadius: 20,
+    padding: 16,
   },
   itemRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: spacing.lg,
-    gap: spacing.md,
-    borderBottomWidth: 0.5,
-    borderBottomColor: 'rgba(255,255,255,0.05)',
-  },
-  itemRowLast: {
-    borderBottomWidth: 0,
-  },
-  itemRowDisabled: {
-    opacity: 0.5,
+    gap: 16,
+    paddingVertical: 8,
   },
   itemInfo: {
     flex: 1,
@@ -512,142 +339,57 @@ const styles = StyleSheet.create({
   itemName: {
     fontSize: 15,
     fontWeight: '600',
-    color: colors.text.primary,
+    color: '#fff',
     letterSpacing: -0.2,
   },
-  itemSku: {
+  itemSKU: {
     fontSize: 11,
     fontWeight: '400',
-    color: colors.text.tertiary,
-    letterSpacing: 0.2,
+    color: 'rgba(235,235,245,0.5)',
+    letterSpacing: -0.08,
   },
   itemMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    marginTop: 2,
-  },
-  itemMetaText: {
     fontSize: 11,
     fontWeight: '400',
-    color: colors.text.quaternary,
-    letterSpacing: -0.1,
+    color: 'rgba(235,235,245,0.5)',
+    letterSpacing: -0.08,
+    marginTop: 2,
   },
-  itemMetaDot: {
-    fontSize: 11,
-    color: 'rgba(235,235,245,0.2)',
-  },
-  itemMetaHighlight: {
-    color: '#0a84ff',
-    fontWeight: '600',
+  itemRight: {
+    width: 80,
   },
   quantityInput: {
-    gap: 4,
-  },
-  inputLabel: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: 'rgba(235,235,245,0.5)',
-    letterSpacing: 0.3,
-    textTransform: 'uppercase',
-    textAlign: 'center',
-  },
-  input: {
-    width: 80,
-    height: 44,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    paddingHorizontal: spacing.sm,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
     fontSize: 17,
     fontWeight: '600',
-    color: colors.text.primary,
+    color: '#fff',
     letterSpacing: -0.2,
     textAlign: 'center',
   },
-  inputDisabled: {
-    opacity: 0.5,
-    backgroundColor: 'rgba(255,255,255,0.03)',
+  divider: {
+    height: 0.5,
+    backgroundColor: 'rgba(235,235,245,0.2)',
+    marginVertical: 8,
   },
-  summaryCard: {
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderRadius: radius.xxl,
-    borderCurve: 'continuous',
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.1)',
-    padding: spacing.lg,
-    marginBottom: spacing.md,
-  },
-  summaryRow: {
+  totalRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    paddingTop: 8,
   },
-  summaryLabel: {
+  totalLabel: {
     fontSize: 15,
     fontWeight: '600',
-    color: colors.text.secondary,
+    color: '#fff',
     letterSpacing: -0.2,
   },
-  summaryValue: {
-    fontSize: 20,
+  totalValue: {
+    fontSize: 24,
     fontWeight: '700',
-    color: '#34c759',
+    color: '#0a84ff',
     letterSpacing: -0.3,
-  },
-  errorBox: {
-    padding: spacing.sm,
-    borderRadius: radius.md,
-    backgroundColor: 'rgba(239, 68, 68, 0.1)',
-    borderWidth: 1,
-    borderColor: 'rgba(239, 68, 68, 0.2)',
-    marginTop: spacing.sm,
-  },
-  errorText: {
-    fontSize: 12,
-    fontWeight: '400',
-    color: '#f87171',
-    letterSpacing: -0.1,
-    textAlign: 'center',
-  },
-  modalFooter: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    padding: spacing.lg,
-    borderTopWidth: 0.5,
-    borderTopColor: 'rgba(255,255,255,0.1)',
-  },
-  button: {
-    flex: 1,
-    height: 44,
-    borderRadius: radius.lg,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  buttonPrimary: {
-    backgroundColor: 'rgba(52, 199, 89, 0.2)',
-    borderWidth: 1,
-    borderColor: 'rgba(52, 199, 89, 0.3)',
-  },
-  buttonPrimaryText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#34c759',
-    letterSpacing: -0.2,
-  },
-  buttonSecondary: {
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-  },
-  buttonSecondaryText: {
-    fontSize: 15,
-    fontWeight: '500',
-    color: colors.text.secondary,
-    letterSpacing: -0.2,
-  },
-  buttonDisabled: {
-    opacity: 0.5,
   },
 })

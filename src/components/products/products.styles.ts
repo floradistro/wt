@@ -53,12 +53,10 @@ export const productsStyles = StyleSheet.create({
     zIndex: 10,
   },
   titleSectionContainer: {
-    backgroundColor: colors.glass.regular,
+    backgroundColor: 'rgba(255,255,255,0.05)', // Match product list - borderless
     borderRadius: radius.xxl,
     borderCurve: 'continuous',
     padding: spacing.lg,
-    borderWidth: 0.5,
-    borderColor: colors.border.emphasis,
   },
   titleWithLogo: {
     flexDirection: 'row',
@@ -69,8 +67,6 @@ export const productsStyles = StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: radius.xxl,
-    borderWidth: 1,
-    borderColor: colors.border.emphasis,
     shadowColor: colors.background.primary,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.15,
@@ -89,9 +85,7 @@ export const productsStyles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs,
     borderRadius: radius.md,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.2)',
+    backgroundColor: 'rgba(255,255,255,0.05)', // Match product list - borderless
   },
   addProductButtonText: {
     fontSize: 13,
@@ -110,7 +104,7 @@ export const productsStyles = StyleSheet.create({
     borderRadius: radius.xxl,
     borderCurve: 'continuous',
     overflow: 'hidden',
-    backgroundColor: colors.glass.regular,
+    backgroundColor: 'rgba(255,255,255,0.05)', // Match product list - borderless
   },
   sectionHeader: {
     paddingVertical: 4,
@@ -146,7 +140,7 @@ export const productsStyles = StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: colors.glass.regular,
+    backgroundColor: 'rgba(255,255,255,0.05)', // Match product list - borderless
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 8,

@@ -4,26 +4,20 @@
  */
 
 import { View, Text, ScrollView, Pressable, ActivityIndicator, Alert, Animated, TextInput, Image, Switch } from "react-native"
-import { useState } from "react"
-import { LiquidGlassView, LiquidGlassContainerView, isLiquidGlassSupported } from "@callstack/liquid-glass"
+import { useState, useEffect } from "react"
+// Removed LiquidGlassView - using plain View with borderless style
 import { LinearGradient } from "expo-linear-gradient"
 import Slider from "@react-native-community/slider"
 import * as Haptics from "expo-haptics"
 import { colors, typography, spacing, radius } from "@/theme/tokens"
 import { layout } from "@/theme/layout"
-import type { UserLocationAccess } from "@/hooks/useUserLocations"
-import type { UserWithLocations } from "@/hooks/useUsers"
-import type { Supplier } from "@/hooks/useSuppliers"
-import type { LoyaltyProgram } from "@/hooks/useLoyalty"
-import type { Campaign } from "@/hooks/useCampaigns"
-import type { PaymentProcessor } from "@/hooks/usePaymentProcessors"
-import { UserManagementModals } from "../UserManagementModals"
-import { SupplierManagementModals } from "../SupplierManagementModals"
-import { PaymentProcessorModal } from "../PaymentProcessorModal"
+import type { Location } from "@/types/pos"
+import type { PaymentProcessor } from "@/types/payment-processors"
 import { DetailRow } from "./DetailRow"
 import { locationConfigurationStyles as styles } from "./locationConfiguration.styles"
 import { usePaymentProcessors, usePaymentProcessorsLoading, usePaymentProcessorsError, usePaymentProcessorsActions } from "@/stores/payment-processors-settings.store"
-import { useActiveModal, useSelectedProcessor, useSelectedLocationId, useSettingsUIActions } from "@/stores/settings-ui.store"
+import { updateLocation } from "@/services/locations.service"
+import { useAppAuth } from "@/contexts/AppAuthContext"
 
 function PaymentIcon({ color }: { color: string }) {
   return (
@@ -36,39 +30,143 @@ function PaymentIcon({ color }: { color: string }) {
 }
 
 function LocationConfigurationDetail({
-  location,
+  location: initialLocation,
   headerOpacity,
   onBack,
 }: {
-  location: UserLocationAccess
+  location: Location
   headerOpacity: Animated.Value
   onBack: () => void
 }) {
+  // Local state for the location to enable instant updates
+  const [location, setLocation] = useState<Location>(initialLocation)
+
+  // Update local location when initialLocation changes (e.g., from parent refresh)
+  useEffect(() => {
+    setLocation(initialLocation)
+  }, [initialLocation])
+
   // ✅ Read from stores instead of props
   const allProcessors = usePaymentProcessors()
   const processorsLoading = usePaymentProcessorsLoading()
   const processorsError = usePaymentProcessorsError()
   const { createProcessor, updateProcessor, deleteProcessor, testConnection, setAsDefault, toggleProcessorStatus } = usePaymentProcessorsActions()
+  const { refreshVendorData } = useAppAuth()
 
   // Filter processors for this location
-  const processors = allProcessors.filter(p => p.location_id === location.location.id)
-
-  // ✅ Use store actions for modal state
-  const activeModal = useActiveModal()
-  const selectedProcessor = useSelectedProcessor()
-  const selectedLocationId = useSelectedLocationId()
-  const { openModal, closeModal } = useSettingsUIActions()
+  const processors = allProcessors.filter(p => p.location_id === location.id)
 
   const [testingProcessorId, setTestingProcessorId] = useState<string | null>(null)
 
+  // Edit mode state
+  const [isEditMode, setIsEditMode] = useState(false)
+  const [isSaving, setIsSaving] = useState(false)
+  const [editedLocation, setEditedLocation] = useState({
+    name: location.name,
+    address_line1: location.address_line1 || '',
+    city: location.city || '',
+    state: location.state || '',
+    postal_code: location.postal_code || '',
+    phone: location.phone || '',
+    is_active: location.is_active !== undefined ? location.is_active : true,
+    tax_rate: location.tax_rate !== undefined ? (location.tax_rate * 100).toString() : '',
+    tax_name: location.tax_name || 'Sales Tax',
+  })
+
+  const handleEditLocation = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    setIsEditMode(true)
+  }
+
+  const handleCancelEdit = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    setIsEditMode(false)
+    // Reset to original values
+    setEditedLocation({
+      name: location.name,
+      address_line1: location.address_line1 || '',
+      city: location.city || '',
+      state: location.state || '',
+      postal_code: location.postal_code || '',
+      phone: location.phone || '',
+      is_active: location.is_active !== undefined ? location.is_active : true,
+      tax_rate: location.tax_rate !== undefined ? (location.tax_rate * 100).toString() : '',
+      tax_name: location.tax_name || 'Sales Tax',
+    })
+  }
+
+  const handleSaveLocation = async () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+    setIsSaving(true)
+
+    try {
+      // Validate tax rate
+      let taxRate: number | undefined = undefined
+      if (editedLocation.tax_rate.trim() !== '') {
+        const parsedRate = parseFloat(editedLocation.tax_rate)
+        if (isNaN(parsedRate) || parsedRate < 0 || parsedRate > 100) {
+          Alert.alert('Invalid Tax Rate', 'Please enter a valid tax rate between 0 and 100.')
+          setIsSaving(false)
+          return
+        }
+        taxRate = parsedRate / 100 // Convert percentage to decimal
+      }
+
+      const { data, error } = await updateLocation(location.id, {
+        name: editedLocation.name.trim(),
+        address_line1: editedLocation.address_line1.trim(),
+        city: editedLocation.city.trim(),
+        state: editedLocation.state.trim(),
+        postal_code: editedLocation.postal_code.trim(),
+        phone: editedLocation.phone.trim(),
+        is_active: editedLocation.is_active,
+        tax_rate: taxRate,
+        tax_name: editedLocation.tax_name.trim() || 'Sales Tax',
+      })
+
+      if (error) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
+        Alert.alert('Error', error)
+      } else {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+
+        // Immediately update the local location state for instant UI update
+        setLocation({
+          ...location,
+          name: editedLocation.name.trim(),
+          address_line1: editedLocation.address_line1.trim(),
+          city: editedLocation.city.trim(),
+          state: editedLocation.state.trim(),
+          postal_code: editedLocation.postal_code.trim(),
+          phone: editedLocation.phone.trim(),
+          is_active: editedLocation.is_active,
+          tax_rate: taxRate,
+          tax_name: editedLocation.tax_name.trim() || 'Sales Tax',
+        })
+
+        setIsEditMode(false)
+
+        // Refresh vendor data in background to sync with parent
+        refreshVendorData().catch(err => {
+          console.error('Failed to refresh vendor data:', err)
+        })
+      }
+    } catch (err) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
+      Alert.alert('Error', err instanceof Error ? err.message : 'Failed to update location')
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
   const handleAddProcessor = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-    openModal('addProcessor', null, location.location.id)
+    Alert.alert('Payment Processors', 'Payment processor configuration coming soon. Contact support to add processors.')
   }
 
   const handleEditProcessor = (processor: PaymentProcessor) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-    openModal('editProcessor', processor, location.location.id)
+    Alert.alert('Payment Processors', 'Payment processor editing coming soon. Contact support to edit processors.')
   }
 
   const handleTestConnection = async (processor: PaymentProcessor) => {
@@ -166,10 +264,10 @@ function LocationConfigurationDetail({
 
   const formatAddress = () => {
     const parts = [
-      location.location.address_line1,
-      location.location.city,
-      location.location.state,
-      location.location.postal_code,
+      location.address_line1,
+      location.city,
+      location.state,
+      location.postal_code,
     ].filter(Boolean)
     return parts.join(', ') || 'No address'
   }
@@ -179,73 +277,222 @@ function LocationConfigurationDetail({
 
   return (
     <View style={styles.detailContainer}>
-      <Animated.View style={[styles.fixedHeader, { opacity: headerOpacity }]}>
-        <Pressable onPress={onBack} style={styles.fixedHeaderButton}>
-          <Text style={styles.fixedHeaderButtonText}>‹ Back</Text>
-        </Pressable>
-        <Text style={styles.fixedHeaderTitle}>{location.location.name}</Text>
-        <View style={{ width: 70 }} />
-      </Animated.View>
-
-      <LinearGradient
-        colors={['rgba(0,0,0,0.95)', 'rgba(0,0,0,0.8)', 'rgba(0,0,0,0)']}
-        style={styles.fadeGradient}
-        pointerEvents="none"
-      />
-
       <ScrollView
         style={styles.detailScroll}
         showsVerticalScrollIndicator={true}
         indicatorStyle="white"
-        scrollIndicatorInsets={{ right: 2, top: layout.contentStartTop, bottom: layout.dockHeight }}
-        contentContainerStyle={{ paddingTop: layout.contentStartTop, paddingBottom: layout.dockHeight, paddingRight: 0 }}
-        onScroll={(e) => {
-          const offsetY = e.nativeEvent.contentOffset.y
-          const threshold = 40
-          headerOpacity.setValue(offsetY > threshold ? 1 : 0)
-        }}
-        scrollEventThrottle={16}
+        scrollIndicatorInsets={{ right: 2, top: 0, bottom: layout.dockHeight }}
+        contentContainerStyle={{ paddingTop: 0, paddingBottom: layout.dockHeight, paddingRight: 0 }}
       >
         <View style={[styles.cardWrapper, styles.titleRow]}>
           <Pressable
             onPress={onBack}
-            style={[styles.addButton, { backgroundColor: colors.glass.regular }]}
+            style={[styles.addButton, { backgroundColor: 'rgba(255,255,255,0.05)' }]} // Match product list - borderless
             accessible={true}
             accessibilityRole="button"
             accessibilityLabel="Back to locations"
           >
             <Text style={[styles.addButtonText, { color: colors.text.secondary }]}>‹ Locations</Text>
           </Pressable>
-          <Text style={styles.detailTitle}>{location.location.name}</Text>
+          <Text style={styles.detailTitle}>{location.name}</Text>
         </View>
 
         {/* Location Info */}
-        <Text style={[styles.cardSectionTitle, { marginTop: spacing.lg }]}>STORE INFORMATION</Text>
-        <LiquidGlassContainerView spacing={12} style={styles.cardWrapper}>
-          <LiquidGlassView
-            interactive
-            style={[styles.detailCard, !isLiquidGlassSupported && styles.cardFallback]}
-          >
-            <View style={{ padding: spacing.md, gap: spacing.sm }}>
-              <Text style={styles.formLabel}>ADDRESS</Text>
-              <Text style={styles.locationConfigValue}>{formatAddress()}</Text>
-              {location.location.phone && (
-                <>
-                  <Text style={[styles.formLabel, { marginTop: spacing.md }]}>PHONE</Text>
-                  <Text style={styles.locationConfigValue}>{location.location.phone}</Text>
-                </>
-              )}
-              {location.location.tax_rate !== undefined && location.location.tax_rate !== null && (
-                <>
-                  <Text style={[styles.formLabel, { marginTop: spacing.md }]}>TAX RATE</Text>
-                  <Text style={styles.locationConfigValue}>
-                    {(location.location.tax_rate * 100).toFixed(2)}% {location.location.tax_name || 'Sales Tax'}
-                  </Text>
-                </>
-              )}
+        <View style={[styles.cardWrapper, styles.titleRow]}>
+          <Text style={[styles.cardSectionTitle, { margin: 0 }]}>STORE INFORMATION</Text>
+          {!isEditMode ? (
+            <Pressable onPress={handleEditLocation} style={styles.addButton}>
+              <Text style={styles.addButtonText}>Edit</Text>
+            </Pressable>
+          ) : (
+            <View style={{ flexDirection: 'row', gap: spacing.xs }}>
+              <Pressable
+                onPress={handleCancelEdit}
+                disabled={isSaving}
+                style={[styles.addButton, { backgroundColor: 'rgba(255,255,255,0.05)' }]} // Match product list - borderless
+              >
+                <Text style={[styles.addButtonText, { color: colors.text.tertiary }]}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                onPress={handleSaveLocation}
+                disabled={isSaving}
+                style={[styles.addButton, { backgroundColor: '#60A5FA20' }]}
+              >
+                <Text style={[styles.addButtonText, { color: '#60A5FA', fontWeight: '600' }]}>
+                  {isSaving ? 'Saving...' : 'Save'}
+                </Text>
+              </Pressable>
             </View>
-          </LiquidGlassView>
-        </LiquidGlassContainerView>
+          )}
+        </View>
+        <View style={styles.cardWrapper}>
+          <View style={styles.detailCard}>
+            <View style={{ padding: spacing.md, gap: spacing.sm }}>
+              {/* Location Name */}
+              <Text style={styles.formLabel}>LOCATION NAME</Text>
+              {isEditMode ? (
+                <TextInput
+                  value={editedLocation.name}
+                  onChangeText={(text) => setEditedLocation({ ...editedLocation, name: text })}
+                  style={styles.formInput}
+                  placeholder="Location name"
+                  placeholderTextColor={colors.text.quaternary}
+                  editable={!isSaving}
+                />
+              ) : (
+                <Text style={styles.locationConfigValue}>{location.name}</Text>
+              )}
+
+              {/* Address Line 1 */}
+              <Text style={[styles.formLabel, { marginTop: spacing.md }]}>ADDRESS LINE 1</Text>
+              {isEditMode ? (
+                <TextInput
+                  value={editedLocation.address_line1}
+                  onChangeText={(text) => setEditedLocation({ ...editedLocation, address_line1: text })}
+                  style={styles.formInput}
+                  placeholder="Street address"
+                  placeholderTextColor={colors.text.quaternary}
+                  editable={!isSaving}
+                />
+              ) : (
+                <Text style={styles.locationConfigValue}>{location.address_line1 || 'Not set'}</Text>
+              )}
+
+              {/* City */}
+              <Text style={[styles.formLabel, { marginTop: spacing.md }]}>CITY</Text>
+              {isEditMode ? (
+                <TextInput
+                  value={editedLocation.city}
+                  onChangeText={(text) => setEditedLocation({ ...editedLocation, city: text })}
+                  style={styles.formInput}
+                  placeholder="City"
+                  placeholderTextColor={colors.text.quaternary}
+                  editable={!isSaving}
+                />
+              ) : (
+                <Text style={styles.locationConfigValue}>{location.city || 'Not set'}</Text>
+              )}
+
+              {/* State & Postal Code */}
+              <View style={{ flexDirection: 'row', gap: spacing.md }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.formLabel, { marginTop: spacing.md }]}>STATE</Text>
+                  {isEditMode ? (
+                    <TextInput
+                      value={editedLocation.state}
+                      onChangeText={(text) => setEditedLocation({ ...editedLocation, state: text.toUpperCase() })}
+                      style={styles.formInput}
+                      placeholder="CA"
+                      placeholderTextColor={colors.text.quaternary}
+                      maxLength={2}
+                      autoCapitalize="characters"
+                      editable={!isSaving}
+                    />
+                  ) : (
+                    <Text style={styles.locationConfigValue}>{location.state || 'Not set'}</Text>
+                  )}
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.formLabel, { marginTop: spacing.md }]}>ZIP CODE</Text>
+                  {isEditMode ? (
+                    <TextInput
+                      value={editedLocation.postal_code}
+                      onChangeText={(text) => setEditedLocation({ ...editedLocation, postal_code: text })}
+                      style={styles.formInput}
+                      placeholder="12345"
+                      placeholderTextColor={colors.text.quaternary}
+                      keyboardType="number-pad"
+                      maxLength={10}
+                      editable={!isSaving}
+                    />
+                  ) : (
+                    <Text style={styles.locationConfigValue}>{location.postal_code || 'Not set'}</Text>
+                  )}
+                </View>
+              </View>
+
+              {/* Phone */}
+              <Text style={[styles.formLabel, { marginTop: spacing.md }]}>PHONE</Text>
+              {isEditMode ? (
+                <TextInput
+                  value={editedLocation.phone}
+                  onChangeText={(text) => setEditedLocation({ ...editedLocation, phone: text })}
+                  style={styles.formInput}
+                  placeholder="(555) 123-4567"
+                  placeholderTextColor={colors.text.quaternary}
+                  keyboardType="phone-pad"
+                  editable={!isSaving}
+                />
+              ) : (
+                <Text style={styles.locationConfigValue}>{location.phone || 'Not set'}</Text>
+              )}
+
+              {/* Online Visibility Toggle */}
+              <View style={{ marginTop: spacing.lg, paddingTop: spacing.md, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.05)' }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.formLabel, { marginBottom: spacing.xs }]}>ONLINE VISIBILITY</Text>
+                    <Text style={{ ...typography.footnote, color: colors.text.tertiary }}>
+                      {editedLocation.is_active
+                        ? 'Location is visible on your online storefront'
+                        : 'Location is hidden from your online storefront'}
+                    </Text>
+                  </View>
+                  <Switch
+                    value={editedLocation.is_active}
+                    onValueChange={(value) => {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                      setEditedLocation({ ...editedLocation, is_active: value })
+                    }}
+                    disabled={!isEditMode || isSaving}
+                    trackColor={{ false: 'rgba(120,120,128,0.32)', true: '#60A5FA' }}
+                    thumbColor="#fff"
+                    ios_backgroundColor="rgba(120,120,128,0.32)"
+                  />
+                </View>
+              </View>
+
+              {/* Tax Rate */}
+              <View style={{ flexDirection: 'row', gap: spacing.md }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.formLabel, { marginTop: spacing.md }]}>TAX RATE (%)</Text>
+                  {isEditMode ? (
+                    <TextInput
+                      value={editedLocation.tax_rate}
+                      onChangeText={(text) => setEditedLocation({ ...editedLocation, tax_rate: text })}
+                      style={styles.formInput}
+                      placeholder="8.75"
+                      placeholderTextColor={colors.text.quaternary}
+                      keyboardType="decimal-pad"
+                      editable={!isSaving}
+                    />
+                  ) : (
+                    <Text style={styles.locationConfigValue}>
+                      {location.tax_rate !== undefined && location.tax_rate !== null
+                        ? `${(location.tax_rate * 100).toFixed(2)}%`
+                        : 'Not set'}
+                    </Text>
+                  )}
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.formLabel, { marginTop: spacing.md }]}>TAX NAME</Text>
+                  {isEditMode ? (
+                    <TextInput
+                      value={editedLocation.tax_name}
+                      onChangeText={(text) => setEditedLocation({ ...editedLocation, tax_name: text })}
+                      style={styles.formInput}
+                      placeholder="Sales Tax"
+                      placeholderTextColor={colors.text.quaternary}
+                      editable={!isSaving}
+                    />
+                  ) : (
+                    <Text style={styles.locationConfigValue}>{location.tax_name || 'Sales Tax'}</Text>
+                  )}
+                </View>
+              </View>
+            </View>
+          </View>
+        </View>
 
         {/* Payment Processors Section */}
         <Text style={[styles.cardSectionTitle, { marginTop: spacing.xl }]}>PAYMENT PROCESSORS</Text>
@@ -259,10 +506,7 @@ function LocationConfigurationDetail({
           </View>
         ) : processorsError ? (
           <View style={styles.cardWrapper}>
-            <LiquidGlassView
-              interactive
-              style={[styles.detailCard, !isLiquidGlassSupported && styles.cardFallback]}
-            >
+            <View style={styles.detailCard}>
               <View style={{ padding: spacing.xl, alignItems: 'center', gap: spacing.sm }}>
                 <Text style={[styles.emptyStateText, { fontSize: 15, color: '#ef4444' }]}>Error loading processors</Text>
                 <Text style={{ ...typography.footnote, color: colors.text.tertiary, textAlign: 'center' }}>
@@ -278,14 +522,11 @@ function LocationConfigurationDetail({
                   <Text style={styles.addButtonText}>Retry</Text>
                 </Pressable>
               </View>
-            </LiquidGlassView>
+            </View>
           </View>
         ) : activeProcessors.length === 0 ? (
           <View style={styles.cardWrapper}>
-            <LiquidGlassView
-              interactive
-              style={[styles.detailCard, !isLiquidGlassSupported && styles.cardFallback]}
-            >
+            <View style={styles.detailCard}>
               <View style={{ padding: spacing.xl, alignItems: 'center', gap: spacing.sm }}>
                 <PaymentIcon color={colors.text.quaternary} />
                 <Text style={[styles.emptyStateText, { fontSize: 15 }]}>No processors configured</Text>
@@ -296,7 +537,7 @@ function LocationConfigurationDetail({
                   <Text style={styles.addButtonText}>Add Processor</Text>
                 </Pressable>
               </View>
-            </LiquidGlassView>
+            </View>
           </View>
         ) : (
           <>
@@ -315,11 +556,8 @@ function LocationConfigurationDetail({
               const testStatus = processor.last_test_status
 
               return (
-                <LiquidGlassContainerView key={processor.id} spacing={12} style={styles.cardWrapper}>
-                  <LiquidGlassView
-                    interactive
-                    style={[styles.detailCard, !isLiquidGlassSupported && styles.cardFallback]}
-                  >
+                <View style={styles.cardWrapper}>
+                  <View style={styles.detailCard}>
                     <View style={{ padding: spacing.md }}>
                       {/* Header with name and badges */}
                       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.sm }}>
@@ -350,7 +588,7 @@ function LocationConfigurationDetail({
                         <View style={{
                           paddingVertical: spacing.sm,
                           paddingHorizontal: spacing.sm,
-                          backgroundColor: colors.glass.thin,
+                          backgroundColor: 'rgba(255,255,255,0.05)', // Match product list - borderless
                           borderRadius: radius.md,
                           marginBottom: spacing.md,
                           borderLeftWidth: 3,
@@ -385,9 +623,7 @@ function LocationConfigurationDetail({
                           style={[
                             styles.userActionButton,
                             {
-                              backgroundColor: isTesting ? colors.glass.thin : '#60A5FA20',
-                              borderWidth: 1,
-                              borderColor: isTesting ? colors.border.subtle : '#60A5FA40',
+                              backgroundColor: isTesting ? 'rgba(255,255,255,0.05)' : '#60A5FA20', // Match product list - borderless
                             }
                           ]}
                         >
@@ -423,8 +659,8 @@ function LocationConfigurationDetail({
                         </Pressable>
                       </View>
                     </View>
-                  </LiquidGlassView>
-                </LiquidGlassContainerView>
+                  </View>
+                </View>
               )
             })}
 
@@ -432,11 +668,8 @@ function LocationConfigurationDetail({
               <>
                 <Text style={[styles.cardSectionTitle, { marginTop: spacing.xl }]}>INACTIVE</Text>
                 {inactiveProcessors.map((processor) => (
-                  <LiquidGlassContainerView key={processor.id} spacing={12} style={styles.cardWrapper}>
-                    <LiquidGlassView
-                      interactive
-                      style={[styles.detailCard, !isLiquidGlassSupported && styles.cardFallback, { opacity: 0.5 }]}
-                    >
+                  <View style={styles.cardWrapper}>
+                    <View style={styles.detailCard}>
                       <View style={styles.supplierCard}>
                         <View style={styles.supplierCardHeader}>
                           <View style={styles.supplierCardInfo}>
@@ -462,8 +695,8 @@ function LocationConfigurationDetail({
                           </Pressable>
                         </View>
                       </View>
-                    </LiquidGlassView>
-                  </LiquidGlassContainerView>
+                    </View>
+                  </View>
                 ))}
               </>
             )}
@@ -471,18 +704,6 @@ function LocationConfigurationDetail({
         )}
       </ScrollView>
 
-      {/* ✅ Modal controlled by store */}
-      {(activeModal === 'addProcessor' || activeModal === 'editProcessor') &&
-       selectedLocationId === location.location.id && (
-        <PaymentProcessorModal
-          visible={true}
-          processor={selectedProcessor}
-          locationId={location.location.id}
-          onClose={closeModal}
-          onCreate={createProcessor}
-          onUpdate={updateProcessor}
-        />
-      )}
     </View>
   )
 }

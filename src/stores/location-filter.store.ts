@@ -47,12 +47,18 @@ export const useLocationFilter = create<LocationFilterState>()(
 
   /**
    * Initialize location filter from user's assigned locations
-   * Only auto-selects for staff users (not admins)
+   *
+   * BEHAVIOR:
+   * - For Products/Orders/Customers screens: ALWAYS defaults to ALL locations (empty array)
+   * - This ensures users see complete data by default
+   * - Users can manually filter to specific locations using the location selector
+   *
+   * IMPORTANT: Only initializes ONCE per app session
    */
   initializeFromUserLocations: (userLocationIds: string[], isAdmin: boolean) => {
     const { isInitialized } = get()
 
-    // Only initialize once
+    // Only initialize once per app session
     if (isInitialized) {
       // eslint-disable-next-line no-console
       console.log('[LocationFilter] Already initialized, skipping', {
@@ -62,30 +68,20 @@ export const useLocationFilter = create<LocationFilterState>()(
     }
 
     // eslint-disable-next-line no-console
-    console.log('[LocationFilter] Initializing from user locations', {
+    console.log('[LocationFilter] Initializing location filter', {
       userLocationIds,
       isAdmin
     })
 
-    // Staff users: auto-select their assigned location(s)
-    // Admin users: don't auto-filter (show all)
-    if (!isAdmin && userLocationIds.length > 0) {
-      set({
-        selectedLocationIds: userLocationIds,
-        isInitialized: true,
-      })
-      // eslint-disable-next-line no-console
-      console.log('[LocationFilter] Auto-selected staff user locations', {
-        selectedLocationIds: userLocationIds
-      })
-    } else {
-      set({
-        selectedLocationIds: [],
-        isInitialized: true,
-      })
-      // eslint-disable-next-line no-console
-      console.log('[LocationFilter] Admin user - no auto-filter')
-    }
+    // ✅ ALWAYS default to ALL locations (empty array) for better UX
+    // Users can manually filter if needed via location selector
+    set({
+      selectedLocationIds: [],
+      isInitialized: true,
+    })
+
+    // eslint-disable-next-line no-console
+    console.log('[LocationFilter] Initialized to show ALL locations')
   },
 
   /**

@@ -24,7 +24,6 @@ import { POSCart } from '../cart/POSCart'
 import { POSCheckoutModals } from './POSCheckoutModals'
 
 // Hooks
-import { useLoyalty } from '@/hooks/pos'
 import { useCustomerSelection } from '@/hooks/pos/useCustomerSelection'
 import { useCampaigns } from '@/hooks/useCampaigns'
 import { usePaymentProcessor } from '@/stores/payment-processor.store'
@@ -34,6 +33,7 @@ import { useSelectedDiscountId, checkoutUIActions, useActiveModal } from '@/stor
 import { useSelectedCustomer, useScannedDataForNewCustomer, useCustomerMatches, customerActions } from '@/stores/customer.store'
 import { paymentActions } from '@/stores/payment.store'
 import { taxActions } from '@/stores/tax.store'
+import { useLoyaltyState, loyaltyActions } from '@/stores/loyalty.store'
 
 // Context - Zero prop drilling!
 import { useAppAuth } from '@/contexts/AppAuthContext'
@@ -114,14 +114,24 @@ export function POSCheckout({
   const { subtotal, itemCount } = useCartTotals()
   const selectedDiscountId = useSelectedDiscountId()
 
-  const {
-    loyaltyProgram,
-    loyaltyPointsToRedeem,
-    setLoyaltyPointsToRedeem,
-    resetLoyalty,
-    getMaxRedeemablePoints,
-    loyaltyDiscountAmount,
-  } = useLoyalty()
+  // Loyalty state from store (same as slider)
+  const { loyaltyProgram, pointsToRedeem } = useLoyaltyState()
+  const loyaltyPointsToRedeem = pointsToRedeem
+
+  // Loyalty actions
+  const setLoyaltyPointsToRedeem = loyaltyActions.setPointsToRedeem
+  const resetLoyalty = loyaltyActions.resetLoyalty
+
+  // Calculate loyalty discount amount (use the store's getter)
+  const loyaltyDiscountAmount = loyaltyActions.getDiscountAmount()
+
+  // Calculate max redeemable points
+  const getMaxRedeemablePoints = (subtotal: number): number => {
+    if (!selectedCustomer) return 0
+    const pointValue = loyaltyProgram?.point_value || 0.01
+    const maxPointsFromSubtotal = Math.floor(subtotal / pointValue)
+    return Math.min(selectedCustomer.loyalty_points, maxPointsFromSubtotal)
+  }
 
   // Get active discounts
   const { campaigns: discounts } = useCampaigns()
@@ -273,28 +283,27 @@ export function POSCheckout({
       throw new Error('Missing session information')
     }
 
-    // CRITICAL VALIDATION: Ensure all session fields are present
-    logger.error('💰 POSCheckout: Validating session data before payment:')
-    logger.error('  hasSession:', !!session)
-    logger.error('  locationId:', session.locationId, typeof session.locationId, 'empty?', !session.locationId)
-    logger.error('  registerId:', session.registerId, typeof session.registerId, 'empty?', !session.registerId)
-    logger.error('  sessionId:', session.sessionId, typeof session.sessionId, 'empty?', !session.sessionId)
-    logger.error('  hasVendor:', !!vendor)
-    logger.error('  vendorId:', vendor?.id, typeof vendor?.id, 'empty?', !vendor?.id)
-    logger.error('  hasCustomUserId:', !!customUserId)
-    logger.error('  FULL SESSION OBJECT:', JSON.stringify(session, null, 2))
-    logger.error('  FULL VENDOR OBJECT:', JSON.stringify(vendor, null, 2))
+    // Validate session fields are present
+    logger.debug('💰 POSCheckout: Session validation', {
+      hasSession: !!session,
+      locationId: session.locationId,
+      registerId: session.registerId,
+      sessionId: session.sessionId,
+      vendorId: vendor?.id,
+      hasCustomUserId: !!customUserId,
+    })
 
     if (!session.locationId || !session.registerId || !session.sessionId) {
-      logger.error('❌ CRITICAL: Incomplete session data!')
-      logger.error('  FAILING CHECK - locationId:', session.locationId)
-      logger.error('  FAILING CHECK - registerId:', session.registerId)
-      logger.error('  FAILING CHECK - sessionId:', session.sessionId)
+      logger.error('❌ Incomplete session data', {
+        locationId: session.locationId,
+        registerId: session.registerId,
+        sessionId: session.sessionId,
+      })
       throw new Error('Session incomplete. Please restart your POS session by selecting location and register again.')
     }
 
     if (!vendor.id) {
-      logger.error('❌ CRITICAL: Missing vendor ID!')
+      logger.error('❌ Missing vendor ID')
       throw new Error('Vendor information missing. Please log out and log back in.')
     }
 

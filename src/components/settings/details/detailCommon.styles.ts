@@ -55,16 +55,14 @@ export const detailCommonStyles = StyleSheet.create({
     flex: 1,
   },
   cardWrapper: {
-    paddingHorizontal: layout.containerMargin, // 8px - matches NavSidebar edge spacing
-    marginVertical: layout.contentVertical, // 20px vertical spacing
+    paddingHorizontal: layout.containerMargin, // 8px - matches NavSidebar edge spacing AND ProductsListView
+    marginBottom: layout.containerMargin, // 8px - matches ProductsListView EXACTLY
   },
   titleSectionContainer: {
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: 'rgba(255,255,255,0.05)', // Match product list - borderless
     borderRadius: radius.xxl,
     borderCurve: 'continuous',
     padding: spacing.lg,
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.12)',
   },
   titleWithLogo: {
     flexDirection: 'row',
@@ -75,8 +73,6 @@ export const detailCommonStyles = StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: radius.xxl,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.25)',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.15,
@@ -93,18 +89,44 @@ export const detailCommonStyles = StyleSheet.create({
   detailTitleLarge: {
     fontSize: 34,
     fontWeight: '700',
-    color: colors.text.primary,
-    letterSpacing: -0.5,
+    color: '#fff', // Match ProductsListView exactly
+    letterSpacing: -0.8, // Match ProductsListView exactly
+  },
+  largeTitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   detailCard: {
     borderRadius: radius.xxl,
     borderCurve: 'continuous',
     overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: 'rgba(255,255,255,0.05)', // Match product list - borderless
   },
-  cardFallback: {
+  // List Card - MATCHES ProductsListView productsCardGlass
+  listCardGlass: {
+    borderRadius: radius.xxl,
+    borderCurve: 'continuous',
+    overflow: 'hidden',
     backgroundColor: 'rgba(255,255,255,0.05)',
+  },
+  // List Item - MATCHES ProductItem styling
+  listItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: layout.rowPaddingVertical,
+    paddingHorizontal: layout.rowPaddingHorizontal,
+    gap: 12,
+    backgroundColor: 'transparent',
+    borderBottomWidth: 0.5,
+    borderBottomColor: 'rgba(255,255,255,0.05)',
+    minHeight: layout.minTouchTarget,
+  },
+  listItemActive: {
+    backgroundColor: 'rgba(99,99,102,0.2)',
+  },
+  listItemLast: {
+    borderBottomWidth: 0,
   },
   emptyState: {
     flex: 1,
@@ -116,7 +138,7 @@ export const detailCommonStyles = StyleSheet.create({
     width: 60,
     height: 60,
     borderRadius: 30,
-    backgroundColor: colors.glass.ultraThin,
+    backgroundColor: 'rgba(255,255,255,0.05)', // Match product list - borderless
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: spacing.md,
@@ -139,9 +161,7 @@ export const detailCommonStyles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs,
     borderRadius: radius.md,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.2)',
+    backgroundColor: 'rgba(255,255,255,0.05)', // Match product list - borderless
   },
   addButtonText: {
     fontSize: 13,
@@ -156,11 +176,9 @@ export const detailCommonStyles = StyleSheet.create({
     marginBottom: spacing.xxs,
   },
   formInputWrapper: {
-    backgroundColor: colors.glass.thin,
+    backgroundColor: 'rgba(255,255,255,0.05)', // Match product list - borderless
     borderRadius: radius.lg,
     padding: spacing.sm,
-    borderWidth: 0.5,
-    borderColor: colors.border.subtle,
   },
   formInput: {
     ...typography.body,
@@ -175,7 +193,7 @@ export const detailCommonStyles = StyleSheet.create({
     flexDirection: 'row',
     gap: spacing.xs,
     padding: spacing.xs,
-    backgroundColor: colors.glass.ultraThin,
+    backgroundColor: 'rgba(255,255,255,0.05)', // Match product list - borderless
     borderRadius: 9999,
   },
   tab: {
@@ -187,7 +205,7 @@ export const detailCommonStyles = StyleSheet.create({
     justifyContent: 'center',
   },
   tabActive: {
-    backgroundColor: colors.glass.thick,
+    backgroundColor: 'rgba(255,255,255,0.15)', // Match product list - borderless
   },
   tabText: {
     ...typography.body,
@@ -205,9 +223,7 @@ export const detailCommonStyles = StyleSheet.create({
     paddingVertical: spacing.xs,
     paddingHorizontal: spacing.xxs,
     borderRadius: radius.sm,
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: 'rgba(255,255,255,0.05)', // Match product list - borderless
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -218,8 +234,7 @@ export const detailCommonStyles = StyleSheet.create({
     letterSpacing: -0.1,
   },
   actionButtonDanger: {
-    backgroundColor: 'rgba(255, 59, 48, 0.1)',
-    borderColor: 'rgba(255, 59, 48, 0.2)',
+    backgroundColor: 'rgba(255, 59, 48, 0.15)', // Match product list - borderless
   },
   actionButtonDangerText: {
     fontSize: 11,

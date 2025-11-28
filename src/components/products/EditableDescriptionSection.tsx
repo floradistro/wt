@@ -10,15 +10,19 @@
 import { View, Text, StyleSheet, TextInput } from 'react-native'
 import { radius } from '@/theme/tokens'
 import { layout } from '@/theme/layout'
-import { useIsEditing, useEditedDescription, useOriginalProduct, productEditActions } from '@/stores/product-edit.store'
+import type { Product } from '@/types/products'
+import { useIsEditing, useEditedDescription, productEditActions } from '@/stores/product-edit.store'
 
-export function EditableDescriptionSection() {
+interface EditableDescriptionSectionProps {
+  product: Product
+}
+
+export function EditableDescriptionSection({ product }: EditableDescriptionSectionProps) {
   // Read from store
   const isEditing = useIsEditing()
   const editedDescription = useEditedDescription()
-  const originalProduct = useOriginalProduct()
 
-  const description = originalProduct?.description || null
+  const description = product?.description || null
 
   // Don't render section if no description and not editing
   if (!description && !isEditing) return null

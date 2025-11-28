@@ -3,15 +3,13 @@
  * Loyalty program and campaigns - Jobs Principle: Reward customer loyalty simply
  */
 
-import { View, Text, ScrollView, Pressable, ActivityIndicator, Alert, Animated, TextInput, Image } from "react-native"
+import { View, Text, ScrollView, Pressable, ActivityIndicator, Alert, Animated, TextInput } from "react-native"
 import { useState, useEffect } from "react"
-import { LiquidGlassView, LiquidGlassContainerView, isLiquidGlassSupported } from "@callstack/liquid-glass"
-import { LinearGradient } from "expo-linear-gradient"
+// Removed LiquidGlassView - using plain View with borderless style
 import * as Haptics from "expo-haptics"
 import { colors, spacing } from "@/theme/tokens"
 import { layout } from "@/theme/layout"
-import type { LoyaltyProgram } from "@/hooks/useLoyalty"
-import type { Campaign } from "@/hooks/useCampaigns"
+import { TitleSection } from "@/components/shared"
 import { CampaignsDetail } from "./CampaignsDetail"
 import { loyaltyManagementStyles as styles } from "./loyaltyManagement.styles"
 import {
@@ -55,7 +53,6 @@ function LoyaltyManagementDetail({
 
   const [activeTab, setActiveTab] = useState<'program' | 'campaigns'>('program')
   const [isEditing, setIsEditing] = useState(false)
-  const [showCreateCampaignModal, setShowCreateCampaignModal] = useState(false)
   const [formData, setFormData] = useState({
     name: 'Loyalty Rewards',
     points_per_dollar: '1.00',
@@ -142,43 +139,17 @@ function LoyaltyManagementDetail({
   if (!program && !isEditing) {
     return (
       <View style={styles.detailContainer}>
-        <Animated.View style={[styles.fixedHeader, { opacity: headerOpacity }]}>
-          <Text style={styles.fixedHeaderTitle}>Loyalty & Rewards</Text>
-        </Animated.View>
-
-        <LinearGradient
-          colors={['rgba(0,0,0,0.95)', 'rgba(0,0,0,0.8)', 'rgba(0,0,0,0)']}
-          style={styles.fadeGradient}
-          pointerEvents="none"
-        />
-
         <ScrollView
           style={styles.detailScroll}
           showsVerticalScrollIndicator={true}
           indicatorStyle="white"
-          scrollIndicatorInsets={{ right: 2, top: layout.contentStartTop, bottom: layout.dockHeight }}
-          contentContainerStyle={{ paddingTop: layout.contentStartTop, paddingBottom: layout.dockHeight, paddingRight: 0 }}
+          scrollIndicatorInsets={{ right: 2, top: 0, bottom: layout.dockHeight }}
+          contentContainerStyle={{ paddingTop: 0, paddingBottom: layout.dockHeight, paddingRight: 0 }}
         >
-          {/* Title Section with Vendor Logo */}
-          <View style={styles.cardWrapper}>
-            <View style={styles.titleSectionContainer}>
-              <View style={styles.titleWithLogo}>
-                {vendorLogo ? (
-                  <Image
-                    source={{ uri: vendorLogo }}
-                    style={styles.vendorLogoInline}
-                    resizeMode="contain"
-                        fadeDuration={0}
-                  />
-                ) : (
-                  <View style={[styles.vendorLogoInline, { backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' }]}>
-                    <Text style={{ color: 'rgba(255,255,255,0.3)', fontSize: 12 }}>No Logo</Text>
-                  </View>
-                )}
-                <Text style={styles.detailTitleLarge}>Loyalty & Rewards</Text>
-              </View>
-            </View>
-          </View>
+          <TitleSection
+            title="Loyalty & Rewards"
+            logo={vendorLogo}
+          />
 
           {/* Tab Switcher */}
           <View style={styles.cardWrapper}>
@@ -241,90 +212,55 @@ function LoyaltyManagementDetail({
   if (isEditing || !program) {
     return (
       <View style={styles.detailContainer}>
-        <Animated.View style={[styles.fixedHeader, { opacity: headerOpacity }]}>
-          <Text style={styles.fixedHeaderTitle}>Loyalty & Rewards</Text>
-        </Animated.View>
-
-        <LinearGradient
-          colors={['rgba(0,0,0,0.95)', 'rgba(0,0,0,0.8)', 'rgba(0,0,0,0)']}
-          style={styles.fadeGradient}
-          pointerEvents="none"
-        />
-
         <ScrollView
           style={styles.detailScroll}
           showsVerticalScrollIndicator={true}
           indicatorStyle="white"
-          scrollIndicatorInsets={{ right: 2, top: layout.contentStartTop, bottom: layout.dockHeight }}
-          contentContainerStyle={{ paddingTop: layout.contentStartTop, paddingBottom: layout.dockHeight, paddingRight: 0 }}
-          onScroll={(e) => {
-            const offsetY = e.nativeEvent.contentOffset.y
-            const threshold = 40
-            headerOpacity.setValue(offsetY > threshold ? 1 : 0)
-          }}
-          scrollEventThrottle={16}
+          scrollIndicatorInsets={{ right: 2, top: 0, bottom: layout.dockHeight }}
+          contentContainerStyle={{ paddingTop: 0, paddingBottom: layout.dockHeight, paddingRight: 0 }}
         >
-          {/* Title Section with Vendor Logo */}
-          <View style={styles.cardWrapper}>
-            <View style={styles.titleSectionContainer}>
-              <View style={styles.titleWithLogo}>
-                {vendorLogo ? (
-                  <Image
-                    source={{ uri: vendorLogo }}
-                    style={styles.vendorLogoInline}
-                    resizeMode="contain"
-                        fadeDuration={0}
-                  />
-                ) : (
-                  <View style={[styles.vendorLogoInline, { backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' }]}>
-                    <Text style={{ color: 'rgba(255,255,255,0.3)', fontSize: 12 }}>No Logo</Text>
-                  </View>
-                )}
-                <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <Text style={styles.detailTitleLarge}>Configure Loyalty Program</Text>
-                  <View style={{ flexDirection: 'row', gap: spacing.sm }}>
-                    <Pressable
-                      onPress={() => {
-                        // Reset form data to program values when canceling
-                        if (program) {
-                          setFormData({
-                            name: program.name || 'Loyalty Rewards',
-                            points_per_dollar: program.points_per_dollar.toString(),
-                            point_value: program.point_value.toString(),
-                            min_redemption_points: program.min_redemption_points.toString(),
-                            points_expiry_days: program.points_expiry_days?.toString() || '',
-                          })
-                        }
-                        setIsEditing(false)
-                      }}
-                style={[styles.addButton, { backgroundColor: colors.glass.regular }]}
-                accessible={true}
-                accessibilityRole="button"
-                accessibilityLabel="Cancel"
-              >
-                <Text style={[styles.addButtonText, { color: colors.text.secondary }]}>Cancel</Text>
-              </Pressable>
-              <Pressable
-                onPress={handleSave}
-                style={styles.addButton}
-                accessible={true}
-                accessibilityRole="button"
-                accessibilityLabel="Save"
-              >
-                <Text style={styles.addButtonText}>Save</Text>
-              </Pressable>
-            </View>
-                </View>
-              </View>
-            </View>
+          <TitleSection
+            title="Configure Loyalty Program"
+            logo={vendorLogo}
+          />
+
+          {/* Action Buttons */}
+          <View style={[styles.cardWrapper, { flexDirection: 'row', gap: spacing.sm, justifyContent: 'flex-end' }]}>
+            <Pressable
+              onPress={() => {
+                // Reset form data to program values when canceling
+                if (program) {
+                  setFormData({
+                    name: program.name || 'Loyalty Rewards',
+                    points_per_dollar: program.points_per_dollar.toString(),
+                    point_value: program.point_value.toString(),
+                    min_redemption_points: program.min_redemption_points.toString(),
+                    points_expiry_days: program.points_expiry_days?.toString() || '',
+                  })
+                }
+                setIsEditing(false)
+              }}
+              style={[styles.addButton, { backgroundColor: 'rgba(255,255,255,0.05)' }]} // Match product list - borderless
+              accessible={true}
+              accessibilityRole="button"
+              accessibilityLabel="Cancel"
+            >
+              <Text style={[styles.addButtonText, { color: colors.text.secondary }]}>Cancel</Text>
+            </Pressable>
+            <Pressable
+              onPress={handleSave}
+              style={styles.addButton}
+              accessible={true}
+              accessibilityRole="button"
+              accessibilityLabel="Save"
+            >
+              <Text style={styles.addButtonText}>Save</Text>
+            </Pressable>
           </View>
 
           {/* Configuration Form */}
-          <LiquidGlassContainerView spacing={12} style={styles.cardWrapper}>
-            <LiquidGlassView
-              interactive
-              style={[styles.detailCard, !isLiquidGlassSupported && styles.cardFallback]}
-            >
+          <View style={styles.cardWrapper}>
+            <View style={styles.detailCard}>
               <View style={{ padding: spacing.md, gap: spacing.md }}>
                 {/* Points per Dollar */}
                 <View>
@@ -390,8 +326,8 @@ function LoyaltyManagementDetail({
                   </View>
                 </View>
               </View>
-            </LiquidGlassView>
-          </LiquidGlassContainerView>
+            </View>
+          </View>
         </ScrollView>
       </View>
     )
@@ -400,84 +336,44 @@ function LoyaltyManagementDetail({
   // Display mode - show current configuration
   return (
     <View style={styles.detailContainer}>
-      <Animated.View style={[styles.fixedHeader, { opacity: headerOpacity }]}>
-        <Text style={styles.fixedHeaderTitle}>Loyalty & Rewards</Text>
-        <Pressable
-          onPress={() => setIsEditing(true)}
-          style={styles.fixedHeaderButton}
-          accessible={true}
-          accessibilityRole="button"
-          accessibilityLabel="Edit loyalty program"
-        >
-          <Text style={styles.fixedHeaderButtonText}>Edit</Text>
-        </Pressable>
-      </Animated.View>
-
-      <LinearGradient
-        colors={['rgba(0,0,0,0.95)', 'rgba(0,0,0,0.8)', 'rgba(0,0,0,0)']}
-        style={styles.fadeGradient}
-        pointerEvents="none"
-      />
-
       <ScrollView
         style={styles.detailScroll}
         showsVerticalScrollIndicator={true}
         indicatorStyle="white"
-        scrollIndicatorInsets={{ right: 2, top: layout.contentStartTop, bottom: layout.dockHeight }}
-        contentContainerStyle={{ paddingTop: layout.contentStartTop, paddingBottom: layout.dockHeight, paddingRight: 0 }}
-        onScroll={(e) => {
-          const offsetY = e.nativeEvent.contentOffset.y
-          const threshold = 40
-          headerOpacity.setValue(offsetY > threshold ? 1 : 0)
-        }}
-        scrollEventThrottle={16}
+        scrollIndicatorInsets={{ right: 2, top: 0, bottom: layout.dockHeight }}
+        contentContainerStyle={{ paddingTop: 0, paddingBottom: layout.dockHeight, paddingRight: 0 }}
       >
-        {/* Title Section with Vendor Logo */}
-        <View style={styles.cardWrapper}>
-          <View style={styles.titleSectionContainer}>
-            <View style={styles.titleWithLogo}>
-              {vendorLogo ? (
-                <Image
-                  source={{ uri: vendorLogo }}
-                  style={styles.vendorLogoInline}
-                  resizeMode="contain"
-                        fadeDuration={0}
-                />
-              ) : (
-                <View style={[styles.vendorLogoInline, { backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' }]}>
-                  <Text style={{ color: 'rgba(255,255,255,0.3)', fontSize: 12 }}>No Logo</Text>
-                </View>
-              )}
-              <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                <Text style={styles.detailTitleLarge}>Loyalty & Rewards</Text>
-                {activeTab === 'program' && (
-                  <View style={{ flexDirection: 'row', gap: spacing.sm }}>
-                    <Pressable
-                      onPress={handleToggleStatus}
-                      style={[styles.addButton, !program.is_active && { backgroundColor: colors.glass.regular }]}
-                      accessible={true}
-                      accessibilityRole="button"
-                      accessibilityLabel={program.is_active ? 'Deactivate program' : 'Activate program'}
-                    >
-                      <Text style={[styles.addButtonText, !program.is_active && { color: colors.text.secondary }]}>
-                        {program.is_active ? 'Deactivate' : 'Activate'}
-                      </Text>
-                    </Pressable>
-                    <Pressable
-                      onPress={() => setIsEditing(true)}
-                      style={styles.addButton}
-                      accessible={true}
-                      accessibilityRole="button"
-                      accessibilityLabel="Edit program"
-                    >
-                      <Text style={styles.addButtonText}>Edit</Text>
-                    </Pressable>
-                  </View>
-                )}
-              </View>
-            </View>
+        <TitleSection
+          title="Loyalty & Rewards"
+          logo={vendorLogo}
+          subtitle={program?.is_active ? 'Active' : 'Inactive'}
+        />
+
+        {/* Action Buttons */}
+        {activeTab === 'program' && (
+          <View style={[styles.cardWrapper, { flexDirection: 'row', gap: spacing.sm, justifyContent: 'flex-end' }]}>
+            <Pressable
+              onPress={handleToggleStatus}
+              style={[styles.addButton, !program.is_active && { backgroundColor: 'rgba(255,255,255,0.05)' }]} // Match product list - borderless
+              accessible={true}
+              accessibilityRole="button"
+              accessibilityLabel={program.is_active ? 'Deactivate program' : 'Activate program'}
+            >
+              <Text style={[styles.addButtonText, !program.is_active && { color: colors.text.secondary }]}>
+                {program.is_active ? 'Deactivate' : 'Activate'}
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={() => setIsEditing(true)}
+              style={styles.addButton}
+              accessible={true}
+              accessibilityRole="button"
+              accessibilityLabel="Edit program"
+            >
+              <Text style={styles.addButtonText}>Edit</Text>
+            </Pressable>
           </View>
-        </View>
+        )}
 
         {/* Tab Switcher */}
         <View style={styles.cardWrapper}>
@@ -506,11 +402,8 @@ function LoyaltyManagementDetail({
         {activeTab === 'program' ? (
           <>
             {/* Program Configuration Card */}
-            <LiquidGlassContainerView spacing={12} style={styles.cardWrapper}>
-          <LiquidGlassView
-            interactive
-            style={[styles.detailCard, !isLiquidGlassSupported && styles.cardFallback]}
-          >
+            <View style={styles.cardWrapper}>
+          <View style={styles.detailCard}>
             <View style={{ padding: spacing.md, gap: spacing.lg }}>
               {/* Status Badge */}
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.xs }}>
@@ -560,8 +453,8 @@ function LoyaltyManagementDetail({
                 </Text>
               </View>
             </View>
-          </LiquidGlassView>
-        </LiquidGlassContainerView>
+          </View>
+        </View>
           </>
         ) : (
           <CampaignsDetail

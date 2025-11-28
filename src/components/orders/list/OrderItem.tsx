@@ -166,6 +166,7 @@ const OrderItem = React.memo<OrderItemProps>(({ order, showLocation, isLast }) =
         </Text>
         <Text style={styles.orderMeta} numberOfLines={1}>
           {timeStr}
+          {order.created_by_user && ` • by ${order.created_by_user.first_name} ${order.created_by_user.last_name}`}
         </Text>
       </View>
 

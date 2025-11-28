@@ -215,6 +215,10 @@ export const usePaymentStore = create<PaymentState>()(
               lineTotal: (item.adjustedPrice !== undefined ? item.adjustedPrice : item.price) * item.quantity,
               inventoryId: item.inventoryId,
               gramsToDeduct, // Pass actual quantity to deduct (e.g., 28 for "28g (Ounce)")
+              // Variant fields - passed to reserve_inventory() for automatic conversion
+              variantTemplateId: item.variantTemplateId,
+              variantName: item.variantName,
+              conversionRatio: item.conversionRatio,
             }
           })
 
@@ -257,6 +261,7 @@ export const usePaymentStore = create<PaymentState>()(
             locationId: sessionInfo.locationId,
             sessionId: sessionInfo.sessionId,
             registerId: sessionInfo.registerId,
+            customUserId: customUserId || null, // Staff member who is processing this order
             items,
             subtotal,
             taxAmount,
@@ -272,6 +277,12 @@ export const usePaymentStore = create<PaymentState>()(
             campaignDiscountAmount: discountAmount || 0,
             campaignId: selectedDiscountId || null,
           }
+
+          logger.info('🔍 STAFF TRACKING DEBUG:', {
+            customUserId,
+            hasCustomUserId: !!customUserId,
+            payloadCustomUserId: edgeFunctionPayload.customUserId,
+          })
 
           logger.debug('📤 Sending to Edge Function:', JSON.stringify(edgeFunctionPayload, null, 2))
 

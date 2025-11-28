@@ -95,7 +95,6 @@ export function SaleSuccessModal({
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
 
         // Satisfying success sound (subtle but rewarding)
-        // console.log('🎵 SaleSuccessModal: Triggering sale completion sound...')
         playSaleCompletionSound()
 
         Animated.parallel([
@@ -131,11 +130,8 @@ export function SaleSuccessModal({
         ]).start()
       }, 600)
 
-      // Step 4: Auto-dismiss with fade out (2.5s total)
+      // Step 4: Auto-dismiss with fade out (1.8s total - faster)
       setTimeout(() => {
-        // Gentle haptic on dismiss
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-
         Animated.parallel([
           Animated.timing(checkmarkScale, {
             toValue: 0.8,
@@ -150,7 +146,7 @@ export function SaleSuccessModal({
         ]).start(() => {
           onDismiss()
         })
-      }, 2500)
+      }, 1800)
     }
   }, [visible, completionData])
 

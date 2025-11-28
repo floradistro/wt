@@ -1,26 +1,41 @@
 /**
- * Create Purchase Order Modal
- * Built from scratch with inline selectors
+ * CreatePOModal Component
+ *
+ * STANDARD MODAL PATTERN ✅
+ * Full-screen slide-up sheet for creating purchase orders
+ *
+ * Pattern: Full-screen slide-up sheet with pill-shaped inputs
+ * Reference: CategoryModal (GOLD STANDARD)
  */
 
-import React, { useState, useMemo, useEffect, useRef } from 'react'
-import { View, Text, StyleSheet, Modal, Pressable, ActivityIndicator, TextInput, ScrollView, useWindowDimensions } from 'react-native'
-import { BlurView } from 'expo-blur'
-import { LiquidGlassView, isLiquidGlassSupported } from '@callstack/liquid-glass'
+import {
+  View,
+  Text,
+  TextInput,
+  StyleSheet,
+  Modal,
+  Pressable,
+  ScrollView,
+  ActivityIndicator,
+  Alert,
+} from 'react-native'
+import { useState, useEffect, useMemo, useRef } from 'react'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import * as Haptics from 'expo-haptics'
-import { colors, spacing, radius } from '@/theme/tokens'
-import { createPurchaseOrder } from '@/services/purchase-orders.service'
-import { useSuppliers } from '@/hooks/useSuppliers'
-import { useProducts, type Product } from '@/hooks/useProducts'
-import { useUserLocations } from '@/hooks/useUserLocations'
+import { createPurchaseOrder, saveDraftPurchaseOrder, deletePurchaseOrder } from '@/services/purchase-orders.service'
+import { useSuppliersManagementStore } from '@/stores/suppliers-management.store'
+import { useProductsStore } from '@/stores/products.store'
+import { useAppAuth } from '@/contexts/AppAuthContext'
 import { useLocationFilter } from '@/stores/location-filter.store'
+import { purchaseOrdersActions } from '@/stores/purchase-orders.store'
+import { useProductsScreenStore } from '@/stores/products-list.store'
+import { supabase } from '@/lib/supabase/client'
 import { logger } from '@/utils/logger'
+import type { Product } from '@/types/pos'
 
 interface CreatePOModalProps {
   visible: boolean
-  vendorId: string
   onClose: () => void
-  onCreated: () => void
 }
 
 interface POLineItem {
@@ -31,180 +46,310 @@ interface POLineItem {
   lineTotal: number
 }
 
-export function CreatePOModal({ visible, vendorId, onClose, onCreated }: CreatePOModalProps) {
-  const { width, height } = useWindowDimensions()
-  const isLandscape = width > height
+/**
+ * CreatePOModal - Full purchase order creation
+ * Full-screen sheet - EXACT match to CategoryModal
+ */
+export function CreatePOModal({ visible, onClose }: CreatePOModalProps) {
+  const insets = useSafeAreaInsets()
 
-  const { suppliers } = useSuppliers()
-  const { products } = useProducts()
-  const { locations } = useUserLocations()
+  // ========================================
+  // HOOKS & STORES - ZERO PROP DRILLING ✅
+  // ========================================
+  const { user, vendor, locations } = useAppAuth()
   const { selectedLocationIds } = useLocationFilter()
+  const selectedPO = useProductsScreenStore((state) => state.selectedPurchaseOrder)
+  const vendorId = vendor?.id || ''
 
+  // Real Zustand stores
+  const suppliers = useSuppliersManagementStore((state) => state.suppliers)
+  const loadSuppliers = useSuppliersManagementStore((state) => state.loadSuppliers)
+  const products = useProductsStore((state) => state.products)
+  const loadProducts = useProductsStore((state) => state.loadProducts)
+
+  // ========================================
+  // LOCAL STATE
+  // ========================================
+  const [supplierSearch, setSupplierSearch] = useState('')
   const [selectedSupplierId, setSelectedSupplierId] = useState('')
   const [selectedLocationId, setSelectedLocationId] = useState('')
-  const [supplierSearchQuery, setSupplierSearchQuery] = useState('')
-  const [locationSearchQuery, setLocationSearchQuery] = useState('')
-  const [showSupplierList, setShowSupplierList] = useState(false)
-  const [showLocationList, setShowLocationList] = useState(false)
-  const [isSubmitting, setIsSubmitting] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  // Product selection
-  const [productSearchQuery, setProductSearchQuery] = useState('')
+  const [productSearch, setProductSearch] = useState('')
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
   const [quantity, setQuantity] = useState('')
   const [unitPrice, setUnitPrice] = useState('')
   const [lineItems, setLineItems] = useState<POLineItem[]>([])
+  const [notes, setNotes] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [showSupplierList, setShowSupplierList] = useState(false)
+  const [showLocationList, setShowLocationList] = useState(false)
+  const [showProductList, setShowProductList] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [draftId, setDraftId] = useState<string | null>(null)
+  const [autoSaving, setAutoSaving] = useState(false)
 
-  const searchInputRef = useRef<TextInput>(null)
   const quantityInputRef = useRef<TextInput>(null)
   const unitPriceInputRef = useRef<TextInput>(null)
+  const productSearchInputRef = useRef<TextInput>(null)
 
-  const modalStyle = useMemo(() => ({
-    width: isLandscape ? '85%' : '95%',
-    maxWidth: isLandscape ? 900 : 700,
-    maxHeight: height * 0.92,
-  }), [isLandscape, height])
+  // Load data when modal opens
+  useEffect(() => {
+    if (visible && user?.id && vendorId) {
+      loadSuppliers(user.id)
+      // Load products for the selected location (or first location if available)
+      if (selectedLocationId) {
+        loadProducts(selectedLocationId)
+      } else if (selectedLocationIds.length > 0) {
+        loadProducts(selectedLocationIds[0])
+      }
+    }
+  }, [visible, user?.id, vendorId, loadSuppliers, loadProducts, selectedLocationId, selectedLocationIds])
 
-  const scrollContentStyle = useMemo(() => ({
-    maxHeight: isLandscape ? height * 0.7 : height * 0.75,
-  }), [isLandscape, height])
-
-  const filteredSuppliers = useMemo(() => {
-    if (!supplierSearchQuery.trim()) return suppliers
-    const query = supplierSearchQuery.toLowerCase()
-    return suppliers.filter(s =>
-      s.external_name?.toLowerCase().includes(query)
-    )
-  }, [suppliers, supplierSearchQuery])
-
-  const filteredLocations = useMemo(() => {
-    if (!locationSearchQuery.trim()) return locations
-    const query = locationSearchQuery.toLowerCase()
-    return locations.filter(l =>
-      l.location.name.toLowerCase().includes(query) ||
-      l.location.address_line1?.toLowerCase().includes(query) ||
-      l.location.city?.toLowerCase().includes(query)
-    )
-  }, [locations, locationSearchQuery])
-
-  const filteredProducts = useMemo(() => {
-    if (!productSearchQuery.trim()) return []
-    const query = productSearchQuery.toLowerCase()
-    const addedProductIds = new Set(lineItems.map(item => item.product.id))
-    return products
-      .filter(p => !addedProductIds.has(p.id))
-      .filter(p =>
-        p.name.toLowerCase().includes(query) ||
-        (p.sku && p.sku.toLowerCase().includes(query))
-      )
-      .slice(0, 10)
-  }, [productSearchQuery, products, lineItems])
-
-  const selectedSupplier = useMemo(() =>
-    suppliers.find(s => s.id === selectedSupplierId),
-    [suppliers, selectedSupplierId]
-  )
-
-  const selectedLocation = useMemo(() =>
-    locations.find(l => l.location.id === selectedLocationId),
-    [locations, selectedLocationId]
-  )
-
-  const subtotal = lineItems.reduce((sum, item) => sum + item.lineTotal, 0)
-
+  // Auto-select location if only one is selected in filter
   useEffect(() => {
     if (visible && selectedLocationIds.length === 1 && !selectedLocationId) {
       setSelectedLocationId(selectedLocationIds[0])
     }
   }, [visible, selectedLocationIds, selectedLocationId])
 
+  // Auto-save draft when line items change
+  useEffect(() => {
+    const saveDraft = async () => {
+      if (!visible || lineItems.length === 0 || autoSaving || saving) return
+
+      try {
+        setAutoSaving(true)
+
+        const draft = await saveDraftPurchaseOrder(vendorId, {
+          id: draftId || undefined,
+          po_type: 'inbound',
+          supplier_id: selectedSupplierId || null,
+          location_id: selectedLocationId || null,
+          notes: notes || null,
+          items: lineItems.map(item => ({
+            product_id: item.product.id,
+            quantity: item.quantity,
+            unit_price: item.unitPrice,
+          })),
+        })
+
+        if (!draftId) {
+          // New draft - add to store optimistically
+          setDraftId(draft.id)
+          purchaseOrdersActions.addPurchaseOrder(draft)
+          logger.debug('[CreatePOModal] Draft created and added to store', { id: draft.id })
+        } else {
+          // Update existing draft in store
+          purchaseOrdersActions.updatePurchaseOrder(draft.id, draft)
+          logger.debug('[CreatePOModal] Draft updated in store', { id: draft.id })
+        }
+      } catch (err) {
+        logger.error('[CreatePOModal] Failed to auto-save draft', { error: err })
+      } finally {
+        setAutoSaving(false)
+      }
+    }
+
+    // Debounce auto-save by 1 second
+    const timer = setTimeout(saveDraft, 1000)
+    return () => clearTimeout(timer)
+  }, [lineItems, selectedSupplierId, selectedLocationId, notes, visible, vendorId, draftId, autoSaving, saving])
+
+  // Load draft data if editing, otherwise reset
   useEffect(() => {
     if (visible) {
-      setSelectedSupplierId('')
-      if (selectedLocationIds.length !== 1) setSelectedLocationId('')
-      setSupplierSearchQuery('')
-      setLocationSearchQuery('')
+      // Check if we're editing a draft
+      if (selectedPO && selectedPO.status === 'draft') {
+        // Load draft data
+        setDraftId(selectedPO.id)
+        setSelectedSupplierId(selectedPO.supplier_id || '')
+        setSelectedLocationId(selectedPO.location_id || '')
+        setNotes(selectedPO.notes || '')
+
+        // Load items from draft
+        const loadDraftItems = async () => {
+          try {
+            const { data, error } = await supabase
+              .from('purchase_order_items')
+              .select(`*, products (id, name, sku, regular_price)`)
+              .eq('purchase_order_id', selectedPO.id)
+
+            if (error) throw error
+
+            const draftItems: POLineItem[] = (data || []).map((item: any) => {
+              const product = Array.isArray(item.products) ? item.products[0] : item.products
+              return {
+                id: item.id,
+                product: {
+                  id: product.id,
+                  name: product.name,
+                  sku: product.sku,
+                  regular_price: product.regular_price,
+                } as Product,
+                quantity: item.quantity,
+                unitPrice: item.unit_price,
+                lineTotal: item.quantity * item.unit_price,
+              }
+            })
+
+            setLineItems(draftItems)
+            logger.info('[CreatePOModal] Loaded draft data', { draftId: selectedPO.id, itemCount: draftItems.length })
+          } catch (err) {
+            logger.error('[CreatePOModal] Failed to load draft items', { error: err })
+          }
+        }
+
+        loadDraftItems()
+      } else {
+        // Reset for new PO
+        setSupplierSearch('')
+        setSelectedSupplierId('')
+        // Only reset location if not auto-selected from filter
+        if (selectedLocationIds.length !== 1) {
+          setSelectedLocationId('')
+        } else {
+          setSelectedLocationId(selectedLocationIds[0])
+        }
+        setProductSearch('')
+        setSelectedProduct(null)
+        setQuantity('')
+        setUnitPrice('')
+        setLineItems([])
+        setNotes('')
+        setDraftId(null)
+        setAutoSaving(false)
+      }
+
+      // Always reset UI state
       setShowSupplierList(false)
       setShowLocationList(false)
-      setProductSearchQuery('')
-      setSelectedProduct(null)
-      setQuantity('')
-      setUnitPrice('')
-      setLineItems([])
+      setShowProductList(false)
       setError(null)
     }
-  }, [visible, selectedLocationIds])
+  }, [visible, selectedPO, selectedLocationIds])
+
+  // Show all suppliers when list is open
+  const filteredSuppliers = useMemo(() => {
+    if (!supplierSearch.trim()) return suppliers
+    const query = supplierSearch.toLowerCase()
+    return suppliers.filter(s => s.external_name?.toLowerCase().includes(query))
+  }, [suppliers, supplierSearch])
+
+  // Filter products by search (exclude already added)
+  const filteredProducts = useMemo(() => {
+    if (!productSearch.trim()) return []
+    const query = productSearch.toLowerCase()
+    const addedIds = new Set(lineItems.map(item => item.product.id))
+    return products
+      .filter(p => !addedIds.has(p.id))
+      .filter(p => p.name.toLowerCase().includes(query) || p.sku?.toLowerCase().includes(query))
+      .slice(0, 20)
+  }, [products, productSearch, lineItems])
+
+  const selectedSupplier = useMemo(
+    () => suppliers.find(s => s.id === selectedSupplierId),
+    [suppliers, selectedSupplierId]
+  )
+
+  const selectedLocation = useMemo(
+    () => locations.find(l => l.id === selectedLocationId),
+    [locations, selectedLocationId]
+  )
+
+  const subtotal = useMemo(
+    () => lineItems.reduce((sum, item) => sum + item.lineTotal, 0),
+    [lineItems]
+  )
 
   const handleSupplierSelect = (supplierId: string) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
     setSelectedSupplierId(supplierId)
     setShowSupplierList(false)
-    setSupplierSearchQuery('')
-    setError(null)
+    setSupplierSearch('')
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
   }
 
   const handleLocationSelect = (locationId: string) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
     setSelectedLocationId(locationId)
     setShowLocationList(false)
-    setLocationSearchQuery('')
-    setError(null)
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
   }
 
   const handleProductSelect = (product: Product) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
     setSelectedProduct(product)
     setUnitPrice((product.regular_price || 0).toString())
     setQuantity('1')
-    setProductSearchQuery('')
-    setTimeout(() => quantityInputRef.current?.focus(), 100)
+    setProductSearch('')
+    setShowProductList(false)
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+
+    // Minimal delay - same keyboard throughout
+    setTimeout(() => {
+      quantityInputRef.current?.focus()
+    }, 50)
   }
 
   const handleAddLineItem = () => {
     if (!selectedProduct || !quantity || !unitPrice) {
-      setError('Please enter quantity and unit price')
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
       return
     }
     const qty = parseFloat(quantity)
     const price = parseFloat(unitPrice)
     if (isNaN(qty) || qty <= 0 || isNaN(price) || price < 0) {
-      setError('Invalid quantity or price')
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
       return
     }
-    setLineItems([...lineItems, {
-      id: `temp-${Date.now()}`,
-      product: selectedProduct,
-      quantity: qty,
-      unitPrice: price,
-      lineTotal: qty * price,
-    }])
+    setLineItems([
+      ...lineItems,
+      {
+        id: `temp-${Date.now()}`,
+        product: selectedProduct,
+        quantity: qty,
+        unitPrice: price,
+        lineTotal: qty * price,
+      },
+    ])
     setSelectedProduct(null)
     setQuantity('')
     setUnitPrice('')
-    setProductSearchQuery('')
-    setError(null)
+    setProductSearch('')
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+
+    // Focus back on product search for continuous flow - minimal delay, same keyboard
+    setTimeout(() => {
+      productSearchInputRef.current?.focus()
+    }, 50)
   }
 
   const handleRemoveLineItem = (id: string) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
     setLineItems(lineItems.filter(item => item.id !== id))
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
   }
 
-  const handleSubmit = async () => {
+  const handleSave = async () => {
+    logger.info('[CreatePOModal] handleSave called', {
+      selectedSupplierId,
+      selectedLocationId,
+      lineItemsCount: lineItems.length,
+      draftId,
+    })
+
+    if (!selectedSupplierId || !selectedLocationId || lineItems.length === 0) {
+      setError('Please select supplier, location, and add products')
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
+      return
+    }
+
     try {
-      setError(null)
-      if (!selectedSupplierId || !selectedLocationId || lineItems.length === 0) {
-        setError('Please select supplier, location, and add products')
-        return
-      }
-      setIsSubmitting(true)
+      setSaving(true)
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy)
-      await createPurchaseOrder(vendorId, {
+
+      logger.info('[CreatePOModal] Creating real PO...', { vendorId })
+
+      const createdPO = await createPurchaseOrder(vendorId, {
         po_type: 'inbound',
         supplier_id: selectedSupplierId,
         location_id: selectedLocationId,
+        notes: notes.trim() || undefined,
         items: lineItems.map(item => ({
           product_id: item.product.id,
           quantity: item.quantity,
@@ -213,583 +358,652 @@ export function CreatePOModal({ visible, vendorId, onClose, onCreated }: CreateP
         tax: 0,
         shipping: 0,
       })
+
+      // Delete draft if it exists (converted to real PO)
+      if (draftId) {
+        await deletePurchaseOrder(draftId)
+        // Remove draft from store
+        purchaseOrdersActions.removePurchaseOrder(draftId)
+        logger.debug('[CreatePOModal] Draft deleted after PO creation', { draftId })
+      }
+
+      // Add created PO to store optimistically
+      purchaseOrdersActions.addPurchaseOrder(createdPO)
+      logger.info('[CreatePOModal] PO created and added to store', { poId: createdPO.id })
+
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
-      onClose()
-      onCreated()
+      handleClose()
     } catch (err) {
       logger.error('Failed to create purchase order', { error: err })
       setError(err instanceof Error ? err.message : 'Failed to create purchase order')
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
     } finally {
-      setIsSubmitting(false)
+      setSaving(false)
     }
   }
 
-  const canSubmit = selectedSupplierId && selectedLocationId && lineItems.length > 0 && !isSubmitting
+  const handleClose = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    onClose()
+  }
+
+  const handleDeleteDraft = () => {
+    if (!draftId && !selectedPO?.id) return
+
+    Alert.alert(
+      'Delete Draft',
+      'Are you sure you want to delete this draft purchase order? This action cannot be undone.',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+          onPress: () => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light),
+        },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const idToDelete = draftId || selectedPO?.id
+              if (!idToDelete) return
+
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+
+              // Delete from database
+              await deletePurchaseOrder(idToDelete)
+
+              // Remove from store
+              purchaseOrdersActions.removePurchaseOrder(idToDelete)
+
+              logger.info('[CreatePOModal] Draft deleted', { id: idToDelete })
+
+              // Close modal
+              handleClose()
+            } catch (err) {
+              logger.error('[CreatePOModal] Failed to delete draft', { error: err })
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
+              setError(err instanceof Error ? err.message : 'Failed to delete draft')
+            }
+          },
+        },
+      ]
+    )
+  }
+
+  const canSave = selectedSupplierId && selectedLocationId && lineItems.length > 0 && !saving
+  const isDraft = !!(draftId || selectedPO?.id)
 
   if (!visible) return null
 
   return (
     <Modal
-      visible={true}
-      transparent
-      animationType="fade"
-      onRequestClose={onClose}
+      visible={visible}
+      animationType="slide"
+      presentationStyle="fullScreen"
+      supportedOrientations={['portrait', 'landscape', 'landscape-left', 'landscape-right']}
+      onRequestClose={handleClose}
       statusBarTranslucent
-      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
     >
-      <BlurView intensity={40} style={styles.modalOverlay} tint="dark">
-        <Pressable style={styles.modalBackdrop} onPress={onClose} />
-        <View style={[styles.modalContainer, modalStyle]}>
-          <LiquidGlassView
-            effect="regular"
-            colorScheme="dark"
-            style={[styles.modalContent, !isLiquidGlassSupported && styles.modalContentFallback]}
-          >
-            {/* Header */}
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>New Purchase Order</Text>
-              <Pressable onPress={onClose} style={styles.closeButton}>
-                <Text style={styles.closeButtonText}>×</Text>
-              </Pressable>
-            </View>
+      <View style={[styles.container, { paddingTop: insets.top }]}>
+        {/* ===== HEADER ===== */}
+        <View style={styles.searchContainer}>
+          <View style={styles.searchBar}>
+            <TextInput
+              ref={productSearchInputRef}
+              style={styles.searchInput}
+              value={productSearch}
+              onChangeText={setProductSearch}
+              placeholder="Search products..."
+              placeholderTextColor="rgba(235,235,245,0.3)"
+              autoFocus
+              returnKeyType="search"
+              keyboardType="default"
+              autoCapitalize="none"
+              autoCorrect={false}
+              onFocus={() => {
+                setShowProductList(true)
+                setShowSupplierList(false)
+                setShowLocationList(false)
+              }}
+            />
+          </View>
+          <Pressable onPress={() => handleClose()} style={styles.doneButton}>
+            <Text style={styles.doneButtonText}>Done</Text>
+          </Pressable>
+        </View>
 
-            <ScrollView
-              style={[styles.modalScroll, scrollContentStyle]}
-              contentContainerStyle={styles.modalScrollContent}
-              showsVerticalScrollIndicator={false}
-              keyboardShouldPersistTaps="handled"
-            >
-              {/* Supplier Selector */}
-              <View style={styles.formField}>
-                <Text style={styles.fieldLabel}>FROM SUPPLIER *</Text>
+        {/* ===== CONTENT ===== */}
+        <ScrollView
+          style={styles.content}
+          contentContainerStyle={styles.contentContainer}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Add Products Section - PRIMARY */}
+          <View style={styles.section}>
+            <Text style={styles.sectionLabel}>ADD PRODUCTS</Text>
+
+            {!selectedProduct ? (
+              <>
+                {showProductList && filteredProducts.length > 0 && (
+                  <View style={styles.productResults}>
+                    {filteredProducts.map(product => (
+                      <Pressable
+                        key={product.id}
+                        style={styles.productResultItem}
+                        onPress={() => handleProductSelect(product)}
+                      >
+                        <View style={styles.productResultInfo}>
+                          <Text style={styles.productResultName}>{product.name}</Text>
+                          {product.primary_category && (
+                            <Text style={styles.productResultCategory}>{product.primary_category}</Text>
+                          )}
+                        </View>
+                        <Text style={styles.productResultPrice}>
+                          ${(product.regular_price || 0).toFixed(2)}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                )}
+              </>
+            ) : (
+              <View style={styles.selectedProductCard}>
+                <View style={styles.selectedProductHeader}>
+                  <View style={styles.selectedProductInfo}>
+                    <Text style={styles.selectedProductName}>{selectedProduct.name}</Text>
+                    {selectedProduct.sku && (
+                      <Text style={styles.selectedProductSKU}>SKU: {selectedProduct.sku}</Text>
+                    )}
+                  </View>
+                  <Pressable
+                    onPress={() => {
+                      setSelectedProduct(null)
+                      setQuantity('')
+                      setUnitPrice('')
+                    }}
+                    style={styles.clearButton}
+                  >
+                    <Text style={styles.clearButtonText}>✕</Text>
+                  </Pressable>
+                </View>
+
+                <View style={styles.quantityRow}>
+                  <View style={styles.quantityField}>
+                    <Text style={styles.quantityLabel}>Quantity</Text>
+                    <TextInput
+                      ref={quantityInputRef}
+                      style={styles.quantityInput}
+                      value={quantity}
+                      onChangeText={setQuantity}
+                      keyboardType="default"
+                      placeholder="0"
+                      placeholderTextColor="rgba(235,235,245,0.3)"
+                      returnKeyType="next"
+                      selectTextOnFocus
+                      onSubmitEditing={() => unitPriceInputRef.current?.focus()}
+                      blurOnSubmit={false}
+                    />
+                  </View>
+                  <View style={styles.quantityField}>
+                    <Text style={styles.quantityLabel}>Unit Price</Text>
+                    <TextInput
+                      ref={unitPriceInputRef}
+                      style={styles.quantityInput}
+                      value={unitPrice}
+                      onChangeText={setUnitPrice}
+                      keyboardType="default"
+                      placeholder="0.00"
+                      placeholderTextColor="rgba(235,235,245,0.3)"
+                      returnKeyType="done"
+                      selectTextOnFocus
+                      onSubmitEditing={handleAddLineItem}
+                      blurOnSubmit={false}
+                    />
+                  </View>
+                </View>
+
+                <Pressable style={styles.addItemButton} onPress={handleAddLineItem}>
+                  <Text style={styles.addItemButtonText}>+ Add to Order</Text>
+                </Pressable>
+              </View>
+            )}
+          </View>
+
+          {/* Supplier Selection - SECONDARY */}
+          {lineItems.length > 0 && (
+            <View style={styles.section}>
+              <Text style={styles.sectionLabel}>FROM SUPPLIER</Text>
+              {selectedSupplier ? (
                 <Pressable
-                  style={styles.selectorButton}
+                  style={styles.selectedCard}
                   onPress={() => {
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                    setShowSupplierList(!showSupplierList)
+                    setShowSupplierList(true)
                     setShowLocationList(false)
+                    setShowProductList(false)
                   }}
                 >
-                  <View style={styles.selectorContent}>
-                    <Text style={styles.selectorLabel}>Supplier</Text>
-                    <Text style={selectedSupplier ? styles.selectorValue : styles.selectorPlaceholder}>
-                      {selectedSupplier ? selectedSupplier.external_name : 'Select supplier...'}
-                    </Text>
-                  </View>
-                  <Text style={[styles.selectorArrow, showSupplierList && styles.selectorArrowExpanded]}>›</Text>
+                  <Text style={styles.selectedCardTitle}>{selectedSupplier.external_name}</Text>
+                  <Text style={styles.selectedCardChevron}>▼</Text>
                 </Pressable>
+              ) : (
+                <Pressable
+                  style={styles.placeholderCard}
+                  onPress={() => {
+                    setShowSupplierList(true)
+                    setShowLocationList(false)
+                    setShowProductList(false)
+                  }}
+                >
+                  <Text style={styles.placeholderText}>Select supplier...</Text>
+                  <Text style={styles.selectedCardChevron}>▼</Text>
+                </Pressable>
+              )}
 
-                {showSupplierList && (
-                  <View style={styles.selectorList}>
+              {showSupplierList && (
+                <View style={styles.listCard}>
+                  <View style={styles.searchInputWrapper}>
                     <TextInput
-                      style={styles.searchInput}
+                      style={styles.searchInputInline}
+                      value={supplierSearch}
+                      onChangeText={setSupplierSearch}
                       placeholder="Search suppliers..."
                       placeholderTextColor="rgba(235,235,245,0.3)"
-                      value={supplierSearchQuery}
-                      onChangeText={setSupplierSearchQuery}
-                      autoCapitalize="none"
-                      autoCorrect={false}
+                      returnKeyType="search"
                     />
-                    <ScrollView style={styles.selectorScroll} showsVerticalScrollIndicator={false}>
-                      {filteredSuppliers.map((supplier, index) => (
+                  </View>
+                  {filteredSuppliers.length === 0 ? (
+                    <View style={styles.emptyList}>
+                      <Text style={styles.emptyListText}>No suppliers found</Text>
+                    </View>
+                  ) : (
+                    <ScrollView style={styles.list} nestedScrollEnabled>
+                      {filteredSuppliers.map(supplier => (
                         <Pressable
                           key={supplier.id}
-                          style={[
-                            styles.selectorItem,
-                            index === filteredSuppliers.length - 1 && styles.selectorItemLast,
-                            selectedSupplierId === supplier.id && styles.selectorItemSelected,
-                          ]}
+                          style={styles.listItem}
                           onPress={() => handleSupplierSelect(supplier.id)}
                         >
-                          <Text style={styles.selectorItemText}>{supplier.external_name}</Text>
-                          {selectedSupplierId === supplier.id && <Text style={styles.checkmark}>✓</Text>}
+                          <Text style={styles.listItemText}>{supplier.external_name}</Text>
                         </Pressable>
                       ))}
                     </ScrollView>
-                  </View>
-                )}
-              </View>
+                  )}
+                </View>
+              )}
+            </View>
+          )}
 
-              {/* Location Selector */}
-              <View style={styles.formField}>
-                <Text style={styles.fieldLabel}>RECEIVING AT *</Text>
+          {/* Location Selection - SECONDARY */}
+          {lineItems.length > 0 && (
+            <View style={styles.section}>
+              <Text style={styles.sectionLabel}>RECEIVING LOCATION</Text>
+              {selectedLocation ? (
                 <Pressable
-                  style={styles.selectorButton}
+                  style={styles.selectedCard}
                   onPress={() => {
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
                     setShowLocationList(!showLocationList)
                     setShowSupplierList(false)
+                    setShowProductList(false)
                   }}
                 >
-                  <View style={styles.selectorContent}>
-                    <Text style={styles.selectorLabel}>Location</Text>
-                    {selectedLocation ? (
-                      <View>
-                        <Text style={styles.selectorValue}>{selectedLocation.location.name}</Text>
-                        {selectedLocation.location.address_line1 && (
-                          <Text style={styles.selectorSubtext}>{selectedLocation.location.address_line1}</Text>
-                        )}
-                      </View>
-                    ) : (
-                      <Text style={styles.selectorPlaceholder}>Select location...</Text>
+                  <View style={styles.selectedCardInfo}>
+                    <Text style={styles.selectedCardTitle}>{selectedLocation.name}</Text>
+                    {selectedLocation.city && (
+                      <Text style={styles.selectedCardSubtext}>{selectedLocation.city}</Text>
                     )}
                   </View>
-                  <Text style={[styles.selectorArrow, showLocationList && styles.selectorArrowExpanded]}>›</Text>
+                  <Text style={styles.selectedCardChevron}>{showLocationList ? '▼' : '▶'}</Text>
                 </Pressable>
-
-                {showLocationList && (
-                  <View style={styles.selectorList}>
-                    <TextInput
-                      style={styles.searchInput}
-                      placeholder="Search locations..."
-                      placeholderTextColor="rgba(235,235,245,0.3)"
-                      value={locationSearchQuery}
-                      onChangeText={setLocationSearchQuery}
-                      autoCapitalize="none"
-                      autoCorrect={false}
-                    />
-                    <ScrollView style={styles.selectorScroll} showsVerticalScrollIndicator={false}>
-                      {filteredLocations.map((userLoc, index) => (
-                        <Pressable
-                          key={userLoc.location.id}
-                          style={[
-                            styles.selectorItem,
-                            index === filteredLocations.length - 1 && styles.selectorItemLast,
-                            selectedLocationId === userLoc.location.id && styles.selectorItemSelected,
-                          ]}
-                          onPress={() => handleLocationSelect(userLoc.location.id)}
-                        >
-                          <View style={styles.selectorItemContent}>
-                            <Text style={styles.selectorItemText}>{userLoc.location.name}</Text>
-                            {userLoc.location.address_line1 && (
-                              <Text style={styles.selectorItemSubtext}>
-                                {[userLoc.location.address_line1, userLoc.location.city, userLoc.location.state].filter(Boolean).join(', ')}
-                              </Text>
-                            )}
-                          </View>
-                          {selectedLocationId === userLoc.location.id && <Text style={styles.checkmark}>✓</Text>}
-                        </Pressable>
-                      ))}
-                    </ScrollView>
-                  </View>
-                )}
-              </View>
-
-              {/* Add Products */}
-              {selectedSupplierId && selectedLocationId && (
-                <View style={styles.formField}>
-                  <Text style={styles.fieldLabel}>ADD PRODUCTS</Text>
-                  <View style={styles.productCard}>
-                    {!selectedProduct ? (
-                      <View>
-                        <Text style={styles.inputLabel}>Search Product</Text>
-                        <TextInput
-                          ref={searchInputRef}
-                          style={styles.input}
-                          placeholder="Search by name or SKU..."
-                          placeholderTextColor="rgba(235,235,245,0.3)"
-                          value={productSearchQuery}
-                          onChangeText={setProductSearchQuery}
-                          autoCapitalize="none"
-                          autoCorrect={false}
-                        />
-                        {filteredProducts.length > 0 && (
-                          <View style={styles.productResults}>
-                            {filteredProducts.map((product) => (
-                              <Pressable
-                                key={product.id}
-                                style={styles.productRow}
-                                onPress={() => handleProductSelect(product)}
-                              >
-                                <View style={styles.productInfo}>
-                                  <Text style={styles.productName}>{product.name}</Text>
-                                  {product.sku && <Text style={styles.productSKU}>SKU: {product.sku}</Text>}
-                                </View>
-                                <Text style={styles.productPrice}>${(product.regular_price || 0).toFixed(2)}</Text>
-                              </Pressable>
-                            ))}
-                          </View>
-                        )}
-                      </View>
-                    ) : (
-                      <View>
-                        <View style={styles.selectedProductHeader}>
-                          <View style={styles.selectedProductInfo}>
-                            <Text style={styles.selectedProductName}>{selectedProduct.name}</Text>
-                            {selectedProduct.sku && <Text style={styles.selectedProductSKU}>SKU: {selectedProduct.sku}</Text>}
-                          </View>
-                          <Pressable
-                            onPress={() => {
-                              setSelectedProduct(null)
-                              setQuantity('')
-                              setUnitPrice('')
-                            }}
-                            style={styles.clearButton}
-                          >
-                            <Text style={styles.clearButtonText}>✕</Text>
-                          </Pressable>
-                        </View>
-                        <View style={styles.divider} />
-                        <View style={styles.inlineRow}>
-                          <View style={styles.inlineField}>
-                            <Text style={styles.inputLabel}>Quantity</Text>
-                            <TextInput
-                              ref={quantityInputRef}
-                              style={styles.input}
-                              value={quantity}
-                              onChangeText={setQuantity}
-                              keyboardType="decimal-pad"
-                              placeholder="0"
-                              placeholderTextColor="rgba(235,235,245,0.3)"
-                            />
-                          </View>
-                          <View style={styles.inlineField}>
-                            <Text style={styles.inputLabel}>Unit Price</Text>
-                            <TextInput
-                              ref={unitPriceInputRef}
-                              style={styles.input}
-                              value={unitPrice}
-                              onChangeText={setUnitPrice}
-                              keyboardType="decimal-pad"
-                              placeholder="0.00"
-                              placeholderTextColor="rgba(235,235,245,0.3)"
-                            />
-                          </View>
-                          <Pressable style={styles.addButton} onPress={handleAddLineItem}>
-                            <Text style={styles.addButtonText}>Add</Text>
-                          </Pressable>
-                        </View>
-                      </View>
-                    )}
-                  </View>
-                </View>
+              ) : (
+                <Pressable
+                  style={styles.placeholderCard}
+                  onPress={() => {
+                    setShowLocationList(!showLocationList)
+                    setShowSupplierList(false)
+                    setShowProductList(false)
+                  }}
+                >
+                  <Text style={styles.placeholderText}>Select location...</Text>
+                  <Text style={styles.selectedCardChevron}>{showLocationList ? '▼' : '▶'}</Text>
+                </Pressable>
               )}
 
-              {/* Line Items */}
-              {lineItems.length > 0 && (
-                <View style={styles.formField}>
-                  <Text style={styles.fieldLabel}>ORDER ITEMS ({lineItems.length})</Text>
-                  <View style={styles.lineItemsCard}>
-                    {lineItems.map((item, index) => (
-                      <View key={item.id}>
-                        <View style={styles.lineItemRow}>
-                          <View style={styles.lineItemInfo}>
-                            <Text style={styles.lineItemName}>{item.product.name}</Text>
-                            {item.product.sku && <Text style={styles.lineItemSKU}>SKU: {item.product.sku}</Text>}
-                            <Text style={styles.lineItemMeta}>
-                              {item.quantity} × ${item.unitPrice.toFixed(2)}
-                            </Text>
-                          </View>
-                          <View style={styles.lineItemActions}>
-                            <Text style={styles.lineItemTotal}>${item.lineTotal.toFixed(2)}</Text>
-                            <Pressable onPress={() => handleRemoveLineItem(item.id)}>
-                              <Text style={styles.removeButtonText}>Remove</Text>
-                            </Pressable>
-                          </View>
+              {showLocationList && (
+                <View style={styles.listCard}>
+                  <ScrollView style={styles.list} nestedScrollEnabled>
+                    {locations.map((location) => (
+                      <Pressable
+                        key={location.id}
+                        style={[
+                          styles.listItem,
+                          selectedLocationId === location.id && styles.listItemSelected,
+                        ]}
+                        onPress={() => handleLocationSelect(location.id)}
+                      >
+                        <View style={styles.listItemInfo}>
+                          <Text style={styles.listItemText}>{location.name}</Text>
+                          {location.city && (
+                            <Text style={styles.listItemSubtext}>{location.city}</Text>
+                          )}
                         </View>
-                        {index < lineItems.length - 1 && <View style={styles.divider} />}
-                      </View>
+                      </Pressable>
                     ))}
-                    <View style={styles.divider} />
-                    <View style={styles.subtotalRow}>
-                      <Text style={styles.subtotalLabel}>Subtotal</Text>
-                      <Text style={styles.subtotalValue}>${subtotal.toFixed(2)}</Text>
+                  </ScrollView>
+                </View>
+              )}
+            </View>
+          )}
+
+          {/* Line Items Summary */}
+          {lineItems.length > 0 && (
+            <View style={styles.section}>
+              <Text style={styles.sectionLabel}>ORDER ITEMS ({lineItems.length})</Text>
+              <View style={styles.lineItemsCard}>
+                {lineItems.map((item, index) => (
+                  <View key={item.id}>
+                    <View style={styles.lineItem}>
+                      <View style={styles.lineItemInfo}>
+                        <Text style={styles.lineItemName}>{item.product.name}</Text>
+                        {item.product.sku && (
+                          <Text style={styles.lineItemSKU}>SKU: {item.product.sku}</Text>
+                        )}
+                        <Text style={styles.lineItemMeta}>
+                          {item.quantity} × ${item.unitPrice.toFixed(2)}
+                        </Text>
+                      </View>
+                      <View style={styles.lineItemRight}>
+                        <Text style={styles.lineItemTotal}>${item.lineTotal.toFixed(2)}</Text>
+                        <Pressable onPress={() => handleRemoveLineItem(item.id)}>
+                          <Text style={styles.removeButtonText}>Remove</Text>
+                        </Pressable>
+                      </View>
                     </View>
+                    {index < lineItems.length - 1 && <View style={styles.divider} />}
                   </View>
-                </View>
-              )}
+                ))}
 
-              {error && (
-                <View style={styles.errorBox}>
-                  <Text style={styles.errorText}>{error}</Text>
+                <View style={styles.divider} />
+                <View style={styles.subtotalRow}>
+                  <Text style={styles.subtotalLabel}>Subtotal</Text>
+                  <Text style={styles.subtotalValue}>${subtotal.toFixed(2)}</Text>
                 </View>
-              )}
-            </ScrollView>
+              </View>
+            </View>
+          )}
 
-            {/* Footer */}
-            <View style={styles.modalFooter}>
+          {/* Notes Field */}
+          {lineItems.length > 0 && (
+            <View style={styles.section}>
+              <Text style={styles.sectionLabel}>NOTES (OPTIONAL)</Text>
+              <TextInput
+                style={styles.notesInput}
+                value={notes}
+                onChangeText={setNotes}
+                placeholder="Add notes or special instructions..."
+                placeholderTextColor="rgba(235,235,245,0.3)"
+                multiline
+                numberOfLines={3}
+                textAlignVertical="top"
+                maxLength={500}
+              />
+            </View>
+          )}
+
+          {/* Error Message */}
+          {error && (
+            <View style={styles.errorCard}>
+              <Text style={styles.errorText}>{error}</Text>
+            </View>
+          )}
+
+          {/* ===== ACTION BUTTONS ===== */}
+          {lineItems.length > 0 && (
+            <>
               <Pressable
-                onPress={onClose}
-                disabled={isSubmitting}
-                style={[styles.button, styles.buttonSecondary]}
+                onPress={handleSave}
+                style={[styles.createButton, (!canSave || saving) && styles.createButtonDisabled]}
+                disabled={!canSave || saving}
               >
-                <Text style={styles.buttonSecondaryText}>Cancel</Text>
-              </Pressable>
-              <Pressable
-                onPress={handleSubmit}
-                disabled={!canSubmit}
-                style={[styles.button, styles.buttonPrimary]}
-              >
-                {isSubmitting ? (
-                  <ActivityIndicator color={colors.text.primary} />
+                {saving ? (
+                  <ActivityIndicator color="#fff" />
                 ) : (
-                  <Text style={styles.buttonPrimaryText}>Create Order</Text>
+                  <Text style={styles.createButtonText}>+ CREATE PURCHASE ORDER</Text>
                 )}
               </Pressable>
-            </View>
-          </LiquidGlassView>
-        </View>
-      </BlurView>
+
+              {/* Delete Draft Button - Only show for drafts */}
+              {isDraft && (
+                <Pressable
+                  onPress={handleDeleteDraft}
+                  style={styles.deleteDraftButton}
+                >
+                  <Text style={styles.deleteDraftButtonText}>Delete Draft</Text>
+                </Pressable>
+              )}
+            </>
+          )}
+        </ScrollView>
+      </View>
     </Modal>
   )
 }
 
 const styles = StyleSheet.create({
-  modalOverlay: {
+  container: {
     flex: 1,
+    backgroundColor: '#1c1c1e',
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    gap: 12,
+  },
+  searchBar: {
+    flex: 1,
+    height: 48,
+    backgroundColor: 'rgba(118, 118, 128, 0.24)',
+    borderRadius: 24,
+    paddingHorizontal: 20,
+    justifyContent: 'center',
+  },
+  searchInput: {
+    fontSize: 17,
+    fontWeight: '400',
+    color: '#fff',
+    letterSpacing: -0.4,
+  },
+  doneButton: {
+    backgroundColor: 'rgba(118, 118, 128, 0.24)',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 24,
+    height: 48,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
   },
-  modalBackdrop: {
-    ...StyleSheet.absoluteFillObject,
+  doneButtonText: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: '#fff',
+    letterSpacing: -0.4,
   },
-  modalContainer: {},
-  modalContent: {
-    borderRadius: radius.xxl,
-    borderCurve: 'continuous',
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
+  content: {
+    flex: 1,
   },
-  modalContentFallback: {
-    backgroundColor: 'rgba(20, 20, 20, 0.95)',
+  contentContainer: {
+    paddingHorizontal: 16,
+    paddingBottom: 40,
   },
-  modalHeader: {
+  section: {
+    marginTop: 20,
+  },
+  sectionLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: 'rgba(235,235,245,0.6)',
+    letterSpacing: -0.08,
+    marginBottom: 12,
+    marginLeft: 4,
+  },
+  selectedCard: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: spacing.lg,
+    backgroundColor: 'rgba(118, 118, 128, 0.24)',
+    borderRadius: 20,
+    padding: 16,
+  },
+  selectedCardInfo: {
+    flex: 1,
+  },
+  selectedCardTitle: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: '#fff',
+    letterSpacing: -0.3,
+  },
+  selectedCardSubtext: {
+    fontSize: 13,
+    fontWeight: '400',
+    color: 'rgba(235,235,245,0.6)',
+    letterSpacing: -0.1,
+    marginTop: 4,
+  },
+  selectedCardChevron: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: 'rgba(235,235,245,0.5)',
+    marginLeft: 12,
+  },
+  placeholderCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(118, 118, 128, 0.24)',
+    borderRadius: 20,
+    padding: 16,
+  },
+  placeholderText: {
+    fontSize: 17,
+    fontWeight: '400',
+    color: 'rgba(235,235,245,0.3)',
+    letterSpacing: -0.3,
+  },
+  listCard: {
+    backgroundColor: 'rgba(118, 118, 128, 0.24)',
+    borderRadius: 20,
+    marginTop: 8,
+    maxHeight: 300,
+    overflow: 'hidden',
+  },
+  list: {
+    maxHeight: 300,
+  },
+  listItem: {
+    padding: 16,
     borderBottomWidth: 0.5,
     borderBottomColor: 'rgba(255,255,255,0.1)',
   },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: colors.text.primary,
-    letterSpacing: -0.4,
+  listItemSelected: {
+    backgroundColor: 'rgba(255,255,255,0.05)',
   },
-  closeButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
+  listItemInfo: {
+    flex: 1,
   },
-  closeButtonText: {
-    fontSize: 28,
-    fontWeight: '300',
-    color: colors.text.primary,
-    marginTop: -4,
+  listItemText: {
+    fontSize: 17,
+    fontWeight: '500',
+    color: '#fff',
+    letterSpacing: -0.3,
   },
-  modalScroll: {},
-  modalScrollContent: {
-    padding: spacing.lg,
-  },
-  formField: {
-    marginBottom: spacing.md,
-  },
-  fieldLabel: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: 'rgba(235,235,245,0.5)',
-    letterSpacing: 0.6,
-    textTransform: 'uppercase',
-    marginBottom: 8,
-  },
-  inputLabel: {
+  listItemSubtext: {
     fontSize: 13,
-    fontWeight: '600',
-    color: 'rgba(235,235,245,0.7)',
-    marginBottom: 6,
+    fontWeight: '400',
+    color: 'rgba(235,235,245,0.6)',
     letterSpacing: -0.1,
+    marginTop: 4,
+  },
+  emptyList: {
+    padding: 40,
+    alignItems: 'center',
+  },
+  emptyListText: {
+    fontSize: 15,
+    fontWeight: '400',
+    color: 'rgba(235,235,245,0.4)',
+    letterSpacing: -0.2,
+  },
+  inputCard: {
+    backgroundColor: 'rgba(118, 118, 128, 0.24)',
+    borderRadius: 20,
+    padding: 16,
   },
   input: {
-    height: 44,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    paddingHorizontal: spacing.sm,
-    fontSize: 15,
+    fontSize: 17,
     fontWeight: '400',
-    color: colors.text.primary,
-    letterSpacing: -0.2,
-  },
-  searchInput: {
-    height: 36,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    paddingHorizontal: spacing.sm,
-    fontSize: 14,
-    fontWeight: '400',
-    color: colors.text.primary,
-    letterSpacing: -0.2,
-    marginBottom: spacing.xs,
-  },
-  selectorButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: spacing.lg,
-    borderRadius: radius.xxl,
-    borderCurve: 'continuous',
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.1)',
-  },
-  selectorContent: {
-    flex: 1,
-    gap: 4,
-  },
-  selectorLabel: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.text.secondary,
-    letterSpacing: -0.1,
-  },
-  selectorValue: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: colors.text.primary,
-    letterSpacing: -0.2,
-  },
-  selectorPlaceholder: {
-    fontSize: 15,
-    fontWeight: '400',
-    color: colors.text.quaternary,
-    letterSpacing: -0.2,
-  },
-  selectorSubtext: {
-    fontSize: 13,
-    fontWeight: '400',
-    color: colors.text.tertiary,
-    letterSpacing: -0.1,
-    marginTop: 2,
-  },
-  selectorArrow: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: colors.text.quaternary,
-    marginLeft: 12,
-    transform: [{ rotate: '0deg' }],
-  },
-  selectorArrowExpanded: {
-    transform: [{ rotate: '90deg' }],
-  },
-  selectorList: {
-    marginTop: spacing.xs,
-    backgroundColor: 'rgba(255,255,255,0.03)',
-    borderRadius: radius.lg,
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.08)',
-    padding: spacing.sm,
-  },
-  selectorScroll: {
-    maxHeight: 200,
-  },
-  selectorItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.sm,
-    borderBottomWidth: 0.5,
-    borderBottomColor: 'rgba(255,255,255,0.05)',
-    minHeight: 44,
-  },
-  selectorItemLast: {
-    borderBottomWidth: 0,
-  },
-  selectorItemSelected: {
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderRadius: radius.md,
-  },
-  selectorItemContent: {
-    flex: 1,
-    gap: 2,
-  },
-  selectorItemText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: colors.text.primary,
-    letterSpacing: -0.2,
-  },
-  selectorItemSubtext: {
-    fontSize: 13,
-    fontWeight: '400',
-    color: colors.text.tertiary,
-    letterSpacing: -0.1,
-  },
-  checkmark: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: colors.text.primary,
-    marginLeft: 12,
-  },
-  productCard: {
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderRadius: radius.xxl,
-    borderCurve: 'continuous',
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.1)',
-    padding: spacing.lg,
+    color: '#fff',
+    letterSpacing: -0.3,
+    minHeight: 24,
   },
   productResults: {
     marginTop: 12,
     gap: 8,
   },
-  productRow: {
+  productResultItem: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    borderRadius: 10,
-    borderCurve: 'continuous',
     backgroundColor: 'rgba(255,255,255,0.05)',
-    minHeight: 60,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 12,
+    padding: 12,
   },
-  productInfo: {
+  productResultInfo: {
     flex: 1,
-    gap: 4,
   },
-  productName: {
-    fontSize: 16,
+  productResultName: {
+    fontSize: 15,
     fontWeight: '600',
     color: '#fff',
     letterSpacing: -0.2,
   },
-  productSKU: {
+  productResultSKU: {
     fontSize: 13,
+    fontWeight: '400',
     color: 'rgba(235,235,245,0.5)',
-    fontWeight: '500',
+    letterSpacing: -0.1,
+    marginTop: 2,
   },
-  productPrice: {
-    fontSize: 16,
+  productResultCategory: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: 'rgba(235,235,245,0.35)',
+    letterSpacing: 0.3,
+    marginTop: 4,
+    textTransform: 'uppercase',
+  },
+  productResultPrice: {
+    fontSize: 15,
     fontWeight: '700',
     color: '#34c759',
     letterSpacing: -0.2,
+    marginLeft: 12,
+  },
+  selectedProductCard: {
+    backgroundColor: 'rgba(118, 118, 128, 0.24)',
+    borderRadius: 20,
+    padding: 16,
   },
   selectedProductHeader: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     justifyContent: 'space-between',
-    backgroundColor: 'rgba(255,255,255,0.03)',
-    padding: 12,
-    borderRadius: 10,
-    borderCurve: 'continuous',
-    marginBottom: 4,
+    marginBottom: 16,
   },
   selectedProductInfo: {
     flex: 1,
-    gap: 4,
   },
   selectedProductName: {
     fontSize: 17,
@@ -799,157 +1013,204 @@ const styles = StyleSheet.create({
   },
   selectedProductSKU: {
     fontSize: 13,
+    fontWeight: '400',
     color: 'rgba(235,235,245,0.6)',
-    fontWeight: '500',
+    letterSpacing: -0.1,
+    marginTop: 4,
   },
   clearButton: {
     padding: 4,
   },
   clearButtonText: {
-    fontSize: 18,
+    fontSize: 20,
+    fontWeight: '300',
     color: 'rgba(235,235,245,0.5)',
   },
-  inlineRow: {
+  quantityRow: {
     flexDirection: 'row',
-    alignItems: 'flex-end',
     gap: 12,
+    marginBottom: 16,
   },
-  inlineField: {
+  quantityField: {
     flex: 1,
-    gap: 6,
   },
-  addButton: {
-    paddingVertical: 14,
-    paddingHorizontal: 20,
+  quantityLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: 'rgba(235,235,245,0.6)',
+    letterSpacing: -0.08,
+    marginBottom: 8,
+  },
+  quantityInput: {
+    backgroundColor: 'rgba(0,0,0,0.3)',
     borderRadius: 12,
-    borderCurve: 'continuous',
-    backgroundColor: '#fff',
+    padding: 12,
+    fontSize: 17,
+    fontWeight: '400',
+    color: '#fff',
+    letterSpacing: -0.3,
+    textAlign: 'center',
+  },
+  addItemButton: {
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+    borderRadius: 20,
+    paddingVertical: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 44,
   },
-  addButtonText: {
+  addItemButtonText: {
     fontSize: 15,
-    fontWeight: '700',
-    color: '#000',
-    letterSpacing: -0.2,
-  },
-  divider: {
-    height: 0.5,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    marginVertical: 8,
+    fontWeight: '600',
+    color: '#fff',
+    letterSpacing: 0.5,
   },
   lineItemsCard: {
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderRadius: radius.xxl,
-    borderCurve: 'continuous',
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.1)',
-    padding: spacing.lg,
+    backgroundColor: 'rgba(118, 118, 128, 0.24)',
+    borderRadius: 20,
+    padding: 16,
   },
-  lineItemRow: {
+  lineItem: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     justifyContent: 'space-between',
-    paddingVertical: 4,
+    paddingVertical: 8,
   },
   lineItemInfo: {
     flex: 1,
-    gap: 2,
   },
   lineItemName: {
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: '600',
     color: '#fff',
+    letterSpacing: -0.2,
   },
   lineItemSKU: {
-    fontSize: 11,
-    color: 'rgba(235,235,245,0.5)',
-  },
-  lineItemMeta: {
     fontSize: 12,
-    color: 'rgba(235,235,245,0.6)',
+    fontWeight: '400',
+    color: 'rgba(235,235,245,0.5)',
+    letterSpacing: -0.1,
     marginTop: 2,
   },
-  lineItemActions: {
+  lineItemMeta: {
+    fontSize: 13,
+    fontWeight: '400',
+    color: 'rgba(235,235,245,0.6)',
+    letterSpacing: -0.1,
+    marginTop: 4,
+  },
+  lineItemRight: {
     alignItems: 'flex-end',
     gap: 4,
   },
   lineItemTotal: {
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: '700',
     color: '#34c759',
+    letterSpacing: -0.2,
   },
   removeButtonText: {
     fontSize: 12,
-    color: '#ff453a',
     fontWeight: '500',
+    color: '#ff453a',
+    letterSpacing: -0.1,
+  },
+  divider: {
+    height: 0.5,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    marginVertical: 12,
   },
   subtotalRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: 4,
+    paddingTop: 4,
   },
   subtotalLabel: {
-    fontSize: 15,
+    fontSize: 17,
     fontWeight: '600',
-    color: 'rgba(235,235,245,0.7)',
+    color: 'rgba(235,235,245,0.8)',
+    letterSpacing: -0.3,
   },
   subtotalValue: {
-    fontSize: 20,
+    fontSize: 24,
     fontWeight: '700',
     color: '#fff',
+    letterSpacing: -0.5,
   },
-  errorBox: {
-    padding: spacing.sm,
-    borderRadius: radius.md,
+  notesInput: {
+    backgroundColor: 'rgba(118, 118, 128, 0.24)',
+    borderRadius: 20,
+    padding: 16,
+    fontSize: 17,
+    fontWeight: '400',
+    color: '#fff',
+    letterSpacing: -0.3,
+    minHeight: 100,
+  },
+  errorCard: {
+    marginTop: 20,
     backgroundColor: 'rgba(239, 68, 68, 0.1)',
     borderWidth: 1,
-    borderColor: 'rgba(239, 68, 68, 0.2)',
-    marginTop: spacing.sm,
+    borderColor: 'rgba(239, 68, 68, 0.3)',
+    borderRadius: 20,
+    padding: 16,
   },
   errorText: {
-    fontSize: 12,
+    fontSize: 15,
     fontWeight: '400',
     color: '#f87171',
-    letterSpacing: -0.1,
+    letterSpacing: -0.2,
     textAlign: 'center',
   },
-  modalFooter: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    padding: spacing.lg,
-    borderTopWidth: 0.5,
-    borderTopColor: 'rgba(255,255,255,0.1)',
-  },
-  button: {
-    flex: 1,
-    height: 44,
-    borderRadius: radius.lg,
+  createButton: {
+    marginTop: 32,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+    borderRadius: 24,
+    paddingVertical: 16,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  buttonPrimary: {
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
+  createButtonDisabled: {
+    opacity: 0.4,
   },
-  buttonPrimaryText: {
+  createButtonText: {
     fontSize: 15,
     fontWeight: '600',
-    color: colors.text.primary,
-    letterSpacing: -0.2,
+    color: '#fff',
+    letterSpacing: 0.5,
   },
-  buttonSecondary: {
-    backgroundColor: 'rgba(255,255,255,0.05)',
+  deleteDraftButton: {
+    marginTop: 16,
+    backgroundColor: 'rgba(255,69,58,0.15)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
+    borderColor: 'rgba(255,69,58,0.3)',
+    borderRadius: 24,
+    paddingVertical: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  buttonSecondaryText: {
+  deleteDraftButtonText: {
     fontSize: 15,
-    fontWeight: '500',
-    color: colors.text.secondary,
-    letterSpacing: -0.2,
+    fontWeight: '600',
+    color: '#ff453a',
+    letterSpacing: 0.5,
+  },
+  searchInputWrapper: {
+    padding: 12,
+    borderBottomWidth: 0.5,
+    borderBottomColor: 'rgba(255,255,255,0.1)',
+  },
+  searchInputInline: {
+    fontSize: 17,
+    fontWeight: '400',
+    color: '#fff',
+    letterSpacing: -0.3,
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    borderRadius: 12,
+    padding: 12,
   },
 })

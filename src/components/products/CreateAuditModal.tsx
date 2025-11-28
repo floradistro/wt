@@ -1,61 +1,84 @@
 /**
- * Create Audit Modal
- * Apple-simple inventory audit creation
- * "Simplicity is the ultimate sophistication" - Leonardo da Vinci (Jobs' favorite)
+ * CreateAuditModal Component
+ *
+ * STANDARD MODAL PATTERN ✅
+ * Full-screen slide-up sheet for quick inventory audits
+ *
+ * Pattern: Full-screen slide-up sheet with pill-shaped inputs
+ * Reference: CategoryModal (GOLD STANDARD)
+ *
+ * Flow: Select location → Select categories (optional) → Count products
  */
 
-import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react'
-import { View, Text, StyleSheet, Modal, Pressable, ActivityIndicator, TextInput, ScrollView, useWindowDimensions, Alert } from 'react-native'
-import { BlurView } from 'expo-blur'
+import {
+  View,
+  Text,
+  TextInput,
+  StyleSheet,
+  Modal,
+  Pressable,
+  ScrollView,
+  ActivityIndicator,
+  Alert,
+} from 'react-native'
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import * as Haptics from 'expo-haptics'
 import AsyncStorage from '@react-native-async-storage/async-storage'
-import { colors, spacing, radius, typography } from '@/theme/tokens'
-import { useProducts, type Product } from '@/hooks/useProducts'
-import { useUserLocations } from '@/hooks/useUserLocations'
 import { useCategories } from '@/hooks/useCategories'
 import { useInventoryAdjustments } from '@/hooks/useInventoryAdjustments'
 import { createBulkInventoryAdjustments } from '@/services/inventory-adjustments.service'
 import { logger } from '@/utils/logger'
+import { useAppAuth } from '@/contexts/AppAuthContext'
+import { useProductsStore } from '@/stores/products.store'
 
 interface CreateAuditModalProps {
   visible: boolean
   onClose: () => void
-  onCreated: () => void
+  onCreated?: () => void
 }
 
 interface AuditEntry {
-  product: Product
+  productId: string
+  productName: string
   currentQuantity: number
-  auditedQuantity: string
-  difference: number
+  countedQuantity: string
 }
 
+/**
+ * CreateAuditModal - Quick inventory audit
+ * Full-screen sheet - EXACT match to CategoryModal
+ */
 export function CreateAuditModal({ visible, onClose, onCreated }: CreateAuditModalProps) {
-  const { width, height } = useWindowDimensions()
-  const isLandscape = width > height
+  const insets = useSafeAreaInsets()
 
-  const { products } = useProducts()
-  const { locations } = useUserLocations()
+  // ========================================
+  // HOOKS & STORES - ZERO PROP DRILLING
+  // ========================================
+  const products = useProductsStore((state) => state.products)
+  const loadProducts = useProductsStore((state) => state.loadProducts)
+  const { locations } = useAppAuth()
   const { categories } = useCategories()
-  const { createAdjustment, vendorId } = useInventoryAdjustments()
+  const { vendorId } = useInventoryAdjustments()
 
+  // ========================================
+  // LOCAL STATE
+  // ========================================
+  const [productSearch, setProductSearch] = useState('')
   const [selectedLocationId, setSelectedLocationId] = useState('')
   const [selectedCategoryIds, setSelectedCategoryIds] = useState<string[]>([])
-  const [locationSearchQuery, setLocationSearchQuery] = useState('')
-  const [productSearchQuery, setProductSearchQuery] = useState('')
-  const [showLocationList, setShowLocationList] = useState(false)
-  const [showCategoryList, setShowCategoryList] = useState(false)
-  const [isSubmitting, setIsSubmitting] = useState(false)
   const [auditEntries, setAuditEntries] = useState<Map<string, AuditEntry>>(new Map())
   const [auditReason, setAuditReason] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [showLocationList, setShowLocationList] = useState(false)
+  const [showCategoryList, setShowCategoryList] = useState(false)
   const [draftRestored, setDraftRestored] = useState(false)
-  const [lastSaved, setLastSaved] = useState<Date | null>(null)
   const [locationsWithDrafts, setLocationsWithDrafts] = useState<Set<string>>(new Set())
+
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const isRestoringRef = useRef(false)
-  const restoreTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
-  // Auto-draft storage key (location-specific)
+  // Draft storage key
   const getDraftKey = useCallback((locationId: string) => {
     return `audit-draft-${vendorId}-${locationId}`
   }, [vendorId])
@@ -69,21 +92,12 @@ export function CreateAuditModal({ visible, onClose, onCreated }: CreateAuditMod
         locationId: selectedLocationId,
         categoryIds: selectedCategoryIds,
         reason: auditReason,
-        entries: Array.from(auditEntries.entries()).map(([id, entry]) => ({
-          productId: id,
-          productName: entry.product.name,
-          productSku: entry.product.sku,
-          currentQuantity: entry.currentQuantity,
-          auditedQuantity: entry.auditedQuantity,
-          difference: entry.difference,
-        })),
+        entries: Array.from(auditEntries.values()),
         timestamp: Date.now(),
       }
 
       await AsyncStorage.setItem(getDraftKey(selectedLocationId), JSON.stringify(draft))
-      setLastSaved(new Date())
 
-      // Add to drafts set
       setLocationsWithDrafts(prev => {
         const updated = new Set(prev)
         updated.add(selectedLocationId)
@@ -128,7 +142,6 @@ export function CreateAuditModal({ visible, onClose, onCreated }: CreateAuditMod
       const key = getDraftKey(locId)
       await AsyncStorage.removeItem(key)
 
-      // Remove from drafts set
       setLocationsWithDrafts(prev => {
         const updated = new Set(prev)
         updated.delete(locId)
@@ -141,74 +154,40 @@ export function CreateAuditModal({ visible, onClose, onCreated }: CreateAuditMod
     }
   }, [selectedLocationId, getDraftKey])
 
-  const modalStyle = useMemo(() => ({
-    width: '95%' as const,
-    maxWidth: isLandscape ? 1200 : 800,
-    maxHeight: isLandscape ? height * 0.88 : height * 0.92,
-  }), [isLandscape, height])
-
-  // Filter locations
-  const filteredLocations = useMemo(() => {
-    if (!locationSearchQuery.trim()) return locations
-    const query = locationSearchQuery.toLowerCase()
-    return locations.filter(l =>
-      l.location.name.toLowerCase().includes(query) ||
-      l.location.city?.toLowerCase().includes(query)
-    )
-  }, [locations, locationSearchQuery])
-
-  const selectedLocation = useMemo(() =>
-    locations.find(l => l.location.id === selectedLocationId)?.location,
-    [locations, selectedLocationId]
-  )
-
-  // Filter products by location and categories
-  const filteredProducts = useMemo(() => {
-    if (!selectedLocationId) return []
-
-    let filtered = products.filter(p => {
-      // Check if product has inventory at selected location
-      const hasInventory = p.inventory?.some(inv => inv.location_id === selectedLocationId)
-      return hasInventory
-    })
-
-    // Filter by categories if selected
-    if (selectedCategoryIds.length > 0) {
-      filtered = filtered.filter(p =>
-        p.primary_category_id && selectedCategoryIds.includes(p.primary_category_id)
-      )
+  // Reset on close
+  useEffect(() => {
+    if (!visible) {
+      setProductSearch('')
+      setSelectedLocationId('')
+      setSelectedCategoryIds([])
+      setAuditEntries(new Map())
+      setAuditReason('')
+      setShowLocationList(false)
+      setShowCategoryList(false)
+      setDraftRestored(false)
+      isRestoringRef.current = false
     }
+  }, [visible])
 
-    // Filter by search query
-    if (productSearchQuery.trim()) {
-      const query = productSearchQuery.toLowerCase()
-      filtered = filtered.filter(p =>
-        p.name.toLowerCase().includes(query) ||
-        (p.sku && p.sku.toLowerCase().includes(query))
-      )
+  // Load products for selected location
+  useEffect(() => {
+    if (selectedLocationId && visible) {
+      logger.info('Loading products for audit modal', { locationId: selectedLocationId })
+      loadProducts(selectedLocationId)
     }
-
-    // Sort alphabetically
-    return filtered.sort((a, b) => a.name.localeCompare(b.name))
-  }, [products, selectedLocationId, selectedCategoryIds, productSearchQuery])
-
-  // Get current quantity for a product at selected location
-  const getCurrentQuantity = useCallback((product: Product) => {
-    const inventory = product.inventory?.find(inv => inv.location_id === selectedLocationId)
-    return inventory?.quantity || 0
-  }, [selectedLocationId])
+  }, [selectedLocationId, visible, loadProducts])
 
   // Scan for available drafts when modal opens
   useEffect(() => {
-    if (!visible || !vendorId) return
+    if (!visible || !vendorId || locations.length === 0) return
 
     const scanForDrafts = async () => {
       try {
         const draftsFound = new Set<string>()
         for (const location of locations) {
-          const draft = await loadDraft(location.location.id)
+          const draft = await loadDraft(location.id)
           if (draft) {
-            draftsFound.add(location.location.id)
+            draftsFound.add(location.id)
           }
         }
         setLocationsWithDrafts(draftsFound)
@@ -218,11 +197,12 @@ export function CreateAuditModal({ visible, onClose, onCreated }: CreateAuditMod
     }
 
     scanForDrafts()
-  }, [visible, vendorId, locations, loadDraft])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, vendorId])
 
   // Auto-restore draft when location is selected
   useEffect(() => {
-    if (!selectedLocationId || isRestoringRef.current || !visible || products.length === 0) return
+    if (!selectedLocationId || isRestoringRef.current || !visible) return
 
     const restoreDraft = async () => {
       isRestoringRef.current = true
@@ -233,69 +213,44 @@ export function CreateAuditModal({ visible, onClose, onCreated }: CreateAuditMod
           return
         }
 
-        // Use requestAnimationFrame to prevent blocking
-        requestAnimationFrame(() => {
-          try {
-            // Restore category filters
-            if (draft.categoryIds?.length > 0) {
-              setSelectedCategoryIds(draft.categoryIds)
-            }
+        // Restore category filters
+        if (draft.categoryIds?.length > 0) {
+          setSelectedCategoryIds(draft.categoryIds)
+        }
 
-            // Restore audit reason
-            if (draft.reason) {
-              setAuditReason(draft.reason)
-            }
+        // Restore audit reason
+        if (draft.reason) {
+          setAuditReason(draft.reason)
+        }
 
-            // Restore audit entries (optimized)
-            const restoredEntries = new Map<string, AuditEntry>()
-            const productMap = new Map(products.map(p => [p.id, p]))
+        // Restore audit entries
+        const restoredEntries = new Map<string, AuditEntry>()
+        for (const entry of draft.entries) {
+          restoredEntries.set(entry.productId, entry)
+        }
 
-            for (const entry of draft.entries) {
-              const product = productMap.get(entry.productId)
-              if (product) {
-                const currentQty = getCurrentQuantity(product)
-                restoredEntries.set(entry.productId, {
-                  product,
-                  currentQuantity: currentQty,
-                  auditedQuantity: entry.auditedQuantity,
-                  difference: parseFloat(entry.auditedQuantity) - currentQty,
-                })
-              }
-            }
+        setAuditEntries(restoredEntries)
+        setDraftRestored(true)
 
-            setAuditEntries(restoredEntries)
-            setDraftRestored(true)
-
-            logger.info('Audit draft restored', {
-              locationId: selectedLocationId,
-              entryCount: restoredEntries.size,
-              age: Date.now() - draft.timestamp
-            })
-
-            // Show subtle feedback
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
-
-            // Hide restored indicator after 3 seconds
-            if (restoreTimeoutRef.current) {
-              clearTimeout(restoreTimeoutRef.current)
-            }
-            restoreTimeoutRef.current = setTimeout(() => {
-              setDraftRestored(false)
-            }, 3000)
-          } catch (err) {
-            logger.error('Failed during draft restore animation frame:', err)
-          } finally {
-            isRestoringRef.current = false
-          }
+        logger.info('Audit draft restored', {
+          locationId: selectedLocationId,
+          entryCount: restoredEntries.size,
         })
+
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+
+        // Hide restored indicator after 3 seconds
+        setTimeout(() => setDraftRestored(false), 3000)
       } catch (err) {
         logger.error('Failed to restore draft:', err)
+      } finally {
         isRestoringRef.current = false
       }
     }
 
     restoreDraft()
-  }, [selectedLocationId, visible, loadDraft, products, getCurrentQuantity])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedLocationId, visible])
 
   // Debounced auto-save when audit data changes
   useEffect(() => {
@@ -318,23 +273,110 @@ export function CreateAuditModal({ visible, onClose, onCreated }: CreateAuditMod
     }
   }, [selectedLocationId, selectedCategoryIds, auditReason, auditEntries, visible, saveDraft])
 
-  // Handle audited quantity input
-  const handleAuditEntry = useCallback((product: Product, value: string) => {
-    const currentQuantity = getCurrentQuantity(product)
-    const auditedQuantity = parseFloat(value) || 0
-    const difference = auditedQuantity - currentQuantity
+  // Selected location data
+  const selectedLocation = useMemo(
+    () => locations.find(l => l.id === selectedLocationId),
+    [locations, selectedLocationId]
+  )
 
+  // Selected category names for display
+  const selectedCategoryNames = useMemo(() => {
+    if (selectedCategoryIds.length === 0) return 'All categories'
+    return selectedCategoryIds
+      .map(id => categories.find(c => c.id === id)?.name)
+      .filter(Boolean)
+      .join(', ')
+  }, [selectedCategoryIds, categories])
+
+  // Get current quantity for a product at selected location
+  const getCurrentQuantity = useCallback((productId: string) => {
+    const product = products.find(p => p.id === productId)
+    // Use inventory_quantity which is set when loading for specific location
+    return product?.inventory_quantity ?? 0
+  }, [products])
+
+  // Get unit label for a product (grams vs units)
+  const getUnitLabel = useCallback((product: any) => {
+    // Check if product tracks by weight or units
+    const trackingType = product.tracking_type || product.custom_fields?.tracking_type
+
+    if (trackingType === 'weight' || !trackingType) {
+      return 'g' // Default to grams for cannabis products
+    }
+    return 'units'
+  }, [])
+
+  // Filter products by location and categories
+  const filteredProducts = useMemo(() => {
+    if (!selectedLocationId) return []
+
+    logger.info('Filtering products', {
+      totalProducts: products.length,
+      selectedLocationId,
+      selectedCategoryIds,
+      productSearch,
+      sampleProduct: products[0] ? {
+        name: products[0].name,
+        inventory: products[0].inventory,
+        inventory_quantity: products[0].inventory_quantity,
+      } : null,
+    })
+
+    let filtered = products.filter(p => {
+      // Has inventory at selected location
+      const hasInventory = p.inventory?.some(inv => inv.location_id === selectedLocationId)
+
+      // Also check if inventory_quantity exists (fallback)
+      const hasQuantity = (p.inventory_quantity ?? 0) >= 0
+
+      if (!hasInventory && !hasQuantity) return false
+
+      // Filter by categories if any selected
+      if (selectedCategoryIds.length > 0) {
+        if (!p.primary_category_id) return false
+        if (!selectedCategoryIds.includes(p.primary_category_id)) return false
+      }
+
+      // Filter by search query
+      if (productSearch.trim()) {
+        const query = productSearch.toLowerCase()
+        const matchesName = p.name.toLowerCase().includes(query)
+        const matchesSku = p.sku?.toLowerCase().includes(query)
+        if (!matchesName && !matchesSku) return false
+      }
+
+      return true
+    })
+
+    logger.info('Filtered products result', {
+      filteredCount: filtered.length,
+      sampleFiltered: filtered[0] ? {
+        name: filtered[0].name,
+        inventory: filtered[0].inventory,
+      } : null,
+    })
+
+    // Sort alphabetically
+    return filtered.sort((a, b) => a.name.localeCompare(b.name))
+  }, [products, selectedLocationId, selectedCategoryIds, productSearch])
+
+  // Handle quantity input for a product
+  const handleQuantityChange = useCallback((productId: string, productName: string, value: string) => {
+    const currentQuantity = getCurrentQuantity(productId)
     const newEntries = new Map(auditEntries)
-    if (value.trim() === '' || auditedQuantity === currentQuantity) {
-      newEntries.delete(product.id)
+
+    // Remove entry if empty
+    if (value.trim() === '') {
+      newEntries.delete(productId)
     } else {
-      newEntries.set(product.id, {
-        product,
+      newEntries.set(productId, {
+        productId,
+        productName,
         currentQuantity,
-        auditedQuantity: value,
-        difference,
+        countedQuantity: value,
       })
     }
+
     setAuditEntries(newEntries)
   }, [auditEntries, getCurrentQuantity])
 
@@ -345,17 +387,17 @@ export function CreateAuditModal({ visible, onClose, onCreated }: CreateAuditMod
         ? prev.filter(id => id !== categoryId)
         : [...prev, categoryId]
     )
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
   }, [])
 
-  // Handle submit
-  const handleSubmit = useCallback(async () => {
+  const handleSave = async () => {
     if (!selectedLocationId) {
       Alert.alert('Location Required', 'Please select a location for the audit')
       return
     }
 
     if (auditEntries.size === 0) {
-      Alert.alert('No Changes', 'Please enter audited quantities that differ from current stock')
+      Alert.alert('No Counts Entered', 'Please enter counted quantities for at least one product')
       return
     }
 
@@ -364,31 +406,38 @@ export function CreateAuditModal({ visible, onClose, onCreated }: CreateAuditMod
       return
     }
 
-    try {
-      setIsSubmitting(true)
+    if (!vendorId) {
+      Alert.alert('Error', 'Vendor information not found')
+      return
+    }
 
-      if (!vendorId) {
-        throw new Error('No vendor found')
-      }
+    try {
+      setSaving(true)
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy)
 
       const entries = Array.from(auditEntries.values())
 
-      // Use bulk atomic function for dramatic performance improvement
-      const { data, error, results } = await createBulkInventoryAdjustments(
-        vendorId,
-        entries.map(entry => ({
-          product_id: entry.product.id,
-          location_id: selectedLocationId,
-          adjustment_type: 'count_correction',
-          quantity_change: entry.difference,
-          reason: `Audit: ${auditReason}`,
-          notes: `Audited quantity: ${entry.auditedQuantity}g (was ${entry.currentQuantity}g)`,
-        }))
-      )
+      // Create adjustments for each counted item
+      const adjustments = entries.map(entry => {
+        const countedQty = parseFloat(entry.countedQuantity) || 0
+        const difference = countedQty - entry.currentQuantity
+        const product = products.find(p => p.id === entry.productId)
+        const unitLabel = product ? getUnitLabel(product) : 'g'
 
-      if (error) {
-        throw error
-      }
+        return {
+          product_id: entry.productId,
+          location_id: selectedLocationId,
+          adjustment_type: 'count_correction' as const,
+          quantity_change: difference,
+          reason: `Audit: ${auditReason}`,
+          notes: `Counted: ${countedQty}${unitLabel} (was ${entry.currentQuantity}${unitLabel})`,
+        }
+      })
+
+      // Use bulk atomic function
+      const { data, error } = await createBulkInventoryAdjustments(vendorId, adjustments)
+
+      if (error) throw error
 
       const successCount = data?.succeeded || 0
       const errorCount = data?.failed || 0
@@ -398,81 +447,203 @@ export function CreateAuditModal({ visible, onClose, onCreated }: CreateAuditMod
         await clearDraft(selectedLocationId)
 
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
-        Alert.alert(
-          'Audit Complete',
-          `Successfully audited ${successCount} product${successCount > 1 ? 's' : ''}${errorCount > 0 ? `\n${errorCount} failed` : ''}`,
-          [
-            {
-              text: 'OK',
-              onPress: () => {
-                onCreated()
-                handleClose()
-              }
-            }
-          ]
-        )
+        onCreated?.()
+        handleClose()
+
+        if (errorCount > 0) {
+          Alert.alert('Partially Complete', `${successCount} products counted successfully\n${errorCount} failed`)
+        }
       } else {
         throw new Error('All adjustments failed')
       }
 
     } catch (err) {
-      logger.error('Failed to create audit:', err)
-      const errorMessage = err instanceof Error ? err.message : 'Failed to create audit adjustments'
+      logger.error('Failed to complete audit:', err)
+      const errorMessage = err instanceof Error ? err.message : 'Failed to save audit'
       Alert.alert('Error', errorMessage)
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
     } finally {
-      setIsSubmitting(false)
+      setSaving(false)
     }
-  }, [selectedLocationId, auditEntries, auditReason, vendorId, onCreated, clearDraft])
+  }
 
-  const handleClose = useCallback(() => {
-    // Clear all timeouts
-    if (saveTimeoutRef.current) {
-      clearTimeout(saveTimeoutRef.current)
-    }
-    if (restoreTimeoutRef.current) {
-      clearTimeout(restoreTimeoutRef.current)
-    }
-
-    setSelectedLocationId('')
-    setSelectedCategoryIds([])
-    setLocationSearchQuery('')
-    setProductSearchQuery('')
-    setShowLocationList(false)
-    setShowCategoryList(false)
-    setAuditEntries(new Map())
-    setAuditReason('')
-    setDraftRestored(false)
-    isRestoringRef.current = false
+  const handleClose = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
     onClose()
-  }, [onClose])
+  }
 
-  const selectedCategoryNames = useMemo(() =>
-    selectedCategoryIds.map(id => categories.find(c => c.id === id)?.name).filter(Boolean),
-    [selectedCategoryIds, categories]
-  )
+  const canSave = selectedLocationId && auditEntries.size > 0 && auditReason.trim() !== ''
+
+  if (!visible) return null
 
   return (
     <Modal
       visible={visible}
-      transparent
-      animationType="fade"
+      animationType="slide"
+      presentationStyle="fullScreen"
+      supportedOrientations={['portrait', 'landscape', 'landscape-left', 'landscape-right']}
       onRequestClose={handleClose}
-      supportedOrientations={['portrait', 'landscape']}
+      statusBarTranslucent
     >
-      <BlurView intensity={80} style={styles.modalOverlay} tint="dark">
-        <Pressable style={styles.modalBackdrop} onPress={handleClose} />
-
-        <View style={[styles.modalContent, modalStyle]}>
-          {/* Header */}
-          <View style={styles.modalHeader}>
-            <View>
-              <Text style={styles.modalTitle}>CREATE AUDIT</Text>
-              <Text style={styles.modalSubtitle}>Physical inventory count</Text>
-            </View>
-            <Pressable style={styles.closeButton} onPress={handleClose}>
-              <Text style={styles.closeButtonText}>✕</Text>
-            </Pressable>
+      <View style={[styles.container, { paddingTop: insets.top }]}>
+        {/* ===== HEADER ===== */}
+        <View style={styles.searchContainer}>
+          <View style={styles.searchBar}>
+            <TextInput
+              style={styles.searchInput}
+              value={productSearch}
+              onChangeText={setProductSearch}
+              placeholder="Search products..."
+              placeholderTextColor="rgba(235,235,245,0.3)"
+              autoFocus={selectedLocationId !== ''}
+              returnKeyType="search"
+            />
           </View>
+          <Pressable onPress={handleClose} style={styles.doneButton}>
+            <Text style={styles.doneButtonText}>Done</Text>
+          </Pressable>
+        </View>
+
+        {/* ===== CONTENT ===== */}
+        <ScrollView
+          style={styles.content}
+          contentContainerStyle={styles.contentContainer}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Location Selection */}
+          <View style={styles.section}>
+            <Text style={styles.sectionLabel}>LOCATION</Text>
+            {selectedLocation ? (
+              <Pressable
+                style={styles.selectedCard}
+                onPress={() => {
+                  setShowLocationList(!showLocationList)
+                  setShowCategoryList(false)
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                }}
+              >
+                <View style={styles.selectedCardInfo}>
+                  <Text style={styles.selectedCardTitle}>{selectedLocation.name}</Text>
+                  {selectedLocation.city && (
+                    <Text style={styles.selectedCardSubtext}>{selectedLocation.city}</Text>
+                  )}
+                </View>
+                <Text style={styles.selectedCardChevron}>{showLocationList ? '▼' : '▶'}</Text>
+              </Pressable>
+            ) : (
+              <Pressable
+                style={styles.placeholderCard}
+                onPress={() => {
+                  logger.info('Location selector clicked', { locationsCount: locations.length })
+                  setShowLocationList(!showLocationList)
+                  setShowCategoryList(false)
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                }}
+              >
+                <Text style={styles.placeholderText}>Select location...</Text>
+                <Text style={styles.selectedCardChevron}>{showLocationList ? '▼' : '▶'}</Text>
+              </Pressable>
+            )}
+
+            {showLocationList && (
+              <View style={styles.listCard}>
+                {locations.length === 0 ? (
+                  <View style={styles.emptyCard}>
+                    <Text style={styles.emptyText}>No locations found</Text>
+                  </View>
+                ) : (
+                  <ScrollView style={styles.list} nestedScrollEnabled>
+                    {locations.map((location) => (
+                    <Pressable
+                      key={location.id}
+                      style={styles.listItem}
+                      onPress={() => {
+                        setSelectedLocationId(location.id)
+                        setShowLocationList(false)
+                        setAuditEntries(new Map()) // Reset entries when location changes
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                      }}
+                    >
+                      <View style={styles.locationItemContent}>
+                        <View style={styles.listItemInfo}>
+                          <Text style={styles.listItemText}>{location.name}</Text>
+                          {location.city && (
+                            <Text style={styles.listItemSubtext}>{location.city}</Text>
+                          )}
+                        </View>
+                        {locationsWithDrafts.has(location.id) && (
+                          <View style={styles.draftBadge}>
+                            <Text style={styles.draftBadgeText}>Draft</Text>
+                          </View>
+                        )}
+                      </View>
+                      </Pressable>
+                    ))}
+                  </ScrollView>
+                )}
+              </View>
+            )}
+          </View>
+
+          {/* Category Filter */}
+          {selectedLocationId && (
+            <View style={styles.section}>
+              <Text style={styles.sectionLabel}>
+                CATEGORIES {selectedCategoryIds.length > 0 && `(${selectedCategoryIds.length})`}
+              </Text>
+              <Pressable
+                style={styles.selectedCard}
+                onPress={() => {
+                  setShowCategoryList(!showCategoryList)
+                  setShowLocationList(false)
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                }}
+              >
+                <Text style={styles.selectedCardTitle}>{selectedCategoryNames}</Text>
+                <Text style={styles.selectedCardChevron}>{showCategoryList ? '▼' : '▶'}</Text>
+              </Pressable>
+
+              {showCategoryList && (
+                <View style={styles.listCard}>
+                  <ScrollView style={styles.list} nestedScrollEnabled>
+                    {/* Clear All option */}
+                    {selectedCategoryIds.length > 0 && (
+                      <Pressable
+                        style={[styles.listItem, styles.clearAllItem]}
+                        onPress={() => {
+                          setSelectedCategoryIds([])
+                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                        }}
+                      >
+                        <Text style={styles.clearAllText}>Clear All (Show All Products)</Text>
+                      </Pressable>
+                    )}
+                    {categories.map(category => {
+                      const isSelected = selectedCategoryIds.includes(category.id)
+                      return (
+                        <Pressable
+                          key={category.id}
+                          style={[
+                            styles.listItem,
+                            isSelected && styles.listItemSelected,
+                          ]}
+                          onPress={() => toggleCategory(category.id)}
+                        >
+                          <View style={styles.checkboxContainer}>
+                            <View style={styles.checkbox}>
+                              {isSelected && <View style={styles.checkmark} />}
+                            </View>
+                            <Text style={styles.listItemText}>{category.name}</Text>
+                          </View>
+                        </Pressable>
+                      )
+                    })}
+                  </ScrollView>
+                </View>
+              )}
+            </View>
+          )}
 
           {/* Draft Restored Indicator */}
           {draftRestored && (
@@ -481,643 +652,372 @@ export function CreateAuditModal({ visible, onClose, onCreated }: CreateAuditMod
             </View>
           )}
 
-          <ScrollView
-            style={styles.scrollView}
-            contentContainerStyle={styles.scrollContent}
-            showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
-          >
-            {/* Top Section - Location, Category, Search, Reason */}
-            <View style={[styles.topSection, isLandscape && styles.topSectionLandscape]}>
-              {/* Left Column in Landscape */}
-              <View style={[styles.topColumn, isLandscape && styles.topColumnLandscape]}>
-                {/* Location Selection */}
-                <View style={styles.section}>
-                  <Text style={styles.sectionLabel}>LOCATION</Text>
-                  <Pressable
-                    style={styles.selector}
-                    onPress={() => {
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                      setShowLocationList(!showLocationList)
-                      setShowCategoryList(false)
-                    }}
-                  >
-                    <Text style={[styles.selectorText, !selectedLocation && styles.selectorPlaceholder]}>
-                      {selectedLocation?.name || 'Select location...'}
-                    </Text>
-                    <Text style={styles.selectorChevron}>{showLocationList ? '▼' : '▶'}</Text>
-                  </Pressable>
-
-                  {showLocationList && (
-                    <View style={styles.dropdownCard}>
-                      <TextInput
-                        style={styles.searchInput}
-                        value={locationSearchQuery}
-                        onChangeText={setLocationSearchQuery}
-                        placeholder="Search locations..."
-                        placeholderTextColor={colors.text.placeholder}
-                        autoFocus
-                      />
-                      <ScrollView style={styles.dropdownList} nestedScrollEnabled>
-                        {filteredLocations.map(({ location }) => (
-                          <Pressable
-                            key={location.id}
-                            style={[
-                              styles.dropdownItem,
-                              location.id === selectedLocationId && styles.dropdownItemSelected,
-                            ]}
-                            onPress={() => {
-                              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                              setSelectedLocationId(location.id)
-                              setShowLocationList(false)
-                              setLocationSearchQuery('')
-                              setAuditEntries(new Map()) // Reset entries when location changes
-                            }}
-                          >
-                            <View style={styles.locationItemContent}>
-                              <View style={styles.locationItemText}>
-                                <Text style={styles.dropdownItemText}>{location.name}</Text>
-                                {location.city && (
-                                  <Text style={styles.dropdownItemSubtext}>{location.city}</Text>
-                                )}
-                              </View>
-                              {locationsWithDrafts.has(location.id) && (
-                                <View style={styles.draftBadge}>
-                                  <Text style={styles.draftBadgeText}>Draft</Text>
-                                </View>
-                              )}
-                            </View>
-                          </Pressable>
-                        ))}
-                      </ScrollView>
-                    </View>
-                  )}
-                </View>
-
-                {/* Category Filter */}
-                {selectedLocationId && (
-                  <View style={styles.section}>
-                    <Text style={styles.sectionLabel}>
-                      FILTER BY CATEGORIES {selectedCategoryIds.length > 0 && `(${selectedCategoryIds.length})`}
-                    </Text>
-                    <Pressable
-                      style={styles.selector}
-                      onPress={() => {
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                        setShowCategoryList(!showCategoryList)
-                        setShowLocationList(false)
-                      }}
-                    >
-                      <Text style={[styles.selectorText, selectedCategoryIds.length === 0 && styles.selectorPlaceholder]}>
-                        {selectedCategoryIds.length > 0
-                          ? selectedCategoryNames.join(', ')
-                          : 'All categories...'}
-                      </Text>
-                      <Text style={styles.selectorChevron}>{showCategoryList ? '▼' : '▶'}</Text>
-                    </Pressable>
-
-                    {showCategoryList && (
-                      <View style={styles.dropdownCard}>
-                        <ScrollView style={styles.dropdownList} nestedScrollEnabled>
-                          {categories.map(category => {
-                            const isSelected = selectedCategoryIds.includes(category.id)
-                            return (
-                              <Pressable
-                                key={category.id}
-                                style={[
-                                  styles.dropdownItem,
-                                  isSelected && styles.dropdownItemSelected,
-                                ]}
-                                onPress={() => {
-                                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                                  toggleCategory(category.id)
-                                }}
-                              >
-                                <View style={styles.dropdownItemCheckbox}>
-                                  {isSelected && <View style={styles.dropdownItemCheckmark} />}
-                                </View>
-                                <Text style={styles.dropdownItemText}>{category.name}</Text>
-                              </Pressable>
-                            )
-                          })}
-                        </ScrollView>
-                      </View>
-                    )}
-                  </View>
-                )}
-              </View>
-
-              {/* Right Column in Landscape */}
-              <View style={[styles.topColumn, isLandscape && styles.topColumnLandscape]}>
-                {/* Product Search */}
-                {selectedLocationId && (
-                  <View style={styles.section}>
-                    <Text style={styles.sectionLabel}>SEARCH PRODUCTS</Text>
-                    <TextInput
-                      style={styles.searchInput}
-                      value={productSearchQuery}
-                      onChangeText={setProductSearchQuery}
-                      placeholder="Search by name or SKU..."
-                      placeholderTextColor={colors.text.placeholder}
-                    />
-                  </View>
-                )}
-
-                {/* Audit Reason */}
-                {selectedLocationId && (
-                  <View style={styles.section}>
-                    <Text style={styles.sectionLabel}>AUDIT REASON</Text>
-                    <TextInput
-                      style={styles.textAreaInput}
-                      value={auditReason}
-                      onChangeText={setAuditReason}
-                      placeholder="e.g., Monthly physical count, Cycle count, Spot check"
-                      placeholderTextColor={colors.text.placeholder}
-                      multiline
-                      numberOfLines={2}
-                    />
-                  </View>
-                )}
+          {/* Audit Reason */}
+          {selectedLocationId && (
+            <View style={styles.section}>
+              <Text style={styles.sectionLabel}>AUDIT REASON</Text>
+              <View style={styles.descriptionCard}>
+                <TextInput
+                  style={styles.descriptionInput}
+                  value={auditReason}
+                  onChangeText={setAuditReason}
+                  placeholder="e.g., Monthly count, Cycle count, Spot check..."
+                  placeholderTextColor="rgba(235,235,245,0.3)"
+                  multiline
+                  numberOfLines={2}
+                  textAlignVertical="top"
+                />
               </View>
             </View>
+          )}
 
-            {/* Products List */}
-            {selectedLocationId && (
-              <View style={styles.section}>
-                <Text style={styles.sectionLabel}>
-                  PRODUCTS AT {selectedLocation?.name?.toUpperCase()} ({filteredProducts.length})
-                </Text>
+          {/* Products List with Count Inputs */}
+          {selectedLocationId && (
+            <View style={styles.section}>
+              <Text style={styles.sectionLabel}>
+                PRODUCTS ({filteredProducts.length})
+              </Text>
 
-                {filteredProducts.length === 0 ? (
-                  <View style={styles.emptyState}>
-                    <Text style={styles.emptyStateText}>
-                      {productSearchQuery
-                        ? 'No products match your search'
-                        : selectedCategoryIds.length > 0
-                        ? 'No products in selected categories'
-                        : 'No products at this location'}
-                    </Text>
-                  </View>
-                ) : (
-                  <View style={styles.productsCard}>
-                    {filteredProducts.map((product, index) => {
-                      const currentQty = getCurrentQuantity(product)
-                      const entry = auditEntries.get(product.id)
-                      const isModified = entry !== undefined
-
-                      return (
-                        <View key={product.id}>
-                          <View style={styles.productRow}>
-                            {/* Product Info */}
-                            <View style={styles.productInfo}>
-                              <Text style={styles.productName}>{product.name}</Text>
-                              {product.sku && (
-                                <Text style={styles.productSKU}>SKU: {product.sku}</Text>
-                              )}
-                            </View>
-
-                            {/* Current Quantity */}
-                            <View style={styles.quantitySection}>
-                              <Text style={styles.quantityLabel}>Current</Text>
-                              <Text style={styles.currentQuantity}>{currentQty}g</Text>
-                            </View>
-
-                            {/* Audit Input */}
-                            <View style={styles.quantitySection}>
-                              <Text style={styles.quantityLabel}>Audited</Text>
-                              <TextInput
-                                style={[
-                                  styles.auditInput,
-                                  isModified && styles.auditInputModified,
-                                ]}
-                                value={entry?.auditedQuantity || ''}
-                                onChangeText={(value) => handleAuditEntry(product, value)}
-                                placeholder={currentQty.toString()}
-                                placeholderTextColor={colors.text.placeholder}
-                                keyboardType="numeric"
-                              />
-                            </View>
-
-                            {/* Difference */}
-                            {isModified && (
-                              <View style={styles.differenceSection}>
-                                <Text
-                                  style={[
-                                    styles.differenceText,
-                                    entry.difference > 0 && styles.differencePositive,
-                                    entry.difference < 0 && styles.differenceNegative,
-                                  ]}
-                                >
-                                  {entry.difference > 0 ? '+' : ''}{entry.difference}g
-                                </Text>
-                              </View>
-                            )}
-                          </View>
-
-                          {index < filteredProducts.length - 1 && <View style={styles.divider} />}
-                        </View>
-                      )
-                    })}
-                  </View>
-                )}
-              </View>
-            )}
-
-            {/* Summary */}
-            {auditEntries.size > 0 && (
-              <View style={styles.summaryCard}>
-                <Text style={styles.summaryTitle}>Audit Summary</Text>
-                <Text style={styles.summaryText}>
-                  {auditEntries.size} product{auditEntries.size > 1 ? 's' : ''} with discrepancies
-                </Text>
-                {Array.from(auditEntries.values()).map(entry => (
-                  <View key={entry.product.id} style={styles.summaryItem}>
-                    <Text style={styles.summaryItemText}>{entry.product.name}</Text>
-                    <Text
-                      style={[
-                        styles.summaryItemDiff,
-                        entry.difference > 0 && styles.differencePositive,
-                        entry.difference < 0 && styles.differenceNegative,
-                      ]}
-                    >
-                      {entry.difference > 0 ? '+' : ''}{entry.difference}g
-                    </Text>
-                  </View>
-                ))}
-              </View>
-            )}
-          </ScrollView>
-
-          {/* Actions */}
-          <View style={styles.actions}>
-            <Pressable
-              style={[styles.button, styles.cancelButton]}
-              onPress={handleClose}
-              disabled={isSubmitting}
-            >
-              <Text style={styles.cancelButtonText}>Cancel</Text>
-            </Pressable>
-
-            <Pressable
-              style={[
-                styles.button,
-                styles.submitButton,
-                (isSubmitting || auditEntries.size === 0 || !selectedLocationId || !auditReason.trim()) && styles.submitButtonDisabled,
-              ]}
-              onPress={handleSubmit}
-              disabled={isSubmitting || auditEntries.size === 0 || !selectedLocationId || !auditReason.trim()}
-            >
-              {isSubmitting ? (
-                <ActivityIndicator color={colors.text.primary} />
+              {filteredProducts.length === 0 ? (
+                <View style={styles.emptyCard}>
+                  <Text style={styles.emptyText}>
+                    {productSearch
+                      ? 'No products match your search'
+                      : selectedCategoryIds.length > 0
+                      ? 'No products in selected categories'
+                      : 'No products at this location'}
+                  </Text>
+                </View>
               ) : (
-                <Text style={styles.submitButtonText}>
-                  Complete Audit ({auditEntries.size})
+                <View style={styles.productsCard}>
+                  {filteredProducts.map((product) => {
+                    const currentQty = getCurrentQuantity(product.id)
+                    const entry = auditEntries.get(product.id)
+                    const countedQty = entry?.countedQuantity || ''
+                    const unitLabel = getUnitLabel(product)
+
+                    return (
+                      <View key={product.id} style={styles.productRow}>
+                        <View style={styles.productInfo}>
+                          <Text style={styles.productName}>{product.name}</Text>
+                          {product.sku && (
+                            <Text style={styles.productSku}>SKU: {product.sku}</Text>
+                          )}
+                          <Text style={styles.productCurrent}>
+                            Current: {currentQty}{unitLabel}
+                          </Text>
+                        </View>
+                        <View style={styles.quantityInput}>
+                          <TextInput
+                            style={styles.quantityInputField}
+                            value={countedQty}
+                            onChangeText={(value) => handleQuantityChange(product.id, product.name, value)}
+                            placeholder={currentQty.toString()}
+                            placeholderTextColor="rgba(235,235,245,0.3)"
+                            keyboardType="numeric"
+                            returnKeyType="next"
+                          />
+                          <Text style={styles.quantityInputLabel}>{unitLabel}</Text>
+                        </View>
+                      </View>
+                    )
+                  })}
+                </View>
+              )}
+            </View>
+          )}
+
+          {/* Summary */}
+          {auditEntries.size > 0 && (
+            <View style={styles.summaryCard}>
+              <Text style={styles.summaryTitle}>
+                {auditEntries.size} product{auditEntries.size > 1 ? 's' : ''} counted
+              </Text>
+            </View>
+          )}
+
+          {/* ===== ACTION BUTTON ===== */}
+          {selectedLocationId && (
+            <Pressable
+              onPress={handleSave}
+              style={[styles.saveButton, (!canSave || saving) && styles.saveButtonDisabled]}
+              disabled={!canSave || saving}
+            >
+              {saving ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.saveButtonText}>
+                  + COMPLETE AUDIT ({auditEntries.size})
                 </Text>
               )}
             </Pressable>
-          </View>
-        </View>
-      </BlurView>
+          )}
+        </ScrollView>
+      </View>
     </Modal>
   )
 }
 
 const styles = StyleSheet.create({
-  modalOverlay: {
+  container: {
     flex: 1,
+    backgroundColor: '#1c1c1e',
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    gap: 12,
+  },
+  searchBar: {
+    flex: 1,
+    height: 48,
+    backgroundColor: 'rgba(118, 118, 128, 0.24)',
+    borderRadius: 24,
+    paddingHorizontal: 20,
     justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.5)',
-  },
-  modalBackdrop: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  modalContent: {
-    backgroundColor: 'rgba(20,20,20,0.98)',
-    borderRadius: radius.xxl,
-    borderCurve: 'continuous',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-    overflow: 'hidden',
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    padding: spacing.xl,
-    borderBottomWidth: 0.5,
-    borderBottomColor: colors.border.subtle,
-  },
-  modalTitle: {
-    ...typography.title2,
-    color: colors.text.primary,
-    letterSpacing: 0.4,
-    marginBottom: spacing.xxs,
-  },
-  modalSubtitle: {
-    ...typography.footnote,
-    color: colors.text.tertiary,
-  },
-  closeButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: colors.glass.regular,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  closeButtonText: {
-    ...typography.title3,
-    color: colors.text.secondary,
-  },
-  scrollView: {
-    maxHeight: 600,
-  },
-  scrollContent: {
-    padding: spacing.xl,
-  },
-  topSection: {
-    // Default stacked layout
-  },
-  topSectionLandscape: {
-    flexDirection: 'row',
-    gap: spacing.lg,
-  },
-  topColumn: {
-    flex: 1,
-  },
-  topColumnLandscape: {
-    flex: 1,
-    minWidth: 0, // Prevent flex overflow
-  },
-  section: {
-    marginBottom: spacing.lg,
-  },
-  sectionLabel: {
-    ...typography.uppercaseLabel,
-    color: colors.text.subtle,
-    marginBottom: spacing.xs,
-  },
-  selector: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: colors.glass.regular,
-    borderWidth: 1,
-    borderColor: colors.border.regular,
-    borderRadius: radius.lg,
-    paddingVertical: 14,
-    paddingHorizontal: spacing.md,
-    minHeight: 48,
-  },
-  selectorText: {
-    ...typography.body,
-    color: colors.text.primary,
-    flex: 1,
-  },
-  selectorPlaceholder: {
-    color: colors.text.placeholder,
-  },
-  selectorChevron: {
-    ...typography.caption1,
-    color: colors.text.tertiary,
-    marginLeft: spacing.sm,
   },
   searchInput: {
-    ...typography.input,
-    color: colors.text.primary,
-    backgroundColor: colors.glass.regular,
-    borderWidth: 1,
-    borderColor: colors.border.regular,
-    borderRadius: radius.lg,
+    fontSize: 17,
+    fontWeight: '400',
+    color: '#fff',
+    letterSpacing: -0.4,
+  },
+  doneButton: {
+    backgroundColor: 'rgba(118, 118, 128, 0.24)',
+    paddingHorizontal: 24,
     paddingVertical: 12,
-    paddingHorizontal: spacing.md,
-    minHeight: 48,
+    borderRadius: 24,
+    height: 48,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  textAreaInput: {
-    ...typography.input,
-    color: colors.text.primary,
-    backgroundColor: colors.glass.regular,
-    borderWidth: 1,
-    borderColor: colors.border.regular,
-    borderRadius: radius.lg,
-    paddingVertical: 12,
-    paddingHorizontal: spacing.md,
-    minHeight: 72,
-    textAlignVertical: 'top',
+  doneButtonText: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: '#fff',
+    letterSpacing: -0.4,
   },
-  dropdownCard: {
-    backgroundColor: colors.glass.thick,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border.regular,
-    marginTop: spacing.xs,
-    overflow: 'hidden',
-    maxHeight: 300,
+  content: {
+    flex: 1,
   },
-  dropdownList: {
-    maxHeight: 240,
+  contentContainer: {
+    paddingHorizontal: 16,
+    paddingBottom: 40,
   },
-  dropdownItem: {
+  section: {
+    marginTop: 20,
+  },
+  sectionLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: 'rgba(235,235,245,0.6)',
+    letterSpacing: -0.08,
+    marginBottom: 12,
+    marginLeft: 4,
+  },
+  selectedCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: spacing.md,
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(118, 118, 128, 0.24)',
+    borderRadius: 20,
+    padding: 16,
+  },
+  selectedCardInfo: {
+    flex: 1,
+  },
+  selectedCardTitle: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: '#fff',
+    letterSpacing: -0.3,
+  },
+  selectedCardSubtext: {
+    fontSize: 13,
+    fontWeight: '400',
+    color: 'rgba(235,235,245,0.6)',
+    letterSpacing: -0.1,
+    marginTop: 4,
+  },
+  selectedCardChevron: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: 'rgba(235,235,245,0.5)',
+    marginLeft: 12,
+  },
+  placeholderCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(118, 118, 128, 0.24)',
+    borderRadius: 20,
+    padding: 16,
+  },
+  placeholderText: {
+    fontSize: 17,
+    fontWeight: '400',
+    color: 'rgba(235,235,245,0.3)',
+    letterSpacing: -0.3,
+  },
+  listCard: {
+    backgroundColor: 'rgba(118, 118, 128, 0.24)',
+    borderRadius: 20,
+    marginTop: 8,
+    maxHeight: 300,
+    overflow: 'hidden',
+  },
+  list: {
+    maxHeight: 300,
+  },
+  listItem: {
+    padding: 16,
     borderBottomWidth: 0.5,
-    borderBottomColor: colors.border.subtle,
+    borderBottomColor: 'rgba(255,255,255,0.1)',
   },
-  dropdownItemSelected: {
-    backgroundColor: colors.glass.regular,
+  listItemSelected: {
+    backgroundColor: 'rgba(255,255,255,0.05)',
   },
-  dropdownItemCheckbox: {
+  listItemInfo: {
+    flex: 1,
+  },
+  listItemText: {
+    fontSize: 17,
+    fontWeight: '500',
+    color: '#fff',
+    letterSpacing: -0.3,
+  },
+  listItemSubtext: {
+    fontSize: 13,
+    fontWeight: '400',
+    color: 'rgba(235,235,245,0.6)',
+    letterSpacing: -0.1,
+    marginTop: 4,
+  },
+  checkboxContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  checkbox: {
     width: 20,
     height: 20,
     borderRadius: 4,
     borderWidth: 1.5,
-    borderColor: colors.border.regular,
+    borderColor: 'rgba(255,255,255,0.3)',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: spacing.sm,
   },
-  dropdownItemCheckmark: {
+  checkmark: {
     width: 12,
     height: 12,
     borderRadius: 2,
-    backgroundColor: colors.semantic.success,
+    backgroundColor: 'rgba(16,185,129,1)',
   },
-  dropdownItemText: {
-    ...typography.body,
-    color: colors.text.primary,
-    flex: 1,
+  emptyCard: {
+    padding: 40,
+    alignItems: 'center',
+    backgroundColor: 'rgba(118, 118, 128, 0.24)',
+    borderRadius: 20,
   },
-  dropdownItemSubtext: {
-    ...typography.footnote,
-    color: colors.text.tertiary,
-    marginTop: spacing.xxxs,
+  emptyText: {
+    fontSize: 15,
+    fontWeight: '400',
+    color: 'rgba(235,235,245,0.4)',
+    letterSpacing: -0.2,
+    textAlign: 'center',
   },
   productsCard: {
-    backgroundColor: colors.glass.regular,
-    borderRadius: radius.xxl,
-    borderCurve: 'continuous',
-    borderWidth: 1,
-    borderColor: colors.border.regular,
-    padding: spacing.md,
+    backgroundColor: 'rgba(118, 118, 128, 0.24)',
+    borderRadius: 20,
+    padding: 16,
+    gap: 12,
   },
   productRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.md,
-    paddingVertical: spacing.sm,
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+    gap: 16,
   },
   productInfo: {
     flex: 1,
   },
   productName: {
-    ...typography.subhead,
-    color: colors.text.primary,
+    fontSize: 17,
+    fontWeight: '600',
+    color: '#fff',
+    letterSpacing: -0.3,
   },
-  productSKU: {
-    ...typography.caption1,
-    color: colors.text.tertiary,
-    marginTop: spacing.xxxs,
+  productSku: {
+    fontSize: 13,
+    fontWeight: '400',
+    color: 'rgba(235,235,245,0.6)',
+    letterSpacing: -0.1,
+    marginTop: 2,
   },
-  quantitySection: {
+  productCurrent: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: 'rgba(16,185,129,0.8)',
+    letterSpacing: -0.1,
+    marginTop: 4,
+  },
+  quantityInput: {
+    flexDirection: 'row',
     alignItems: 'center',
-    minWidth: 80,
+    gap: 6,
   },
-  quantityLabel: {
-    ...typography.caption1,
-    color: colors.text.subtle,
-    marginBottom: spacing.xxs,
-  },
-  currentQuantity: {
-    ...typography.subhead,
-    color: colors.text.secondary,
-  },
-  auditInput: {
-    ...typography.subhead,
-    color: colors.text.primary,
+  quantityInputField: {
+    width: 80,
+    height: 40,
     backgroundColor: 'rgba(0,0,0,0.3)',
-    borderWidth: 1,
-    borderColor: colors.border.subtle,
-    borderRadius: radius.sm,
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    minWidth: 70,
-    textAlign: 'center',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    fontSize: 17,
+    fontWeight: '600',
+    color: '#fff',
+    textAlign: 'right',
   },
-  auditInputModified: {
-    borderColor: colors.semantic.successBorder,
-    backgroundColor: 'rgba(16,185,129,0.05)',
-  },
-  differenceSection: {
-    minWidth: 60,
-    alignItems: 'flex-end',
-  },
-  differenceText: {
-    ...typography.subhead,
-    fontWeight: '700',
-  },
-  differencePositive: {
-    color: colors.semantic.success,
-  },
-  differenceNegative: {
-    color: colors.semantic.error,
-  },
-  divider: {
-    height: 0.5,
-    backgroundColor: colors.border.subtle,
-    marginVertical: spacing.xs,
-  },
-  emptyState: {
-    paddingVertical: spacing.xxl,
-    alignItems: 'center',
-  },
-  emptyStateText: {
-    ...typography.body,
-    color: colors.text.tertiary,
-    textAlign: 'center',
+  quantityInputLabel: {
+    fontSize: 15,
+    fontWeight: '500',
+    color: 'rgba(235,235,245,0.6)',
   },
   summaryCard: {
-    backgroundColor: colors.glass.thick,
-    borderRadius: radius.lg,
+    marginTop: 20,
+    backgroundColor: 'rgba(16,185,129,0.1)',
     borderWidth: 1,
-    borderColor: colors.border.regular,
-    padding: spacing.md,
-    marginBottom: spacing.md,
+    borderColor: 'rgba(16,185,129,0.3)',
+    borderRadius: 20,
+    padding: 16,
+    alignItems: 'center',
   },
   summaryTitle: {
-    ...typography.subhead,
-    color: colors.text.primary,
-    marginBottom: spacing.xs,
+    fontSize: 15,
+    fontWeight: '600',
+    color: 'rgba(16,185,129,1)',
+    letterSpacing: -0.2,
   },
-  summaryText: {
-    ...typography.footnote,
-    color: colors.text.tertiary,
-    marginBottom: spacing.sm,
-  },
-  summaryItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: spacing.xxs,
-  },
-  summaryItemText: {
-    ...typography.caption1,
-    color: colors.text.secondary,
-    flex: 1,
-  },
-  summaryItemDiff: {
-    ...typography.caption1,
-    fontWeight: '700',
-  },
-  actions: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    padding: spacing.xl,
-    borderTopWidth: 0.5,
-    borderTopColor: colors.border.subtle,
-  },
-  button: {
-    flex: 1,
+  saveButton: {
+    marginTop: 32,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+    borderRadius: 24,
     paddingVertical: 16,
-    borderRadius: radius.xl,
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 52,
   },
-  cancelButton: {
-    backgroundColor: colors.glass.regular,
-    borderWidth: 1,
-    borderColor: colors.border.regular,
-  },
-  cancelButtonText: {
-    ...typography.buttonLarge,
-    color: colors.text.primary,
-  },
-  submitButton: {
-    backgroundColor: colors.semantic.success,
-  },
-  submitButtonDisabled: {
+  saveButtonDisabled: {
     opacity: 0.4,
   },
-  submitButtonText: {
-    ...typography.buttonLarge,
-    color: colors.text.primary,
+  saveButtonText: {
+    fontSize: 15,
     fontWeight: '600',
-  },
-  draftIndicator: {
-    backgroundColor: 'rgba(16,185,129,0.15)',
-    borderBottomWidth: 1,
-    borderBottomColor: colors.semantic.successBorder,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.xl,
-    alignItems: 'center',
-  },
-  draftIndicatorText: {
-    ...typography.footnote,
-    color: colors.semantic.success,
-    fontWeight: '600',
+    color: '#fff',
+    letterSpacing: 0.5,
   },
   locationItemContent: {
     flex: 1,
@@ -1125,22 +1025,57 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  locationItemText: {
-    flex: 1,
-  },
   draftBadge: {
     backgroundColor: 'rgba(16,185,129,0.15)',
     borderWidth: 1,
-    borderColor: colors.semantic.successBorder,
+    borderColor: 'rgba(16,185,129,0.3)',
     borderRadius: 8,
     paddingVertical: 3,
     paddingHorizontal: 8,
-    marginLeft: spacing.sm,
+    marginLeft: 12,
   },
   draftBadgeText: {
-    ...typography.caption2,
-    color: colors.semantic.success,
+    fontSize: 11,
     fontWeight: '600',
+    color: 'rgba(16,185,129,1)',
     letterSpacing: 0.3,
+  },
+  draftIndicator: {
+    marginTop: 20,
+    backgroundColor: 'rgba(16,185,129,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(16,185,129,0.3)',
+    borderRadius: 20,
+    padding: 12,
+    alignItems: 'center',
+  },
+  draftIndicatorText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: 'rgba(16,185,129,1)',
+    letterSpacing: -0.1,
+  },
+  descriptionCard: {
+    backgroundColor: 'rgba(118, 118, 128, 0.24)',
+    borderRadius: 20,
+    padding: 16,
+  },
+  descriptionInput: {
+    fontSize: 15,
+    fontWeight: '400',
+    color: '#fff',
+    letterSpacing: -0.2,
+    minHeight: 60,
+  },
+  clearAllItem: {
+    backgroundColor: 'rgba(255,59,48,0.1)',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,59,48,0.3)',
+  },
+  clearAllText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: 'rgba(255,59,48,1)',
+    letterSpacing: -0.2,
   },
 })

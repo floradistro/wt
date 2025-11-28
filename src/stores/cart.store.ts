@@ -17,7 +17,7 @@ import { devtools, persist } from 'zustand/middleware'
 import { useShallow } from 'zustand/react/shallow'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import * as Haptics from 'expo-haptics'
-import type { CartItem, Product, PricingTier } from '@/types/pos'
+import type { CartItem, Product, PricingTier, ProductVariant } from '@/types/pos'
 import { logger } from '@/utils/logger'
 
 // ============================================================================
@@ -45,7 +45,7 @@ interface CartState {
   discountingItemId: string | null
 
   // Actions
-  addToCart: (product: Product, tier?: PricingTier) => void
+  addToCart: (product: Product, tier?: PricingTier, variant?: ProductVariant) => void
   updateQuantity: (itemId: string, delta: number) => void
   changeTier: (oldItemId: string, product: Product, newTier: PricingTier) => void
   applyManualDiscount: (itemId: string, type: 'percentage' | 'amount', value: number) => void
@@ -67,15 +67,30 @@ export const useCartStore = create<CartState>()(
         ...initialState,
 
       /**
-       * Add product to cart (with optional pricing tier)
+       * Add product to cart (with optional pricing tier and/or variant)
        * STEVE JOBS PRINCIPLE: Never let them add more than we have in stock
        */
-      addToCart: (product: Product, tier?: PricingTier) => {
+      addToCart: (product: Product, tier?: PricingTier, variant?: ProductVariant) => {
+        // 🔍 DEBUG: Log what we're receiving
+        logger.debug('[Cart] addToCart called with:', {
+          productId: product.id,
+          productName: product.name,
+          tier: tier ? JSON.stringify(tier) : 'undefined',
+          tierQty: tier?.qty,
+          variant: variant?.variant_name,
+        })
+
         const price = tier
           ? (typeof tier.price === 'number' ? tier.price : parseFloat(tier.price))
           : (product.regular_price || 0)
         const tierLabel = tier ? (tier.weight || tier.label) : null
-        const itemId = tier ? `${product.id}_${tier.weight || tier.label}` : product.id
+
+        // Generate unique itemId including variant if present
+        const variantSuffix = variant ? `_variant_${variant.variant_template_id}` : ''
+        const itemId = tier
+          ? `${product.id}_${tier.weight || tier.label}${variantSuffix}`
+          : `${product.id}${variantSuffix}`
+
         const availableInventory = product.inventory_quantity || 0
 
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
@@ -109,17 +124,37 @@ export const useCartStore = create<CartState>()(
             return state // Don't add
           }
 
+          // Build display name with variant if present
+          let displayName = product.name
+          if (variant) {
+            displayName = `${product.name} - ${variant.variant_name}`
+          }
+          if (tierLabel) {
+            displayName = `${displayName} (${tierLabel})`
+          }
+
+          // CRITICAL: Extract tierQuantity with multiple fallbacks
+          let tierQuantity = 1 // Default fallback
+          if (tier) {
+            tierQuantity = tier.qty || tier.quantity || 1
+            logger.debug('[Cart] Extracted tierQuantity:', { tierQuantity, rawTier: JSON.stringify(tier) })
+          }
+
           const newItem: CartItem = {
             id: itemId,
-            name: tierLabel ? `${product.name} (${tierLabel})` : product.name,
+            name: displayName,
             price,
             quantity: 1, // Cart quantity (how many of this tier are in cart)
             tierLabel: tierLabel || undefined,
-            tierQuantity: tier ? (tier.qty || 1) : 1, // CRITICAL: Actual quantity to deduct from inventory (e.g., 28 for "28g", 3 for "3 units")
+            tierQuantity, // CRITICAL: Actual quantity to deduct from inventory (e.g., 28 for "28g", 3 for "3 units")
             productName: product.name,
             productId: product.id,
             inventoryId: product.inventory_id || product.id, // Use actual inventory record ID
             availableInventory, // Store for future validation
+            // Variant fields
+            variantTemplateId: variant?.variant_template_id,
+            variantName: variant?.variant_name,
+            conversionRatio: variant?.conversion_ratio,
           }
 
           // CRITICAL VALIDATION: Ensure tierQuantity exists before adding to cart
@@ -194,13 +229,17 @@ export const useCartStore = create<CartState>()(
             }
           }
 
+          // CRITICAL: Extract tierQuantity with multiple fallbacks
+          const tierQuantity = newTier.qty || newTier.quantity || 1
+          logger.debug('[Cart] changeTier - Extracted tierQuantity:', { tierQuantity, rawTier: JSON.stringify(newTier) })
+
           const newItem: CartItem = {
             id: itemId,
             name: tierLabel ? `${product.name} (${tierLabel})` : product.name,
             price,
             quantity: 1,
             tierLabel: tierLabel || undefined,
-            tierQuantity: newTier.qty || 1, // CRITICAL: Actual quantity to deduct from inventory
+            tierQuantity, // CRITICAL: Actual quantity to deduct from inventory
             productName: product.name,
             productId: product.id,
             inventoryId: product.inventory_id || product.id, // Use actual inventory record ID

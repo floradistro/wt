@@ -1,54 +1,59 @@
 /**
  * CategoryModal Component
- * Add/Edit category with parent selection
- * Apple Engineering: Modal presentation, validation, <300 lines
+ *
+ * STANDARD MODAL PATTERN ✅
+ * This is the GOLD STANDARD for all modals in the app
+ *
+ * Pattern: Full-screen slide-up sheet with pill-shaped inputs
+ * Reference: Based on POSUnifiedCustomerSelector
+ *
+ * When creating new modals, copy this structure exactly!
  */
 
-import { View, Text, StyleSheet, Modal, Pressable, TextInput, ScrollView, ActivityIndicator } from 'react-native'
+import {
+  View,
+  Text,
+  TextInput,
+  StyleSheet,
+  Modal,
+  Pressable,
+  ScrollView,
+} from 'react-native'
 import { useState, useEffect } from 'react'
-import { LiquidGlassView, isLiquidGlassSupported } from '@callstack/liquid-glass'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import * as Haptics from 'expo-haptics'
 import { supabase } from '@/lib/supabase/client'
-import { useAuth } from '@/stores/auth.store'
+import { useAppAuth } from '@/contexts/AppAuthContext'
 import { logger } from '@/utils/logger'
-import { layout } from '@/theme/layout'
-import type { Category } from '@/types/categories'
+import { useProductsScreenStore, productsScreenActions } from '@/stores/products-list.store'
 
-interface CategoryModalProps {
-  visible: boolean
-  category?: Category | null // If provided, edit mode
-  categories: Category[] // For parent selection
-  onClose: () => void
-  onSaved: () => void
-}
+/**
+ * CategoryModal - ZERO PROPS ✅
+ * Full-screen sheet - EXACT match to customer selector
+ */
+export function CategoryModal() {
+  const insets = useSafeAreaInsets()
 
-export function CategoryModal({
-  visible,
-  category,
-  categories,
-  onClose,
-  onSaved,
-}: CategoryModalProps) {
-  const { user } = useAuth()
+  // ========================================
+  // STORES - TRUE ZERO PROPS
+  // ========================================
+  const { user } = useAppAuth()
+  const showModal = useProductsScreenStore((state) => state.showCreateCategory)
+
+  // ========================================
+  // LOCAL STATE (for form)
+  // ========================================
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
-  const [parentId, setParentId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
-  const isEditMode = !!category
-
-  // Load category data when editing
+  // Reset on open/close
   useEffect(() => {
-    if (category) {
-      setName(category.name)
-      setDescription(category.description || '')
-      setParentId(category.parent_id)
-    } else {
+    if (showModal) {
       setName('')
       setDescription('')
-      setParentId(null)
     }
-  }, [category])
+  }, [showModal])
 
   const handleSave = async () => {
     if (!name.trim()) {
@@ -70,153 +75,102 @@ export function CategoryModal({
 
       const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-')
 
-      if (isEditMode) {
-        // Update existing
-        const { error } = await supabase
-          .from('categories')
-          .update({
-            name,
-            slug,
-            description: description || null,
-            parent_id: parentId,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', category.id)
-          .eq('vendor_id', userData.vendor_id)
+      const { error: createError } = await supabase
+        .from('categories')
+        .insert({
+          name: name.trim(),
+          slug,
+          description: description.trim() || null,
+          parent_id: null,
+          vendor_id: userData.vendor_id,
+        })
 
-        if (error) throw error
-      } else {
-        // Create new
-        const { error } = await supabase
-          .from('categories')
-          .insert({
-            name,
-            slug,
-            description: description || null,
-            parent_id: parentId,
-            vendor_id: userData.vendor_id,
-          })
-
-        if (error) throw error
-      }
+      if (createError) throw createError
 
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
-      onSaved()
-      onClose()
-    } catch (error) {
-      logger.error('Failed to save category', { error })
+      productsScreenActions.closeAllModals()
+    } catch (err) {
+      logger.error('Failed to create category', { error: err })
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
     } finally {
       setSaving(false)
     }
   }
 
-  const handleCancel = () => {
+  const handleClose = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-    onClose()
+    productsScreenActions.closeAllModals()
   }
 
-  // Get available parent categories (excluding self and children in edit mode)
-  const availableParents = (categories || []).filter(c => {
-    if (!isEditMode) return true
-    // Can't select self or own children as parent
-    return c.id !== category.id && c.parent_id !== category.id
-  })
+  if (!showModal) return null
 
   return (
     <Modal
-      visible={visible}
-      animationType="slide"
-      presentationStyle="pageSheet"
-      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
+      visible={showModal}
+      animationType="slide" // Slides up from bottom
+      presentationStyle="fullScreen" // Full screen, not half
+      supportedOrientations={['portrait', 'landscape', 'landscape-left', 'landscape-right']}
+      onRequestClose={handleClose}
+      statusBarTranslucent
     >
-      <View style={styles.container}>
-        <LiquidGlassView
-          effect="regular"
-          colorScheme="dark"
-          style={[styles.background, !isLiquidGlassSupported && styles.backgroundFallback]}
-        >
-          {/* Header */}
-          <View style={styles.header}>
-            <Pressable onPress={handleCancel} style={styles.headerButton}>
-              <Text style={styles.headerButtonText}>Cancel</Text>
-            </Pressable>
-            <Text style={styles.headerTitle}>
-              {isEditMode ? 'Edit Category' : 'New Category'}
-            </Text>
-            <Pressable onPress={handleSave} style={styles.headerButton} disabled={saving}>
-              {saving ? (
-                <ActivityIndicator size="small" color="#60A5FA" />
-              ) : (
-                <Text style={[styles.headerButtonText, styles.headerButtonTextPrimary]}>
-                  {isEditMode ? 'Save' : 'Create'}
-                </Text>
-              )}
-            </Pressable>
+      <View style={[styles.container, { paddingTop: insets.top }]}>
+        {/* ===== HEADER ===== */}
+        {/* Standard pattern: Search input + Done button */}
+        <View style={styles.searchContainer}>
+          <View style={styles.searchBar}>
+            <TextInput
+              style={styles.searchInput}
+              value={name}
+              onChangeText={setName}
+              placeholder="Category name"
+              placeholderTextColor="rgba(235,235,245,0.3)"
+              autoFocus
+              returnKeyType="done"
+              onSubmitEditing={handleSave}
+            />
           </View>
+          <Pressable onPress={handleClose} style={styles.doneButton}>
+            <Text style={styles.doneButtonText}>Done</Text>
+          </Pressable>
+        </View>
 
-          <ScrollView
-            style={styles.content}
-            showsVerticalScrollIndicator={true}
-            indicatorStyle="white"
-            scrollIndicatorInsets={{ right: 2 }}
-          >
-            {/* Name Input */}
-            <View style={styles.section}>
-              <Text style={styles.label}>Category Name *</Text>
+        {/* ===== CONTENT ===== */}
+        {/* Scrollable content area */}
+        <ScrollView
+          style={styles.content}
+          contentContainerStyle={styles.contentContainer}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Description Section (optional field) */}
+          <View style={styles.section}>
+            <Text style={styles.sectionLabel}>DESCRIPTION</Text>
+            <View style={styles.descriptionCard}>
               <TextInput
-                style={styles.input}
-                value={name}
-                onChangeText={setName}
-                placeholder="e.g., Flower, Edibles, Concentrates"
-                placeholderTextColor="rgba(235,235,245,0.3)"
-                autoFocus
-              />
-            </View>
-
-            {/* Description Input */}
-            <View style={styles.section}>
-              <Text style={styles.label}>Description</Text>
-              <TextInput
-                style={[styles.input, styles.textArea]}
+                style={styles.descriptionInput}
                 value={description}
                 onChangeText={setDescription}
-                placeholder="Optional description"
+                placeholder="Optional description for this category"
                 placeholderTextColor="rgba(235,235,245,0.3)"
                 multiline
-                numberOfLines={4}
+                numberOfLines={3}
+                textAlignVertical="top"
               />
             </View>
+          </View>
 
-            {/* Parent Category Selector */}
-            <View style={styles.section}>
-              <Text style={styles.label}>Parent Category</Text>
-              <View style={styles.parentList}>
-                <Pressable
-                  style={[styles.parentOption, !parentId && styles.parentOptionActive]}
-                  onPress={() => setParentId(null)}
-                >
-                  <Text style={[styles.parentOptionText, !parentId && styles.parentOptionTextActive]}>
-                    None (Top Level)
-                  </Text>
-                  {!parentId && <Text style={styles.checkmark}>✓</Text>}
-                </Pressable>
-                {availableParents.map(cat => (
-                  <Pressable
-                    key={cat.id}
-                    style={[styles.parentOption, parentId === cat.id && styles.parentOptionActive]}
-                    onPress={() => setParentId(cat.id)}
-                  >
-                    <Text style={[styles.parentOptionText, parentId === cat.id && styles.parentOptionTextActive]}>
-                      {cat.name}
-                    </Text>
-                    {parentId === cat.id && <Text style={styles.checkmark}>✓</Text>}
-                  </Pressable>
-                ))}
-              </View>
-            </View>
-          </ScrollView>
-        </LiquidGlassView>
+          {/* ===== ACTION BUTTON ===== */}
+          {/* Standard pattern: "+ ACTION NAME" */}
+          <Pressable
+            onPress={handleSave}
+            style={[styles.addButton, (!name.trim() || saving) && styles.addButtonDisabled]}
+            disabled={!name.trim() || saving}
+          >
+            <Text style={styles.addButtonText}>
+              {saving ? 'CREATING...' : '+ CREATE CATEGORY'}
+            </Text>
+          </Pressable>
+        </ScrollView>
       </View>
     </Modal>
   )
@@ -225,95 +179,91 @@ export function CategoryModal({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000',
+    backgroundColor: '#1c1c1e',
   },
-  background: {
-    flex: 1,
-  },
-  backgroundFallback: {
-    backgroundColor: '#000',
-  },
-  header: {
+  searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: layout.contentHorizontal,
-    paddingVertical: layout.cardPadding,
-    borderBottomWidth: 0.5,
-    borderBottomColor: 'rgba(255,255,255,0.1)',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    gap: 12,
   },
-  headerButton: {
-    minWidth: 60,
+  searchBar: {
+    flex: 1,
+    height: 48,
+    backgroundColor: 'rgba(118, 118, 128, 0.24)',
+    borderRadius: 24, // PILL SHAPED
+    paddingHorizontal: 20,
+    justifyContent: 'center',
   },
-  headerButtonText: {
+  searchInput: {
     fontSize: 17,
-    color: 'rgba(235,235,245,0.6)',
+    fontWeight: '400',
+    color: '#fff',
+    letterSpacing: -0.4,
   },
-  headerButtonTextPrimary: {
-    color: '#60A5FA',
-    fontWeight: '600',
+  doneButton: {
+    backgroundColor: 'rgba(118, 118, 128, 0.24)',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 24, // PILL SHAPED
+    height: 48,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  headerTitle: {
+  doneButtonText: {
     fontSize: 17,
     fontWeight: '600',
     color: '#fff',
+    letterSpacing: -0.4,
   },
   content: {
     flex: 1,
-    paddingHorizontal: layout.contentHorizontal,
+  },
+  contentContainer: {
+    paddingHorizontal: 16,
+    paddingBottom: 40,
   },
   section: {
-    marginTop: 24,
+    marginTop: 20,
   },
-  label: {
+  sectionLabel: {
     fontSize: 13,
     fontWeight: '600',
-    color: 'rgba(235,235,245,0.7)',
-    marginBottom: 8,
+    color: 'rgba(235,235,245,0.6)',
+    letterSpacing: -0.08,
+    marginBottom: 12,
+    marginLeft: 4,
   },
-  input: {
-    fontSize: 17,
-    color: '#fff',
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.1)',
-    borderRadius: 10,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+  descriptionCard: {
+    backgroundColor: 'rgba(118, 118, 128, 0.24)',
+    borderRadius: 20, // PILL SHAPED
+    padding: 16,
   },
-  textArea: {
-    minHeight: 100,
-    textAlignVertical: 'top',
-  },
-  parentList: {
-    gap: 8,
-  },
-  parentOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    backgroundColor: 'rgba(255,255,255,0.03)',
-    borderRadius: 10,
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.05)',
-  },
-  parentOptionActive: {
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    borderColor: 'rgba(255,255,255,0.2)',
-  },
-  parentOptionText: {
+  descriptionInput: {
     fontSize: 15,
-    color: 'rgba(235,235,245,0.7)',
-  },
-  parentOptionTextActive: {
+    fontWeight: '400',
     color: '#fff',
-    fontWeight: '600',
+    letterSpacing: -0.2,
+    minHeight: 80,
   },
-  checkmark: {
-    fontSize: 16,
-    color: '#60A5FA',
-    fontWeight: '700',
+  addButton: {
+    marginTop: 32,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+    borderRadius: 24, // PILL SHAPED
+    paddingVertical: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addButtonDisabled: {
+    opacity: 0.4,
+  },
+  addButtonText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#fff',
+    letterSpacing: 0.5,
   },
 })

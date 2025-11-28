@@ -49,6 +49,9 @@ export function EditablePricingTemplatesSection({
   const [expandedTemplateId, setExpandedTemplateId] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
 
+  // Track raw text input for decimal fields during editing
+  const [editingValues, setEditingValues] = useState<Record<string, string>>({})
+
   // Load all vendor templates (not filtered by category)
   const loadAllTemplates = useCallback(async () => {
     if (!user?.email) return
@@ -196,6 +199,68 @@ export function EditablePricingTemplatesSection({
     handleUpdateTemplate(templateIndex, updatedTemplate)
   }
 
+  const generateSlug = (name: string): string => {
+    return name
+      .toLowerCase()
+      .trim()
+      .replace(/[^\w\s-]/g, '') // Remove special characters
+      .replace(/\s+/g, '-') // Replace spaces with hyphens
+      .replace(/-+/g, '-') // Replace multiple hyphens with single hyphen
+      .replace(/^-+|-+$/g, '') // Remove leading/trailing hyphens
+  }
+
+  const updateProductsWithTemplate = async (templateId: string, vendorId: string, newTiers: any[]) => {
+    try {
+      logger.info('⚡ LIVE TEMPLATE LINK: Setting template reference for all products', {
+        templateId,
+        categoryId,
+        message: 'Products will now read pricing from template dynamically',
+      })
+
+      // Call database function to set template reference (LIVE SYSTEM)
+      // Products will read pricing from template at runtime - no more orphaned copies
+      const { data, error } = await supabase.rpc('update_products_pricing_from_template', {
+        p_category_id: categoryId,
+        p_vendor_id: vendorId,
+        p_template_id: templateId,
+      })
+
+      if (error) {
+        if (error.code === 'PGRST202') {
+          logger.error('❌ DATABASE FUNCTION NOT FOUND!', {
+            error: 'update_products_pricing_from_template function does not exist',
+            solution: 'Run in Supabase SQL Editor: NOTIFY pgrst, \'reload schema\';',
+            details: error,
+          })
+          throw new Error('Database function not accessible. Schema cache needs reload.')
+        }
+        logger.error('❌ BULK UPDATE FAILED', {
+          error: error.message || String(error),
+          code: error.code,
+          details: error,
+        })
+        throw error
+      }
+
+      const result = data?.[0]
+      const updatedCount = result?.updated_count || 0
+      const updatedIds = result?.updated_product_ids || []
+
+      logger.info('✅ BULK UPDATE COMPLETE', {
+        updatedCount,
+        firstFewIds: updatedIds.slice(0, 3),
+        message: `${updatedCount} product(s) updated instantly`,
+      })
+    } catch (error) {
+      logger.error('Failed to bulk update products:', {
+        error: error instanceof Error ? error.message : String(error),
+        templateId,
+        categoryId,
+      })
+      throw error
+    }
+  }
+
   const handleSaveTemplates = async () => {
     if (!user?.email) return
 
@@ -223,8 +288,15 @@ export function EditablePricingTemplatesSection({
         }))
 
         if (template.id) {
-          // Update existing
-          const { error } = await supabase
+          // Update existing template
+          logger.info('💾 Saving template update', {
+            templateId: template.id,
+            templateName: template.name,
+            tierCount: default_tiers.length,
+            firstTier: default_tiers[0],
+          })
+
+          const { data: updatedData, error } = await supabase
             .from('pricing_tier_templates')
             .update({
               name: template.name,
@@ -234,27 +306,77 @@ export function EditablePricingTemplatesSection({
             })
             .eq('id', template.id)
             .eq('vendor_id', userData.vendor_id)
+            .select()
+            .single()
 
-          if (error) throw error
+          if (error) {
+            logger.error('❌ Failed to save template', {
+              error: error.message,
+              templateId: template.id,
+            })
+            throw error
+          }
+
+          logger.info('✅ Template saved successfully', {
+            templateId: template.id,
+            updatedData: updatedData,
+          })
+
+          // CASCADE UPDATE: Update all products in this category with the new pricing
+          logger.info('🔄 Triggering cascade update for template', {
+            templateId: template.id,
+            templateName: template.name,
+          })
+          await updateProductsWithTemplate(template.id, userData.vendor_id, default_tiers)
         } else {
-          // Insert new
-          const { error } = await supabase
+          // Insert new - generate slug from name
+          const slug = generateSlug(template.name)
+          const { data: newTemplate, error } = await supabase
             .from('pricing_tier_templates')
             .insert({
               vendor_id: userData.vendor_id,
               category_id: categoryId,
               name: template.name,
+              slug: slug,
               description: template.description,
               default_tiers: default_tiers,
               is_active: true,
             })
+            .select()
+            .single()
 
           if (error) throw error
+
+          // CASCADE UPDATE: For new templates, also update existing products
+          if (newTemplate) {
+            logger.info('✨ New template created, updating existing products', {
+              templateId: newTemplate.id,
+              templateName: template.name,
+            })
+            await updateProductsWithTemplate(newTemplate.id, userData.vendor_id, default_tiers)
+          }
         }
       }
 
+      logger.info('✅ All templates saved successfully, reloading UI')
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
-      reload()
+
+      // Reload templates from database
+      await reload()
+
+      logger.info('✅ Templates reloaded, triggering products refresh')
+
+      // CRITICAL: Force products store to refresh after cascade update
+      // This ensures UI shows updated pricing immediately
+      const { productsActions, useProductsStore } = await import('@/stores/products.store')
+      const { productsScreenActions } = await import('@/stores/products-list.store')
+
+      await productsActions.refreshProducts()
+
+      // Also refresh the selected product if one is open
+      const freshProducts = useProductsStore.getState().products
+      productsScreenActions.refreshSelectedProduct(freshProducts)
+
       onTemplatesUpdated()
     } catch (error) {
       logger.error('Failed to save templates:', error)
@@ -275,14 +397,26 @@ export function EditablePricingTemplatesSection({
 
   return (
     <View style={styles.section}>
-      <Text style={styles.sectionTitle}>PRICING TEMPLATES</Text>
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle}>PRICING TEMPLATES</Text>
+        {isEditing && (
+          <View style={styles.sectionActions}>
+            <Pressable onPress={handleAddTemplate} style={styles.addButton}>
+              <Text style={styles.addButtonText}>+ Add Template</Text>
+            </Pressable>
+          </View>
+        )}
+      </View>
+
       <View style={styles.cardGlass}>
         {isEditing ? (
           <>
             {editedTemplates.length === 0 ? (
-              <Pressable onPress={handleAddTemplate} style={styles.emptyRow}>
-                <Text style={styles.emptyText}>+ Add Pricing Template</Text>
-              </Pressable>
+              <View style={styles.emptyContainer}>
+                <Text style={styles.emptyText}>
+                  Add pricing templates to define reusable pricing tiers for this category
+                </Text>
+              </View>
             ) : (
               <>
                 {editedTemplates.map((template, templateIndex) => {
@@ -359,25 +493,93 @@ export function EditablePricingTemplatesSection({
                               <View style={styles.priceBreakInputRow}>
                                 <TextInput
                                   style={styles.priceBreakSmallInput}
-                                  value={priceBreak.quantity.toString()}
-                                  onChangeText={(text) => handleUpdatePriceBreak(templateIndex, breakIndex, { quantity: parseFloat(text) || 0 })}
+                                  value={editingValues[`${templateIndex}-${breakIndex}-qty`] ?? (priceBreak.quantity === 0 ? '' : priceBreak.quantity.toString())}
+                                  onChangeText={(text) => {
+                                    // Allow empty, numbers, and decimal point
+                                    if (text === '' || /^\d*\.?\d*$/.test(text)) {
+                                      const key = `${templateIndex}-${breakIndex}-qty`
+                                      setEditingValues({ ...editingValues, [key]: text })
+
+                                      // Only update the actual value if it's a valid number
+                                      if (text !== '' && text !== '.') {
+                                        const parsed = parseFloat(text)
+                                        if (!isNaN(parsed)) {
+                                          handleUpdatePriceBreak(templateIndex, breakIndex, { quantity: parsed })
+                                        }
+                                      } else if (text === '') {
+                                        handleUpdatePriceBreak(templateIndex, breakIndex, { quantity: 0 })
+                                      }
+                                    }
+                                  }}
+                                  onBlur={() => {
+                                    // Clear editing state on blur
+                                    const key = `${templateIndex}-${breakIndex}-qty`
+                                    const newEditingValues = { ...editingValues }
+                                    delete newEditingValues[key]
+                                    setEditingValues(newEditingValues)
+                                  }}
                                   placeholder="Qty"
                                   placeholderTextColor="rgba(235,235,245,0.3)"
                                   keyboardType="decimal-pad"
                                 />
-                                <TextInput
-                                  style={styles.priceBreakSmallInput}
-                                  value={priceBreak.unit}
-                                  onChangeText={(text) => handleUpdatePriceBreak(templateIndex, breakIndex, { unit: text })}
-                                  placeholder="Unit"
-                                  placeholderTextColor="rgba(235,235,245,0.3)"
-                                />
+                                <View style={styles.unitPickerContainer}>
+                                  <ScrollView
+                                    horizontal
+                                    showsHorizontalScrollIndicator={false}
+                                    style={styles.unitPickerScroll}
+                                    contentContainerStyle={styles.unitPickerContent}
+                                  >
+                                    {['g', 'ml', 'oz', 'unit', 'pack'].map((unit) => (
+                                      <Pressable
+                                        key={unit}
+                                        style={[
+                                          styles.unitOption,
+                                          priceBreak.unit === unit && styles.unitOptionActive
+                                        ]}
+                                        onPress={() => {
+                                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                                          handleUpdatePriceBreak(templateIndex, breakIndex, { unit })
+                                        }}
+                                      >
+                                        <Text style={[
+                                          styles.unitOptionText,
+                                          priceBreak.unit === unit && styles.unitOptionTextActive
+                                        ]}>
+                                          {unit}
+                                        </Text>
+                                      </Pressable>
+                                    ))}
+                                  </ScrollView>
+                                </View>
                                 <View style={styles.priceBreakPriceWrapper}>
                                   <Text style={styles.dollarSign}>$</Text>
                                   <TextInput
                                     style={styles.priceBreakPriceInput}
-                                    value={priceBreak.price > 0 ? priceBreak.price.toString() : ''}
-                                    onChangeText={(text) => handleUpdatePriceBreak(templateIndex, breakIndex, { price: parseFloat(text) || 0 })}
+                                    value={editingValues[`${templateIndex}-${breakIndex}-price`] ?? (priceBreak.price > 0 ? priceBreak.price.toString() : '')}
+                                    onChangeText={(text) => {
+                                      // Allow empty, numbers, and decimal point
+                                      if (text === '' || /^\d*\.?\d*$/.test(text)) {
+                                        const key = `${templateIndex}-${breakIndex}-price`
+                                        setEditingValues({ ...editingValues, [key]: text })
+
+                                        // Only update the actual value if it's a valid number
+                                        if (text !== '' && text !== '.') {
+                                          const parsed = parseFloat(text)
+                                          if (!isNaN(parsed)) {
+                                            handleUpdatePriceBreak(templateIndex, breakIndex, { price: parsed })
+                                          }
+                                        } else if (text === '') {
+                                          handleUpdatePriceBreak(templateIndex, breakIndex, { price: 0 })
+                                        }
+                                      }
+                                    }}
+                                    onBlur={() => {
+                                      // Clear editing state on blur
+                                      const key = `${templateIndex}-${breakIndex}-price`
+                                      const newEditingValues = { ...editingValues }
+                                      delete newEditingValues[key]
+                                      setEditingValues(newEditingValues)
+                                    }}
                                     placeholder="0.00"
                                     placeholderTextColor="rgba(235,235,245,0.3)"
                                     keyboardType="decimal-pad"
@@ -441,14 +643,42 @@ const styles = StyleSheet.create({
     marginHorizontal: layout.containerMargin, // Handles own horizontal spacing
     marginBottom: layout.sectionSpacing,
   },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
   sectionTitle: {
     fontSize: 11,
     fontWeight: '600',
     color: 'rgba(235,235,245,0.5)',
     letterSpacing: 0.6,
     textTransform: 'uppercase',
-    marginBottom: 8,
-    paddingHorizontal: 0, // No padding - inherits parent margin
+  },
+  sectionActions: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  addButton: {
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    borderRadius: 20,
+    borderCurve: 'continuous',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  addButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: 'rgba(235,235,245,0.9)',
+    letterSpacing: -0.2,
+  },
+  emptyContainer: {
+    paddingVertical: layout.containerMargin * 2,
+    paddingHorizontal: layout.containerMargin,
+    alignItems: 'center',
   },
   cardGlass: {
     borderRadius: radius.xxl,
@@ -459,14 +689,11 @@ const styles = StyleSheet.create({
   cardGlassFallback: {
     backgroundColor: 'rgba(255,255,255,0.05)',
   },
-  emptyRow: {
-    paddingVertical: 20,
-    paddingHorizontal: layout.rowPaddingHorizontal,
-    alignItems: 'center',
-  },
   emptyText: {
-    fontSize: 15,
-    color: 'rgba(235,235,245,0.6)',
+    fontSize: 14,
+    color: 'rgba(235,235,245,0.5)',
+    textAlign: 'center',
+    lineHeight: 20,
     fontWeight: '500',
   },
 
@@ -604,6 +831,38 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 8,
     textAlign: 'center',
+  },
+  unitPickerContainer: {
+    flex: 2,
+    marginLeft: spacing.sm,
+  },
+  unitPickerScroll: {
+    maxHeight: 40,
+  },
+  unitPickerContent: {
+    gap: spacing.xs,
+    paddingRight: spacing.sm,
+  },
+  unitOption: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 16,
+    borderCurve: 'continuous' as any,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  unitOptionActive: {
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    borderColor: 'rgba(255,255,255,0.3)',
+  },
+  unitOptionText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: 'rgba(235,235,245,0.6)',
+  },
+  unitOptionTextActive: {
+    color: '#fff',
   },
   priceBreakPriceWrapper: {
     flex: 1,

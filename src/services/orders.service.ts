@@ -17,7 +17,7 @@ export interface Order {
   order_type: 'walk_in' | 'pickup' | 'delivery' | 'shipping'
 
   // Status - Context-aware workflow based on order_type
-  status: 'pending' | 'preparing' | 'ready' | 'out_for_delivery' | 'ready_to_ship' | 'shipped' | 'in_transit' | 'delivered' | 'completed' | 'cancelled'
+  status: 'pending' | 'confirmed' | 'preparing' | 'packing' | 'packed' | 'ready' | 'out_for_delivery' | 'ready_to_ship' | 'shipped' | 'in_transit' | 'delivered' | 'completed' | 'cancelled'
   payment_status: 'pending' | 'paid' | 'failed' | 'refunded' | 'partially_refunded'
   fulfillment_status: 'unfulfilled' | 'partial' | 'fulfilled' | 'cancelled'
 
@@ -82,6 +82,12 @@ export interface Order {
   customer_name?: string
   customer_email?: string
   customer_phone?: string
+
+  // Staff tracking (joined from users table)
+  created_by_user?: {
+    first_name: string
+    last_name: string
+  } | null
 }
 
 export interface OrderItem {
@@ -138,6 +144,10 @@ export async function getOrders(params?: {
       ),
       locations:pickup_location_id (
         name
+      ),
+      created_by_user:created_by_user_id (
+        first_name,
+        last_name
       )
     `)
     .order('created_at', { ascending: false })

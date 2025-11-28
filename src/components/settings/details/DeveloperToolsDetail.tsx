@@ -3,17 +3,22 @@
  * Jobs Principle: Power tools hidden from production, obvious in dev
  */
 
-import { View, Text, StyleSheet, ScrollView, Image, Animated, Pressable, Alert, ActivityIndicator } from 'react-native'
+import { View, Text, StyleSheet, ScrollView, Animated, Pressable, Alert, ActivityIndicator, Switch } from 'react-native'
 import { useState } from 'react'
-import { LiquidGlassView, LiquidGlassContainerView, isLiquidGlassSupported } from '@callstack/liquid-glass'
-import { LinearGradient } from 'expo-linear-gradient'
+// Removed LiquidGlassView - using plain View with borderless style
 import * as Haptics from 'expo-haptics'
 import { colors, typography, spacing, radius } from '@/theme/tokens'
 import { layout } from '@/theme/layout'
+import { TitleSection } from '@/components/shared'
 import { runAllSentryTests, quickSentryTest } from '@/utils/test-sentry'
+import { createSamplePickupOrders, createSampleECommerceOrders } from '@/utils/create-sample-orders'
 import { DetailRow } from './DetailRow'
 import { detailCommonStyles } from './detailCommon.styles'
 import { usePOSSession } from '@/contexts/POSSessionContext'
+import { useAppAuth } from '@/contexts/AppAuthContext'
+import { useOrdersActions } from '@/stores/orders.store'
+import { useCurrentEnvironment, settingsUIActions } from '@/stores/settings-ui.store'
+import Constants from 'expo-constants'
 
 interface DeveloperToolsDetailProps {
   headerOpacity: Animated.Value
@@ -22,7 +27,48 @@ interface DeveloperToolsDetailProps {
 
 export function DeveloperToolsDetail({ headerOpacity, vendorLogo }: DeveloperToolsDetailProps) {
   const [isRunning, setIsRunning] = useState(false)
-  const { clearSession } = usePOSSession()
+  const [isCreatingOrders, setIsCreatingOrders] = useState(false)
+  const { clearSession, session } = usePOSSession()
+  const { vendor, locations } = useAppAuth()
+  const { refreshOrders } = useOrdersActions()
+  const currentEnvironment = useCurrentEnvironment()
+
+  // Get actual environment from Constants
+  const actualEnvUrl = Constants.expoConfig?.extra?.supabaseUrl || process.env.EXPO_PUBLIC_SUPABASE_URL
+  const isProdEnv = actualEnvUrl?.includes('uaednwpxursknmwdeejn')
+  const isDevEnv = actualEnvUrl?.includes('zwcwrwctomlnvyswovhb')
+
+  const handleEnvironmentToggle = () => {
+    const targetEnv = currentEnvironment === 'dev' ? 'prod' : 'dev'
+    const targetName = targetEnv === 'prod' ? 'PRODUCTION' : 'DEVELOPMENT'
+
+    Alert.alert(
+      `Switch to ${targetName}?`,
+      `⚠️ THIS REQUIRES APP RESTART\n\nYou need to:\n\n1. Stop Metro bundler (Ctrl+C)\n2. Update .env file to ${targetName}\n3. Run: npx expo start -c\n\nCurrent: ${isProdEnv ? 'PROD' : isDevEnv ? 'DEV' : 'Unknown'}\nTarget: ${targetName}\n\n${targetEnv === 'prod' ? '⚠️ PROD has REAL customer data!' : '✅ DEV is safe to test!'}`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: `Switch to ${targetName}`,
+          style: targetEnv === 'prod' ? 'destructive' : 'default',
+          onPress: () => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy)
+            settingsUIActions.toggleEnvironment()
+            Alert.alert(
+              'Instructions',
+              `To complete the switch to ${targetName}:\n\n` +
+              '1. Stop Metro: Press Ctrl+C in terminal\n\n' +
+              `2. Edit .env file:\n${targetEnv === 'prod'
+                ? 'EXPO_PUBLIC_SUPABASE_URL=https://uaednwpxursknmwdeejn.supabase.co'
+                : 'EXPO_PUBLIC_SUPABASE_URL=https://zwcwrwctomlnvyswovhb.supabase.co'}\n\n` +
+              '3. Clear cache: npx expo start -c\n\n' +
+              '4. App will restart with new environment',
+              [{ text: 'Got It' }]
+            )
+          },
+        },
+      ]
+    )
+  }
 
   const handleQuickTest = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
@@ -86,59 +132,219 @@ export function DeveloperToolsDetail({ headerOpacity, vendorLogo }: DeveloperToo
     )
   }
 
+  const handleCreatePickupOrders = async () => {
+    if (!vendor?.id) {
+      Alert.alert('Error', 'Vendor ID not found')
+      return
+    }
+
+    if (!session?.locationId) {
+      Alert.alert(
+        'No Active POS Session',
+        'You need to start a POS session first!\n\nGo to POS → Select Location → Select Register to start a session.\n\nThis ensures orders are created for your current location so you can test notifications.',
+        [{ text: 'OK' }]
+      )
+      return
+    }
+
+    Alert.alert(
+      'Create Sample Pickup Orders?',
+      `Location: ${session.locationName}\n\nThis will create 4 sample pickup orders:\n\n• 3 Pending orders\n• 1 Completed order\n\nYou'll receive notifications for these orders!`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Create Orders',
+          onPress: async () => {
+            setIsCreatingOrders(true)
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+
+            try {
+              console.log('[DeveloperTools] Creating pickup orders with:', {
+                vendorId: vendor.id,
+                locationId: session.locationId,
+                locationName: session.locationName
+              })
+
+              const result = await createSamplePickupOrders({
+                vendorId: vendor.id,
+                locationId: session.locationId,
+              })
+
+              console.log('[DeveloperTools] Created pickup orders:', result)
+
+              // Refresh orders to show the new ones
+              console.log('[DeveloperTools] Refreshing orders list...')
+              await refreshOrders()
+
+              Alert.alert(
+                'Success',
+                `Created ${result.count} sample pickup orders!\n\nVendor: ${vendor.store_name}\n\nGo to Orders > Store Pickup to see them.`,
+                [{ text: 'OK' }]
+              )
+            } catch (err) {
+              console.error('[DeveloperTools] Failed to create pickup orders:', err)
+              Alert.alert(
+                'Error',
+                err instanceof Error ? err.message : 'Failed to create orders',
+                [{ text: 'OK' }]
+              )
+            } finally {
+              setIsCreatingOrders(false)
+            }
+          },
+        },
+      ]
+    )
+  }
+
+  const handleCreateECommerceOrders = async () => {
+    if (!vendor?.id) {
+      Alert.alert('Error', 'Vendor ID not found')
+      return
+    }
+
+    if (!session?.locationId) {
+      Alert.alert(
+        'No Active POS Session',
+        'You need to start a POS session first!\n\nGo to POS → Select Location → Select Register to start a session.\n\nThis ensures orders are created for your current location so you can test notifications.',
+        [{ text: 'OK' }]
+      )
+      return
+    }
+
+    Alert.alert(
+      'Create Sample E-Commerce Orders?',
+      `Location: ${session.locationName}\n\nThis will create 6 sample shipping orders:\n\n• 4 Pending orders\n• 2 Completed/Shipped orders\n\nYou'll receive notifications for these orders!`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Create Orders',
+          onPress: async () => {
+            setIsCreatingOrders(true)
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+
+            try {
+              console.log('[DeveloperTools] Creating e-commerce orders with:', {
+                vendorId: vendor.id,
+                locationId: session.locationId,
+                locationName: session.locationName
+              })
+
+              const result = await createSampleECommerceOrders({
+                vendorId: vendor.id,
+                locationId: session.locationId,
+              })
+
+              console.log('[DeveloperTools] Created e-commerce orders:', result)
+
+              // Refresh orders to show the new ones
+              console.log('[DeveloperTools] Refreshing orders list...')
+              await refreshOrders()
+
+              Alert.alert(
+                'Success',
+                `Created ${result.count} sample e-commerce orders!\n\nVendor: ${vendor.store_name}\n\nGo to Orders > E-Commerce to see them.`,
+                [{ text: 'OK' }]
+              )
+            } catch (err) {
+              console.error('[DeveloperTools] Failed to create e-commerce orders:', err)
+              Alert.alert(
+                'Error',
+                err instanceof Error ? err.message : 'Failed to create orders',
+                [{ text: 'OK' }]
+              )
+            } finally {
+              setIsCreatingOrders(false)
+            }
+          },
+        },
+      ]
+    )
+  }
+
   return (
     <View style={styles.detailContainer}>
-      {/* Fixed Header - appears on scroll */}
-      <Animated.View style={[styles.fixedHeader, { opacity: headerOpacity }]}>
-        <Text style={styles.fixedHeaderTitle}>Developer Tools</Text>
-      </Animated.View>
-
-      {/* Fade Gradient */}
-      <LinearGradient
-        colors={['rgba(0,0,0,0.95)', 'rgba(0,0,0,0.8)', 'rgba(0,0,0,0)']}
-        style={styles.fadeGradient}
-        pointerEvents="none"
-      />
-
       <ScrollView
         style={styles.detailScroll}
         showsVerticalScrollIndicator={true}
         indicatorStyle="white"
-        scrollIndicatorInsets={{ right: 2, top: layout.contentStartTop, bottom: layout.dockHeight }}
-        contentContainerStyle={{ paddingTop: layout.contentStartTop, paddingBottom: layout.dockHeight, paddingRight: 0 }}
-        onScroll={(e) => {
-          const offsetY = e.nativeEvent.contentOffset.y
-          const threshold = 40
-          headerOpacity.setValue(offsetY > threshold ? 1 : 0)
-        }}
-        scrollEventThrottle={16}
+        scrollIndicatorInsets={{ right: 2, top: 0, bottom: layout.dockHeight }}
+        contentContainerStyle={{ paddingTop: 0, paddingBottom: layout.dockHeight, paddingRight: 0 }}
       >
-        {/* Title Section with Vendor Logo */}
+        <TitleSection
+          title="Developer Tools"
+          logo={vendorLogo}
+          subtitle="Testing & debugging utilities"
+        />
+
+        {/* Environment Toggle */}
         <View style={styles.cardWrapper}>
-          <View style={styles.titleSectionContainer}>
-            <View style={styles.titleWithLogo}>
-              {vendorLogo ? (
-                <Image
-                  source={{ uri: vendorLogo }}
-                  style={styles.vendorLogoInline}
-                  resizeMode="contain"
-                  fadeDuration={0}
-                />
-              ) : (
-                <View style={[styles.vendorLogoInline, { backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' }]}>
-                  <Text style={{ color: 'rgba(255,255,255,0.3)', fontSize: 12 }}>No Logo</Text>
+          <View style={styles.detailCard}>
+            <View style={styles.cardInner}>
+              <Text style={styles.cardTitle}>Environment</Text>
+              <Text style={styles.cardDescription}>
+                Switch between DEV and PROD databases
+              </Text>
+              <View style={styles.cardDivider} />
+
+              <View style={styles.envToggleContainer}>
+                <View style={styles.envInfo}>
+                  <Text style={styles.envLabel}>Current Environment</Text>
+                  <View style={styles.envBadgeContainer}>
+                    <View style={[
+                      styles.envBadge,
+                      isProdEnv ? styles.envBadgeProd : styles.envBadgeDev
+                    ]}>
+                      <Text style={[
+                        styles.envBadgeText,
+                        isProdEnv ? styles.envBadgeTextProd : styles.envBadgeTextDev
+                      ]}>
+                        {isProdEnv ? '🔴 PRODUCTION' : isDevEnv ? '🟢 DEVELOPMENT' : '⚠️ Unknown'}
+                      </Text>
+                    </View>
+                    <Text style={styles.envUrl}>
+                      {isProdEnv
+                        ? 'uaednwpxursknmwdeejn'
+                        : isDevEnv
+                        ? 'zwcwrwctomlnvyswovhb'
+                        : 'Not configured'}
+                    </Text>
+                  </View>
                 </View>
-              )}
-              <Text style={styles.detailTitleLarge}>Developer Tools</Text>
+
+                <View style={styles.envSwitchContainer}>
+                  <Text style={styles.envSwitchLabel}>
+                    {currentEnvironment === 'dev' ? 'DEV' : 'PROD'}
+                  </Text>
+                  <Switch
+                    value={currentEnvironment === 'prod'}
+                    onValueChange={handleEnvironmentToggle}
+                    trackColor={{ false: 'rgba(52,199,89,0.3)', true: 'rgba(255,59,48,0.3)' }}
+                    thumbColor={currentEnvironment === 'prod' ? '#ff3b30' : '#34c759'}
+                    ios_backgroundColor="rgba(255,255,255,0.1)"
+                  />
+                </View>
+              </View>
+
+              <View style={styles.infoBox}>
+                <Text style={styles.infoBoxText}>
+                  {isProdEnv
+                    ? '⚠️ You are connected to PRODUCTION with REAL customer data. Be careful!'
+                    : '✅ You are connected to DEVELOPMENT. Safe to test and experiment!'}
+                </Text>
+              </View>
+
+              <View style={[styles.infoBox, { marginTop: spacing.sm }]}>
+                <Text style={styles.infoBoxText}>
+                  💡 Toggle requires app restart: Stop Metro, update .env, then run npx expo start -c
+                </Text>
+              </View>
             </View>
           </View>
         </View>
-        <LiquidGlassContainerView spacing={12} style={styles.cardWrapper}>
-          <LiquidGlassView
-            effect="regular"
-            colorScheme="dark"
-            style={[styles.detailCard, !isLiquidGlassSupported && styles.cardFallback]}
-          >
+
+        <View style={styles.cardWrapper}>
+          <View style={styles.detailCard}>
             <View style={styles.cardInner}>
               <Text style={styles.cardTitle}>Sentry Integration</Text>
               <Text style={styles.cardDescription}>
@@ -187,15 +393,11 @@ export function DeveloperToolsDetail({ headerOpacity, vendorLogo }: DeveloperToo
                 <Text style={styles.infoBoxLink}>https://sentry.io/</Text>
               </View>
             </View>
-          </LiquidGlassView>
-        </LiquidGlassContainerView>
+          </View>
+        </View>
 
-        <LiquidGlassContainerView spacing={12} style={styles.cardWrapper}>
-          <LiquidGlassView
-            effect="regular"
-            colorScheme="dark"
-            style={[styles.detailCard, !isLiquidGlassSupported && styles.cardFallback]}
-          >
+        <View style={styles.cardWrapper}>
+          <View style={styles.detailCard}>
             <View style={styles.cardInner}>
               <Text style={styles.cardTitle}>POS Session</Text>
               <Text style={styles.cardDescription}>
@@ -221,15 +423,69 @@ export function DeveloperToolsDetail({ headerOpacity, vendorLogo }: DeveloperToo
                 </Text>
               </View>
             </View>
-          </LiquidGlassView>
-        </LiquidGlassContainerView>
+          </View>
+        </View>
 
-        <LiquidGlassContainerView spacing={12} style={styles.cardWrapper}>
-          <LiquidGlassView
-            effect="regular"
-            colorScheme="dark"
-            style={[styles.detailCard, !isLiquidGlassSupported && styles.cardFallback]}
-          >
+        <View style={styles.cardWrapper}>
+          <View style={styles.detailCard}>
+            <View style={styles.cardInner}>
+              <Text style={styles.cardTitle}>Sample Orders</Text>
+              <Text style={styles.cardDescription}>
+                Create test orders for workflow testing
+              </Text>
+              <View style={styles.cardDivider} />
+
+              <Pressable
+                onPress={handleCreatePickupOrders}
+                disabled={isCreatingOrders}
+                style={styles.testButton}
+                accessible={true}
+                accessibilityRole="button"
+                accessibilityLabel="Create sample pickup orders"
+                accessibilityHint="Double tap to create 4 sample pickup orders"
+                accessibilityState={{ disabled: isCreatingOrders }}
+              >
+                {isCreatingOrders ? (
+                  <ActivityIndicator color="rgba(52,199,89,0.8)" accessibilityElementsHidden={true} importantForAccessibility="no" />
+                ) : (
+                  <>
+                    <Text style={[styles.testButtonText, { color: 'rgba(52,199,89,1)' }]} accessible={false}>Create Pickup Orders</Text>
+                    <Text style={[styles.testButtonSubtext, { color: 'rgba(52,199,89,0.7)' }]} accessible={false}>4 orders • 3 Pending + 1 Completed</Text>
+                  </>
+                )}
+              </Pressable>
+
+              <Pressable
+                onPress={handleCreateECommerceOrders}
+                disabled={isCreatingOrders}
+                style={[styles.testButton, styles.testButtonLast]}
+                accessible={true}
+                accessibilityRole="button"
+                accessibilityLabel="Create sample e-commerce orders"
+                accessibilityHint="Double tap to create 6 sample shipping orders"
+                accessibilityState={{ disabled: isCreatingOrders }}
+              >
+                {isCreatingOrders ? (
+                  <ActivityIndicator color="rgba(52,199,89,0.8)" accessibilityElementsHidden={true} importantForAccessibility="no" />
+                ) : (
+                  <>
+                    <Text style={[styles.testButtonText, { color: 'rgba(52,199,89,1)' }]} accessible={false}>Create E-Commerce Orders</Text>
+                    <Text style={[styles.testButtonSubtext, { color: 'rgba(52,199,89,0.7)' }]} accessible={false}>6 orders • 4 Pending + 2 Completed</Text>
+                  </>
+                )}
+              </Pressable>
+
+              <View style={styles.infoBox}>
+                <Text style={styles.infoBoxText}>
+                  Creates real orders in your database with sample customer data. Use these to test the pickup and e-commerce workflows in the Orders tab.
+                </Text>
+              </View>
+            </View>
+          </View>
+        </View>
+
+        <View style={styles.cardWrapper}>
+          <View style={styles.detailCard}>
             <View style={styles.cardInner}>
               <Text style={styles.cardTitle}>What Gets Tested</Text>
               <View style={styles.cardDivider} />
@@ -242,8 +498,8 @@ export function DeveloperToolsDetail({ headerOpacity, vendorLogo }: DeveloperToo
               <DetailRow label="Health Checks" value="Terminal offline simulation" />
               <DetailRow label="Checkout Errors" value="Transaction save failures" />
             </View>
-          </LiquidGlassView>
-        </LiquidGlassContainerView>
+          </View>
+        </View>
       </ScrollView>
     </View>
   )
@@ -251,26 +507,11 @@ export function DeveloperToolsDetail({ headerOpacity, vendorLogo }: DeveloperToo
 
 const styles = StyleSheet.create({
   ...detailCommonStyles,
-  titleWithLogo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 16,
-  },
-  vendorLogoInline: {
-    width: 64,
-    height: 64,
-    borderRadius: 12,
-  },
-  detailTitleLarge: {
-    ...typography.largeTitle,
-    color: colors.text.primary,
-  },
   detailCard: {
-    borderRadius: radius.lg,
+    borderRadius: radius.xxl,
+    borderCurve: 'continuous',
     overflow: 'hidden',
-  },
-  cardFallback: {
-    backgroundColor: 'rgba(255,255,255,0.05)',
+    backgroundColor: 'rgba(255,255,255,0.05)', // Match product list - borderless
   },
   cardInner: {
     paddingVertical: 14,
@@ -292,12 +533,10 @@ const styles = StyleSheet.create({
     marginVertical: spacing.md,
   },
   testButton: {
-    backgroundColor: 'rgba(0,122,255,0.15)',
+    backgroundColor: 'rgba(0,122,255,0.15)', // Match product list - borderless
     borderRadius: radius.md,
     padding: spacing.md,
     marginBottom: spacing.sm,
-    borderWidth: 1,
-    borderColor: 'rgba(0,122,255,0.3)',
   },
   testButtonLast: {
     marginBottom: 0,
@@ -325,5 +564,60 @@ const styles = StyleSheet.create({
   infoBoxLink: {
     ...typography.caption1,
     color: 'rgba(10,132,255,1)',
+  },
+  envToggleContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing.md,
+  },
+  envInfo: {
+    flex: 1,
+  },
+  envLabel: {
+    ...typography.caption1,
+    color: colors.text.secondary,
+    marginBottom: spacing.xs,
+  },
+  envBadgeContainer: {
+    flexDirection: 'column',
+    gap: 4,
+  },
+  envBadge: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+    borderRadius: radius.sm,
+  },
+  envBadgeDev: {
+    backgroundColor: 'rgba(52,199,89,0.15)', // Match product list - borderless
+  },
+  envBadgeProd: {
+    backgroundColor: 'rgba(255,59,48,0.15)', // Match product list - borderless
+  },
+  envBadgeText: {
+    ...typography.caption1,
+    fontWeight: '600',
+  },
+  envBadgeTextDev: {
+    color: 'rgba(52,199,89,1)',
+  },
+  envBadgeTextProd: {
+    color: 'rgba(255,59,48,1)',
+  },
+  envUrl: {
+    ...typography.caption2,
+    color: colors.text.tertiary,
+    fontFamily: 'Menlo',
+  },
+  envSwitchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  envSwitchLabel: {
+    ...typography.caption1,
+    color: colors.text.secondary,
+    fontWeight: '600',
   },
 })

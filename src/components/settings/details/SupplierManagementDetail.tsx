@@ -3,15 +3,15 @@
  * Supplier management - Jobs Principle: Simple vendor relationships
  */
 
-import { View, Text, ScrollView, Pressable, ActivityIndicator, Animated, Alert, Image } from "react-native"
-import { LiquidGlassView, LiquidGlassContainerView, isLiquidGlassSupported } from "@callstack/liquid-glass"
-import { LinearGradient } from "expo-linear-gradient"
+import { View, Text, ScrollView, Pressable, ActivityIndicator, Animated, Alert } from "react-native"
+import { useState } from "react"
+// Removed LiquidGlassView - using plain View with borderless style
 import * as Haptics from "expo-haptics"
 import { colors, spacing } from "@/theme/tokens"
 import { layout } from "@/theme/layout"
+import { TitleSection } from "@/components/shared"
 import { useSuppliers, useSuppliersLoading, useSuppliersActions } from "@/stores/suppliers-management.store"
-import { useSettingsUIActions } from "@/stores/settings-ui.store"
-import { SupplierManagementModals } from "../SupplierManagementModals"
+import { SupplierDetail } from "./SupplierDetail"
 import { supplierManagementStyles as styles } from "./supplierManagement.styles"
 
 function SuppliersIcon({ color }: { color: string }) {
@@ -34,18 +34,31 @@ function SupplierManagementDetail({
   // ✅ Read from stores instead of props
   const suppliers = useSuppliers()
   const isLoading = useSuppliersLoading()
-  const { deleteSupplier, toggleSupplierStatus } = useSuppliersActions()
-  const { openModal } = useSettingsUIActions()
+  const { deleteSupplier, toggleSupplierStatus, loadSuppliers } = useSuppliersActions()
 
-  // ✅ Use store actions instead of local state
+  // Navigation state
+  const [selectedSupplier, setSelectedSupplier] = useState<any | null>(null)
+  const [isCreatingNew, setIsCreatingNew] = useState(false)
+
+  // ✅ Use navigation instead of modals
   const handleAddSupplier = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-    openModal('addSupplier')
+    setIsCreatingNew(true)
   }
 
   const handleEditSupplier = (supplier: any) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-    openModal('editSupplier', supplier)
+    setSelectedSupplier(supplier)
+  }
+
+  const handleBack = () => {
+    setSelectedSupplier(null)
+    setIsCreatingNew(false)
+  }
+
+  const handleSupplierSaved = async () => {
+    // Reload suppliers list
+    await loadSuppliers(suppliers[0]?.vendor_id || '')
   }
 
   const handleToggleStatus = async (supplier: any) => {
@@ -92,6 +105,17 @@ function SupplierManagementDetail({
     )
   }
 
+  // Show detail page if supplier selected or creating new
+  if (selectedSupplier || isCreatingNew) {
+    return (
+      <SupplierDetail
+        supplier={selectedSupplier}
+        onBack={handleBack}
+        onSupplierSaved={handleSupplierSaved}
+      />
+    )
+  }
+
   if (isLoading) {
     return (
       <View style={styles.detailContainer}>
@@ -106,26 +130,19 @@ function SupplierManagementDetail({
   if (suppliers.length === 0) {
     return (
       <View style={styles.detailContainer}>
-        <Animated.View style={[styles.fixedHeader, { opacity: headerOpacity }]}>
-          <Text style={styles.fixedHeaderTitle}>Suppliers</Text>
-        </Animated.View>
-
-        <LinearGradient
-          colors={['rgba(0,0,0,0.95)', 'rgba(0,0,0,0.8)', 'rgba(0,0,0,0)']}
-          style={styles.fadeGradient}
-          pointerEvents="none"
-        />
-
         <ScrollView
           style={styles.detailScroll}
           showsVerticalScrollIndicator={true}
           indicatorStyle="white"
-          scrollIndicatorInsets={{ right: 2, top: layout.contentStartTop, bottom: layout.dockHeight }}
-          contentContainerStyle={{ paddingTop: layout.contentStartTop, paddingBottom: layout.dockHeight, paddingRight: 0 }}
+          scrollIndicatorInsets={{ right: 2, top: 0, bottom: layout.dockHeight }}
+          contentContainerStyle={{ paddingTop: 0, paddingBottom: layout.dockHeight, paddingRight: 0 }}
         >
-          <View style={styles.cardWrapper}>
-            <Text style={styles.detailTitle}>Suppliers</Text>
-          </View>
+          <TitleSection
+            title="Suppliers"
+            logo={vendorLogo}
+            buttonText="Add Supplier"
+            onButtonPress={handleAddSupplier}
+          />
 
           <View style={[styles.emptyState, { paddingTop: spacing.xxxl }]}>
             <View style={styles.emptyStateIcon}>
@@ -133,20 +150,8 @@ function SupplierManagementDetail({
             </View>
             <Text style={styles.emptyStateText}>No suppliers yet</Text>
             <Text style={styles.emptyStateSubtext}>Add suppliers for purchasing inventory</Text>
-            <Pressable
-              onPress={handleAddSupplier}
-              style={styles.addButton}
-              accessible={true}
-              accessibilityRole="button"
-              accessibilityLabel="Add first supplier"
-            >
-              <Text style={styles.addButtonText}>Add Supplier</Text>
-            </Pressable>
           </View>
         </ScrollView>
-
-        {/* ✅ Zero props - modal reads from stores */}
-        <SupplierManagementModals />
       </View>
     )
   }
@@ -156,131 +161,52 @@ function SupplierManagementDetail({
 
   return (
     <View style={styles.detailContainer}>
-      <Animated.View style={[styles.fixedHeader, { opacity: headerOpacity }]}>
-        <Text style={styles.fixedHeaderTitle}>Suppliers</Text>
-        <Pressable
-          onPress={handleAddSupplier}
-          style={styles.fixedHeaderButton}
-          accessible={true}
-          accessibilityRole="button"
-          accessibilityLabel="Add new supplier"
-        >
-          <Text style={styles.fixedHeaderButtonText}>+</Text>
-        </Pressable>
-      </Animated.View>
-
-      <LinearGradient
-        colors={['rgba(0,0,0,0.95)', 'rgba(0,0,0,0.8)', 'rgba(0,0,0,0)']}
-        style={styles.fadeGradient}
-        pointerEvents="none"
-      />
-
       <ScrollView
         style={styles.detailScroll}
         showsVerticalScrollIndicator={true}
         indicatorStyle="white"
-        scrollIndicatorInsets={{ right: 2, top: layout.contentStartTop, bottom: layout.dockHeight }}
-        contentContainerStyle={{ paddingTop: layout.contentStartTop, paddingBottom: layout.dockHeight, paddingRight: 0 }}
-        onScroll={(e) => {
-          const offsetY = e.nativeEvent.contentOffset.y
-          const threshold = 40
-          headerOpacity.setValue(offsetY > threshold ? 1 : 0)
-        }}
-        scrollEventThrottle={16}
+        scrollIndicatorInsets={{ right: 2, top: 0, bottom: layout.dockHeight }}
+        contentContainerStyle={{ paddingTop: 0, paddingBottom: layout.dockHeight, paddingRight: 0 }}
       >
-        {/* Title Section with Vendor Logo */}
+        <TitleSection
+          title="Suppliers"
+          logo={vendorLogo}
+          subtitle={`${activeSuppliers.length} active${inactiveSuppliers.length > 0 ? `, ${inactiveSuppliers.length} inactive` : ''}`}
+          buttonText="Add Supplier"
+          onButtonPress={handleAddSupplier}
+        />
+
+        {/* Active Suppliers List - MATCHES ProductsListView Structure */}
         <View style={styles.cardWrapper}>
-          <View style={styles.titleSectionContainer}>
-            <View style={styles.titleWithLogo}>
-              {vendorLogo ? (
-                <Image
-                  source={{ uri: vendorLogo }}
-                  style={styles.vendorLogoInline}
-                  resizeMode="contain"
-                        fadeDuration={0}
-                />
-              ) : (
-                <View style={[styles.vendorLogoInline, { backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' }]}>
-                  <Text style={{ color: 'rgba(255,255,255,0.3)', fontSize: 12 }}>No Logo</Text>
-                </View>
-              )}
-              <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                <Text style={styles.detailTitleLarge}>Suppliers</Text>
+          <View style={styles.listCardGlass}>
+            {activeSuppliers.map((supplier, index) => {
+              const isLast = index === activeSuppliers.length - 1
+              return (
                 <Pressable
-                  onPress={handleAddSupplier}
-                  style={styles.addButton}
+                  key={supplier.id}
+                  style={[styles.listItem, isLast && styles.listItemLast]}
+                  onPress={() => handleEditSupplier(supplier)}
                   accessible={true}
                   accessibilityRole="button"
-                  accessibilityLabel="Add new supplier"
+                  accessibilityLabel={supplier.external_name}
                 >
-                  <Text style={styles.addButtonText}>Add Supplier</Text>
+                  {/* Supplier Icon */}
+                  <View style={styles.supplierIcon}>
+                    <SuppliersIcon color={'rgba(235,235,245,0.6)'} />
+                  </View>
+
+                  {/* Supplier Info */}
+                  <View style={styles.supplierInfo}>
+                    <Text style={styles.supplierName} numberOfLines={1}>{supplier.external_name}</Text>
+                    <Text style={styles.supplierContact} numberOfLines={1}>
+                      {supplier.contact_name || 'No contact'}
+                    </Text>
+                  </View>
                 </Pressable>
-              </View>
-            </View>
+              )
+            })}
           </View>
         </View>
-
-        {/* Active Suppliers */}
-        {activeSuppliers.map((supplier) => (
-          <LiquidGlassContainerView key={supplier.id} spacing={12} style={styles.cardWrapper}>
-            <LiquidGlassView
-              effect="regular"
-              colorScheme="dark"
-              interactive
-              style={[styles.detailCard, !isLiquidGlassSupported && styles.cardFallback]}
-            >
-              <View style={styles.supplierCard}>
-                <View style={styles.supplierCardHeader}>
-                  <View style={styles.supplierCardInfo}>
-                    <Text style={styles.supplierCardName}>{supplier.external_name}</Text>
-                    {supplier.contact_name && (
-                      <Text style={styles.supplierCardContact}>{supplier.contact_name}</Text>
-                    )}
-                    {supplier.contact_email && (
-                      <Text style={styles.supplierCardEmail}>{supplier.contact_email}</Text>
-                    )}
-                    {supplier.contact_phone && (
-                      <Text style={styles.supplierCardPhone}>{supplier.contact_phone}</Text>
-                    )}
-                    {supplier.address && (
-                      <Text style={styles.supplierCardAddress}>{supplier.address}</Text>
-                    )}
-                  </View>
-                </View>
-
-                <View style={styles.supplierCardActions}>
-                  <Pressable
-                    onPress={() => handleEditSupplier(supplier)}
-                    style={styles.userActionButton}
-                    accessible={true}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Edit ${supplier.external_name}`}
-                  >
-                    <Text style={styles.userActionButtonText}>Edit</Text>
-                  </Pressable>
-                  <Pressable
-                    onPress={() => handleToggleStatus(supplier)}
-                    style={styles.userActionButton}
-                    accessible={true}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Deactivate ${supplier.external_name}`}
-                  >
-                    <Text style={styles.userActionButtonText}>Deactivate</Text>
-                  </Pressable>
-                  <Pressable
-                    onPress={() => handleDeleteSupplier(supplier)}
-                    style={[styles.userActionButton, styles.userActionButtonDanger]}
-                    accessible={true}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Delete ${supplier.external_name}`}
-                  >
-                    <Text style={styles.userActionButtonDangerText}>Delete</Text>
-                  </Pressable>
-                </View>
-              </View>
-            </LiquidGlassView>
-          </LiquidGlassContainerView>
-        ))}
 
         {/* Inactive Suppliers */}
         {inactiveSuppliers.length > 0 && (
@@ -288,51 +214,47 @@ function SupplierManagementDetail({
             <View style={styles.cardWrapper}>
               <Text style={styles.sectionLabel}>INACTIVE</Text>
             </View>
-            {inactiveSuppliers.map((supplier) => (
-              <LiquidGlassContainerView key={supplier.id} spacing={12} style={styles.cardWrapper}>
-                <LiquidGlassView
-                  effect="regular"
-                  colorScheme="dark"
-                  interactive
-                  style={[styles.detailCard, !isLiquidGlassSupported && styles.cardFallback, { opacity: 0.5 }]}
-                >
-                  <View style={styles.supplierCard}>
-                    <View style={styles.supplierCardHeader}>
-                      <View style={styles.supplierCardInfo}>
-                        <Text style={styles.supplierCardName}>{supplier.external_name}</Text>
+            {/* Inactive Suppliers List - MATCHES ProductsListView Structure */}
+            <View style={styles.cardWrapper}>
+              <View style={[styles.listCardGlass, { opacity: 0.5 }]}>
+                {inactiveSuppliers.map((supplier, index) => {
+                  const isLast = index === inactiveSuppliers.length - 1
+                  return (
+                    <Pressable
+                      key={supplier.id}
+                      style={[styles.listItem, isLast && styles.listItemLast]}
+                      onPress={() => handleEditSupplier(supplier)}
+                      accessible={true}
+                      accessibilityRole="button"
+                      accessibilityLabel={supplier.external_name}
+                    >
+                      {/* Supplier Icon */}
+                      <View style={styles.supplierIcon}>
+                        <SuppliersIcon color={'rgba(235,235,245,0.6)'} />
                       </View>
-                    </View>
 
-                    <View style={styles.supplierCardActions}>
-                      <Pressable
-                        onPress={() => handleToggleStatus(supplier)}
-                        style={styles.userActionButton}
-                        accessible={true}
-                        accessibilityRole="button"
-                        accessibilityLabel={`Activate ${supplier.external_name}`}
-                      >
-                        <Text style={styles.userActionButtonText}>Activate</Text>
-                      </Pressable>
-                      <Pressable
-                        onPress={() => handleDeleteSupplier(supplier)}
-                        style={[styles.userActionButton, styles.userActionButtonDanger]}
-                        accessible={true}
-                        accessibilityRole="button"
-                        accessibilityLabel={`Delete ${supplier.external_name}`}
-                      >
-                        <Text style={styles.userActionButtonDangerText}>Delete</Text>
-                      </Pressable>
-                    </View>
-                  </View>
-                </LiquidGlassView>
-              </LiquidGlassContainerView>
-            ))}
+                      {/* Supplier Info */}
+                      <View style={styles.supplierInfo}>
+                        <Text style={styles.supplierName} numberOfLines={1}>{supplier.external_name}</Text>
+                        <Text style={styles.supplierContact} numberOfLines={1}>
+                          {supplier.contact_name || 'No contact'}
+                        </Text>
+                      </View>
+
+                      {/* Status (if inactive) */}
+                      {!supplier.is_active && (
+                        <View style={styles.supplierMeta}>
+                          <Text style={styles.inactiveLabel}>INACTIVE</Text>
+                        </View>
+                      )}
+                    </Pressable>
+                  )
+                })}
+              </View>
+            </View>
           </>
         )}
       </ScrollView>
-
-      {/* ✅ Zero props - modal reads from stores */}
-      <SupplierManagementModals />
     </View>
   )
 }

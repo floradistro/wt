@@ -177,9 +177,9 @@ export function CreateProductModal({
         tiers: template.default_tiers.map(tier => ({
           id: tier.id,
           label: tier.label,
-          qty: tier.qty,
+          qty: tier.quantity, // Fixed: use 'quantity' from database
           unit: tier.unit,
-          price: tier.price || 0,
+          price: tier.default_price || 0, // Fixed: use 'default_price' from database
           enabled: true,
           sort_order: tier.sort_order,
         })),
@@ -243,9 +243,9 @@ export function CreateProductModal({
         tiers: template.default_tiers.map(tier => ({
           id: tier.id,
           label: tier.label,
-          qty: tier.qty,
+          qty: tier.quantity, // Fixed: use 'quantity' from database
           unit: tier.unit,
-          price: tier.price || 0,
+          price: tier.default_price || 0, // Fixed: use 'default_price' from database
           enabled: true,
           sort_order: tier.sort_order,
         })),

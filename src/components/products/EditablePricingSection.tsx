@@ -11,7 +11,7 @@
 import { View, Text, StyleSheet, Pressable, TextInput, ActivityIndicator, ScrollView } from 'react-native'
 import { useEffect } from 'react'
 import * as Haptics from 'expo-haptics'
-import type { PricingTier } from '@/types/products'
+import type { Product, PricingTier } from '@/types/products'
 import { radius } from '@/theme/tokens'
 import { layout } from '@/theme/layout'
 import {
@@ -19,34 +19,31 @@ import {
   usePricingEditState,
   useTemplatesState,
   useIsEditing,
-  useOriginalProduct,
   productEditActions,
 } from '@/stores/product-edit.store'
 
-export function EditablePricingSection() {
+interface EditablePricingSectionProps {
+  product: Product
+}
+
+export function EditablePricingSection({ product }: EditablePricingSectionProps) {
   // Read from store
   const isEditing = useIsEditing()
-  const originalProduct = useOriginalProduct()
   const { editedPrice, editedCostPrice, pricingMode, pricingTiers, selectedTemplateId } = usePricingEditState()
   const { availableTemplates, loadingTemplates } = useTemplatesState()
 
   // Load templates when entering edit mode
   useEffect(() => {
-    if (isEditing && originalProduct?.primary_category_id && availableTemplates.length === 0) {
-      productEditActions.loadTemplates(originalProduct.primary_category_id)
+    if (isEditing && product?.primary_category_id && availableTemplates.length === 0) {
+      productEditActions.loadTemplates(product.primary_category_id)
     }
-  }, [isEditing, originalProduct?.primary_category_id, availableTemplates.length])
+  }, [isEditing, product?.primary_category_id, availableTemplates.length])
 
-  // Don't render until product is loaded in store
-  if (!originalProduct) {
-    return null
-  }
-
-  // Display values from original product (for view mode)
-  const displayPrice = originalProduct?.price || 0
-  const displayCostPrice = originalProduct?.cost_price || 0
-  const displaySalePrice = originalProduct?.sale_price || null
-  const isOnSale = originalProduct?.on_sale || false
+  // Display values from product prop (for view mode) - always fresh after save
+  const displayPrice = product?.price || 0
+  const displayCostPrice = product?.cost_price || 0
+  const displaySalePrice = product?.sale_price || null
+  const isOnSale = product?.on_sale || false
 
   const margin =
     displayCostPrice > 0 && displayPrice > 0
@@ -216,7 +213,7 @@ export function EditablePricingSection() {
                     <View style={styles.tierNumberRow}>
                       <TextInput
                         style={styles.tierSmallInput}
-                        value={tier.quantity.toString()}
+                        value={tier.quantity != null ? tier.quantity.toString() : ''}
                         onChangeText={(text) => handleUpdateTier(tier.id, { quantity: parseFloat(text) || 0 })}
                         placeholder="Qty"
                         placeholderTextColor="rgba(235,235,245,0.3)"
@@ -233,7 +230,7 @@ export function EditablePricingSection() {
                         <Text style={styles.dollarSign}>$</Text>
                         <TextInput
                           style={styles.tierPriceInput}
-                          value={tier.price.toString()}
+                          value={tier.price != null ? tier.price.toString() : ''}
                           onChangeText={(text) => handleUpdateTier(tier.id, { price: parseFloat(text) || 0 })}
                           placeholder="0.00"
                           placeholderTextColor="rgba(235,235,245,0.3)"
@@ -253,16 +250,15 @@ export function EditablePricingSection() {
           </>
         ) : (
           <>
-            {/* View Mode */}
-            {pricingMode === 'tiered' && pricingTiers.length > 0 ? (
+            {/* View Mode - SINGLE SOURCE: Read from LIVE template */}
+            {product.pricing_template?.default_tiers && product.pricing_template.default_tiers.length > 0 ? (
               <>
                 <View style={styles.pricingModeHeader}>
                   <Text style={styles.rowLabel}>Tiered Pricing</Text>
-                  <Text style={styles.tierCount}>{pricingTiers.filter(t => t.enabled).length} tiers</Text>
+                  <Text style={styles.tierCount}>{product.pricing_template.default_tiers.length} tiers</Text>
                 </View>
                 <View style={styles.tiersContainer}>
-                  {pricingTiers
-                    .filter(tier => tier.enabled)
+                  {product.pricing_template.default_tiers
                     .sort((a, b) => a.sort_order - b.sort_order)
                     .map((tier) => (
                       <View key={tier.id} style={styles.tierRow}>
@@ -270,7 +266,7 @@ export function EditablePricingSection() {
                           <Text style={styles.tierWeight}>{tier.label}</Text>
                           <Text style={styles.tierQty}>{tier.quantity} {tier.unit} minimum</Text>
                         </View>
-                        <Text style={styles.tierPrice}>${tier.price.toFixed(2)}</Text>
+                        <Text style={styles.tierPrice}>${tier.default_price?.toFixed(2) || '0.00'}</Text>
                       </View>
                     ))}
                 </View>

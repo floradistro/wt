@@ -15,8 +15,8 @@ import { create } from 'zustand'
 import { devtools } from 'zustand/middleware'
 import { useShallow } from 'zustand/react/shallow'
 
-type NavSection = 'all' | 'needs_action' | 'in_progress' | 'completed' | 'cancelled'
-type DateRange = 'today' | 'week' | 'month' | 'all'
+type NavSection = 'in-store' | 'pickup' | 'ecommerce' | 'all'
+type DateRange = 'today' | 'week' | 'month' | 'all' | 'custom'
 
 interface OrdersUIState {
   // Navigation
@@ -28,29 +28,39 @@ interface OrdersUIState {
   // Search & Filters
   searchQuery: string
   dateRange: DateRange
+  customStartDate: Date | null
+  customEndDate: Date | null
 
   // Modals
   showLocationSelector: boolean
+  showCustomDatePicker: boolean
 
   // Actions
   setActiveNav: (nav: NavSection) => void
+  setActiveNavWithOrder: (nav: NavSection, orderId: string) => void
   selectOrder: (orderId: string | null) => void
   setSearchQuery: (query: string) => void
   setDateRange: (range: DateRange) => void
+  setCustomDateRange: (startDate: Date, endDate: Date) => void
   toggleLocationSelector: () => void
   openLocationSelector: () => void
   closeLocationSelector: () => void
+  openCustomDatePicker: () => void
+  closeCustomDatePicker: () => void
 
   // Reset
   reset: () => void
 }
 
 const initialState = {
-  activeNav: 'all' as NavSection,
+  activeNav: 'pickup' as NavSection, // Default to pickup view
   selectedOrderId: null,
   searchQuery: '',
   dateRange: 'all' as DateRange,
+  customStartDate: null,
+  customEndDate: null,
   showLocationSelector: false,
+  showCustomDatePicker: false,
 }
 
 export const useOrdersUIStore = create<OrdersUIState>()(
@@ -60,9 +70,18 @@ export const useOrdersUIStore = create<OrdersUIState>()(
 
       /**
        * Set active navigation section
+       * Also clears selected order when switching views
        */
       setActiveNav: (nav: NavSection) => {
-        set({ activeNav: nav }, false, 'ordersUI/setActiveNav')
+        set({ activeNav: nav, selectedOrderId: null }, false, 'ordersUI/setActiveNav')
+      },
+
+      /**
+       * Set active nav AND select an order (for notifications)
+       * Atomically sets both without clearing
+       */
+      setActiveNavWithOrder: (nav: NavSection, orderId: string) => {
+        set({ activeNav: nav, selectedOrderId: orderId }, false, 'ordersUI/setActiveNavWithOrder')
       },
 
       /**
@@ -83,7 +102,24 @@ export const useOrdersUIStore = create<OrdersUIState>()(
        * Set date range filter
        */
       setDateRange: (range: DateRange) => {
-        set({ dateRange: range }, false, 'ordersUI/setDateRange')
+        // If setting to 'custom', open the date picker
+        if (range === 'custom') {
+          set({ showCustomDatePicker: true }, false, 'ordersUI/openCustomDatePicker')
+        } else {
+          set({ dateRange: range }, false, 'ordersUI/setDateRange')
+        }
+      },
+
+      /**
+       * Set custom date range
+       */
+      setCustomDateRange: (startDate: Date, endDate: Date) => {
+        set({
+          dateRange: 'custom',
+          customStartDate: startDate,
+          customEndDate: endDate,
+          showCustomDatePicker: false
+        }, false, 'ordersUI/setCustomDateRange')
       },
 
       /**
@@ -107,6 +143,20 @@ export const useOrdersUIStore = create<OrdersUIState>()(
        */
       closeLocationSelector: () => {
         set({ showLocationSelector: false }, false, 'ordersUI/closeLocationSelector')
+      },
+
+      /**
+       * Open custom date picker modal
+       */
+      openCustomDatePicker: () => {
+        set({ showCustomDatePicker: true }, false, 'ordersUI/openCustomDatePicker')
+      },
+
+      /**
+       * Close custom date picker modal
+       */
+      closeCustomDatePicker: () => {
+        set({ showCustomDatePicker: false }, false, 'ordersUI/closeCustomDatePicker')
       },
 
       /**
@@ -136,19 +186,34 @@ export const useSearchQuery = () => useOrdersUIStore((state) => state.searchQuer
 // Get date range filter
 export const useDateRange = () => useOrdersUIStore((state) => state.dateRange)
 
+// Get custom date range
+export const useCustomDateRange = () => useOrdersUIStore(
+  useShallow((state) => ({
+    startDate: state.customStartDate,
+    endDate: state.customEndDate,
+  }))
+)
+
 // Get location selector visibility
 export const useShowLocationSelector = () => useOrdersUIStore((state) => state.showLocationSelector)
+
+// Get custom date picker visibility
+export const useShowCustomDatePicker = () => useOrdersUIStore((state) => state.showCustomDatePicker)
 
 // Get all UI actions (with useShallow to prevent infinite loops)
 export const useOrdersUIActions = () => useOrdersUIStore(
   useShallow((state) => ({
     setActiveNav: state.setActiveNav,
+    setActiveNavWithOrder: state.setActiveNavWithOrder,
     selectOrder: state.selectOrder,
     setSearchQuery: state.setSearchQuery,
     setDateRange: state.setDateRange,
+    setCustomDateRange: state.setCustomDateRange,
     toggleLocationSelector: state.toggleLocationSelector,
     openLocationSelector: state.openLocationSelector,
     closeLocationSelector: state.closeLocationSelector,
+    openCustomDatePicker: state.openCustomDatePicker,
+    closeCustomDatePicker: state.closeCustomDatePicker,
     reset: state.reset,
   }))
 )
@@ -160,7 +225,10 @@ export const useOrdersUIState = () => useOrdersUIStore(
     selectedOrderId: state.selectedOrderId,
     searchQuery: state.searchQuery,
     dateRange: state.dateRange,
+    customStartDate: state.customStartDate,
+    customEndDate: state.customEndDate,
     showLocationSelector: state.showLocationSelector,
+    showCustomDatePicker: state.showCustomDatePicker,
   }))
 )
 

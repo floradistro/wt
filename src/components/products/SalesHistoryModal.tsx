@@ -1,23 +1,32 @@
 /**
- * SalesHistoryModal Component
- * Product sales history with trends and analytics
+ * SalesHistoryModal Component - REFACTORED
+ * Full-screen modal matching Products screen design
  *
- * State Management:
- * - Reads product data from product-edit.store
- * - Reads modal visibility from product-ui.store
- * - Displays sales stats, charts, and recent transactions
+ * ZERO PROP DRILLING:
+ * - Reads from product-edit.store for product data
+ * - Reads from product-ui.store for modal visibility
+ * - Reads from AppAuthContext for vendor data
+ *
+ * Features:
+ * - Clean list format with sale records
+ * - Date range filtering
+ * - Summary stats
+ * - Matches Products screen styling
+ * - Shows customer names and store locations
  */
 
+import React, { useState, useEffect, useMemo } from 'react'
 import { View, Text, StyleSheet, Modal, Pressable, ScrollView, ActivityIndicator } from 'react-native'
-import { useState, useEffect } from 'react'
-import { LiquidGlassView, isLiquidGlassSupported } from '@callstack/liquid-glass'
+import { LinearGradient } from 'expo-linear-gradient'
 import * as Haptics from 'expo-haptics'
-import { colors, spacing, radius, typography } from '@/theme/tokens'
+import { colors, spacing, radius } from '@/theme/tokens'
 import { layout } from '@/theme/layout'
-import { logger } from '@/utils/logger'
-import { useSalesHistory } from '@/hooks/useSalesHistory'
+import { TitleSection } from '@/components/shared'
 import { useOriginalProduct } from '@/stores/product-edit.store'
 import { useActiveModal, productUIActions } from '@/stores/product-ui.store'
+import { useAppAuth } from '@/contexts/AppAuthContext'
+import { fetchSalesHistory, getSalesStats, type SalesRecord } from '@/services/sales-history.service'
+import { logger } from '@/utils/logger'
 
 type DateRange = '7days' | '30days' | '90days' | 'all'
 
@@ -29,15 +38,21 @@ const DATE_RANGES: { value: DateRange; label: string }[] = [
 ]
 
 export function SalesHistoryModal() {
-  // Read from stores
+  // ========================================
+  // STORES & CONTEXT - ZERO PROPS
+  // ========================================
   const visible = useActiveModal() === 'sales-history'
   const product = useOriginalProduct()
+  const { vendor } = useAppAuth()
+
+  // State
   const [dateRange, setDateRange] = useState<DateRange>('30days')
-  const [startDate, setStartDate] = useState<string | undefined>()
-  const [endDate, setEndDate] = useState<string | undefined>()
+  const [salesRecords, setSalesRecords] = useState<SalesRecord[]>([])
+  const [stats, setStats] = useState<any>(null)
+  const [loading, setLoading] = useState(false)
 
   // Calculate date range
-  useEffect(() => {
+  const { startDate, endDate } = useMemo(() => {
     const now = new Date()
     const end = now.toISOString()
     let start: string | undefined
@@ -58,15 +73,58 @@ export function SalesHistoryModal() {
       start = undefined // All time
     }
 
-    setStartDate(start)
-    setEndDate(end)
+    return { startDate: start, endDate: end }
   }, [dateRange])
 
-  const { sales: salesRecords, stats, isLoading: loading } = useSalesHistory(
-    product?.id,
-    { startDate, endDate }
-  )
+  // Fetch sales data when modal opens or filters change
+  useEffect(() => {
+    if (!visible || !product?.id || !vendor?.id) {
+      logger.info('[SalesHistoryModal] Skipping load - visible:', visible, 'product:', product?.id, 'vendor:', vendor?.id)
+      return
+    }
 
+    const loadSalesData = async () => {
+      setLoading(true)
+      logger.info('[SalesHistoryModal] Loading sales data', {
+        vendorId: vendor.id,
+        productId: product.id,
+        startDate,
+        endDate,
+      })
+
+      try {
+        // Fetch sales records
+        const { data: records, error: fetchError } = await fetchSalesHistory(vendor.id, {
+          product_id: product.id,
+          start_date: startDate,
+          end_date: endDate,
+        })
+
+        logger.info('[SalesHistoryModal] Fetch result:', {
+          recordsCount: records?.length || 0,
+          hasError: !!fetchError,
+          error: fetchError,
+        })
+
+        setSalesRecords(records || [])
+
+        // Fetch stats
+        const statsData = await getSalesStats(vendor.id, product.id, startDate, endDate)
+        logger.info('[SalesHistoryModal] Stats loaded:', statsData)
+        setStats(statsData)
+      } catch (error) {
+        logger.error('[SalesHistoryModal] Error loading sales data:', error)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    loadSalesData()
+  }, [visible, product?.id, vendor?.id, startDate, endDate])
+
+  // ========================================
+  // HANDLERS
+  // ========================================
   const handleClose = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
     productUIActions.closeModal()
@@ -76,195 +134,190 @@ export function SalesHistoryModal() {
     if (value === undefined || value === null || isNaN(value)) return '$0.00'
     return `$${value.toFixed(2)}`
   }
+
   const formatDate = (dateStr: string) => {
     const date = new Date(dateStr)
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+    return date.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    })
   }
 
+  // ========================================
+  // RENDER
+  // ========================================
   return (
     <Modal
       visible={visible}
       animationType="slide"
-      presentationStyle="pageSheet"
+      presentationStyle="fullScreen"
       supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
     >
       <View style={styles.container}>
-        <LiquidGlassView
-          effect="regular"
-          colorScheme="dark"
-          style={[styles.background, !isLiquidGlassSupported && styles.backgroundFallback]}
+        {/* Fixed Header */}
+        <View style={styles.fixedHeader}>
+          <Pressable onPress={handleClose} style={styles.headerButton}>
+            <Text style={styles.headerButtonText}>Close</Text>
+          </Pressable>
+          <Text style={styles.headerTitle}>Sales History</Text>
+          <View style={{ width: 70 }} />
+        </View>
+
+        {/* Fade Gradient */}
+        <LinearGradient
+          colors={['rgba(0,0,0,0.95)', 'rgba(0,0,0,0.8)', 'rgba(0,0,0,0)']}
+          style={styles.fadeGradient}
+          pointerEvents="none"
+        />
+
+        <ScrollView
+          style={styles.scrollView}
+          showsVerticalScrollIndicator={true}
+          indicatorStyle="white"
+          contentContainerStyle={styles.scrollContent}
         >
-          {/* Header */}
-          <View style={styles.header}>
-            <View style={{ width: 70 }} />
-            <Text style={styles.headerTitle}>Sales History</Text>
-            <Pressable onPress={handleClose} style={styles.headerButton}>
-              <Text style={[styles.headerButtonText, styles.headerButtonTextPrimary]}>Done</Text>
-            </Pressable>
+          {/* Title Section */}
+          <TitleSection
+            title={product?.name || 'Product'}
+            subtitle={product?.sku ? `SKU: ${product.sku}` : undefined}
+            hideButton
+          />
+
+          {/* Date Range Filter */}
+          <View style={styles.filterSection}>
+            <View style={styles.dateRangeContainer}>
+              {DATE_RANGES.map((range) => (
+                <Pressable
+                  key={range.value}
+                  style={[
+                    styles.dateRangeButton,
+                    dateRange === range.value && styles.dateRangeButtonActive,
+                  ]}
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                    setDateRange(range.value)
+                  }}
+                >
+                  <Text
+                    style={[
+                      styles.dateRangeButtonText,
+                      dateRange === range.value && styles.dateRangeButtonTextActive,
+                    ]}
+                  >
+                    {range.label}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
           </View>
 
-          <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-            {/* Product Info */}
-            <View style={styles.section}>
-              <View style={styles.card}>
-                <Text style={styles.productName}>{product?.name || 'Unknown'}</Text>
-                <Text style={styles.productSKU}>{product?.sku || 'No SKU'}</Text>
-              </View>
+          {loading ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color={colors.text.secondary} />
+              <Text style={styles.loadingText}>Loading sales data...</Text>
             </View>
-
-            {/* Date Range Selector */}
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>TIME PERIOD</Text>
-              <View style={styles.dateRangeContainer}>
-                {DATE_RANGES.map((range) => (
-                  <Pressable
-                    key={range.value}
-                    style={[
-                      styles.dateRangeButton,
-                      dateRange === range.value && styles.dateRangeButtonActive,
-                    ]}
-                    onPress={() => {
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                      setDateRange(range.value)
-                    }}
-                  >
-                    <Text
-                      style={[
-                        styles.dateRangeButtonText,
-                        dateRange === range.value && styles.dateRangeButtonTextActive,
-                      ]}
-                    >
-                      {range.label}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
-            </View>
-
-            {loading ? (
-              <View style={styles.loadingContainer}>
-                <ActivityIndicator size="large" color="#60A5FA" />
-                <Text style={styles.loadingText}>Loading sales data...</Text>
-              </View>
-            ) : (
-              <>
-                {/* Stats Summary */}
-                <View style={styles.section}>
-                  <Text style={styles.sectionTitle}>SUMMARY</Text>
+          ) : (
+            <>
+              {/* Summary Stats */}
+              {stats && (
+                <View style={styles.statsSection}>
                   <View style={styles.statsGrid}>
                     <View style={styles.statCard}>
                       <Text style={styles.statLabel}>Total Sales</Text>
-                      <Text style={styles.statValue}>{stats?.total_units_sold || 0}g</Text>
+                      <Text style={styles.statValue}>{(stats.total_units_sold || 0).toFixed(2)}g</Text>
                     </View>
                     <View style={styles.statCard}>
                       <Text style={styles.statLabel}>Revenue</Text>
-                      <Text style={styles.statValue}>{formatCurrency(stats?.total_revenue || 0)}</Text>
+                      <Text style={styles.statValue}>{formatCurrency(stats.total_revenue || 0)}</Text>
                     </View>
                     <View style={styles.statCard}>
                       <Text style={styles.statLabel}>Orders</Text>
-                      <Text style={styles.statValue}>{stats?.total_orders || 0}</Text>
+                      <Text style={styles.statValue}>{stats.total_orders || 0}</Text>
                     </View>
                     <View style={styles.statCard}>
                       <Text style={styles.statLabel}>Avg Price</Text>
-                      <Text style={styles.statValue}>{formatCurrency(stats?.average_unit_price || 0)}/g</Text>
+                      <Text style={styles.statValue}>{formatCurrency(stats.average_unit_price || 0)}/g</Text>
                     </View>
                   </View>
                 </View>
+              )}
 
-                {/* Sales by Order Type */}
-                {stats?.by_order_type && Object.keys(stats.by_order_type).length > 0 && (
-                  <View style={styles.section}>
-                    <Text style={styles.sectionTitle}>BY ORDER TYPE</Text>
-                    <View style={styles.card}>
-                      {Object.entries(stats.by_order_type).map(([type, data], index, arr) => (
-                        <View key={type}>
-                          <View style={styles.orderTypeRow}>
-                            <View>
-                              <Text style={styles.orderTypeLabel}>
-                                {type.replace('_', ' ').toUpperCase()}
-                              </Text>
-                              <Text style={styles.orderTypeUnits}>{data.units}g sold</Text>
-                            </View>
-                            <Text style={styles.orderTypeRevenue}>{formatCurrency(data.revenue)}</Text>
-                          </View>
-                          {index < arr.length - 1 && <View style={styles.divider} />}
-                        </View>
-                      ))}
-                    </View>
-                  </View>
-                )}
+              {/* Sales List */}
+              <View style={styles.salesSection}>
+                {salesRecords && salesRecords.length > 0 ? (
+                  <View style={styles.salesCard}>
+                    {salesRecords.map((sale, index) => {
+                      const isLast = index === salesRecords.length - 1
 
-                {/* Simple Chart - Daily Sales */}
-                {stats?.by_date && stats.by_date.length > 0 && (
-                  <View style={styles.section}>
-                    <Text style={styles.sectionTitle}>DAILY SALES</Text>
-                    <View style={styles.card}>
-                      <View style={styles.chartContainer}>
-                        {stats.by_date.map((day, index) => {
-                          const maxRevenue = Math.max(...stats.by_date.map(d => d.revenue))
-                          const barHeight = maxRevenue > 0 ? (day.revenue / maxRevenue) * 120 : 0
+                      // DEBUG: Log the first sale record
+                      if (index === 0) {
+                        logger.info('[SalesHistoryModal] First sale record:', {
+                          quantity: sale.quantity,
+                          unit_price: sale.unit_price,
+                          total: sale.total,
+                          customer: sale.customer_name,
+                          location: sale.location_name,
+                        })
+                      }
 
-                          return (
-                            <View key={day.date} style={styles.chartBar}>
-                              <View style={styles.chartBarInfo}>
-                                <Text style={styles.chartBarValue}>{formatCurrency(day.revenue)}</Text>
-                              </View>
-                              <View style={[styles.chartBarFill, { height: Math.max(barHeight, 4) }]} />
-                              <Text style={styles.chartBarLabel}>{formatDate(day.date)}</Text>
-                            </View>
-                          )
-                        })}
-                      </View>
-                    </View>
-                  </View>
-                )}
-
-                {/* Recent Sales List */}
-                <View style={styles.section}>
-                  <Text style={styles.sectionTitle}>RECENT SALES</Text>
-                  {salesRecords && salesRecords.length > 0 ? (
-                    <View style={styles.card}>
-                      {salesRecords.slice(0, 20).map((sale, index) => (
+                      return (
                         <View key={sale.id}>
-                          <View style={styles.saleRow}>
-                            <View style={styles.saleInfo}>
-                              <Text style={styles.saleName}>
-                                Order #{sale.order_number}
+                          <View style={styles.saleItem}>
+                            <View style={styles.saleLeft}>
+                              {/* Store/Location Name */}
+                              <Text style={styles.saleLocation}>
+                                {sale.location_name || 'Store'}
                               </Text>
-                              <Text style={styles.saleDate}>
-                                {new Date(sale.created_at).toLocaleDateString('en-US', {
-                                  month: 'short',
-                                  day: 'numeric',
-                                  year: 'numeric',
-                                  hour: 'numeric',
-                                  minute: '2-digit',
-                                })}
-                              </Text>
+
+                              {/* Customer Name */}
                               {sale.customer_name && (
                                 <Text style={styles.saleCustomer}>{sale.customer_name}</Text>
                               )}
+
+                              {/* Date */}
+                              <Text style={styles.saleDate}>{formatDate(sale.created_at)}</Text>
+
+                              {/* Order Number (small) */}
+                              <Text style={styles.saleOrderNumber}>
+                                Order #{sale.order_number}
+                              </Text>
                             </View>
-                            <View style={styles.saleAmount}>
-                              <Text style={styles.saleQuantity}>{sale.quantity}g</Text>
+
+                            <View style={styles.saleRight}>
+                              {/* Quantity - Show tier_name if available, otherwise quantity */}
+                              <Text style={styles.saleQuantity}>
+                                {sale.tier_name || `${(sale.quantity || 0).toFixed(2)}g`}
+                              </Text>
+
+                              {/* Unit Price - Calculate actual price per unit weight */}
+                              <Text style={styles.saleUnitPrice}>
+                                @ {sale.quantity > 0 ? formatCurrency(sale.total / sale.quantity) : formatCurrency(0)}/g
+                              </Text>
+
+                              {/* Total */}
                               <Text style={styles.saleTotal}>{formatCurrency(sale.total)}</Text>
                             </View>
                           </View>
-                          {index < salesRecords.length - 1 && <View style={styles.divider} />}
+                          {!isLast && <View style={styles.saleDivider} />}
                         </View>
-                      ))}
-                    </View>
-                  ) : (
-                    <View style={styles.emptyCard}>
-                      <Text style={styles.emptyText}>No sales in this period</Text>
-                    </View>
-                  )}
-                </View>
-              </>
-            )}
-
-            <View style={{ height: 40 }} />
-          </ScrollView>
-        </LiquidGlassView>
+                      )
+                    })}
+                  </View>
+                ) : (
+                  <View style={styles.emptyContainer}>
+                    <Text style={styles.emptyTitle}>No Sales</Text>
+                    <Text style={styles.emptySubtitle}>
+                      No sales found for this period
+                    </Text>
+                  </View>
+                )}
+              </View>
+            </>
+          )}
+        </ScrollView>
       </View>
     </Modal>
   )
@@ -275,66 +328,57 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background.primary,
   },
-  background: {
-    flex: 1,
-  },
-  backgroundFallback: {
-    backgroundColor: colors.background.primary,
-  },
-  header: {
+  fixedHeader: {
+    position: 'absolute',
+    top: layout.headerTop,
+    left: 0,
+    right: 0,
+    height: layout.searchBarHeight,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
+    paddingHorizontal: layout.contentHorizontal,
+    zIndex: 20,
+    backgroundColor: 'rgba(0,0,0,0.95)',
     borderBottomWidth: 0.5,
     borderBottomColor: colors.border.subtle,
   },
   headerButton: {
     minWidth: 70,
     paddingVertical: spacing.xs,
-    alignItems: 'flex-end',
   },
   headerButtonText: {
-    ...typography.body,
-    color: colors.text.secondary,
-  },
-  headerButtonTextPrimary: {
+    fontSize: 17,
+    fontWeight: '400',
     color: '#60A5FA',
-    fontWeight: '600',
+    letterSpacing: -0.2,
   },
   headerTitle: {
-    ...typography.headline,
+    fontSize: 17,
+    fontWeight: '600',
     color: colors.text.primary,
+    letterSpacing: -0.2,
   },
-  content: {
+  fadeGradient: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 80,
+    zIndex: 10,
+  },
+  scrollView: {
     flex: 1,
-    paddingHorizontal: spacing.md,
   },
-  section: {
-    marginTop: spacing.lg,
+  scrollContent: {
+    paddingTop: layout.contentStartTop,
+    paddingBottom: layout.dockHeight + spacing.xl,
   },
-  sectionTitle: {
-    ...typography.uppercaseLabel,
-    color: colors.text.tertiary,
-    marginBottom: spacing.xs,
-    marginLeft: spacing.xs,
-  },
-  card: {
-    backgroundColor: colors.glass.regular,
-    borderRadius: radius.xxl,
-    padding: spacing.md,
-    borderWidth: 0.5,
-    borderColor: colors.border.subtle,
-  },
-  productName: {
-    ...typography.title3,
-    color: colors.text.primary,
-    marginBottom: spacing.xxs,
-  },
-  productSKU: {
-    ...typography.footnote,
-    color: colors.text.tertiary,
+
+  // Date Range Filter
+  filterSection: {
+    paddingHorizontal: layout.contentHorizontal,
+    marginBottom: spacing.md,
   },
   dateRangeContainer: {
     flexDirection: 'row',
@@ -344,10 +388,10 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.xs,
-    backgroundColor: colors.glass.regular,
+    backgroundColor: 'rgba(255,255,255,0.05)',
     borderRadius: radius.xl,
     borderWidth: 0.5,
-    borderColor: colors.border.subtle,
+    borderColor: 'rgba(255,255,255,0.12)',
     alignItems: 'center',
   },
   dateRangeButtonActive: {
@@ -355,21 +399,32 @@ const styles = StyleSheet.create({
     borderColor: '#60A5FA',
   },
   dateRangeButtonText: {
-    ...typography.footnote,
-    color: colors.text.secondary,
+    fontSize: 15,
     fontWeight: '600',
+    color: colors.text.secondary,
+    letterSpacing: -0.2,
   },
   dateRangeButtonTextActive: {
     color: colors.text.primary,
   },
+
+  // Loading
   loadingContainer: {
-    marginTop: spacing.huge,
+    paddingVertical: spacing.huge,
     alignItems: 'center',
   },
   loadingText: {
-    ...typography.footnote,
+    fontSize: 15,
+    fontWeight: '400',
     color: colors.text.tertiary,
     marginTop: spacing.md,
+    letterSpacing: -0.2,
+  },
+
+  // Stats Grid
+  statsSection: {
+    paddingHorizontal: layout.contentHorizontal,
+    marginBottom: spacing.md,
   },
   statsGrid: {
     flexDirection: 'row',
@@ -379,126 +434,121 @@ const styles = StyleSheet.create({
   statCard: {
     flex: 1,
     minWidth: '48%',
-    backgroundColor: colors.glass.regular,
+    backgroundColor: 'rgba(255,255,255,0.05)',
     borderRadius: radius.xxl,
     padding: spacing.md,
     borderWidth: 0.5,
-    borderColor: colors.border.subtle,
+    borderColor: 'rgba(255,255,255,0.12)',
   },
   statLabel: {
-    ...typography.caption1,
+    fontSize: 13,
+    fontWeight: '600',
     color: colors.text.tertiary,
     textTransform: 'uppercase',
     marginBottom: spacing.xs,
+    letterSpacing: 0.3,
   },
   statValue: {
-    ...typography.title2,
-    color: colors.text.primary,
+    fontSize: 24,
     fontWeight: '700',
+    color: colors.text.primary,
+    letterSpacing: -0.5,
   },
-  orderTypeRow: {
+
+  // Sales List
+  salesSection: {
+    paddingHorizontal: layout.contentHorizontal,
+  },
+  salesCard: {
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: radius.xxl,
+    overflow: 'hidden',
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  saleItem: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: spacing.sm,
+    padding: spacing.md,
   },
-  orderTypeLabel: {
-    ...typography.body,
-    color: colors.text.primary,
-    fontWeight: '600',
-    marginBottom: spacing.xxs,
-  },
-  orderTypeUnits: {
-    ...typography.footnote,
-    color: colors.text.tertiary,
-  },
-  orderTypeRevenue: {
-    ...typography.headline,
-    color: colors.text.primary,
-  },
-  divider: {
-    height: 0.5,
-    backgroundColor: colors.border.subtle,
-  },
-  chartContainer: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    justifyContent: 'space-between',
-    height: 180,
-    paddingTop: spacing.lg,
-  },
-  chartBar: {
+  saleLeft: {
     flex: 1,
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    marginHorizontal: 2,
+    gap: spacing.xxs,
   },
-  chartBarInfo: {
-    marginBottom: spacing.xs,
-  },
-  chartBarValue: {
-    ...typography.caption2,
-    color: colors.text.tertiary,
-    fontSize: 9,
-  },
-  chartBarFill: {
-    width: '100%',
-    backgroundColor: '#60A5FA',
-    borderRadius: radius.xs,
-    minHeight: 4,
-  },
-  chartBarLabel: {
-    ...typography.caption2,
-    color: colors.text.quaternary,
-    marginTop: spacing.xxs,
-    fontSize: 8,
-    transform: [{ rotate: '-45deg' }],
-  },
-  saleRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: spacing.sm,
-  },
-  saleInfo: {
-    flex: 1,
-  },
-  saleName: {
-    ...typography.body,
+  saleLocation: {
+    fontSize: 17,
+    fontWeight: '700',
     color: colors.text.primary,
-    fontWeight: '600',
-    marginBottom: spacing.xxs,
-  },
-  saleDate: {
-    ...typography.footnote,
-    color: colors.text.tertiary,
+    letterSpacing: -0.3,
   },
   saleCustomer: {
-    ...typography.footnote,
-    color: colors.text.quaternary,
-    marginTop: spacing.xxs,
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.text.secondary,
+    letterSpacing: -0.2,
   },
-  saleAmount: {
+  saleDate: {
+    fontSize: 13,
+    fontWeight: '400',
+    color: colors.text.tertiary,
+    letterSpacing: -0.1,
+  },
+  saleOrderNumber: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: colors.text.quaternary,
+    letterSpacing: 0,
+  },
+  saleRight: {
     alignItems: 'flex-end',
+    gap: spacing.xxs,
   },
   saleQuantity: {
-    ...typography.body,
-    color: colors.text.secondary,
-    marginBottom: spacing.xxs,
+    fontSize: 17,
+    fontWeight: '700',
+    color: colors.text.primary,
+    letterSpacing: -0.3,
+  },
+  saleUnitPrice: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: colors.text.tertiary,
+    letterSpacing: -0.1,
   },
   saleTotal: {
-    ...typography.headline,
-    color: colors.text.primary,
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#60A5FA',
+    letterSpacing: -0.4,
   },
-  emptyCard: {
-    backgroundColor: colors.glass.regular,
+  saleDivider: {
+    height: 0.5,
+    backgroundColor: colors.border.subtle,
+    marginHorizontal: spacing.md,
+  },
+
+  // Empty State
+  emptyContainer: {
+    backgroundColor: 'rgba(255,255,255,0.05)',
     borderRadius: radius.xxl,
     padding: spacing.xxl,
     borderWidth: 0.5,
-    borderColor: colors.border.subtle,
+    borderColor: 'rgba(255,255,255,0.12)',
     alignItems: 'center',
   },
-  emptyText: {
-    ...typography.body,
-    color: colors.text.quaternary,
+  emptyTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: colors.text.primary,
+    marginBottom: spacing.xs,
+    letterSpacing: -0.3,
+  },
+  emptySubtitle: {
+    fontSize: 15,
+    fontWeight: '400',
+    color: colors.text.tertiary,
+    textAlign: 'center',
+    letterSpacing: -0.2,
   },
 })

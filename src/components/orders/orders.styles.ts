@@ -63,12 +63,10 @@ export const ordersStyles = StyleSheet.create({
     zIndex: 10,
   },
   titleSectionContainer: {
-    backgroundColor: colors.glass.regular, // ✅ Using token instead of hardcoded rgba
+    backgroundColor: 'rgba(255,255,255,0.05)', // Match product list - borderless
     borderRadius: radius.xxl,
     borderCurve: 'continuous',
     padding: spacing.lg,
-    borderWidth: 0.5,
-    borderColor: colors.border.emphasis, // ✅ Using token instead of hardcoded rgba
   },
   titleWithLogo: {
     flexDirection: 'row',
@@ -79,8 +77,6 @@ export const ordersStyles = StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: radius.xxl,
-    borderWidth: 1,
-    borderColor: colors.border.emphasis, // ✅ Using token (0.12 opacity is close to 0.25)
     shadowColor: colors.background.primary, // ✅ Using token
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.15,
@@ -98,13 +94,10 @@ export const ordersStyles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 16,
     borderRadius: 20,
-    backgroundColor: colors.interactive.default, // ✅ Using token (was rgba 0.05, token is 0.08 - close enough)
-    borderWidth: 1,
-    borderColor: colors.border.regular, // ✅ Using token
+    backgroundColor: 'rgba(255,255,255,0.05)', // Match product list - borderless
   },
   dateRangeButtonActive: {
-    backgroundColor: colors.interactive.active, // ✅ Using token
-    borderColor: colors.border.strong, // ✅ Using token (was 0.3, token is 0.15 - acceptable)
+    backgroundColor: 'rgba(255,255,255,0.15)', // Slightly lighter for active state - borderless
   },
   dateRangeButtonText: {
     fontSize: 13,
@@ -118,7 +111,7 @@ export const ordersStyles = StyleSheet.create({
 
   // FlatList
   flatListContent: {
-    paddingTop: layout.contentStartTop,
+    paddingTop: 0,
     paddingBottom: layout.dockHeight,
     paddingRight: 0, // No padding - cardWrapper handles spacing
   },
@@ -132,7 +125,7 @@ export const ordersStyles = StyleSheet.create({
     borderRadius: radius.xxl,
     borderCurve: 'continuous',
     overflow: 'hidden',
-    backgroundColor: colors.glass.regular, // ✅ Using token (was 0.05, token is 0.08 - acceptable for consistency)
+    backgroundColor: 'rgba(255,255,255,0.05)', // Match product list - borderless
   },
 
   // Section Headers - ✅ UNIFIED: Now matches Customers screen (golden standard)
@@ -324,7 +317,7 @@ export const ordersStyles = StyleSheet.create({
     borderRadius: radius.xxl,
     borderCurve: 'continuous',
     overflow: 'hidden',
-    backgroundColor: colors.glass.regular, // ✅ Using token
+    backgroundColor: 'rgba(255,255,255,0.05)', // Match product list - borderless
   },
   headerCard: {
     flexDirection: 'row',
@@ -387,7 +380,7 @@ export const ordersStyles = StyleSheet.create({
     borderRadius: radius.xxl,
     borderCurve: 'continuous',
     overflow: 'hidden',
-    backgroundColor: colors.glass.regular, // ✅ Using token
+    backgroundColor: 'rgba(255,255,255,0.05)', // Match product list - borderless
   },
   row: {
     flexDirection: 'row',

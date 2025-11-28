@@ -33,6 +33,7 @@ import { useProductsScreenStore, productsScreenActions } from '@/stores/products
 import { useCategories } from '@/hooks/useCategories'
 import { logger } from '@/utils/logger'
 import type { Product } from '@/types/pos'
+import { getIconImage } from '@/utils/image-transforms'
 
 interface TransferLineItem {
   id: string
@@ -409,15 +410,22 @@ export function CreateTransferModal() {
   const handleClose = async (skipAutoSave = false) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
 
+    // IMPORTANT: Capture state BEFORE closing modal
+    // (closing the modal triggers useEffect which resets state)
+    const currentSourceId = selectedSourceLocationId
+    const currentDestId = selectedDestLocationId
+    const currentLineItems = lineItems
+    const currentNotes = notes
+
     // Auto-save as draft if user has started filling out the form
     // BUT only if they didn't successfully submit (skip via parameter)
-    const hasContent = selectedSourceLocationId && selectedDestLocationId && lineItems.length > 0
+    const hasContent = currentSourceId && currentDestId && currentLineItems.length > 0
     const shouldAutoSave = hasContent && !skipAutoSave && !isEditingDraft
 
     console.log('[CreateTransferModal] handleClose - Detailed Debug', {
-      selectedSourceLocationId,
-      selectedDestLocationId,
-      lineItemsCount: lineItems.length,
+      currentSourceId,
+      currentDestId,
+      lineItemsCount: currentLineItems.length,
       hasContent,
       skipAutoSave,
       isEditingDraft,
@@ -432,13 +440,13 @@ export function CreateTransferModal() {
         const transferId = await createTransfer(
           vendorId,
           {
-            source_location_id: selectedSourceLocationId,
-            destination_location_id: selectedDestLocationId,
-            items: lineItems.map(item => ({
+            source_location_id: currentSourceId,
+            destination_location_id: currentDestId,
+            items: currentLineItems.map(item => ({
               product_id: item.product.id,
               quantity: item.quantity,
             })),
-            notes: notes.trim() || undefined,
+            notes: currentNotes.trim() || undefined,
           },
           user?.id
         )
@@ -708,7 +716,7 @@ onPress={() => {
                     }}
                   >
                     {product.image_url && (
-                      <Image source={{ uri: product.image_url }} style={styles.productImage} />
+                      <Image source={{ uri: getIconImage(product.image_url) || product.image_url }} style={styles.productImage} />
                     )}
 
                     <View style={styles.productInfo}>

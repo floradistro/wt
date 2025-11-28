@@ -27,6 +27,7 @@ interface AppAuthContextValue {
   // State
   user: User | null
   vendor: Vendor | null
+  vendorId: string | null
   locations: Location[]
   loading: boolean
   error: string | null
@@ -196,6 +197,7 @@ export function AppAuthProvider({ children }: AppAuthProviderProps) {
   const value: AppAuthContextValue = {
     user: authUser,
     vendor,
+    vendorId: vendor?.id || null,
     locations,
     loading,
     error,

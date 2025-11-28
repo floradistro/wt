@@ -12,6 +12,7 @@ import React, { useMemo, memo } from 'react'
 import { View, Text, StyleSheet, Pressable, Image } from 'react-native'
 import { layout } from '@/theme/layout'
 import type { Product } from '@/types/products'
+import { getIconImage } from '@/utils/image-transforms'
 
 interface ProductItemProps {
   item: Product
@@ -83,13 +84,13 @@ function ProductItemComponent({
       {/* Icon/Thumbnail - Apple Music Style: Full-height, zero padding */}
       {item.featured_image ? (
         <Image
-          source={{ uri: item.featured_image }}
+          source={{ uri: getIconImage(item.featured_image) || item.featured_image }}
           style={styles.productIconImage}
           resizeMode="cover"
         />
       ) : item.vendor_logo_url ? (
         <Image
-          source={{ uri: item.vendor_logo_url }}
+          source={{ uri: getIconImage(item.vendor_logo_url) || item.vendor_logo_url }}
           style={styles.productIconImage}
           resizeMode="contain"
         />

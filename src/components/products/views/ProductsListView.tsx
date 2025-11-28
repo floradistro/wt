@@ -7,20 +7,22 @@
  * - iOS section index (A-Z scroller on right side)
  * - Large title header with vendor logo
  * - Empty states
- * - Fixed header with fade gradient
  */
 
 import React, { useRef, useState, useMemo, useCallback } from 'react'
-import { View, Text, StyleSheet, Pressable, ScrollView, ActivityIndicator, Image, Animated, PanResponder } from 'react-native'
-import { LinearGradient } from 'expo-linear-gradient'
+import { View, Text, StyleSheet, Pressable, ScrollView, ActivityIndicator, Animated, PanResponder } from 'react-native'
 import * as Haptics from 'expo-haptics'
 import { ProductItem } from '@/components/products/list/ProductItem'
+import { TitleSection } from '@/components/shared'
+import type { FilterPill } from '@/components/shared'
 import { layout } from '@/theme/layout'
 import { colors, spacing, radius } from '@/theme/tokens'
 import type { Product } from '@/types/products'
 import { useProductsScreenStore } from '@/stores/products-list.store'
 import { useLocationFilter } from '@/stores/location-filter.store'
 import { useCategories } from '@/hooks/useCategories'
+
+type ProductFilter = 'all' | 'low-stock' | 'out-of-stock'
 
 interface ProductsListViewProps {
   products: Product[]
@@ -34,12 +36,14 @@ export function ProductsListView({
   isLoading,
 }: ProductsListViewProps) {
   // Read from stores
-  const activeNav = useProductsScreenStore(state => state.activeNav)
   const selectedProduct = useProductsScreenStore(state => state.selectedProduct)
   const selectProduct = useProductsScreenStore(state => state.selectProduct)
   const openModal = useProductsScreenStore(state => state.openModal)
   const { selectedLocationIds } = useLocationFilter()
   const { categories } = useCategories({ includeGlobal: true, parentId: null })
+
+  // Local filter state (replaces activeNav)
+  const [activeFilter, setActiveFilter] = useState<ProductFilter>('all')
 
   // Compute category map
   const categoryMap = useMemo(() => {
@@ -48,9 +52,20 @@ export function ProductsListView({
     return map
   }, [categories])
 
+  // Filter products based on active filter
+  const filteredProducts = useMemo(() => {
+    if (activeFilter === 'low-stock') {
+      return products.filter(p => (p.inventory_quantity || 0) > 0 && (p.inventory_quantity || 0) < 10)
+    }
+    if (activeFilter === 'out-of-stock') {
+      return products.filter(p => (p.inventory_quantity || 0) === 0)
+    }
+    return products
+  }, [products, activeFilter])
+
   // Compute product sections (A-Z grouped)
   const productSections = useMemo((): [string, Product[]][] => {
-    const grouped = products.reduce((acc, product) => {
+    const grouped = filteredProducts.reduce((acc, product) => {
       const firstLetter = (product.name || '').charAt(0).toUpperCase()
       const letter = /[A-Z]/.test(firstLetter) ? firstLetter : '#'
       if (!acc[letter]) acc[letter] = []
@@ -63,7 +78,24 @@ export function ProductsListView({
       if (b === '#') return -1
       return a.localeCompare(b)
     })
+  }, [filteredProducts])
+
+  // Define filter pills
+  const filterPills: FilterPill[] = useMemo(() => {
+    const lowStockCount = products.filter(p => (p.inventory_quantity || 0) > 0 && (p.inventory_quantity || 0) < 10).length
+    const outOfStockCount = products.filter(p => (p.inventory_quantity || 0) === 0).length
+
+    return [
+      { id: 'all', label: 'All' },
+      { id: 'low-stock', label: `Low Stock (${lowStockCount})` },
+      { id: 'out-of-stock', label: `Out of Stock (${outOfStockCount})` },
+    ]
   }, [products])
+
+  // Handle filter selection
+  const handleFilterSelect = (filterId: string) => {
+    setActiveFilter(filterId as ProductFilter)
+  }
 
   // Handlers
   const onProductSelect = useCallback((product: Product) => {
@@ -81,9 +113,8 @@ export function ProductsListView({
       : ['All locations']
   }, [selectedLocationIds])
   // ========================================
-  // SCROLL & HEADER STATE
+  // SCROLL STATE
   // ========================================
-  const productsHeaderOpacity = useRef(new Animated.Value(0)).current
   const scrollViewRef = useRef<ScrollView>(null)
 
   // ========================================
@@ -201,10 +232,8 @@ export function ProductsListView({
   )
 
   // ========================================
-  // TITLE & LOADING
+  // LOADING
   // ========================================
-  const title = activeNav === 'all' ? 'All Products' : activeNav === 'low-stock' ? 'Low Stock' : 'Out of Stock'
-
   if (isLoading) {
     return (
       <View style={styles.loadingContainer}>
@@ -218,74 +247,38 @@ export function ProductsListView({
   // ========================================
   return (
     <View style={styles.container}>
-      {/* Fixed Header */}
-      <Animated.View style={[styles.fixedHeader, { opacity: productsHeaderOpacity }]}>
-        <Text style={styles.fixedHeaderTitle}>{title}</Text>
-      </Animated.View>
-
-      {/* Fade Gradient */}
-      <LinearGradient
-        colors={['rgba(0,0,0,0.95)', 'rgba(0,0,0,0.8)', 'rgba(0,0,0,0)']}
-        style={styles.fadeGradient}
-        pointerEvents="none"
-      />
-
       <View style={styles.sectionListContainer}>
         <ScrollView
           ref={scrollViewRef}
           showsVerticalScrollIndicator={!showSectionIndex}
           indicatorStyle="white"
-          scrollIndicatorInsets={{ right: 2, top: layout.contentStartTop, bottom: layout.dockHeight }}
+          scrollIndicatorInsets={{ right: 2, bottom: layout.dockHeight }}
           contentContainerStyle={{
-            paddingTop: layout.contentStartTop,
             paddingBottom: layout.dockHeight,
             paddingRight: 0
           }}
-          onScroll={(e) => {
-            const offsetY = e.nativeEvent.contentOffset.y
-            const threshold = 40
-            productsHeaderOpacity.setValue(offsetY > threshold ? 1 : 0)
-          }}
-          scrollEventThrottle={16}
         >
-          {/* Large Title */}
-          <View style={styles.cardWrapper}>
-            <View style={styles.titleSectionContainer}>
-              <View style={styles.largeTitleContainer}>
-                <View style={styles.titleWithLogo}>
-                  {vendorLogo && (
-                    <Image
-                      source={{ uri: vendorLogo }}
-                      style={styles.vendorLogoInline}
-                      resizeMode="contain"
-                      fadeDuration={0}
-                    />
-                  )}
-                  <Text style={styles.largeTitleHeader}>{title}</Text>
-                </View>
-                {activeNav === 'all' && (
-                  <Pressable
-                    style={styles.addProductButton}
-                    onPress={() => {
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                      onAddProduct()
-                    }}
-                  >
-                    <Text style={styles.addProductButtonText}>Add Product</Text>
-                  </Pressable>
-                )}
-              </View>
-            </View>
-          </View>
+          {/* Title Section with Filter Pills */}
+          <TitleSection
+            title="Products"
+            logo={vendorLogo}
+            subtitle={`${filteredProducts.length} ${activeFilter === 'all' ? 'products' : activeFilter === 'low-stock' ? 'low stock' : 'out of stock'}`}
+            buttonText="+ Add Product"
+            onButtonPress={onAddProduct}
+            buttonAccessibilityLabel="Add new product"
+            filterPills={filterPills}
+            activeFilterId={activeFilter}
+            onFilterSelect={handleFilterSelect}
+          />
 
           {/* Empty State */}
-          {products.length === 0 ? (
+          {filteredProducts.length === 0 ? (
             <View style={styles.emptyState}>
               <Text style={styles.emptyStateTitle}>No Products Found</Text>
               <Text style={styles.emptyStateText}>
-                {activeNav === 'low-stock'
+                {activeFilter === 'low-stock'
                   ? 'No products with low stock levels'
-                  : activeNav === 'out-of-stock'
+                  : activeFilter === 'out-of-stock'
                   ? 'No products are out of stock'
                   : 'No products available'}
               </Text>
@@ -310,9 +303,8 @@ export function ProductsListView({
                     <View style={styles.productsCardGlass}>
                       {items.map((item, index) => {
                         const isLast = index === items.length - 1
-                        const categoryName = item.primary_category_id
-                          ? (categoryMap.get(item.primary_category_id) ?? null)
-                          : null
+                        // Use item.category directly - it's already populated by transformer
+                        const categoryName = item.category
 
                         return (
                           <ProductItem
@@ -427,30 +419,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: 40,
   },
-  fixedHeader: {
-    position: 'absolute',
-    top: layout.headerTop,
-    left: 0,
-    right: 0,
-    height: layout.searchBarHeight,
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 20,
-  },
-  fixedHeaderTitle: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: '#fff',
-    letterSpacing: -0.2,
-  },
-  fadeGradient: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: 80,
-    zIndex: 10,
-  },
   sectionListContainer: {
     flex: 1,
     position: 'relative',
@@ -458,55 +426,6 @@ const styles = StyleSheet.create({
   cardWrapper: {
     paddingHorizontal: layout.containerMargin,
     marginBottom: layout.containerMargin,
-  },
-  titleSectionContainer: {
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderRadius: radius.xxl,
-    borderCurve: 'continuous',
-    padding: spacing.lg,
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.12)',
-  },
-  largeTitleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  titleWithLogo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.lg,
-  },
-  vendorLogoInline: {
-    width: 80,
-    height: 80,
-    borderRadius: radius.xxl,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.25)',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-  },
-  largeTitleHeader: {
-    fontSize: 34,
-    fontWeight: '700',
-    color: '#fff',
-    letterSpacing: -0.8,
-  },
-  addProductButton: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-    borderRadius: radius.md,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.2)',
-  },
-  addProductButtonText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#fff',
-    letterSpacing: -0.2,
   },
   emptyState: {
     flex: 1,

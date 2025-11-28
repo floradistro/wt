@@ -3,13 +3,13 @@
  * Discount campaigns management - Jobs Principle: Simple discount creation
  */
 
-import { View, Text, Pressable, ActivityIndicator, Alert, TextInput, Switch } from "react-native"
+import { View, Text, Pressable, ActivityIndicator, Alert, TextInput } from "react-native"
 import { useState } from "react"
-import { LiquidGlassView, LiquidGlassContainerView, isLiquidGlassSupported } from "@callstack/liquid-glass"
+// Removed LiquidGlassView - using plain View with borderless style
 import Slider from "@react-native-community/slider"
 import * as Haptics from "expo-haptics"
 import { colors, typography, spacing, radius } from "@/theme/tokens"
-import type { Campaign } from "@/hooks/useCampaigns"
+import type { Campaign } from "@/types/campaigns"
 import { campaignsStyles as styles } from "./campaigns.styles"
 
 function CampaignsDetail({
@@ -57,7 +57,7 @@ function CampaignsDetail({
       schedule_type: 'always',
       application_method: 'auto',
       badge_text: badgeText,
-      badge_color: colors.glass.thick,
+      badge_color: 'rgba(255,255,255,0.15)', // Match product list - borderless
     })
 
     setIsSaving(false)
@@ -80,32 +80,10 @@ function CampaignsDetail({
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
   }
 
-  const handleToggleDiscount = (discountId: string, currentStatus: boolean) => {
+  const onEditCampaign = (campaign: Campaign) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-    onToggleStatus(discountId, !currentStatus).catch((error: any) => {
-      Alert.alert('Error', error?.message || 'Failed to toggle discount')
-    })
-  }
-
-  const handleDeleteDiscount = (discountId: string, discountName: string) => {
-    Alert.alert(
-      'Delete Discount',
-      `Are you sure you want to delete "${discountName}"?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
-            const result = await onDelete(discountId)
-            if (!result.success) {
-              Alert.alert('Error', result.error || 'Failed to delete discount')
-            }
-          },
-        },
-      ]
-    )
+    // TODO: Implement edit modal/flow
+    Alert.alert('Edit Campaign', `Edit "${campaign.name}"`)
   }
 
   if (isLoading) {
@@ -138,8 +116,8 @@ function CampaignsDetail({
   return (
     <>
       {editingId === 'new' && (
-        <LiquidGlassContainerView spacing={12} style={styles.cardWrapper}>
-          <LiquidGlassView style={[styles.detailCard, !isLiquidGlassSupported && styles.cardFallback]}>
+        <View style={styles.cardWrapper}>
+          <View style={styles.detailCard}>
             <View style={{ padding: spacing.md }}>
               <Text style={{ ...typography.headline, color: colors.text.primary, marginBottom: spacing.md }}>Create Discount</Text>
 
@@ -183,7 +161,7 @@ function CampaignsDetail({
                   value={discountValue}
                   onValueChange={setDiscountValue}
                   minimumTrackTintColor={colors.text.primary}
-                  maximumTrackTintColor={colors.glass.thick}
+                  maximumTrackTintColor="rgba(255,255,255,0.15)" // Match product list - borderless
                   thumbTintColor={colors.text.primary}
                 />
               </View>
@@ -204,8 +182,8 @@ function CampaignsDetail({
                 </Pressable>
               </View>
             </View>
-          </LiquidGlassView>
-        </LiquidGlassContainerView>
+          </View>
+        </View>
       )}
 
       {campaigns.length > 0 && editingId !== 'new' && (
@@ -225,63 +203,49 @@ function CampaignsDetail({
         </View>
       )}
 
-      {campaigns.map((discount) => (
-        <LiquidGlassContainerView key={discount.id} spacing={12} style={styles.cardWrapper}>
-          <LiquidGlassView
-            interactive
-            style={[styles.detailCard, !isLiquidGlassSupported && styles.cardFallback]}
-          >
-            <View style={{ padding: spacing.md }}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ ...typography.headline, color: colors.text.primary }}>{discount.name}</Text>
-                  <Text style={{ ...typography.footnote, color: colors.text.tertiary, marginTop: 2 }}>
-                    {discount.discount_type === 'percentage'
-                      ? `${discount.discount_value}% OFF`
-                      : `$${discount.discount_value} OFF`}
+      {/* Campaigns List - MATCHES ProductsListView Structure */}
+      <View style={styles.cardWrapper}>
+        <View style={styles.listCardGlass}>
+          {campaigns.map((campaign, index) => {
+            const isLast = index === campaigns.length - 1
+            return (
+              <Pressable
+                key={campaign.id}
+                style={[styles.listItem, isLast && styles.listItemLast]}
+                onPress={() => onEditCampaign(campaign)}
+                accessible={true}
+                accessibilityRole="button"
+                accessibilityLabel={campaign.name}
+              >
+                {/* Campaign Icon */}
+                <View style={styles.campaignIcon}>
+                  <Text style={styles.campaignIconText}>
+                    {campaign.name.charAt(0).toUpperCase()}
                   </Text>
                 </View>
-                <View style={{ flexDirection: 'row', gap: spacing.sm, alignItems: 'center' }}>
-                  {discount.badge_text && (
-                    <View
-                      style={{
-                        paddingHorizontal: 8,
-                        paddingVertical: 4,
-                        backgroundColor: discount.badge_color || colors.glass.thick,
-                        borderRadius: radius.xs
-                      }}
-                    >
-                      <Text style={{ ...typography.caption2, color: colors.text.primary, fontWeight: '600' }}>
-                        {discount.badge_text}
-                      </Text>
-                    </View>
-                  )}
-                  <Switch
-                    value={discount.is_active}
-                    onValueChange={() => handleToggleDiscount(discount.id, discount.is_active)}
-                    trackColor={{ false: colors.glass.thick, true: colors.glass.thick }}
-                    thumbColor={colors.text.primary}
-                    ios_backgroundColor={colors.glass.thick}
-                  />
-                  <Pressable
-                    onPress={() => handleDeleteDiscount(discount.id, discount.name)}
-                    style={{
-                      width: 32,
-                      height: 32,
-                      borderRadius: radius.sm,
-                      backgroundColor: colors.glass.regular,
-                      alignItems: 'center',
-                      justifyContent: 'center'
-                    }}
-                  >
-                    <Text style={{ fontSize: 24, color: colors.text.tertiary, lineHeight: 24 }}>×</Text>
-                  </Pressable>
+
+                {/* Campaign Info */}
+                <View style={styles.campaignInfo}>
+                  <Text style={styles.campaignName} numberOfLines={1}>{campaign.name}</Text>
+                  <Text style={styles.campaignType} numberOfLines={1}>
+                    {campaign.campaign_type || 'Campaign'}
+                  </Text>
                 </View>
-              </View>
-            </View>
-          </LiquidGlassView>
-        </LiquidGlassContainerView>
-      ))}
+
+                {/* Status */}
+                <View style={styles.campaignMeta}>
+                  {!campaign.is_active && (
+                    <Text style={styles.inactiveLabel}>INACTIVE</Text>
+                  )}
+                  {campaign.is_active && (
+                    <Text style={styles.activeLabel}>ACTIVE</Text>
+                  )}
+                </View>
+              </Pressable>
+            )
+          })}
+        </View>
+      </View>
     </>
   )
 }

@@ -4,7 +4,7 @@
  * Matches the pattern from EditableCustomFieldsSection for products
  */
 
-import { View, Text, StyleSheet, Pressable, TextInput } from 'react-native'
+import { View, Text, StyleSheet, Pressable, TextInput, Switch } from 'react-native'
 import { useState, useEffect, useCallback } from 'react'
 import * as Haptics from 'expo-haptics'
 import { spacing, radius } from '@/theme/tokens'
@@ -24,8 +24,8 @@ interface CustomField {
   name: string
   field_type: 'text' | 'number' | 'select' | 'multiselect' | 'date' | 'boolean'
   options?: string[]
-  required: boolean
   description?: string
+  is_active?: boolean
 }
 
 export function EditableCustomFieldsSection({
@@ -53,12 +53,13 @@ export function EditableCustomFieldsSection({
 
       if (userError || !userData) throw userError || new Error('User record not found')
 
-      // Load fields from vendor_product_fields table
+      // Load ALL fields from vendor_product_fields table
+      // Note: Native app shows all fields regardless of is_active status
+      // The is_active field only controls online storefront visibility
       const { data, error } = await supabase
         .from('vendor_product_fields')
         .select('*')
         .eq('vendor_id', userData.vendor_id)
-        .eq('is_active', true)
         .order('sort_order', { ascending: true })
 
       if (error) throw error
@@ -95,8 +96,8 @@ export function EditableCustomFieldsSection({
         name: f.label || f.name,
         field_type: f.type || f.field_type || 'text',
         options: f.options,
-        required: f.required || false,
         description: f.description,
+        is_active: f.is_active !== undefined ? f.is_active : true,
       })))
     }
   }, [allFields])
@@ -106,8 +107,8 @@ export function EditableCustomFieldsSection({
     const newField: CustomField = {
       name: '',
       field_type: 'text',
-      required: false,
       description: '',
+      is_active: true,
     }
     setEditedFields([...editedFields, newField])
   }
@@ -137,10 +138,9 @@ export function EditableCustomFieldsSection({
 
       if (userError || !userData) throw userError || new Error('User record not found')
 
-      logger.info('[EditableCustomFieldsSection] Saving custom fields', {
+      logger.info('[EditableCustomFieldsSection] 💾 Saving custom fields', {
         categoryId,
-        fieldCount: editedFields.length,
-        fields: editedFields.map(f => ({ id: f.id, name: f.name, type: f.field_type }))
+        fieldCount: editedFields.length
       })
 
       // Save to vendor_product_fields table with field_definition JSONB
@@ -149,17 +149,16 @@ export function EditableCustomFieldsSection({
           label: field.name,
           type: field.field_type,
           options: field.options,
-          required: field.required,
           description: field.description,
         }
 
         if (field.id) {
-          // Update existing
-          logger.info('[EditableCustomFieldsSection] Updating existing field', { fieldId: field.id, name: field.name })
+          // Update existing (no log spam)
           const { error } = await supabase
             .from('vendor_product_fields')
             .update({
               field_definition: fieldDefinition,
+              is_active: field.is_active !== undefined ? field.is_active : true,
               updated_at: new Date().toISOString(),
               updated_by_user_id: user.id, // Track who updated
             })
@@ -173,7 +172,6 @@ export function EditableCustomFieldsSection({
         } else {
           // Insert new field for this category
           const fieldId = field.name.toLowerCase().replace(/[^a-z0-9]+/g, '_')
-          logger.info('[EditableCustomFieldsSection] Inserting new field', { fieldId, name: field.name })
           const { error } = await supabase
             .from('vendor_product_fields')
             .insert({
@@ -204,12 +202,12 @@ export function EditableCustomFieldsSection({
     }
   }, [user, categoryId, editedFields, loadAllFields, onFieldsUpdated])
 
-  // Auto-save when exiting edit mode
+  // Auto-save when exiting edit mode (only watch isEditing to prevent spam)
   useEffect(() => {
     if (!isEditing && editedFields.length > 0) {
       handleSaveFields()
     }
-  }, [isEditing, editedFields.length, handleSaveFields])
+  }, [isEditing]) // Only depend on isEditing, like pricing templates
 
   const reload = loadAllFields
 
@@ -295,19 +293,27 @@ export function EditableCustomFieldsSection({
                         placeholderTextColor="rgba(235,235,245,0.3)"
                       />
 
-                      {/* Required Toggle */}
-                      <Pressable
-                        style={styles.requiredToggle}
-                        onPress={() => {
-                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                          handleUpdateField(index, { required: !field.required })
-                        }}
-                      >
-                        <Text style={styles.requiredLabel}>Required</Text>
-                        <View style={[styles.toggle, field.required && styles.toggleActive]}>
-                          <View style={[styles.toggleThumb, field.required && styles.toggleThumbActive]} />
+                      {/* Online Visibility Toggle */}
+                      <View style={styles.onlineVisibilityRow}>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.onlineVisibilityLabel}>Publish Online</Text>
+                          <Text style={styles.onlineVisibilityDesc}>
+                            {field.is_active
+                              ? 'Field visible on storefront'
+                              : 'Field hidden from storefront'}
+                          </Text>
                         </View>
-                      </Pressable>
+                        <Switch
+                          value={field.is_active !== undefined ? field.is_active : true}
+                          onValueChange={(value) => {
+                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                            handleUpdateField(index, { is_active: value })
+                          }}
+                          trackColor={{ false: 'rgba(120,120,128,0.32)', true: '#60A5FA' }}
+                          thumbColor="#fff"
+                          ios_backgroundColor="rgba(120,120,128,0.32)"
+                        />
+                      </View>
 
                       {/* Options for select/multiselect */}
                       {(field.field_type === 'select' || field.field_type === 'multiselect') && (
@@ -338,10 +344,18 @@ export function EditableCustomFieldsSection({
               const isLast = index === allFields.length - 1
               const fieldName = field.label || field.name
               const fieldType = field.type || field.field_type
+              const isActive = field.is_active !== undefined ? field.is_active : true
               return (
                 <View key={field.id} style={[styles.fieldRow, isLast && styles.fieldRowLast]}>
                   <View style={styles.fieldInfo}>
-                    <Text style={styles.fieldName}>{fieldName}</Text>
+                    <View style={styles.fieldNameRow}>
+                      <Text style={styles.fieldName}>{fieldName}</Text>
+                      {!isActive && (
+                        <View style={styles.offlineBadge}>
+                          <Text style={styles.offlineBadgeText}>OFFLINE</Text>
+                        </View>
+                      )}
+                    </View>
                     {field.description && (
                       <Text style={styles.fieldDescription}>{field.description}</Text>
                     )}
@@ -349,10 +363,10 @@ export function EditableCustomFieldsSection({
                       <Text style={styles.fieldMetaText}>
                         {fieldType?.toUpperCase() || 'TEXT'}
                       </Text>
-                      {field.required && (
+                      {isActive && (
                         <>
                           <Text style={styles.fieldMetaDot}>•</Text>
-                          <Text style={[styles.fieldMetaText, styles.fieldMetaRequired]}>Required</Text>
+                          <Text style={[styles.fieldMetaText, styles.fieldMetaOnline]}>Online</Text>
                         </>
                       )}
                     </View>
@@ -499,37 +513,6 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     marginBottom: 10,
   },
-  requiredToggle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 8,
-    marginBottom: 10,
-  },
-  requiredLabel: {
-    fontSize: 15,
-    color: '#fff',
-  },
-  toggle: {
-    width: 51,
-    height: 31,
-    borderRadius: 15.5,
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    padding: 2,
-    justifyContent: 'center',
-  },
-  toggleActive: {
-    backgroundColor: '#34c759',
-  },
-  toggleThumb: {
-    width: 27,
-    height: 27,
-    borderRadius: 13.5,
-    backgroundColor: '#fff',
-  },
-  toggleThumbActive: {
-    alignSelf: 'flex-end',
-  },
   fieldOptionsInput: {
     fontSize: 13,
     color: '#fff',
@@ -576,7 +559,45 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: 'rgba(235,235,245,0.3)',
   },
-  fieldMetaRequired: {
-    color: '#ff9500',
+  fieldMetaOnline: {
+    color: '#34c759',
+  },
+  onlineVisibilityRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderRadius: 8,
+    marginTop: 10,
+  },
+  onlineVisibilityLabel: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#fff',
+    letterSpacing: -0.2,
+    marginBottom: 2,
+  },
+  onlineVisibilityDesc: {
+    fontSize: 12,
+    color: 'rgba(235,235,245,0.6)',
+  },
+  fieldNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  offlineBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    backgroundColor: 'rgba(255,69,58,0.15)',
+  },
+  offlineBadgeText: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#ff453a',
+    letterSpacing: 0.5,
   },
 })

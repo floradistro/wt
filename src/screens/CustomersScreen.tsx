@@ -10,14 +10,15 @@
  * - No local state, no callbacks
  */
 
-import { View, Text, Pressable, ScrollView, ActivityIndicator, Animated, Image } from 'react-native'
-import React, { useRef, useEffect, useMemo, memo } from 'react'
+import { View, Text, Pressable, ActivityIndicator, Animated, FlatList } from 'react-native'
+import React, { useRef, useEffect, useMemo, memo, useCallback, useState } from 'react'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import { LinearGradient } from 'expo-linear-gradient'
 import * as Haptics from 'expo-haptics'
 import { colors } from '@/theme/tokens'
 import { layout } from '@/theme/layout'
 import { NavSidebar, type NavItem } from '@/components/NavSidebar'
+import { TitleSection } from '@/components/shared'
+import type { FilterPill } from '@/components/shared'
 import { useDockOffset } from '@/navigation/DockOffsetContext'
 import { logger } from '@/utils/logger'
 import { useAppAuth } from '@/contexts/AppAuthContext'
@@ -25,7 +26,6 @@ import {
   useCustomersList,
   useCustomersLoading,
   useSearchQuery,
-  useActiveNavFilter,
   customersListActions,
 } from '@/stores/customers-list.store'
 import {
@@ -36,7 +36,7 @@ import type { Customer } from '@/services/customers.service'
 import { CustomerItem, CustomerDetail, EditCustomerModal } from '@/components/customers'
 import { customersStyles as styles } from '@/components/customers/customers.styles'
 
-type NavSection = 'all' | 'top-customers' | 'recent'
+type CustomerFilter = 'all' | 'top-customers' | 'recent'
 
 // Section Header Component
 const SectionHeader = React.memo<{ title: string }>(({ title }) => (
@@ -57,36 +57,41 @@ function CustomersScreenComponent() {
   const customers = useCustomersList()
   const loading = useCustomersLoading()
   const searchQuery = useSearchQuery()
-  const activeNav = useActiveNavFilter()
   const selectedCustomer = useSelectedCustomerUI()
 
-  // ✅ ANTI-LOOP: Compute filtered customers with useMemo
-  // NEVER use useFilteredCustomers hook - it creates new arrays on every render
+  // Local filter state (replaces activeNav from store)
+  const [activeFilter, setActiveFilter] = useState<CustomerFilter>('all')
+
+  // ⚡ PERFORMANCE: Compute filtered/grouped in component (NOT from store - data mismatch!)
   const filteredCustomers = useMemo(() => {
+    const startTime = performance.now()
     const filtered = [...customers]
-    switch (activeNav) {
+    let result
+    switch (activeFilter) {
       case 'top-customers':
-        return filtered.sort((a, b) => (b.total_spent || 0) - (a.total_spent || 0)).slice(0, 50)
+        result = filtered.sort((a, b) => (b.total_spent || 0) - (a.total_spent || 0)).slice(0, 50)
+        break
       case 'recent':
-        return filtered.sort((a, b) =>
+        result = filtered.sort((a, b) =>
           new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
         ).slice(0, 50)
+        break
       default:
-        return filtered.sort((a, b) => {
+        result = filtered.sort((a, b) => {
           const nameA = (a.full_name || a.first_name || '').toLowerCase()
           const nameB = (b.full_name || b.first_name || '').toLowerCase()
           return nameA.localeCompare(nameB)
         })
     }
-  }, [customers, activeNav])
+    logger.info(`[CustomersScreen] filteredCustomers computed in ${(performance.now() - startTime).toFixed(2)}ms`)
+    return result
+  }, [customers, activeFilter])
 
-  // ✅ ANTI-LOOP: Compute grouped customers with useMemo
-  // NEVER compute in selector - causes infinite loop
   const groupedCustomers = useMemo(() => {
-    if (activeNav !== 'all') return null
+    if (activeFilter !== 'all') return null
 
+    const startTime = performance.now()
     const sorted = [...filteredCustomers]
-
     const groups: Record<string, Customer[]> = {}
 
     sorted.forEach((customer) => {
@@ -104,24 +109,42 @@ function CustomersScreenComponent() {
       groups[letter].push(customer)
     })
 
-    return Object.entries(groups).sort(([a], [b]) => {
+    const result = Object.entries(groups).sort(([a], [b]) => {
       if (a === '#') return 1
       if (b === '#') return -1
       return a.localeCompare(b)
     })
-  }, [filteredCustomers, activeNav])
+
+    logger.info(`[CustomersScreen] groupedCustomers computed in ${(performance.now() - startTime).toFixed(2)}ms`)
+    return result
+  }, [filteredCustomers, activeFilter])
+
+  // Define filter pills
+  const filterPills: FilterPill[] = useMemo(() => [
+    { id: 'all', label: 'All' },
+    { id: 'top-customers', label: 'Top Customers' },
+    { id: 'recent', label: 'Recent' },
+  ], [])
+
+  // Handle filter selection
+  const handleFilterSelect = (filterId: string) => {
+    setActiveFilter(filterId as CustomerFilter)
+    customersUIActions.clearSelection()
+  }
 
   // Animation State (still needed for UI)
   const slideAnim = useRef(new Animated.Value(0)).current
   const contentWidth = useRef(0)
-  const headerOpacity = useRef(new Animated.Value(0)).current
 
   // Load customers on mount
   useEffect(() => {
     if (!vendor?.id) return
 
+    const startTime = performance.now()
     logger.info('[CustomersScreen] Loading customers for vendor:', vendor.id)
-    customersListActions.loadCustomers(vendor.id)
+    customersListActions.loadCustomers(vendor.id).then(() => {
+      logger.info(`[CustomersScreen] Customers loaded in ${(performance.now() - startTime).toFixed(2)}ms`)
+    })
     customersListActions.setupRealtimeSubscription()
 
     return () => {
@@ -129,9 +152,16 @@ function CustomersScreenComponent() {
     }
   }, [vendor?.id])
 
-  // Search Effect with debouncing
+  // Search Effect with debouncing (skip initial load - handled above)
+  const isInitialMount = useRef(true)
   useEffect(() => {
     if (!vendor?.id) return
+
+    // Skip the search effect on initial mount (customers already loading above)
+    if (isInitialMount.current) {
+      isInitialMount.current = false
+      return
+    }
 
     const timeoutId = setTimeout(() => {
       if (searchQuery.trim()) {
@@ -154,110 +184,106 @@ function CustomersScreenComponent() {
     }).start()
   }, [selectedCustomer, slideAnim])
 
-  // Navigation Items
+  // Navigation Items (simplified - filters now in pills)
   const navItems: NavItem[] = useMemo(
     () => [
       {
-        id: 'all',
+        id: 'customers',
         icon: 'grid',
-        label: 'All Customers',
+        label: 'Customers',
         count: customers.length,
-      },
-      {
-        id: 'top-customers',
-        icon: 'list',
-        label: 'Top Customers',
-      },
-      {
-        id: 'recent',
-        icon: 'doc',
-        label: 'Recent',
       },
     ],
     [customers.length]
   )
 
-  // Render list content
-  const renderListContent = () => {
-    if (loading && customers.length === 0) {
-      return (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={colors.text.secondary} />
-          <Text style={styles.loadingText}>Loading customers...</Text>
-        </View>
-      )
+  // ⚡ PERFORMANCE: Flatten sections for FlatList (matches OrdersScreen pattern)
+  const flatListData = useMemo(() => {
+    const items: Array<{ type: 'section'; letter: string; customers: Customer[]; isFirst: boolean }> = []
+
+    if (activeFilter === 'all' && groupedCustomers) {
+      groupedCustomers.forEach(([letter, customers], index) => {
+        items.push({
+          type: 'section',
+          letter,
+          customers,
+          isFirst: index === 0
+        })
+      })
+    } else {
+      // For non-alphabetical views, create single section
+      items.push({
+        type: 'section',
+        letter: '',
+        customers: filteredCustomers,
+        isFirst: true
+      })
     }
 
-    if (filteredCustomers.length === 0) {
-      return (
-        <View style={styles.emptyState}>
-          <Text style={styles.emptyStateTitle}>No Customers Found</Text>
-          <Text style={styles.emptyStateText}>
-            {searchQuery
-              ? `No results for "${searchQuery}"`
-              : 'No customers yet. Add your first customer to get started.'}
-          </Text>
-          {searchQuery && (
-            <Pressable
-              style={styles.clearSearchButton}
-              onPress={() => customersListActions.setSearchQuery('')}
-            >
-              <Text style={styles.clearSearchButtonText}>CLEAR SEARCH</Text>
-            </Pressable>
-          )}
-        </View>
-      )
-    }
+    return items
+  }, [activeFilter, groupedCustomers, filteredCustomers])
 
-    // Render grouped list for "All" view
-    if (activeNav === 'all' && groupedCustomers) {
-      return (
-        <>
-          {groupedCustomers.map(([letter, groupCustomers]) => (
-            <View key={letter}>
-              <SectionHeader title={letter} />
-              <View style={styles.cardWrapper}>
-                <View style={styles.customersCardGlass}>
-                  {groupCustomers.map((customer, idx) => (
-                    <CustomerItem
-                      key={customer.id}
-                      item={customer}
-                      isLast={idx === groupCustomers.length - 1}
-                      isSelected={selectedCustomer?.id === customer.id}
-                      onPress={() => {
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                        customersUIActions.selectCustomer(customer)
-                      }}
-                    />
-                  ))}
-                </View>
-              </View>
-            </View>
-          ))}
-        </>
-      )
-    }
+  // Memoize customer selection handler
+  const handleCustomerPress = useCallback((customer: Customer) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    customersUIActions.selectCustomer(customer)
+  }, [])
 
-    // Render flat list for other views
+  const renderItem = useCallback(({ item }: { item: typeof flatListData[0] }) => {
+    const { letter, customers } = item
     return (
-      <View style={styles.cardWrapper}>
-        <View style={styles.customersCardGlass}>
-          {filteredCustomers.map((customer, idx) => (
-            <CustomerItem
-              key={customer.id}
-              item={customer}
-              isLast={idx === filteredCustomers.length - 1}
-              isSelected={selectedCustomer?.id === customer.id}
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                customersUIActions.selectCustomer(customer)
-              }}
-            />
-          ))}
+      <>
+        {letter && <SectionHeader title={letter} />}
+        <View style={styles.cardWrapper}>
+          <View style={styles.customersCardGlass}>
+            {customers.map((customer, index) => (
+              <CustomerItem
+                key={customer.id}
+                item={customer}
+                isLast={index === customers.length - 1}
+                isSelected={selectedCustomer?.id === customer.id}
+                onPress={() => handleCustomerPress(customer)}
+              />
+            ))}
+          </View>
         </View>
-      </View>
+      </>
     )
-  }
+  }, [selectedCustomer, handleCustomerPress])
+
+  const keyExtractor = useCallback((item: typeof flatListData[0], index: number) => {
+    return `section-${item.letter || 'all'}-${index}`
+  }, [])
+
+  const ListHeaderComponent = useCallback(() => (
+    <TitleSection
+      title="Customers"
+      logo={vendor?.logo_url}
+      subtitle={`${filteredCustomers.length} ${activeFilter === 'all' ? 'customers' : activeFilter === 'top-customers' ? 'top customers' : 'recent'}`}
+      filterPills={filterPills}
+      activeFilterId={activeFilter}
+      onFilterSelect={handleFilterSelect}
+    />
+  ), [vendor?.logo_url, filteredCustomers.length, activeFilter, filterPills, handleFilterSelect])
+
+  const ListEmptyComponent = useCallback(() => (
+    <View style={styles.emptyState}>
+      <Text style={styles.emptyStateTitle}>No Customers Found</Text>
+      <Text style={styles.emptyStateText}>
+        {searchQuery
+          ? `No results for "${searchQuery}"`
+          : 'No customers yet. Add your first customer to get started.'}
+      </Text>
+      {searchQuery && (
+        <Pressable
+          style={styles.clearSearchButton}
+          onPress={() => customersListActions.setSearchQuery('')}
+        >
+          <Text style={styles.clearSearchButtonText}>CLEAR SEARCH</Text>
+        </Pressable>
+      )}
+    </View>
+  ), [searchQuery, customersListActions])
 
   // Interpolate animations
   const listTranslateX = slideAnim.interpolate({
@@ -277,17 +303,14 @@ function CustomersScreenComponent() {
         <NavSidebar
           width={layout.sidebarWidth}
           items={navItems}
-          activeItemId={activeNav}
+          activeItemId="customers"
           onItemPress={(id) => {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-            customersListActions.setActiveNav(id as NavSection)
-            customersUIActions.clearSelection()
           }}
           searchValue={searchQuery}
           onSearchChange={customersListActions.setSearchQuery}
           searchPlaceholder="Search customers..."
           vendorLogo={vendor?.logo_url || null}
-          userName={user?.email || 'User'}
         />
 
         {/* CENTER & RIGHT CONTENT */}
@@ -306,70 +329,31 @@ function CustomersScreenComponent() {
               },
             ]}
           >
-            {/* Fixed Header - appears on scroll */}
-            <Animated.View style={[styles.fixedHeader, { opacity: headerOpacity }]}>
-              <Text style={styles.fixedHeaderTitle}>
-                {activeNav === 'all' && 'All Customers'}
-                {activeNav === 'top-customers' && 'Top Customers'}
-                {activeNav === 'recent' && 'Recent Customers'}
-              </Text>
-            </Animated.View>
-
-            {/* Fade Gradient Overlay */}
-            <LinearGradient
-              colors={[
-                'rgba(0,0,0,0.95)',
-                'rgba(0,0,0,0.8)',
-                'rgba(0,0,0,0)',
-              ]}
-              style={styles.fadeGradient}
-              pointerEvents="none"
-            />
-
-            {/* Scrollable Customer List */}
-            <ScrollView
-              style={styles.scrollView}
-              showsVerticalScrollIndicator={true}
-              indicatorStyle="white"
-              scrollIndicatorInsets={{ right: 2, top: layout.contentStartTop, bottom: layout.dockHeight }}
-              contentContainerStyle={{ paddingTop: layout.contentStartTop, paddingBottom: layout.dockHeight, paddingRight: 0 }}
-              onScroll={(e) => {
-                const offsetY = e.nativeEvent.contentOffset.y
-                const threshold = 40
-                // Instant transition like iOS
-                headerOpacity.setValue(offsetY > threshold ? 1 : 0)
-              }}
-              scrollEventThrottle={16}
-            >
-              {/* Large Title with Vendor Logo - scrolls with content */}
-              <View style={styles.cardWrapper}>
-                <View style={styles.titleSectionContainer}>
-                  <View style={styles.titleWithLogo}>
-                    {vendor?.logo_url ? (
-                      <Image
-                        source={{ uri: vendor.logo_url }}
-                        style={styles.vendorLogoInline}
-                        resizeMode="contain"
-                        fadeDuration={0}
-                        onError={(e) => logger.debug('[CustomersScreen] Image load error:', e.nativeEvent.error)}
-                        onLoad={() => logger.debug('[CustomersScreen] Image loaded successfully')}
-                      />
-                    ) : (
-                      <View style={[styles.vendorLogoInline, { backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' }]}>
-                        <Text style={{ color: 'rgba(255,255,255,0.3)', fontSize: 12 }}>No Logo</Text>
-                      </View>
-                    )}
-                    <Text style={styles.largeTitleHeader}>
-                      {activeNav === 'all' && 'All Customers'}
-                      {activeNav === 'top-customers' && 'Top Customers'}
-                      {activeNav === 'recent' && 'Recent Customers'}
-                    </Text>
-                  </View>
-                </View>
+            {/* ⚡ PERFORMANCE: FlatList with proper item-level virtualization */}
+            {loading && customers.length === 0 ? (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="large" color={colors.text.secondary} />
+                <Text style={styles.loadingText}>Loading customers...</Text>
               </View>
-
-              {renderListContent()}
-            </ScrollView>
+            ) : (
+              <FlatList
+                data={flatListData}
+                renderItem={renderItem}
+                keyExtractor={keyExtractor}
+                ListHeaderComponent={ListHeaderComponent}
+                ListEmptyComponent={ListEmptyComponent}
+                showsVerticalScrollIndicator={true}
+                indicatorStyle="white"
+                scrollIndicatorInsets={{ right: 2, top: 0, bottom: layout.dockHeight }}
+                contentContainerStyle={{ paddingTop: 0, paddingBottom: layout.dockHeight, paddingRight: 0 }}
+                // ⚡ PERFORMANCE: Aggressive settings for 1000+ customers
+                maxToRenderPerBatch={2}
+                updateCellsBatchingPeriod={100}
+                initialNumToRender={2}
+                windowSize={3}
+                removeClippedSubviews={true}
+              />
+            )}
           </Animated.View>
 
           {/* RIGHT DETAIL PANEL */}

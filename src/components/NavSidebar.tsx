@@ -6,10 +6,11 @@
 
 import { View, Text, StyleSheet, Pressable, ScrollView, TextInput, Image } from 'react-native'
 import React, { ReactNode } from 'react'
-import { LiquidGlassView, LiquidGlassContainerView, isLiquidGlassSupported } from '@callstack/liquid-glass'
+// Removed LiquidGlassView - using plain View with borderless style
 import * as Haptics from 'expo-haptics'
 import { layout } from '@/theme/layout'
 import { ProductFilterSearchBar, type FilterOption, type ActiveFilter } from './shared'
+import { getIconImage } from '@/utils/image-transforms'
 
 // Monochrome Search Icon (like Settings)
 function _SearchIcon({ color }: { color: string }) {
@@ -100,9 +101,21 @@ function UserIcon({ color }: { color: string }) {
   )
 }
 
+// Monochrome Move/Transfer Icon (Transfers)
+function MoveIcon({ color }: { color: string }) {
+  return (
+    <View style={styles.iconContainer}>
+      {/* Left arrow */}
+      <View style={[styles.moveArrowLeft, { borderRightColor: color }]} />
+      {/* Right arrow */}
+      <View style={[styles.moveArrowRight, { borderLeftColor: color }]} />
+    </View>
+  )
+}
+
 export interface NavItem {
   id: string
-  icon: 'grid' | 'warning' | 'box' | 'folder' | 'doc' | 'list' | 'user' | React.ComponentType<{ color: string }> // Icon type or custom component
+  icon: 'grid' | 'warning' | 'box' | 'folder' | 'doc' | 'list' | 'user' | 'move' | React.ComponentType<{ color: string }> // Icon type or custom component
   label: string
   count?: number
   badge?: 'warning' | 'error' | 'info'
@@ -177,11 +190,7 @@ export function NavSidebar({
 }: NavSidebarProps) {
   return (
     <View style={[styles.sidebar, { width }]}>
-      <LiquidGlassView
-        effect="regular"
-        colorScheme="dark"
-        style={[styles.sidebarContainer, !isLiquidGlassSupported && styles.sidebarContainerFallback]}
-      >
+      <View style={styles.sidebarContainer}>
         <View style={styles.contentWrapper}>
           <ScrollView
             style={styles.sidebarScroll}
@@ -197,15 +206,9 @@ export function NavSidebar({
             )}
 
             {/* User Profile Section */}
-            {userName && (
+            {vendorName && (
               <View style={styles.userProfileWrapper}>
-                <LiquidGlassContainerView spacing={0}>
-                  <LiquidGlassView
-                    effect="regular"
-                    colorScheme="dark"
-                    interactive
-                    style={[styles.userProfileCard, !isLiquidGlassSupported && styles.userProfileCardFallback]}
-                  >
+                <View style={styles.userProfileCard}>
                     <Pressable
                       style={styles.userProfile}
                       onPress={() => {
@@ -214,12 +217,12 @@ export function NavSidebar({
                       }}
                       accessible={true}
                       accessibilityRole="button"
-                      accessibilityLabel={`${vendorName || 'Vendor'}, ${userName || 'User'}${onUserProfilePress ? ', tap to change location' : ''}`}
+                      accessibilityLabel={`${vendorName || 'Vendor'}${onUserProfilePress ? ', tap to change location' : ''}`}
                       accessibilityHint={onUserProfilePress ? "Double tap to select locations" : undefined}
                     >
                       {vendorLogo && vendorLogo.trim() !== '' ? (
                         <Image
-                          source={{ uri: vendorLogo }}
+                          source={{ uri: getIconImage(vendorLogo) || vendorLogo }}
                           style={styles.vendorLogo}
                         />
                       ) : (
@@ -230,7 +233,6 @@ export function NavSidebar({
                         </View>
                       )}
                       <View style={styles.userInfo}>
-                        <Text style={styles.userName}>{userName}</Text>
                         <Text style={styles.vendorName}>{vendorName || 'Vendor Account'}</Text>
                         {selectedLocationNames.length > 0 && (
                           <Text style={styles.selectedLocations} numberOfLines={1}>
@@ -240,8 +242,7 @@ export function NavSidebar({
                       </View>
                       <Text style={styles.userProfileChevron}>›</Text>
                     </Pressable>
-                  </LiquidGlassView>
-                </LiquidGlassContainerView>
+                </View>
               </View>
             )}
 
@@ -282,6 +283,9 @@ export function NavSidebar({
                   case 'user':
                     IconComponent = <UserIcon color={iconColor} />
                     break
+                  case 'move':
+                    IconComponent = <MoveIcon color={iconColor} />
+                    break
                   default:
                     IconComponent = <GridIcon color={iconColor} />
                 }
@@ -294,10 +298,8 @@ export function NavSidebar({
               return (
                 <View key={item.id} style={styles.navItemWrapper}>
                   {isActive ? (
-                    <LiquidGlassView
-                      effect="regular"
-                      colorScheme="dark"
-                      style={[styles.navItemPill, !isLiquidGlassSupported && styles.navItemPillFallback]}
+                    <View
+                      style={styles.navItemPill}
                       accessible={false}
                     >
                       <Pressable
@@ -330,7 +332,7 @@ export function NavSidebar({
                         )}
                         <Text style={styles.navChevron} accessibilityElementsHidden={true} importantForAccessibility="no">›</Text>
                       </Pressable>
-                    </LiquidGlassView>
+                    </View>
                   ) : (
                     <Pressable
                       onPress={() => {
@@ -399,10 +401,8 @@ export function NavSidebar({
                   position="relative"
                 />
               ) : (
-                <LiquidGlassView
-                  effect="clear"
-                  colorScheme="dark"
-                  style={[styles.unifiedSearchBar, !isLiquidGlassSupported && styles.unifiedSearchBarFallback]}
+                <View
+                  style={styles.unifiedSearchBar}
                 >
                   <TextInput
                     style={styles.unifiedSearchInput}
@@ -414,12 +414,12 @@ export function NavSidebar({
                     accessibilityLabel="Search navigation items"
                     accessibilityHint="Type to filter the navigation list"
                   />
-                </LiquidGlassView>
+                </View>
               )}
             </View>
           )}
         </View>
-      </LiquidGlassView>
+      </View>
     </View>
   )
 }
@@ -437,11 +437,7 @@ const styles = StyleSheet.create({
     borderRadius: layout.containerRadius,
     borderCurve: 'continuous',
     overflow: 'hidden',
-  },
-  sidebarContainerFallback: {
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: 'rgba(255,255,255,0.05)', // Match product list - NO border, lighter background
   },
   contentWrapper: {
     flex: 1,
@@ -810,5 +806,31 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 10,
     position: 'absolute',
     bottom: 0,
+  },
+
+  // Move Icon (transfer arrows)
+  moveArrowLeft: {
+    width: 0,
+    height: 0,
+    borderTopWidth: 3,
+    borderBottomWidth: 3,
+    borderRightWidth: 7,
+    borderTopColor: 'transparent',
+    borderBottomColor: 'transparent',
+    position: 'absolute',
+    left: 0,
+    top: 5,
+  },
+  moveArrowRight: {
+    width: 0,
+    height: 0,
+    borderTopWidth: 3,
+    borderBottomWidth: 3,
+    borderLeftWidth: 7,
+    borderTopColor: 'transparent',
+    borderBottomColor: 'transparent',
+    position: 'absolute',
+    right: 0,
+    top: 5,
   },
 })

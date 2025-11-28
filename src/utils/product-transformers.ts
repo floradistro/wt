@@ -6,8 +6,25 @@
 import type { Product, PricingTier, ProductField } from '@/types/pos'
 
 /**
- * Transform raw inventory data from Supabase into Product format
+ * Transform raw products data from Supabase into Product format (ALL PRODUCTS)
+ * Products-first query with nested inventory - shows full catalog
  * Jobs Principle: Pure function, testable, single responsibility
+ */
+export function transformProductsData(productsData: any[], locationId?: string): Product[] {
+  if (!productsData || !Array.isArray(productsData)) {
+    return []
+  }
+
+  return productsData
+    .map((product) => transformSingleProduct(product, locationId))
+    .sort((a, b) => a.name.localeCompare(b.name)) // Alphabetical sort
+}
+
+/**
+ * Transform raw inventory data from Supabase into Product format (IN-STOCK ONLY)
+ * Inventory-first query with nested products - legacy approach
+ * Jobs Principle: Pure function, testable, single responsibility
+ * @deprecated Use transformProductsData for full catalog view
  */
 export function transformInventoryToProducts(inventoryData: any[]): Product[] {
   if (!inventoryData || !Array.isArray(inventoryData)) {
@@ -21,23 +38,99 @@ export function transformInventoryToProducts(inventoryData: any[]): Product[] {
 }
 
 /**
+ * Transform a single product (with nested inventory) into a Product
+ * Handles products-first query structure
+ */
+function transformSingleProduct(productData: any, locationId?: string): Product {
+  // Extract category
+  const category = extractCategory(productData)
+
+  // Extract vendor info
+  const vendor = productData.vendors
+    ? {
+        id: productData.vendors.id,
+        store_name: productData.vendors.store_name,
+        logo_url: productData.vendors.logo_url,
+      }
+    : null
+
+  // Parse custom fields from JSONB object
+  const customFields = productData.custom_fields || {}
+  const fields: ProductField[] = Object.entries(customFields).map(([key, value]) => ({
+    label: key,
+    value: String(value || ''),
+    type: typeof value === 'number' ? 'number' : 'text',
+  }))
+
+  // Get inventory data (array from nested inventory relation)
+  // Filter by location if specified
+  const allInventory = productData.inventory || []
+  const inventoryArray = locationId
+    ? allInventory.filter((inv: any) => inv.location_id === locationId)
+    : allInventory
+
+  const firstInventory = inventoryArray[0] // Get first inventory record if exists
+
+  // Calculate total stock for this location only
+  const totalStock = inventoryArray.reduce((sum: number, inv: any) =>
+    sum + (inv?.total_quantity || 0), 0)
+
+  const availableQuantity = inventoryArray.reduce((sum: number, inv: any) =>
+    sum + (inv?.available_quantity || 0), 0)
+
+  // Transform inventory array to proper format
+  const inventory = inventoryArray.map((inv: any) => ({
+    id: inv.id,
+    location_id: inv.location_id,
+    location_name: inv.locations?.name || 'Unknown',
+    quantity: inv.total_quantity || 0,
+    available_quantity: inv.available_quantity || 0,
+    reserved_quantity: inv.held_quantity || 0,
+  }))
+
+  return {
+    id: productData.id,
+    name: productData.name,
+    sku: productData.sku,
+    price: productData.regular_price || 0,
+    regular_price: productData.regular_price || 0,
+    cost_price: productData.cost_price || 0,
+    sale_price: productData.sale_price || null,
+    on_sale: productData.on_sale || false,
+    stock_quantity: totalStock,
+    total_stock: totalStock,
+    image_url: productData.featured_image,
+    featured_image: productData.featured_image,
+    vendor_logo_url: vendor?.logo_url || null,
+    category,
+    primary_category_id: productData.primary_category_id,
+    description: productData.description || null,
+    short_description: productData.short_description || null,
+    custom_fields: productData.custom_fields || {},
+    pricing_data: productData.pricing_data || {},
+    inventory_quantity: availableQuantity,
+    inventory_id: firstInventory?.id || null,
+    vendor,
+    fields,
+
+    // LIVE PRICING TEMPLATE - SINGLE SOURCE OF TRUTH
+    pricing_template_id: productData.pricing_template_id || null,
+    pricing_template: productData.pricing_template || null,
+
+    // Multi-location inventory support
+    inventory,
+  }
+}
+
+/**
  * Transform a single inventory item into a Product
+ * @deprecated Use transformSingleProduct for products-first structure
  */
 function transformSingleInventoryItem(inv: any): Product {
   const productData = inv.products
 
-  // Extract pricing tiers
+  // LIVE PRICING TEMPLATE - Pass through, don't copy
   const pricingData = productData.pricing_data || {}
-  const pricingTiers: PricingTier[] = (pricingData.tiers || [])
-    .filter((tier: any) => tier.enabled !== false && tier.price)
-    .map((tier: any) => ({
-      break_id: tier.id,
-      label: tier.label,
-      qty: tier.quantity || 1,
-      price: parseFloat(tier.price),
-      sort_order: tier.sort_order || 0,
-    }))
-    .sort((a: PricingTier, b: PricingTier) => (a.sort_order || 0) - (b.sort_order || 0))
 
   // Extract category
   const category = extractCategory(productData)
@@ -62,16 +155,41 @@ function transformSingleInventoryItem(inv: any): Product {
   return {
     id: productData.id,
     name: productData.name,
+    sku: productData.sku,
     price: productData.regular_price || 0,
+    regular_price: productData.regular_price || 0,
+    cost_price: productData.cost_price || 0,
+    sale_price: productData.sale_price || null,
+    on_sale: productData.on_sale || false,
+    stock_quantity: productData.stock_quantity ?? inv.total_quantity,
+    total_stock: productData.stock_quantity ?? inv.total_quantity,
     image_url: productData.featured_image,
+    featured_image: productData.featured_image,
+    vendor_logo_url: vendor?.logo_url || null,
     category,
+    primary_category_id: productData.primary_category_id,
     description: productData.description || null,
     short_description: productData.short_description || null,
+    custom_fields: productData.custom_fields || {},
+    pricing_data: pricingData,
     inventory_quantity: inv.available_quantity,
     inventory_id: inv.id,
-    pricing_tiers: pricingTiers,
     vendor,
     fields,
+
+    // LIVE PRICING TEMPLATE - SINGLE SOURCE OF TRUTH
+    pricing_template_id: productData.pricing_template_id || null,
+    pricing_template: productData.pricing_template || null,
+
+    // Add inventory array for consistency (single location)
+    inventory: inv.locations ? [{
+      id: inv.id,
+      location_id: inv.location_id,
+      location_name: inv.locations.name || 'Unknown',
+      quantity: inv.total_quantity || inv.quantity,
+      available_quantity: inv.available_quantity,
+      reserved_quantity: inv.held_quantity || 0,
+    }] : [],
   }
 }
 
@@ -130,15 +248,16 @@ export function extractFieldValues(products: Product[], fieldLabel: string, cate
 
 /**
  * Get the lowest price from a product (for "From $X.XX" display)
+ * SINGLE SOURCE: Reads from pricing_template.default_tiers
  */
 export function getLowestPrice(product: Product): number {
-  const tiers = product.pricing_tiers || []
+  const tiers = product.pricing_template?.default_tiers || []
 
   if (tiers.length === 0) {
     return product.price || 0
   }
 
-  const prices = tiers.map((t) => parseFloat(String(t.price)))
+  const prices = tiers.map((t) => parseFloat(String(t.default_price)))
   return Math.min(...prices)
 }
 

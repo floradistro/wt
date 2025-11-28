@@ -12,20 +12,24 @@ import { View, Text, StyleSheet, Pressable, TextInput } from 'react-native'
 import * as Haptics from 'expo-haptics'
 import { radius } from '@/theme/tokens'
 import { layout } from '@/theme/layout'
+import { logger } from '@/utils/logger'
+import type { Product } from '@/types/products'
 import {
   useIsEditing,
   useEditedCustomFields,
-  useOriginalProduct,
   productEditActions,
 } from '@/stores/product-edit.store'
 
-export function EditableCustomFieldsSection() {
+interface EditableCustomFieldsSectionProps {
+  product: Product
+}
+
+export function EditableCustomFieldsSection({ product }: EditableCustomFieldsSectionProps) {
   // Read from store
   const isEditing = useIsEditing()
   const editedCustomFields = useEditedCustomFields()
-  const originalProduct = useOriginalProduct()
 
-  const customFields = originalProduct?.custom_fields || null
+  const customFields = product?.custom_fields || null
 
   // Don't render if no custom fields and not editing
   if (!customFields && !isEditing) return null
@@ -33,7 +37,7 @@ export function EditableCustomFieldsSection() {
 
   const handleAddField = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-    const newKey = `custom_field_${Date.now()}`
+    const newKey = `field_${Date.now()}`
     productEditActions.updateField('editedCustomFields', {
       ...editedCustomFields,
       [newKey]: '',
@@ -57,10 +61,17 @@ export function EditableCustomFieldsSection() {
   }
 
   const handleUpdateFieldValue = (key: string, value: string) => {
-    productEditActions.updateField('editedCustomFields', {
+    logger.info('[EditableCustomFieldsSection] Updating field value', {
+      key,
+      value,
+      currentFields: editedCustomFields,
+    })
+    const updatedFields = {
       ...editedCustomFields,
       [key]: value,
-    })
+    }
+    logger.info('[EditableCustomFieldsSection] New fields state:', updatedFields)
+    productEditActions.updateField('editedCustomFields', updatedFields)
   }
 
   const formatKey = (key: string) => {
@@ -85,8 +96,9 @@ export function EditableCustomFieldsSection() {
               <>
                 {Object.entries(editedCustomFields).map(([key, value], index, array) => {
                   const isLast = index === array.length - 1
+                  // Use index as stable key to prevent re-mounting on field name change
                   return (
-                    <View key={key} style={[styles.fieldEditRow, isLast && styles.fieldEditRowLast]}>
+                    <View key={`field-${index}`} style={[styles.fieldEditRow, isLast && styles.fieldEditRowLast]}>
                       <View style={styles.fieldEditHeader}>
                         <TextInput
                           style={styles.fieldKeyInput}

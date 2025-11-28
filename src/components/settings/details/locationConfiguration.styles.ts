@@ -28,6 +28,15 @@ export const locationConfigurationStyles = StyleSheet.create({
     ...typography.body,
     color: colors.text.primary,
   },
+  formInput: {
+    ...typography.body,
+    color: colors.text.primary,
+    backgroundColor: 'rgba(255,255,255,0.05)', // Match product list - borderless
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    minHeight: 40,
+  },
   supplierCard: {
     padding: spacing.md,
   },
@@ -62,9 +71,7 @@ export const locationConfigurationStyles = StyleSheet.create({
     paddingVertical: spacing.xs,
     paddingHorizontal: spacing.xxs,
     borderRadius: radius.sm,
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: 'rgba(255,255,255,0.05)', // Match product list - borderless
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -75,8 +82,7 @@ export const locationConfigurationStyles = StyleSheet.create({
     letterSpacing: -0.1,
   },
   userActionButtonDanger: {
-    backgroundColor: 'rgba(255, 59, 48, 0.1)',
-    borderColor: 'rgba(255, 59, 48, 0.2)',
+    backgroundColor: 'rgba(255, 59, 48, 0.15)', // Match product list - borderless
   },
   userActionButtonDangerText: {
     fontSize: 11,

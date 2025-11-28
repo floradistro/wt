@@ -52,39 +52,6 @@ export const customersStyles = StyleSheet.create({
     height: 80,
     zIndex: 10,
   },
-  titleSectionContainer: {
-    backgroundColor: colors.glass.regular, // ✅ Using token instead of hardcoded rgba
-    borderRadius: radius.xxl,
-    borderCurve: 'continuous',
-    padding: spacing.lg,
-    borderWidth: 0.5,
-    borderColor: colors.border.emphasis, // ✅ Using token instead of hardcoded rgba
-  },
-  titleWithLogo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.lg,
-  },
-  vendorLogoInline: {
-    width: 80,
-    height: 80,
-    borderRadius: radius.xxl,
-    borderWidth: 1,
-    borderColor: colors.border.emphasis, // ✅ Using token (0.12 close to 0.25)
-    shadowColor: colors.background.primary, // ✅ Using token
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-  },
-  largeTitleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  largeTitleHeader: {
-    ...typography.largeTitle,
-    color: colors.text.primary,
-  },
   scrollView: {
     flex: 1,
   },
@@ -119,9 +86,7 @@ export const customersStyles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: colors.glass.thick,
-    borderWidth: 1,
-    borderColor: colors.border.regular,
+    backgroundColor: 'rgba(255,255,255,0.05)', // Match product list - borderless
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -191,7 +156,7 @@ export const customersStyles = StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: colors.glass.regular,
+    backgroundColor: 'rgba(255,255,255,0.05)', // Match product list - borderless
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 8,
@@ -231,189 +196,166 @@ export const customersStyles = StyleSheet.create({
   detailContainer: {
     flex: 1,
   },
-  detailHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: layout.containerMargin, // 8px - consistent minimal spacing
-    paddingVertical: 16,
-    borderBottomWidth: 0.5,
-    borderBottomColor: colors.border.subtle,
+
+  // Header Card - Matches OrderDetail
+  headerCardContainer: {
+    marginHorizontal: layout.containerMargin,
+    marginTop: layout.containerMargin,
+    marginBottom: layout.containerMargin,
   },
-  backButton: {
-    paddingVertical: 8,
-    paddingRight: 16,
-  },
-  backButtonText: {
-    ...typography.body,
-    color: colors.semantic.info,
-  },
-  detailHeaderActions: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  actionButton: {
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    borderColor: colors.border.regular,
-    minWidth: 80,
-    alignItems: 'center',
-  },
-  editButton: {
-    backgroundColor: colors.glass.regular,
-  },
-  deleteButton: {
-    borderColor: colors.semantic.errorBorder,
-  },
-  cancelButton: {
-    backgroundColor: colors.glass.regular,
-  },
-  saveButton: {
-    backgroundColor: colors.semantic.success,
-    borderColor: colors.semantic.success,
-  },
-  actionButtonText: {
-    ...typography.button,
-    color: colors.text.primary,
-  },
-  deleteButtonText: {
-    ...typography.button,
-    color: colors.semantic.error,
-  },
-  saveButtonText: {
-    ...typography.button,
-    color: colors.text.primary,
-  },
-  detailContent: {
-    flex: 1,
-    paddingHorizontal: layout.containerMargin, // 8px - consistent minimal spacing
-  },
-  detailAvatarSection: {
-    alignItems: 'center',
-    paddingVertical: 32,
-    gap: 16,
-  },
-  detailAvatar: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    backgroundColor: colors.glass.thick,
-    borderWidth: 2,
-    borderColor: colors.border.regular,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  detailAvatarText: {
-    fontSize: 48,
-    fontWeight: '700',
-    color: colors.text.primary,
-  },
-  detailCustomerName: {
-    ...typography.title1,
-    color: colors.text.primary,
-  },
-  nameEditFields: {
-    flexDirection: 'row',
-    gap: 8,
-    width: '100%',
-    maxWidth: 500,
-  },
-  nameInput: {
-    ...typography.body,
-    color: colors.text.primary,
-    backgroundColor: colors.glass.regular,
-    borderWidth: 1,
-    borderColor: colors.border.regular,
-    borderRadius: radius.xl,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    flex: 1,
-  },
-  statsGrid: {
-    flexDirection: 'row',
-    gap: 12,
-    marginBottom: 24,
-  },
-  statCard: {
-    flex: 1,
-    backgroundColor: colors.glass.regular,
-    borderRadius: radius.xxl,
-    borderCurve: 'continuous',
-    paddingVertical: 20,
-    paddingHorizontal: 16,
-    alignItems: 'center',
-    gap: 4,
-  },
-  statValue: {
-    ...typography.title2,
-    color: colors.text.primary,
-  },
-  loyaltyStatValue: {
-    color: colors.semantic.success,
-  },
-  statLabel: {
-    ...typography.caption1,
-    color: colors.text.tertiary,
-    textAlign: 'center',
-  },
-  section: {
-    marginBottom: 24,
-  },
-  sectionTitle: {
-    ...typography.uppercaseLabel,
-    color: colors.text.subtle,
-    marginBottom: 8,
-    paddingHorizontal: 4,
-  },
-  glassCard: {
-    backgroundColor: colors.glass.regular,
+  headerCardGlass: {
     borderRadius: radius.xxl,
     borderCurve: 'continuous',
     overflow: 'hidden',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+  },
+  headerCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: layout.containerMargin,
+    gap: 16,
+  },
+  backButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerIcon: {
+    width: 80,
+    height: 80,
+    borderRadius: layout.cardRadius,
+  },
+  headerIconPlaceholder: {
+    backgroundColor: 'rgba(118,118,128,0.24)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerIconText: {
+    fontSize: 36,
+    color: 'rgba(235,235,245,0.6)',
+    fontWeight: '600',
+  },
+  headerInfo: {
+    flex: 1,
+  },
+  headerTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#fff',
+    marginBottom: 6,
+    letterSpacing: -0.4,
+  },
+  headerKPIs: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  kpiItem: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 4,
+  },
+  kpiValue: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.text.primary,
+    letterSpacing: -0.2,
+  },
+  kpiValueLoyalty: {
+    color: colors.semantic.success,
+  },
+  kpiLabel: {
+    fontSize: 13,
+    color: 'rgba(235,235,245,0.6)',
+    letterSpacing: -0.2,
+  },
+  kpiDivider: {
+    fontSize: 13,
+    color: 'rgba(235,235,245,0.3)',
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  iconButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  statusButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 100,
+    borderCurve: 'continuous',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 80,
+  },
+  statusButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#fff',
+    letterSpacing: -0.2,
+  },
+  saveButton: {
+    backgroundColor: colors.semantic.success,
+  },
+  // Sections - Matches OrderDetail
+  section: {
+    marginHorizontal: layout.containerMargin,
+    marginBottom: layout.containerMargin,
+  },
+  sectionTitle: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: 'rgba(235,235,245,0.5)',
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+    marginBottom: 8,
+  },
+  cardGlass: {
+    borderRadius: radius.xxl,
+    borderCurve: 'continuous',
+    overflow: 'hidden',
+    backgroundColor: 'rgba(255,255,255,0.05)',
   },
   infoRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    minHeight: 48,
+    paddingVertical: layout.rowPaddingVertical,
+    paddingHorizontal: layout.containerMargin,
+    minHeight: layout.minTouchTarget,
+    borderBottomWidth: 0.5,
+    borderBottomColor: 'rgba(255,255,255,0.05)',
   },
   infoLabel: {
-    ...typography.body,
-    color: colors.text.tertiary,
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#fff',
+    letterSpacing: -0.2,
   },
   infoValue: {
-    ...typography.body,
-    color: colors.text.primary,
-    textAlign: 'right',
+    fontSize: 15,
+    color: 'rgba(235,235,245,0.6)',
   },
   infoInput: {
-    ...typography.body,
+    fontSize: 15,
     color: colors.text.primary,
     textAlign: 'right',
     flex: 1,
     marginLeft: 16,
     padding: 0,
   },
-  divider: {
-    height: 0.5,
-    backgroundColor: colors.border.subtle,
-    marginLeft: 16,
-  },
-  comingSoonText: {
-    ...typography.body,
-    color: colors.text.tertiary,
-    textAlign: 'center',
-    paddingVertical: 20,
-  },
-  statHint: {
-    ...typography.caption1,
-    color: colors.text.subtle,
-    marginTop: 4,
-    fontStyle: 'italic',
+  lastRow: {
+    borderBottomWidth: 0,
   },
 
   // Loyalty Modal Styles
@@ -429,11 +371,9 @@ export const customersStyles = StyleSheet.create({
     zIndex: 100,
   },
   loyaltyModal: {
-    backgroundColor: colors.glass.ultraThick,
+    backgroundColor: 'rgba(255,255,255,0.15)', // Match product list - borderless, slightly more opaque for modal
     borderRadius: radius.xxl,
     borderCurve: 'continuous',
-    borderWidth: 1,
-    borderColor: colors.border.regular,
     padding: spacing.xl,
     width: '90%',
     maxWidth: 400,
@@ -462,15 +402,12 @@ export const customersStyles = StyleSheet.create({
     borderRadius: radius.lg,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
   },
   loyaltyButtonPositive: {
-    backgroundColor: colors.interactive.active, // ✅ Using token (0.15 matches)
-    borderColor: colors.semantic.successBorder,
+    backgroundColor: 'rgba(16,185,129,0.15)', // Match product list - borderless
   },
   loyaltyButtonNegative: {
-    backgroundColor: colors.semantic.errorBg, // ✅ Using token (was rgba 0.15, now 0.1 - close enough)
-    borderColor: colors.semantic.errorBorder,
+    backgroundColor: 'rgba(255,59,48,0.15)', // Match product list - borderless
   },
   loyaltyButtonText: {
     ...typography.buttonLarge,
@@ -481,9 +418,7 @@ export const customersStyles = StyleSheet.create({
     borderRadius: radius.lg,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.glass.regular,
-    borderWidth: 1,
-    borderColor: colors.border.regular,
+    backgroundColor: 'rgba(255,255,255,0.05)', // Match product list - borderless
     marginTop: spacing.sm,
   },
   loyaltyCloseButtonText: {
@@ -509,9 +444,7 @@ export const customersStyles = StyleSheet.create({
   customAmountInput: {
     ...typography.input,
     color: colors.text.primary,
-    backgroundColor: colors.glass.regular,
-    borderWidth: 1,
-    borderColor: colors.border.regular,
+    backgroundColor: 'rgba(255,255,255,0.05)', // Match product list - borderless
     borderRadius: radius.lg,
     paddingVertical: 12,
     paddingHorizontal: 16,

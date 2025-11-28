@@ -10,6 +10,7 @@ import { LiquidGlassView, isLiquidGlassSupported } from '@callstack/liquid-glass
 import * as Haptics from 'expo-haptics'
 import { colors, typography, spacing, radius } from '@/theme/tokens'
 import type { Product } from '@/types/products'
+import { getIconImage } from '@/utils/image-transforms'
 
 interface ProductCardProps {
   product: Product
@@ -68,7 +69,7 @@ export const ProductCard = memo(function ProductCard({
           <View style={styles.thumbnailContainer}>
             {product.featured_image ? (
               <Image
-                source={{ uri: product.featured_image }}
+                source={{ uri: getIconImage(product.featured_image) || product.featured_image }}
                 style={styles.thumbnail}
                 resizeMode="cover"
                 accessibilityLabel={`Product image for ${product.name}`}

@@ -4,39 +4,63 @@ import { detailCommonStyles } from "./detailCommon.styles"
 
 export const styles = StyleSheet.create({
   ...detailCommonStyles,
-  userCard: {
-    padding: spacing.md,
-  },
-  userCardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    marginBottom: spacing.sm,
-  },
+  // Avatar - Matches ProductItem icon
   userAvatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: colors.glass.regular,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(118,118,128,0.24)',
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1.5,
-    borderColor: 'rgba(255,255,255,0.1)',
   },
   userAvatarText: {
     fontSize: 16,
     fontWeight: '600',
-    color: colors.text.primary,
+    color: 'rgba(235,235,245,0.6)',
     letterSpacing: 0.5,
   },
+  // User Info - Matches ProductItem productInfo
+  userInfo: {
+    flex: 1,
+    gap: 2,
+    minWidth: 180,
+  },
+  userName: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#fff',
+    letterSpacing: -0.2,
+  },
+  userRole: {
+    fontSize: 11,
+    fontWeight: '400',
+    color: 'rgba(235,235,245,0.6)',
+    letterSpacing: 0.2,
+    textTransform: 'uppercase',
+  },
+  // Right Side Meta - Matches ProductItem inventory column
+  userMeta: {
+    minWidth: 100,
+    alignItems: 'flex-end',
+    gap: 4,
+  },
+  inactiveLabel: {
+    fontSize: 9,
+    fontWeight: '600',
+    color: '#ff3b30',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+  },
+  locationCount: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: 'rgba(235,235,245,0.6)',
+    letterSpacing: -0.1,
+  },
+  // Legacy styles (keep for modals)
   userCardInfo: {
     flex: 1,
     gap: 2,
-  },
-  userCardTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
   },
   userCardName: {
     fontSize: 17,
@@ -60,7 +84,6 @@ export const styles = StyleSheet.create({
     paddingHorizontal: spacing.xs,
     paddingVertical: 4,
     borderRadius: radius.sm,
-    borderWidth: 1,
   },
   roleBadgeText: {
     fontSize: 11,
@@ -72,9 +95,7 @@ export const styles = StyleSheet.create({
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: radius.xs,
-    backgroundColor: '#ff3b3020',
-    borderWidth: 1,
-    borderColor: '#ff3b3040',
+    backgroundColor: 'rgba(255,59,48,0.15)', // Match product list - borderless
   },
   inactiveBadgeText: {
     fontSize: 9,

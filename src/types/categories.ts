@@ -12,13 +12,14 @@ export interface Category {
   sort_order?: number
   is_active: boolean
   product_count?: number
+  featured_image?: string | null
   created_at: string
   updated_at: string
 }
 
 export interface FieldVisibilityConfig {
-  field_name: string
-  is_visible: boolean
-  is_required: boolean
-  display_order?: number
+  shop: boolean
+  product_page: boolean
+  pos: boolean
+  tv_menu: boolean
 }

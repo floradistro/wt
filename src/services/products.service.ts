@@ -148,6 +148,11 @@ export async function getProductsWithInventory(
       inventory!inner (
         quantity,
         location_id
+      ),
+      pricing_template:pricing_tier_templates (
+        id,
+        name,
+        default_tiers
       )
     `
     )
@@ -415,6 +420,114 @@ export async function createProductsBulk(
 }
 
 /**
+ * Delete a product completely with all related records
+ *
+ * WARNING: This is a destructive CASCADE delete that will remove:
+ * - Purchase order items referencing this product
+ * - Order items (sales history)
+ * - Inventory transfer items
+ * - Inventory records
+ * - The product itself
+ *
+ * This cannot be undone!
+ */
+export async function deleteProduct(productId: string, vendorId: string): Promise<void> {
+  logger.info('CASCADE deleting product with all related records', { productId, vendorId })
+
+  // Verify product belongs to vendor before deleting
+  const { data: product, error: fetchError } = await supabase
+    .from('products')
+    .select('id, vendor_id, name')
+    .eq('id', productId)
+    .eq('vendor_id', vendorId)
+    .single()
+
+  if (fetchError) {
+    logger.error('Failed to verify product ownership', { error: fetchError.message })
+    throw new Error('Product not found or access denied')
+  }
+
+  if (!product) {
+    throw new Error('Product not found')
+  }
+
+  logger.warn('Starting CASCADE deletion for product', {
+    productId,
+    productName: product.name,
+    warning: 'This will delete ALL related records'
+  })
+
+  // Step 1: Delete purchase order items
+  const { error: poItemsError } = await supabase
+    .from('purchase_order_items')
+    .delete()
+    .eq('product_id', productId)
+
+  if (poItemsError) {
+    logger.error('Failed to delete purchase order items', { error: poItemsError.message })
+    throw new Error(`Failed to delete purchase order items: ${poItemsError.message}`)
+  }
+  logger.info('Deleted purchase order items for product', { productId })
+
+  // Step 2: Delete order items (sales history)
+  const { error: orderItemsError } = await supabase
+    .from('order_items')
+    .delete()
+    .eq('product_id', productId)
+
+  if (orderItemsError) {
+    logger.error('Failed to delete order items', { error: orderItemsError.message })
+    throw new Error(`Failed to delete order items: ${orderItemsError.message}`)
+  }
+  logger.info('Deleted order items for product', { productId })
+
+  // Step 3: Delete inventory transfer items
+  const { error: transferItemsError } = await supabase
+    .from('inventory_transfer_items')
+    .delete()
+    .eq('product_id', productId)
+
+  if (transferItemsError) {
+    logger.error('Failed to delete transfer items', { error: transferItemsError.message })
+    throw new Error(`Failed to delete transfer items: ${transferItemsError.message}`)
+  }
+  logger.info('Deleted inventory transfer items for product', { productId })
+
+  // Step 4: Delete inventory records (will CASCADE to holds)
+  const { error: inventoryError } = await supabase
+    .from('inventory')
+    .delete()
+    .eq('product_id', productId)
+
+  if (inventoryError) {
+    logger.error('Failed to delete inventory', { error: inventoryError.message })
+    throw new Error(`Failed to delete inventory: ${inventoryError.message}`)
+  }
+  logger.info('Deleted inventory records for product', { productId })
+
+  // Step 5: Delete the product itself
+  const { error: deleteError } = await supabase
+    .from('products')
+    .delete()
+    .eq('id', productId)
+    .eq('vendor_id', vendorId)
+
+  if (deleteError) {
+    logger.error('Failed to delete product', {
+      error: deleteError.message,
+      productId,
+      productName: product.name
+    })
+    throw new Error(`Failed to delete product: ${deleteError.message}`)
+  }
+
+  logger.info('Product and ALL related records deleted successfully', {
+    productId,
+    productName: product.name
+  })
+}
+
+/**
  * Export service object
  */
 export const productsService = {
@@ -430,4 +543,5 @@ export const productsService = {
   getLowStockProducts,
   createProduct,
   createProductsBulk,
+  deleteProduct,
 }

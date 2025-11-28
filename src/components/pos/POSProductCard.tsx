@@ -13,6 +13,7 @@ import { useTierSelectorProductId, checkoutUIActions } from '@/stores/checkout-u
 import { getMatchingFilters } from '@/utils/product-transformers'
 import { supabase } from '@/lib/supabase/client'
 import { logger } from '@/utils/logger'
+import { getMediumImage } from '@/utils/image-transforms'
 
 import { layout } from '@/theme/layout'
 import type { Product, ProductVariant } from '@/types/pos'
@@ -345,7 +346,7 @@ const POSProductCard = forwardRef<any, POSProductCardProps>(({ product }, ref) =
             {/* Jobs Principle: Smart fallback hierarchy - Product image → Vendor logo → Placeholder */}
             {product.image_url ? (
               <Image
-                source={{ uri: product.image_url }}
+                source={{ uri: getMediumImage(product.image_url) || product.image_url }}
                 style={styles.image}
                 resizeMode="cover"
                 accessible={true}
@@ -355,7 +356,7 @@ const POSProductCard = forwardRef<any, POSProductCardProps>(({ product }, ref) =
             ) : product.vendor_logo_url ? (
               <View style={styles.vendorLogoContainer}>
                 <Image
-                  source={{ uri: product.vendor_logo_url }}
+                  source={{ uri: getMediumImage(product.vendor_logo_url) || product.vendor_logo_url }}
                   style={styles.vendorLogo}
                   resizeMode="contain"
                         fadeDuration={0}

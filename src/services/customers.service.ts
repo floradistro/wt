@@ -30,6 +30,13 @@ export interface CustomerWithOrders extends Customer {
     order_number: string
     total_amount: number
     created_at: string
+    pickup_location?: {
+      name: string
+    } | null
+    created_by_user?: {
+      first_name: string
+      last_name: string
+    } | null
   }[]
 }
 
@@ -47,7 +54,7 @@ export async function getCustomers(params?: {
 }): Promise<Customer[]> {
   let query = supabase
     .from('customers')
-    .select('*')
+    .select('*', { count: 'exact' }) // Add count to bypass max-rows limit
     .order('created_at', { ascending: false })
 
   // Filter active customers only (unless explicitly requested)
@@ -82,8 +89,9 @@ export async function getCustomers(params?: {
     query = query.or(searchConditions.join(','))
   }
 
-  // Override Supabase default limit (1000) to get ALL customers from vendor
-  query = query.limit(100000)
+  // CRITICAL: Use range() to override Supabase max-rows limit (defaults to 1000)
+  // This allows us to fetch ALL customers (7000+)
+  query = query.range(0, 99999)
 
   const { data, error } = await query
 
@@ -214,7 +222,7 @@ export async function searchCustomers(
 
   let query = supabase
     .from('customers')
-    .select('*')
+    .select('*', { count: 'exact' })
     .eq('is_active', true) // Only active customers
 
   if (vendorId) {
@@ -224,7 +232,7 @@ export async function searchCustomers(
   query = query
     .or(searchConditions.join(','))
     .order('total_spent', { ascending: false }) // Sort by best customers first
-    .limit(100000) // Very high limit to ensure we get ALL customers (Supabase default is only 1000)
+    .range(0, 99999) // Override Supabase max-rows limit
 
   const { data, error } = await query
 
@@ -391,6 +399,7 @@ export async function updateCustomerLoyaltyPoints(
  * Only returns active customers (is_active = true)
  */
 export async function getCustomerWithOrders(customerId: string): Promise<CustomerWithOrders> {
+  // ✅ APPLE WAY: Single query with proper JOINs
   const { data, error } = await supabase
     .from('customers')
     .select(
@@ -400,7 +409,14 @@ export async function getCustomerWithOrders(customerId: string): Promise<Custome
         id,
         order_number,
         total_amount,
-        created_at
+        created_at,
+        pickup_location:pickup_location_id (
+          name
+        ),
+        created_by_user:created_by_user_id (
+          first_name,
+          last_name
+        )
       )
     `
     )

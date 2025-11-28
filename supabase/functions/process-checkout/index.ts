@@ -107,25 +107,51 @@ interface CheckoutRequest {
   // Idempotency
   idempotencyKey?: string
 
-  // Order Info
-  vendorId: string
-  locationId: string
-  registerId: string
+  // Order Info (snake_case for e-commerce compatibility)
+  vendorId?: string
+  vendor_id?: string  // E-commerce format
+  locationId?: string
+  location_id?: string | null  // E-commerce format (nullable)
+  registerId?: string
+  register_id?: string  // E-commerce format
   sessionId?: string
+  session_id?: string  // E-commerce format
 
   // Items
-  items: OrderItem[]
+  items: OrderItem[] | any[]  // Accept both formats
   subtotal: number
-  taxAmount: number
+  taxAmount?: number  // POS format
+  tax?: number  // E-commerce format
+  shipping?: number  // E-commerce only
   total: number
 
-  // Payment
-  paymentMethod: 'cash' | 'credit' | 'debit' | 'ebt_food' | 'ebt_cash' | 'gift'
+  // Payment (flexible format)
+  paymentMethod?: 'cash' | 'credit' | 'debit' | 'ebt_food' | 'ebt_cash' | 'gift'
+  payment?: {  // E-commerce format
+    method: string
+    amount: number
+    opaque_data?: {
+      dataDescriptor: string
+      dataValue: string
+    }
+  }
   tipAmount?: number
+  tip_amount?: number  // E-commerce format
 
-  // Customer
+  // Customer (snake_case for e-commerce compatibility)
   customerId?: string
+  customer_id?: string  // E-commerce format
   customerName?: string
+  customer_name?: string  // E-commerce format
+
+  // E-commerce specific
+  is_ecommerce?: boolean
+  shipping_address?: {
+    address: string
+    city: string
+    state: string
+    zip: string
+  }
 
   // Loyalty
   loyaltyPointsRedeemed?: number
@@ -338,6 +364,205 @@ class SPINClient {
 }
 
 // ============================================================================
+// AUTHORIZE.NET API CLIENT
+// ============================================================================
+
+const AUTHORIZENET_API_BASE_URL = {
+  production: 'https://api.authorize.net/xml/v1/request.api',
+  sandbox: 'https://apitest.authorize.net/xml/v1/request.api',
+}
+
+interface AuthorizeNetSaleRequest {
+  amount: number
+  invoiceNumber: string
+  description?: string
+  customerId?: string
+  customerIp?: string
+}
+
+interface AuthorizeNetSaleResponse {
+  transactionResponse: {
+    responseCode: string // "1" = approved, "2" = declined, "3" = error, "4" = held for review
+    authCode: string
+    avsResultCode: string
+    cvvResultCode: string
+    cavvResultCode: string
+    transId: string
+    refTransID: string
+    transHash: string
+    accountNumber: string // Last 4 digits, e.g., "XXXX1111"
+    accountType: string // "Visa", "Mastercard", etc.
+    messages: Array<{
+      code: string
+      description: string
+    }>
+    errors?: Array<{
+      errorCode: string
+      errorText: string
+    }>
+  }
+  messages: {
+    resultCode: string // "Ok" or "Error"
+    message: Array<{
+      code: string
+      text: string
+    }>
+  }
+}
+
+class AuthorizeNetClient {
+  private baseUrl: string
+  private apiLoginId: string
+  private transactionKey: string
+
+  constructor(apiLoginId: string, transactionKey: string, environment: 'production' | 'sandbox' = 'production') {
+    this.apiLoginId = apiLoginId
+    this.transactionKey = transactionKey
+    this.baseUrl = AUTHORIZENET_API_BASE_URL[environment]
+  }
+
+  /**
+   * Process a card payment using Authorize.Net AIM API
+   * This is a server-to-server authCaptureTransaction (auth + capture in one call)
+   * For POS use, we assume card data is collected via terminal/card reader
+   * For e-commerce, Accept.js should be used to tokenize cards client-side
+   */
+  async processSale(request: AuthorizeNetSaleRequest, opaqueData?: { dataDescriptor: string; dataValue: string } | string): Promise<AuthorizeNetSaleResponse> {
+    // Support both full opaque data object (e-commerce) and string token (legacy POS)
+    const opaqueDataObj = typeof opaqueData === 'string'
+      ? { dataDescriptor: 'COMMON.ACCEPT.INAPP.PAYMENT', dataValue: opaqueData }
+      : opaqueData
+
+    console.log('[AUTHORIZENET] Sending sale request:', {
+      amount: request.amount,
+      invoiceNumber: request.invoiceNumber,
+      hasOpaqueData: !!opaqueDataObj,
+    })
+
+    // Build Authorize.Net request
+    const anetRequest = {
+      createTransactionRequest: {
+        merchantAuthentication: {
+          name: this.apiLoginId,
+          transactionKey: this.transactionKey,
+        },
+        refId: request.invoiceNumber,
+        transactionRequest: {
+          transactionType: 'authCaptureTransaction',
+          amount: request.amount.toFixed(2),
+          payment: opaqueDataObj ? {
+            opaqueData: opaqueDataObj,
+          } : undefined,
+          order: {
+            invoiceNumber: request.invoiceNumber,
+            description: request.description || 'POS Sale',
+          },
+          customer: request.customerId ? {
+            id: request.customerId,
+          } : undefined,
+          customerIP: request.customerIp,
+          processingOptions: {
+            isSubsequentAuth: 'false',
+          },
+          subsequentAuthInformation: undefined,
+        },
+      },
+    }
+
+    // CRITICAL: Enforce client-side timeout to prevent hanging
+    const timeoutMs = PAYMENT_TIMEOUT * 1000 // 120 seconds
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+
+    try {
+      const response = await fetch(this.baseUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(anetRequest),
+        signal: controller.signal,
+      })
+
+      clearTimeout(timeoutId)
+
+      const data = await response.json()
+
+      console.log('[AUTHORIZENET] Received response:', {
+        status: response.status,
+        resultCode: data.messages?.resultCode,
+        responseCode: data.transactionResponse?.responseCode,
+        transId: data.transactionResponse?.transId,
+      })
+
+      if (!response.ok) {
+        throw new Error(`Authorize.Net API HTTP Error: ${response.status}`)
+      }
+
+      // Check for API-level errors
+      if (data.messages?.resultCode !== 'Ok') {
+        const errorMessage = data.messages?.message?.[0]?.text || 'Unknown API error'
+        throw new Error(`Authorize.Net API Error: ${errorMessage}`)
+      }
+
+      // Check for transaction-level errors
+      if (data.transactionResponse?.errors && data.transactionResponse.errors.length > 0) {
+        const errorText = data.transactionResponse.errors[0].errorText
+        throw new Error(`Transaction Error: ${errorText}`)
+      }
+
+      return data
+    } catch (error) {
+      clearTimeout(timeoutId)
+
+      // Provide helpful error message for timeouts
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new Error(
+          `Payment processor timeout after ${timeoutMs / 1000}s. Please try again or use a different payment method.`
+        )
+      }
+
+      throw error
+    }
+  }
+
+  /**
+   * Void a transaction (must be done same day, before settlement)
+   */
+  async voidTransaction(transactionId: string): Promise<AuthorizeNetSaleResponse> {
+    const anetRequest = {
+      createTransactionRequest: {
+        merchantAuthentication: {
+          name: this.apiLoginId,
+          transactionKey: this.transactionKey,
+        },
+        transactionRequest: {
+          transactionType: 'voidTransaction',
+          refTransId: transactionId,
+        },
+      },
+    }
+
+    const response = await fetch(this.baseUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(anetRequest),
+    })
+
+    const data = await response.json()
+
+    if (data.messages?.resultCode !== 'Ok') {
+      const errorMessage = data.messages?.message?.[0]?.text || 'Unknown error'
+      throw new Error(`Void failed: ${errorMessage}`)
+    }
+
+    return data
+  }
+}
+
+// ============================================================================
 // STATE MACHINE
 // ============================================================================
 
@@ -448,103 +673,174 @@ serve(async (req) => {
     const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? ''
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
 
-    // Verify user authentication
-    const supabaseClient = createClient(supabaseUrl, supabaseAnonKey, {
-      auth: { autoRefreshToken: false, persistSession: false },
-    })
+    // Check if using service role key (for e-commerce)
+    const isServiceRole = jwt === supabaseServiceKey
 
-    const { data: { user }, error: userError } = await supabaseClient.auth.getUser(jwt)
+    let user: any = null
+    let supabaseAdmin: SupabaseClient
 
-    if (userError || !user) {
-      console.error('[Auth] Failed:', userError)
+    if (isServiceRole) {
+      // E-commerce request using service role - no user authentication required
+      console.log(`[${requestId}] Service role authentication (e-commerce)`)
+
+      supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
+        auth: { autoRefreshToken: false, persistSession: false },
+      })
+
       Sentry.addBreadcrumb({
         category: 'auth',
-        message: 'Authentication failed',
-        level: 'error',
-        data: { error: userError?.message },
+        message: 'Service role authentication (e-commerce)',
+        level: 'info',
       })
-      transaction.setTag('auth_status', 'failed')
-      transaction.finish()
-      return await errorResponse('Unauthorized', 401, requestId, allowedOrigin)
+      transaction.setTag('auth_type', 'service_role')
+    } else {
+      // POS request using user JWT - verify user authentication
+      const supabaseClient = createClient(supabaseUrl, supabaseAnonKey, {
+        auth: { autoRefreshToken: false, persistSession: false },
+      })
+
+      const { data: { user: authUser }, error: userError } = await supabaseClient.auth.getUser(jwt)
+
+      if (userError || !authUser) {
+        console.error('[Auth] Failed:', userError)
+        Sentry.addBreadcrumb({
+          category: 'auth',
+          message: 'Authentication failed',
+          level: 'error',
+          data: { error: userError?.message },
+        })
+        transaction.setTag('auth_status', 'failed')
+        transaction.finish()
+        return await errorResponse('Unauthorized', 401, requestId, allowedOrigin)
+      }
+
+      user = authUser
+
+      // Set user context for Sentry
+      Sentry.setUser({ id: user.id, email: user.email })
+      transaction.setTag('user_id', user.id)
+
+      Sentry.addBreadcrumb({
+        category: 'auth',
+        message: 'User authenticated successfully',
+        level: 'info',
+        data: { userId: user.id },
+      })
+
+      // Service role client for database operations
+      supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
+        auth: { autoRefreshToken: false, persistSession: false },
+      })
+
+      console.log(`[${requestId}] Request started by user: ${user.id}`)
     }
-
-    // Set user context for Sentry
-    Sentry.setUser({ id: user.id, email: user.email })
-    transaction.setTag('user_id', user.id)
-
-    Sentry.addBreadcrumb({
-      category: 'auth',
-      message: 'User authenticated successfully',
-      level: 'info',
-      data: { userId: user.id },
-    })
-
-    // Service role client for database operations
-    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
-      auth: { autoRefreshToken: false, persistSession: false },
-    })
-
-    console.log(`[${requestId}] Request started by user: ${user.id}`)
 
     // ========================================================================
     // STEP 2: PARSE & VALIDATE REQUEST
     // ========================================================================
-    const body: CheckoutRequest = await req.json()
+    const rawBody: CheckoutRequest = await req.json()
+
+    // Normalize request format (support both POS camelCase and e-commerce snake_case)
+    const body = {
+      ...rawBody,
+      vendorId: rawBody.vendorId || rawBody.vendor_id,
+      locationId: rawBody.locationId || rawBody.location_id,
+      registerId: rawBody.registerId || rawBody.register_id,
+      sessionId: rawBody.sessionId || rawBody.session_id,
+      customerId: rawBody.customerId || rawBody.customer_id,
+      customerName: rawBody.customerName || rawBody.customer_name,
+      taxAmount: rawBody.taxAmount || rawBody.tax || 0,
+      tipAmount: rawBody.tipAmount || rawBody.tip_amount || 0,
+      paymentMethod: rawBody.paymentMethod || (rawBody.payment?.method as any),
+    } as CheckoutRequest
+
+    console.log(`[${requestId}] Request format:`, {
+      isEcommerce: body.is_ecommerce,
+      hasPaymentObject: !!rawBody.payment,
+      paymentMethod: body.paymentMethod,
+    })
 
     // ========================================================================
     // STEP 2.5: AUTHORIZATION CHECK
     // ========================================================================
-    const { data: userAccess, error: accessError } = await supabaseAdmin
-      .from('users')
-      .select('vendor_id')
-      .eq('auth_user_id', user.id)
-      .single()
+    // Skip vendor authorization check for service role (e-commerce)
+    let authorizedVendorId = body.vendorId
 
-    if (accessError || !userAccess || userAccess.vendor_id !== body.vendorId) {
-      console.error(`[${requestId}] Unauthorized access attempt:`, {
-        authUserId: user.id,
-        requestedVendorId: body.vendorId,
-        userVendorId: userAccess?.vendor_id,
-        error: accessError?.message,
-      })
+    if (!isServiceRole && user) {
+      const { data: userAccess, error: accessError } = await supabaseAdmin
+        .from('users')
+        .select('vendor_id')
+        .eq('auth_user_id', user.id)
+        .single()
 
-      // Log security event to Sentry
-      Sentry.captureMessage('Unauthorized vendor access attempt', {
-        level: 'warning',
-        tags: {
-          security: 'true',
-          requestId,
-        },
-        contexts: {
-          authorization: {
-            userId: user.id,
-            requestedVendorId: body.vendorId,
-            userVendorId: userAccess?.vendor_id,
+      if (accessError || !userAccess || userAccess.vendor_id !== body.vendorId) {
+        console.error(`[${requestId}] Unauthorized access attempt:`, {
+          authUserId: user.id,
+          requestedVendorId: body.vendorId,
+          userVendorId: userAccess?.vendor_id,
+          error: accessError?.message,
+        })
+
+        // Log security event to Sentry
+        Sentry.captureMessage('Unauthorized vendor access attempt', {
+          level: 'warning',
+          tags: {
+            security: 'true',
+            requestId,
           },
-        },
-      })
+          contexts: {
+            authorization: {
+              userId: user.id,
+              requestedVendorId: body.vendorId,
+              userVendorId: userAccess?.vendor_id,
+            },
+          },
+        })
 
-      transaction.setTag('authorization', 'failed')
-      transaction.finish()
-      return await errorResponse('Unauthorized: No access to this vendor', 403, requestId, allowedOrigin)
+        transaction.setTag('authorization', 'failed')
+        transaction.finish()
+        return await errorResponse('Unauthorized: No access to this vendor', 403, requestId, allowedOrigin)
+      }
+
+      authorizedVendorId = userAccess.vendor_id
+      transaction.setTag('vendor_id', userAccess.vendor_id)
+    } else {
+      // Service role - use vendor_id from request
+      transaction.setTag('vendor_id', body.vendorId)
+      console.log(`[${requestId}] Service role - using vendor_id from request: ${body.vendorId}`)
     }
 
-    transaction.setTag('vendor_id', userAccess.vendor_id)
     Sentry.addBreadcrumb({
       category: 'authorization',
       message: 'Vendor authorization passed',
       level: 'info',
-      data: { vendorId: userAccess.vendor_id },
+      data: { vendorId: authorizedVendorId },
     })
 
-    console.log(`[${requestId}] Authorization check passed for vendor: ${userAccess.vendor_id}`)
+    console.log(`[${requestId}] Authorization check passed for vendor: ${authorizedVendorId}`)
 
     // ========================================================================
     // STEP 3: VALIDATE REQUEST FIELDS
     // ========================================================================
 
-    if (!body.vendorId || !body.locationId || !body.registerId) {
-      return await errorResponse('Missing required fields: vendorId, locationId, registerId', 400, requestId, allowedOrigin)
+    // Validate vendor ID (required for all orders)
+    if (!body.vendorId) {
+      return await errorResponse('Missing required field: vendorId', 400, requestId, allowedOrigin)
+    }
+
+    // Validate POS-specific fields (not required for e-commerce)
+    if (!body.is_ecommerce) {
+      if (!body.locationId || !body.registerId) {
+        return await errorResponse('Missing required POS fields: locationId, registerId', 400, requestId, allowedOrigin)
+      }
+      if (!body.paymentMethod) {
+        return await errorResponse('Payment method is required', 400, requestId, allowedOrigin)
+      }
+    } else {
+      // E-commerce specific validations
+      if (!rawBody.payment || !rawBody.payment.method) {
+        return await errorResponse('Payment details are required for e-commerce orders', 400, requestId, allowedOrigin)
+      }
     }
 
     if (!body.items || body.items.length === 0) {
@@ -553,10 +849,6 @@ serve(async (req) => {
 
     if (!body.total || body.total <= 0) {
       return await errorResponse('Invalid total amount', 400, requestId, allowedOrigin)
-    }
-
-    if (!body.paymentMethod) {
-      return await errorResponse('Payment method is required', 400, requestId, allowedOrigin)
     }
 
     // ========================================================================
@@ -657,7 +949,7 @@ serve(async (req) => {
             total: body.total,
             threshold: MAX_WALK_IN_AMOUNT,
             vendorId: body.vendorId,
-            userId: user.id,
+            userId: user?.id || 'e-commerce',
           },
         },
       })
@@ -722,19 +1014,36 @@ serve(async (req) => {
     let paymentProcessor: any = null
 
     try {
-      const processorResult = await dbClient.queryObject(
-        `SELECT * FROM get_processor_for_register($1)`,
-        [body.registerId]
-      )
+      if (body.is_ecommerce) {
+        // E-commerce order - fetch the e-commerce processor for this vendor
+        console.log(`[${requestId}] Fetching e-commerce processor for vendor: ${body.vendorId}`)
+        const processorResult = await dbClient.queryObject(
+          `SELECT * FROM get_ecommerce_processor($1)`,
+          [body.vendorId]
+        )
 
-      const processor = processorResult.rows as any[]
+        const processor = processorResult.rows as any[]
 
-      if (!processor || processor.length === 0) {
-        // Connection will be closed by finally block
-        return await errorResponse('No payment processor configured for this register', 400, requestId, allowedOrigin)
+        if (!processor || processor.length === 0) {
+          return await errorResponse('No e-commerce payment processor configured for this vendor', 400, requestId, allowedOrigin)
+        }
+
+        paymentProcessor = processor[0]
+      } else {
+        // POS order - fetch processor for register
+        const processorResult = await dbClient.queryObject(
+          `SELECT * FROM get_processor_for_register($1)`,
+          [body.registerId]
+        )
+
+        const processor = processorResult.rows as any[]
+
+        if (!processor || processor.length === 0) {
+          return await errorResponse('No payment processor configured for this register', 400, requestId, allowedOrigin)
+        }
+
+        paymentProcessor = processor[0]
       }
-
-      paymentProcessor = processor[0]
     } catch (error) {
       console.error(`[${requestId}] Failed to get payment processor:`, error)
       // Connection will be closed by finally block
@@ -744,12 +1053,63 @@ serve(async (req) => {
     console.log(`[${requestId}] Using processor:`, {
       type: paymentProcessor.processor_type,
       environment: paymentProcessor.environment,
+      isEcommerce: body.is_ecommerce,
     })
 
     // ========================================================================
     // STEP 6: CREATE DRAFT ORDER
     // ========================================================================
     const orderNumber = `ORD-${Date.now()}-${Math.random().toString(36).substring(7).toUpperCase()}`
+
+    // Validate that created_by_user_id exists in users table (FK constraint protection)
+    console.log(`[${requestId}] 🔍 STAFF TRACKING v3: customUserId=${body.customUserId}`)
+    let createdByUserId = body.customUserId
+
+    if (body.customUserId) {
+      // Validate the provided customUserId exists
+      const { data: userExists } = await supabaseAdmin
+        .from('users')
+        .select('id')
+        .eq('id', body.customUserId)
+        .maybeSingle()
+
+      console.log(`[${requestId}] ✅ User validation: exists=${!!userExists}, id=${userExists?.id}`)
+
+      if (!userExists) {
+        console.warn(`[${requestId}] customUserId ${body.customUserId} not found in users table, falling back to auth user`)
+        createdByUserId = null // Will be set below
+      } else {
+        console.log(`[${requestId}] ✅ Using provided customUserId: ${body.customUserId}`)
+      }
+    }
+
+    // If no valid customUserId, lookup the users table ID from auth_user_id (POS only)
+    if (!createdByUserId && user) {
+      console.log(`[${requestId}] 🔄 No valid customUserId, looking up by auth_user_id: ${user.id}`)
+      const { data: authUserRecord } = await supabaseAdmin
+        .from('users')
+        .select('id')
+        .eq('auth_user_id', user.id)
+        .maybeSingle()
+
+      if (authUserRecord) {
+        createdByUserId = authUserRecord.id
+        console.log(`[${requestId}] ✅ Using users table ID ${authUserRecord.id} for auth user ${user.id}`)
+      } else {
+        console.warn(`[${requestId}] ❌ No users table record found for auth user ${user.id}, order will have null created_by_user_id`)
+        createdByUserId = null
+      }
+    }
+
+    console.log(`[${requestId}] 📝 Final createdByUserId for order: ${createdByUserId}`)
+
+    // Log full request body for debugging
+    console.log(`[${requestId}] 🔍 Full request body:`, JSON.stringify(body, null, 2))
+    if (user) {
+      console.log(`[${requestId}] 🔍 User info:`, { userId: user.id })
+    } else {
+      console.log(`[${requestId}] 🔍 E-commerce order (no user)`)
+    }
 
     const { data: order, error: orderError } = await supabaseAdmin
       .from('orders')
@@ -767,6 +1127,7 @@ serve(async (req) => {
         total_amount: body.total,
         payment_method: body.paymentMethod,
         idempotency_key: idempotencyKey,
+        created_by_user_id: createdByUserId, // ✅ APPLE WAY: Validated FK before insert
         billing_address: {},
         metadata: {
           ...body.metadata,
@@ -777,7 +1138,6 @@ serve(async (req) => {
           campaign_id: body.campaignId || null,
           session_id: body.sessionId,
           register_id: body.registerId,
-          created_by_user_id: user.id,
           request_id: requestId,
         },
       })
@@ -786,6 +1146,22 @@ serve(async (req) => {
 
     if (orderError || !order) {
       console.error(`[${requestId}] Failed to create order:`, orderError)
+      console.error(`[${requestId}] Order creation payload:`, JSON.stringify({
+        vendor_id: body.vendorId,
+        pickup_location_id: body.locationId,
+        customer_id: body.customerId || null,
+        order_number: orderNumber,
+        order_type: 'walk_in',
+        delivery_type: 'pickup',
+        status: OrderStatus.PENDING,
+        payment_status: PaymentStatus.PENDING,
+        subtotal: body.subtotal,
+        tax_amount: body.taxAmount,
+        total_amount: body.total,
+        payment_method: body.paymentMethod,
+        idempotency_key: idempotencyKey,
+        created_by_user_id: createdByUserId,
+      }, null, 2))
       Sentry.captureException(orderError, {
         tags: { operation: 'order_creation', requestId },
         contexts: {
@@ -793,10 +1169,17 @@ serve(async (req) => {
             orderNumber,
             total: body.total,
             paymentMethod: body.paymentMethod,
+            errorCode: orderError?.code,
+            errorMessage: orderError?.message,
+            errorDetails: orderError?.details,
+            errorHint: orderError?.hint,
           },
         },
       })
-      return await errorResponse('Failed to create order', 500, requestId, allowedOrigin)
+      // Return detailed error message for debugging
+      const detailedError = `Failed to create order: ${orderError?.message || 'Unknown error'} (code: ${orderError?.code || 'N/A'})`
+      console.error(`[${requestId}] ${detailedError}`)
+      return await errorResponse(detailedError, 500, requestId, allowedOrigin)
     }
 
     Sentry.addBreadcrumb({
@@ -1012,8 +1395,8 @@ serve(async (req) => {
       })
 
     } else {
-      // Card payment via SPIN
-      console.log(`[${requestId}] Processing card payment via SPIN`)
+      // Card payment via processor (Dejavoo SPIN or Authorize.Net)
+      console.log(`[${requestId}] Processing card payment via ${paymentProcessor.processor_type}`)
 
       // Keep status as PENDING while processing payment
       await supabaseAdmin
@@ -1021,93 +1404,98 @@ serve(async (req) => {
         .update({ payment_status: PaymentStatus.PENDING })
         .eq('id', order.id)
 
-      const spinClient = new SPINClient(
-        paymentProcessor.authkey,
-        paymentProcessor.tpn,
-        paymentProcessor.environment
-      )
+      // ========================================================================
+      // ROUTE TO APPROPRIATE PAYMENT PROCESSOR
+      // ========================================================================
+      if (paymentProcessor.processor_type === 'dejavoo') {
+        // Dejavoo SPIN API
+        const spinClient = new SPINClient(
+          paymentProcessor.authkey,
+          paymentProcessor.tpn,
+          paymentProcessor.environment
+        )
 
-      const spinRequest: SPINSaleRequest = {
-        Amount: body.total,
-        TipAmount: body.tipAmount || 0,
-        PaymentType: mapPaymentType(body.paymentMethod),
-        ReferenceId: orderNumber,
-        InvoiceNumber: orderNumber,
-        Tpn: paymentProcessor.tpn,
-        Authkey: paymentProcessor.authkey,
-        SPInProxyTimeout: PAYMENT_TIMEOUT,
-        PrintReceipt: 'No',
-        GetReceipt: 'Both',
-        GetExtendedData: true,
-      }
+        const spinRequest: SPINSaleRequest = {
+          Amount: body.total,
+          TipAmount: body.tipAmount || 0,
+          PaymentType: mapPaymentType(body.paymentMethod),
+          ReferenceId: orderNumber,
+          InvoiceNumber: orderNumber,
+          Tpn: paymentProcessor.tpn,
+          Authkey: paymentProcessor.authkey,
+          SPInProxyTimeout: PAYMENT_TIMEOUT,
+          PrintReceipt: 'No',
+          GetReceipt: 'Both',
+          GetExtendedData: true,
+        }
 
-      try {
-        Sentry.addBreadcrumb({
-          category: 'payment',
-          message: 'Sending payment to SPIN processor',
-          level: 'info',
-          data: {
+        try {
+          Sentry.addBreadcrumb({
+            category: 'payment',
+            message: 'Sending payment to SPIN processor',
+            level: 'info',
+            data: {
+              amount: body.total,
+              paymentType: mapPaymentType(body.paymentMethod),
+              environment: paymentProcessor.environment,
+            },
+          })
+
+          const paymentSpan = transaction.startChild({
+            op: 'payment.process',
+            description: 'SPIN API Payment Processing',
+          })
+
+          paymentResult = await spinClient.processSale(spinRequest)
+          paymentSpan.finish()
+
+          const resultCode = paymentResult.GeneralResponse.ResultCode
+          const statusCode = paymentResult.GeneralResponse.StatusCode
+
+          Sentry.addBreadcrumb({
+            category: 'payment',
+            message: 'Received SPIN processor response',
+            level: resultCode === '0' && statusCode === '0000' ? 'info' : 'warning',
+            data: {
+              resultCode,
+              statusCode,
+              approved: resultCode === '0' && statusCode === '0000',
+            },
+          })
+
+          // Log transaction
+          await supabaseAdmin.from('payment_transactions').insert({
+            vendor_id: body.vendorId,
+            location_id: body.locationId,
+            payment_processor_id: paymentProcessor.processor_id,
+            order_id: order.id,
+            processor_type: 'dejavoo',
+            transaction_type: 'sale',
+            payment_method: body.paymentMethod,
             amount: body.total,
-            paymentType: mapPaymentType(body.paymentMethod),
-            environment: paymentProcessor.environment,
-          },
-        })
+            total_amount: body.total,
+            status: resultCode === '0' && statusCode === '0000' ? 'approved' : 'declined',
+            processor_transaction_id: paymentResult.GeneralResponse.ReferenceId,
+            processor_reference_id: orderNumber,
+            authorization_code: paymentResult.GeneralResponse.AuthCode,
+            result_code: resultCode,
+            status_code: statusCode,
+            spin_result_code: resultCode,
+            spin_status_code: statusCode,
+            spin_message: paymentResult.GeneralResponse.Message,
+            spin_detailed_message: paymentResult.GeneralResponse.DetailedMessage,
+            response_data: paymentResult,
+            card_type: paymentResult.CardData?.CardType,
+            card_last_four: paymentResult.CardData?.Last4,
+            processed_at: new Date().toISOString(),
+            idempotency_key: idempotencyKey,
+          })
 
-        const paymentSpan = transaction.startChild({
-          op: 'payment.process',
-          description: 'SPIN API Payment Processing',
-        })
-
-        paymentResult = await spinClient.processSale(spinRequest)
-        paymentSpan.finish()
-
-        const resultCode = paymentResult.GeneralResponse.ResultCode
-        const statusCode = paymentResult.GeneralResponse.StatusCode
-
-        Sentry.addBreadcrumb({
-          category: 'payment',
-          message: 'Received SPIN processor response',
-          level: resultCode === '0' && statusCode === '0000' ? 'info' : 'warning',
-          data: {
-            resultCode,
-            statusCode,
-            approved: resultCode === '0' && statusCode === '0000',
-          },
-        })
-
-        // Log transaction
-        await supabaseAdmin.from('payment_transactions').insert({
-          vendor_id: body.vendorId,
-          location_id: body.locationId,
-          payment_processor_id: paymentProcessor.processor_id,
-          order_id: order.id,
-          processor_type: 'dejavoo',
-          transaction_type: 'sale',
-          payment_method: body.paymentMethod,
-          amount: body.total,
-          total_amount: body.total,
-          status: resultCode === '0' && statusCode === '0000' ? 'approved' : 'declined',
-          processor_transaction_id: paymentResult.GeneralResponse.ReferenceId,
-          processor_reference_id: orderNumber,
-          authorization_code: paymentResult.GeneralResponse.AuthCode,
-          result_code: resultCode,
-          status_code: statusCode,
-          spin_result_code: resultCode,
-          spin_status_code: statusCode,
-          spin_message: paymentResult.GeneralResponse.Message,
-          spin_detailed_message: paymentResult.GeneralResponse.DetailedMessage,
-          response_data: paymentResult,
-          card_type: paymentResult.CardData?.CardType,
-          card_last_four: paymentResult.CardData?.Last4,
-          processed_at: new Date().toISOString(),
-          idempotency_key: idempotencyKey,
-        })
-
-        // Check if approved
-        if (resultCode === '0' && statusCode === '0000') {
-          // Payment approved!
-          console.log(`[${requestId}] Payment approved:`, {
-            authCode: paymentResult.GeneralResponse.AuthCode,
+          // Check if approved
+          if (resultCode === '0' && statusCode === '0000') {
+            // Payment approved!
+            console.log(`[${requestId}] Payment approved:`, {
+              authCode: paymentResult.GeneralResponse.AuthCode,
             transactionId: paymentResult.GeneralResponse.ReferenceId,
           })
 
@@ -1179,6 +1567,163 @@ serve(async (req) => {
 
         // Connection will be closed by finally block
         return await errorResponse(`Payment failed: ${error.message}`, 402, requestId, allowedOrigin)
+      }
+
+      } else if (paymentProcessor.processor_type === 'authorizenet') {
+        // Authorize.Net API
+        const anetClient = new AuthorizeNetClient(
+          paymentProcessor.api_login_id,
+          paymentProcessor.transaction_key,
+          paymentProcessor.environment
+        )
+
+        const anetRequest: AuthorizeNetSaleRequest = {
+          amount: body.total,
+          invoiceNumber: orderNumber,
+          description: `POS Sale - ${orderNumber}`,
+          customerId: body.customerId,
+        }
+
+        try {
+          Sentry.addBreadcrumb({
+            category: 'payment',
+            message: 'Sending payment to Authorize.Net processor',
+            level: 'info',
+            data: {
+              amount: body.total,
+              environment: paymentProcessor.environment,
+            },
+          })
+
+          const paymentSpan = transaction.startChild({
+            op: 'payment.process',
+            description: 'Authorize.Net Payment Processing',
+          })
+
+          // Get opaque data from e-commerce request or legacy card token from metadata
+          const opaqueData = rawBody.payment?.opaque_data || body.metadata?.cardToken
+
+          paymentResult = await anetClient.processSale(anetRequest, opaqueData)
+          paymentSpan.finish()
+
+          const responseCode = paymentResult.transactionResponse.responseCode
+
+          Sentry.addBreadcrumb({
+            category: 'payment',
+            message: 'Received Authorize.Net processor response',
+            level: responseCode === '1' ? 'info' : 'warning',
+            data: {
+              responseCode,
+              approved: responseCode === '1',
+              transId: paymentResult.transactionResponse.transId,
+            },
+          })
+
+          // Log transaction
+          await supabaseAdmin.from('payment_transactions').insert({
+            vendor_id: body.vendorId,
+            location_id: body.locationId,
+            payment_processor_id: paymentProcessor.processor_id,
+            order_id: order.id,
+            processor_type: 'authorizenet',
+            transaction_type: 'sale',
+            payment_method: body.paymentMethod,
+            amount: body.total,
+            total_amount: body.total,
+            status: responseCode === '1' ? 'approved' : responseCode === '2' ? 'declined' : 'error',
+            processor_transaction_id: paymentResult.transactionResponse.transId,
+            processor_reference_id: orderNumber,
+            authorization_code: paymentResult.transactionResponse.authCode,
+            result_code: responseCode,
+            response_data: paymentResult,
+            card_type: paymentResult.transactionResponse.accountType,
+            card_last_four: paymentResult.transactionResponse.accountNumber?.replace('XXXX', ''),
+            processed_at: new Date().toISOString(),
+            idempotency_key: idempotencyKey,
+          })
+
+          // Check if approved
+          if (responseCode === '1') {
+            // Payment approved!
+            console.log(`[${requestId}] Payment approved:`, {
+              authCode: paymentResult.transactionResponse.authCode,
+              transactionId: paymentResult.transactionResponse.transId,
+            })
+
+            const { error: cardUpdateError } = await supabaseAdmin
+              .from('orders')
+              .update({
+                status: OrderStatus.COMPLETED,
+                payment_status: PaymentStatus.PAID,
+                processor_transaction_id: paymentResult.transactionResponse.transId,
+                payment_authorization_code: paymentResult.transactionResponse.authCode,
+                card_type: paymentResult.transactionResponse.accountType,
+                card_last_four: paymentResult.transactionResponse.accountNumber?.replace('XXXX', ''),
+                payment_data: paymentResult,
+              })
+              .eq('id', order.id)
+
+            if (cardUpdateError) {
+              console.error(`[${requestId}] Failed to update order after successful card payment:`, cardUpdateError)
+              return await errorResponse(`Failed to finalize order: ${cardUpdateError.message}`, 500, requestId, allowedOrigin)
+            }
+
+          } else {
+            // Payment declined or error
+            const errorMessage = paymentResult.transactionResponse.errors?.[0]?.errorText
+              || paymentResult.transactionResponse.messages?.[0]?.description
+              || 'Payment declined'
+            throw new Error(errorMessage)
+          }
+
+        } catch (error) {
+          paymentError = error as Error
+          console.error(`[${requestId}] Payment failed:`, error)
+
+          // Log failed transaction
+          await supabaseAdmin.from('payment_transactions').insert({
+            vendor_id: body.vendorId,
+            location_id: body.locationId,
+            payment_processor_id: paymentProcessor.processor_id,
+            order_id: order.id,
+            processor_type: 'authorizenet',
+            transaction_type: 'sale',
+            payment_method: body.paymentMethod,
+            amount: body.total,
+            total_amount: body.total,
+            status: 'error',
+            error_message: error.message,
+            processed_at: new Date().toISOString(),
+            idempotency_key: idempotencyKey,
+          })
+
+          // Update order status to CANCELLED (payment failed)
+          await supabaseAdmin
+            .from('orders')
+            .update({
+              status: OrderStatus.CANCELLED,
+              payment_status: PaymentStatus.FAILED,
+            })
+            .eq('id', order.id)
+
+          // Release inventory holds (payment failed)
+          try {
+            await dbClient.queryObject(
+              `SELECT release_inventory_holds($1, $2)`,
+              [order.id, 'payment_failed']
+            )
+            console.log(`[${requestId}] Inventory holds released after payment failure`)
+          } catch (releaseError) {
+            console.error(`[${requestId}] Failed to release inventory holds:`, releaseError)
+          }
+
+          return await errorResponse(`Payment failed: ${error.message}`, 402, requestId, allowedOrigin)
+        }
+
+      } else {
+        // Unsupported processor type
+        console.error(`[${requestId}] Unsupported processor type: ${paymentProcessor.processor_type}`)
+        return await errorResponse(`Unsupported payment processor type: ${paymentProcessor.processor_type}`, 400, requestId, allowedOrigin)
       }
     }
 
@@ -1571,8 +2116,9 @@ async function errorResponse(message: string, status: number, requestId: string,
     // Log detailed error internally
     console.error(`[${requestId}] Internal error: ${message}`)
 
-    // Return generic error to user
-    userMessage = `An error occurred processing your request. Please contact support with reference ID: ${requestId}`
+    // TEMPORARY DEBUG: Return detailed error to help diagnose issue
+    // TODO: Remove this after debugging and restore generic error message
+    userMessage = `[DEBUG] ${message} (Reference ID: ${requestId})`
   }
 
   // CRITICAL: Flush Sentry events before response

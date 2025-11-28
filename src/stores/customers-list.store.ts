@@ -113,7 +113,7 @@ export const useCustomersListStore = create<CustomersListState>()(
 
           logger.info('[CustomersListStore] Loading customers for vendor:', vendorId)
 
-          const data = await customersService.getCustomers({ limit: 1000 })
+          const data = await customersService.getCustomers({ vendorId })
 
           // Check if request was aborted
           if (controller.signal.aborted) {
@@ -154,7 +154,7 @@ export const useCustomersListStore = create<CustomersListState>()(
 
           logger.info('[CustomersListStore] Searching customers:', term)
 
-          const data = await customersService.searchCustomers(term, 100)
+          const data = await customersService.searchCustomers(term, undefined, vendorId)
 
           // Check if request was aborted
           if (controller.signal.aborted) {

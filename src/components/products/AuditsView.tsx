@@ -1,16 +1,35 @@
 /**
- * AuditsView Component
- * Comprehensive audit trail for inventory adjustments and stock movements
- * Apple Engineering: Clean data presentation, powerful filtering
+ * AuditsView Component - REFACTORED TO MATCH TRANSFERS DESIGN
+ * Comprehensive audit trail for inventory adjustments
+ * Styled exactly like TransfersList with glass cards and pill badges
+ *
+ * ZERO PROP DRILLING:
+ * - Reads from AppAuthContext for vendor
+ * - Reads from products-list.store for selectedLocationIds
+ * - Calls store actions directly for modal opening
  */
 
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator, Pressable, Animated, Image } from 'react-native'
-import { useState, useMemo } from 'react'
+import React, { useState, useMemo } from 'react'
+import {
+  View,
+  Text,
+  StyleSheet,
+  Pressable,
+  ScrollView,
+  ActivityIndicator,
+  Modal,
+  StatusBar,
+} from 'react-native'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import * as Haptics from 'expo-haptics'
-import { colors, spacing, radius, typography } from '@/theme/tokens'
+import { colors, spacing, radius } from '@/theme/tokens'
 import { layout } from '@/theme/layout'
 import { useInventoryAdjustments } from '@/hooks/useInventoryAdjustments'
 import type { AdjustmentType, InventoryAdjustment } from '@/services/inventory-adjustments.service'
+import { TitleSection } from '@/components/shared'
+import type { FilterPill } from '@/components/shared'
+import { useAppAuth } from '@/contexts/AppAuthContext'
+import { useProductsScreenStore, productsScreenActions } from '@/stores/products-list.store'
 
 type AuditBatch = {
   id: string
@@ -24,16 +43,102 @@ type AuditBatch = {
 
 type AdjustmentOrBatch = InventoryAdjustment | AuditBatch
 
+// Memoized Audit Item to prevent flickering
+const AuditItem = React.memo<{
+  item: AdjustmentOrBatch
+  isLast: boolean
+  isSelected: boolean
+  onPress: () => void
+}>(({ item, isLast, isSelected, onPress }) => {
+  const isBatch = 'type' in item && item.type === 'batch'
+  const batch = isBatch ? (item as AuditBatch) : null
+  const adj = !isBatch ? (item as InventoryAdjustment) : null
+
+  // Get user info
+  const user = isBatch ? batch!.adjustments[0]?.created_by_user : adj?.created_by_user
+  const staffName = user?.first_name && user?.last_name
+    ? `${user.first_name} ${user.last_name}`
+    : user?.email?.split('@')[0] || 'Unknown'
+
+  const itemCount = isBatch ? batch!.adjustments.length : 1
+  const createdAt = item.created_at
+  const locationName = isBatch ? batch!.location_name : adj?.location?.name || null
+  const reason = isBatch ? batch!.reason.replace('Audit: ', '') : adj!.reason
+
+  return (
+    <Pressable
+      style={[
+        styles.auditItem,
+        isSelected && styles.auditItemActive,
+        isLast && styles.auditItemLast,
+      ]}
+      onPress={onPress}
+      accessibilityRole="none"
+    >
+      {/* Status Dot */}
+      <View style={[styles.statusDot, { backgroundColor: '#0a84ff' }]} />
+
+      {/* Audit Info */}
+      <View style={styles.auditInfo}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <Text style={styles.staffName} numberOfLines={1}>
+            {staffName}
+          </Text>
+          <View style={styles.typeBadge}>
+            <Text style={styles.typeBadgeText}>
+              {itemCount === 1 ? 'SINGLE' : 'BATCH'}
+            </Text>
+          </View>
+        </View>
+        {locationName && (
+          <Text style={styles.locationText} numberOfLines={1}>
+            {locationName}
+          </Text>
+        )}
+        <Text style={styles.reasonText} numberOfLines={1}>
+          {reason}
+        </Text>
+      </View>
+
+      {/* Items Count */}
+      <View style={styles.dataColumn}>
+        <Text style={styles.dataLabel}>ITEMS</Text>
+        <Text style={styles.dataValue}>{itemCount}</Text>
+      </View>
+
+      {/* Date */}
+      <View style={styles.dataColumn}>
+        <Text style={styles.dataLabel}>DATE</Text>
+        <Text style={styles.dataValue}>
+          {new Date(createdAt).toLocaleDateString()}
+        </Text>
+      </View>
+    </Pressable>
+  )
+})
+
+AuditItem.displayName = 'AuditItem'
+
 interface AuditsViewProps {
-  onCreatePress: () => void
-  headerOpacity: Animated.Value
-  vendorLogo?: string | null
-  selectedLocationIds?: string[]
+  emptyMessage?: string
 }
 
-export function AuditsView({ onCreatePress, headerOpacity, vendorLogo, selectedLocationIds = [] }: AuditsViewProps) {
-  const [filterType, setFilterType] = useState<AdjustmentType | 'all'>('all')
-  const [expandedBatches, setExpandedBatches] = useState<Set<string>>(new Set())
+/**
+ * AuditsView - ZERO PROPS ✅ (except UI state)
+ * Reads from store with real-time updates
+ */
+export function AuditsView({
+  emptyMessage = 'No audit records found',
+}: AuditsViewProps = {}) {
+  // ========================================
+  // STORES - ZERO PROP DRILLING
+  // ========================================
+  const { vendor } = useAppAuth()
+  const selectedLocationIds = useProductsScreenStore((state) => state.selectedLocationIds)
+  const insets = useSafeAreaInsets()
+
+  const [viewFilter, setViewFilter] = useState<'all' | 'batches' | 'single'>('all')
+  const [selectedAuditBatch, setSelectedAuditBatch] = useState<AuditBatch | null>(null)
 
   // Memoize filters to prevent unnecessary re-fetches
   const filters = useMemo(() => {
@@ -43,19 +148,17 @@ export function AuditsView({ onCreatePress, headerOpacity, vendorLogo, selectedL
     return undefined
   }, [selectedLocationIds])
 
-  const { adjustments, loading } = useInventoryAdjustments(filters)
+  const { adjustments, isLoading } = useInventoryAdjustments(undefined, undefined, filters || {})
 
   // Filter adjustments by location BEFORE grouping (for multiple locations)
   const locationFilteredAdjustments = useMemo(() => {
     if (selectedLocationIds.length <= 1) {
-      // No client-side location filtering needed (0 = all, 1 = handled by hook)
       return adjustments
     }
-    // Multiple locations - filter client-side
     return adjustments.filter(adj => adj.location_id && selectedLocationIds.includes(adj.location_id))
   }, [adjustments, selectedLocationIds])
 
-  // Group audit batches - adjustments with same reason starting with "Audit:" created within 60 seconds
+  // Group audit batches
   const groupedAdjustments = useMemo(() => {
     const sorted = [...locationFilteredAdjustments].sort((a, b) =>
       new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
@@ -78,11 +181,10 @@ export function AuditsView({ onCreatePress, headerOpacity, vendorLogo, selectedL
           if (other.adjustment_type !== 'count_correction') return false
 
           const otherTime = new Date(other.created_at).getTime()
-          return Math.abs(adjTime - otherTime) < 60000 // Within 60 seconds
+          return Math.abs(adjTime - otherTime) < 60000
         })
 
         if (batchAdjustments.length > 1) {
-          // Create batch
           batchAdjustments.forEach(a => processed.add(a.id))
 
           const batch: AuditBatch = {
@@ -101,7 +203,6 @@ export function AuditsView({ onCreatePress, headerOpacity, vendorLogo, selectedL
         }
       }
 
-      // Add as individual adjustment
       processed.add(adj.id)
       result.push(adj)
     })
@@ -109,54 +210,79 @@ export function AuditsView({ onCreatePress, headerOpacity, vendorLogo, selectedL
     return result
   }, [locationFilteredAdjustments])
 
-  // Filter by type only (location filtering already done before grouping)
+  // Filter by view type
   const filteredAdjustments = useMemo(() => {
-    if (filterType === 'all') {
+    if (viewFilter === 'all') {
       return groupedAdjustments
     }
+    if (viewFilter === 'batches') {
+      return groupedAdjustments.filter(item => 'type' in item && item.type === 'batch')
+    }
+    return groupedAdjustments.filter(item => !('type' in item && item.type === 'batch'))
+  }, [groupedAdjustments, viewFilter])
 
-    return groupedAdjustments.filter(item => {
-      if ('type' in item && item.type === 'batch') {
-        // For batches, check if all adjustments match the filter
-        return item.adjustments.every(adj => adj.adjustment_type === filterType)
+  // Handlers
+  const handleSelect = (item: AdjustmentOrBatch) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+
+    if ('type' in item && item.type === 'batch') {
+      setSelectedAuditBatch(item as AuditBatch)
+    } else {
+      // Create single-item batch for consistent modal display
+      const adj = item as InventoryAdjustment
+      const singleBatch: AuditBatch = {
+        id: `single-${adj.id}`,
+        type: 'batch',
+        reason: adj.reason,
+        created_at: adj.created_at,
+        location_name: adj.location?.name || null,
+        adjustments: [adj],
+        total_quantity_change: adj.quantity_change,
       }
-      // Type guard: item is InventoryAdjustment
-      return 'adjustment_type' in item && item.adjustment_type === filterType
-    })
-  }, [groupedAdjustments, filterType])
+      setSelectedAuditBatch(singleBatch)
+    }
+  }
 
-  // Group by date
-  const groupedByDate = useMemo(() => {
-    const groups: Record<string, AdjustmentOrBatch[]> = {}
+  const handleAddPress = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    productsScreenActions.openModal('createAudit')
+  }
+
+  const handleCloseModal = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    setSelectedAuditBatch(null)
+  }
+
+  const handleFilterSelect = (filterId: string) => {
+    setViewFilter(filterId as 'all' | 'batches' | 'single')
+  }
+
+  // Define filter pills
+  const filterPills: FilterPill[] = [
+    { id: 'all', label: 'All' },
+    { id: 'batches', label: 'Batches' },
+    { id: 'single', label: 'Single' },
+  ]
+
+  // Group audits by date
+  const auditSections = useMemo(() => {
+    const sections = new Map<string, AdjustmentOrBatch[]>()
+
     filteredAdjustments.forEach(item => {
       const date = new Date(item.created_at).toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
         year: 'numeric',
-        month: 'long',
-        day: 'numeric'
       })
-      if (!groups[date]) groups[date] = []
-      groups[date].push(item)
+
+      if (!sections.has(date)) {
+        sections.set(date, [])
+      }
+      sections.get(date)!.push(item)
     })
-    return Object.entries(groups).sort((a, b) =>
-      new Date(b[1][0].created_at).getTime() - new Date(a[1][0].created_at).getTime()
-    )
+
+    return Array.from(sections.entries())
   }, [filteredAdjustments])
-
-  const toggleBatch = (batchId: string) => {
-    const newExpanded = new Set(expandedBatches)
-    if (newExpanded.has(batchId)) {
-      newExpanded.delete(batchId)
-    } else {
-      newExpanded.add(batchId)
-    }
-    setExpandedBatches(newExpanded)
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-  }
-
-  const formatTime = (dateStr: string) => {
-    const date = new Date(dateStr)
-    return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
-  }
 
   const getTypeLabel = (type: AdjustmentType) => {
     const labels: Record<AdjustmentType, string> = {
@@ -172,482 +298,417 @@ export function AuditsView({ onCreatePress, headerOpacity, vendorLogo, selectedL
     return labels[type]
   }
 
-  const FILTER_OPTIONS: { value: AdjustmentType | 'all'; label: string }[] = [
-    { value: 'all', label: 'All' },
-    { value: 'count_correction', label: 'Corrections' },
-    { value: 'damage', label: 'Damage' },
-    { value: 'shrinkage', label: 'Shrinkage' },
-    { value: 'theft', label: 'Theft' },
-    { value: 'expired', label: 'Expired' },
-    { value: 'received', label: 'Received' },
-    { value: 'return', label: 'Returns' },
-  ]
+  // ========================================
+  // RENDER
+  // ========================================
 
-  if (loading) {
+  if (isLoading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="rgba(235,235,245,0.6)" />
-        <Text style={styles.loadingText}>Loading audit records...</Text>
-      </View>
-    )
-  }
-
-  if (filteredAdjustments.length === 0) {
-    return (
-      <View style={styles.emptyContainer}>
-        <Text style={styles.emptyTitle}>No audit records</Text>
-        <Text style={styles.emptySubtitle}>
-          {filterType === 'all'
-            ? 'Inventory adjustments will appear here'
-            : `No ${getTypeLabel(filterType as AdjustmentType).toLowerCase()} records found`
-          }
-        </Text>
+        <ActivityIndicator color={colors.text.secondary} />
       </View>
     )
   }
 
   return (
-    <ScrollView
-      style={styles.content}
-      contentContainerStyle={{ paddingTop: layout.contentStartTop, paddingBottom: layout.dockHeight, paddingRight: 0 }}
-      showsVerticalScrollIndicator={true}
-      indicatorStyle="white"
-      scrollIndicatorInsets={{ right: 2, top: layout.contentStartTop, bottom: layout.dockHeight }}
-      onScroll={(e) => {
-        const offsetY = e.nativeEvent.contentOffset.y
-        const threshold = 40
-        // Instant transition like iOS
-        headerOpacity.setValue(offsetY > threshold ? 1 : 0)
-      }}
-      scrollEventThrottle={16}
-    >
-      {/* Large Title with Vendor Logo - scrolls with content */}
-      <View style={styles.cardWrapper}>
-        <View style={styles.titleSectionContainer}>
-          <View style={styles.largeTitleContainer}>
-            <View>
-              <View style={styles.titleWithLogo}>
-                {vendorLogo && (
-                  <Image
-                    source={{ uri: vendorLogo }}
-                    style={styles.vendorLogoInline}
-                    resizeMode="contain"
-                        fadeDuration={0}
-                  />
-                )}
-                <Text style={styles.largeTitleHeader}>Audits</Text>
-              </View>
-              <Text style={styles.headerSubtitle}>
-                {filteredAdjustments.length} {filteredAdjustments.length === 1 ? 'record' : 'records'}
-              </Text>
-            </View>
-            <Pressable
-              style={styles.addButton}
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                onCreatePress()
-              }}
-              accessible={true}
-              accessibilityRole="button"
-              accessibilityLabel="Create new audit"
-            >
-              <Text style={styles.addButtonText}>Create Audit</Text>
-            </Pressable>
-          </View>
-        </View>
-      </View>
-
-      {/* Filter Pills */}
+    <>
       <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.filtersContainer}
-        contentContainerStyle={styles.filtersContent}
+        showsVerticalScrollIndicator={true}
+        indicatorStyle="white"
+        scrollIndicatorInsets={{ right: 2, bottom: layout.dockHeight }}
+        contentContainerStyle={{ paddingBottom: layout.dockHeight, paddingRight: 0 }}
       >
-        {FILTER_OPTIONS.map(option => (
-          <Pressable
-            key={option.value}
-            style={[
-              styles.filterPill,
-              filterType === option.value && styles.filterPillActive,
-            ]}
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-              setFilterType(option.value)
-            }}
-          >
-            <Text
-              style={[
-                styles.filterPillText,
-                filterType === option.value && styles.filterPillTextActive,
-              ]}
-            >
-              {option.label}
-            </Text>
-          </Pressable>
-        ))}
+        {/* Title Section */}
+        <TitleSection
+          title="Audits"
+          logo={vendor?.logo_url}
+          buttonText="+ Create Audit"
+          onButtonPress={handleAddPress}
+          buttonAccessibilityLabel="Create new audit"
+          filterPills={filterPills}
+          activeFilterId={viewFilter}
+          onFilterSelect={handleFilterSelect}
+        />
+
+        {/* Empty State */}
+        {filteredAdjustments.length === 0 ? (
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyStateTitle}>No Audits</Text>
+            <Text style={styles.emptyStateText}>{emptyMessage}</Text>
+          </View>
+        ) : (
+          <>
+            {/* Render sections with date headers */}
+            {auditSections.map(([date, items]) => (
+              <View key={date} style={styles.dateSection}>
+                {/* Date Header */}
+                <View style={styles.sectionHeader}>
+                  <Text style={styles.sectionHeaderText}>{date}</Text>
+                </View>
+
+                {/* Audits in this section */}
+                <View style={styles.cardWrapper}>
+                  <View style={styles.auditsCardGlass}>
+                    {items.map((item, index) => {
+                      const isLast = index === items.length - 1
+
+                      return (
+                        <AuditItem
+                          key={item.id}
+                          item={item}
+                          isLast={isLast}
+                          isSelected={selectedAuditBatch?.id === item.id}
+                          onPress={() => handleSelect(item)}
+                        />
+                      )
+                    })}
+                  </View>
+                </View>
+              </View>
+            ))}
+          </>
+        )}
       </ScrollView>
 
-      {/* Grouped Adjustments */}
-      {groupedByDate.map(([date, dayItems]) => (
-            <View key={date} style={styles.dateGroup}>
-              <Text style={styles.dateHeader}>{date}</Text>
-              <View style={styles.card}>
-                {dayItems.map((item, index) => {
-                  // Check if this is a batch or single adjustment
-                  if ('type' in item && item.type === 'batch') {
-                    const batch = item as AuditBatch
-                    const isExpanded = expandedBatches.has(batch.id)
+      {/* Audit Detail Modal */}
+      {selectedAuditBatch && (
+        <Modal
+          visible={!!selectedAuditBatch}
+          animationType="slide"
+          presentationStyle="fullScreen"
+          onRequestClose={handleCloseModal}
+        >
+          <StatusBar barStyle="light-content" />
+          <View style={styles.modalContainer}>
+            <View style={[styles.modalHeader, { paddingTop: insets.top + 16 }]}>
+              <Text style={styles.modalTitle}>Audit Details</Text>
+              <Pressable onPress={handleCloseModal} style={styles.modalCloseButton}>
+                <Text style={styles.modalCloseText}>Done</Text>
+              </Pressable>
+            </View>
+            <ScrollView style={styles.modalContent}>
+              <View style={styles.modalSection}>
+                <Text style={styles.modalSectionLabel}>AUDIT INFO</Text>
+                <View style={styles.modalInfoCard}>
+                  <View style={styles.modalInfoRow}>
+                    <Text style={styles.modalInfoLabel}>Staff:</Text>
+                    <Text style={styles.modalInfoValue}>
+                      {selectedAuditBatch.adjustments[0]?.created_by_user?.first_name}{' '}
+                      {selectedAuditBatch.adjustments[0]?.created_by_user?.last_name}
+                    </Text>
+                  </View>
+                  <View style={styles.modalInfoRow}>
+                    <Text style={styles.modalInfoLabel}>Date:</Text>
+                    <Text style={styles.modalInfoValue}>
+                      {new Date(selectedAuditBatch.created_at).toLocaleDateString('en-US', {
+                        month: 'long',
+                        day: 'numeric',
+                        year: 'numeric',
+                        hour: 'numeric',
+                        minute: '2-digit',
+                      })}
+                    </Text>
+                  </View>
+                  <View style={styles.modalInfoRow}>
+                    <Text style={styles.modalInfoLabel}>Location:</Text>
+                    <Text style={styles.modalInfoValue}>{selectedAuditBatch.location_name}</Text>
+                  </View>
+                  <View style={styles.modalInfoRow}>
+                    <Text style={styles.modalInfoLabel}>Reason:</Text>
+                    <Text style={styles.modalInfoValue}>
+                      {selectedAuditBatch.reason.replace('Audit: ', '')}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+
+              <View style={styles.modalSection}>
+                <Text style={styles.modalSectionLabel}>
+                  {selectedAuditBatch.adjustments.length === 1
+                    ? `${getTypeLabel(selectedAuditBatch.adjustments[0].adjustment_type).toUpperCase()}`
+                    : `CORRECTIONS (${selectedAuditBatch.adjustments.length})`}
+                </Text>
+                <View style={styles.modalProductsCard}>
+                  {selectedAuditBatch.adjustments.map((adj, idx) => {
+                    const unitMatch = adj.notes?.match(/(g|units)/)
+                    const unit = unitMatch?.[1] || 'g'
 
                     return (
-                      <View key={batch.id}>
-                        {/* Batch Summary Row */}
-                        <Pressable
-                          style={styles.batchRow}
-                          onPress={() => toggleBatch(batch.id)}
-                        >
-                          <View style={styles.adjustmentLeft}>
-                            {/* Time */}
-                            <Text style={styles.adjustmentTime}>{formatTime(batch.created_at)}</Text>
-
-                            {/* Batch Info */}
-                            <View style={styles.adjustmentInfo}>
-                              <View style={styles.batchHeader}>
-                                <Text style={styles.batchTitle}>Bulk Audit</Text>
-                                <Text style={styles.batchCount}>
-                                  {batch.adjustments.length} {batch.adjustments.length === 1 ? 'product' : 'products'}
-                                </Text>
-                              </View>
-                              {batch.location_name && (
-                                <Text style={styles.adjustmentLocation}>{batch.location_name}</Text>
-                              )}
-                            </View>
-
-                            {/* Reason */}
-                            <Text style={styles.adjustmentReason}>{batch.reason}</Text>
+                      <View key={adj.id}>
+                        <View style={styles.modalProductRow}>
+                          <View style={styles.modalProductInfo}>
+                            <Text style={styles.modalProductName}>
+                              {adj.product?.name || 'Unknown'}
+                            </Text>
+                            {adj.product?.sku && (
+                              <Text style={styles.modalProductSku}>SKU: {adj.product.sku}</Text>
+                            )}
                           </View>
-
-                          {/* Total Quantity Change */}
-                          <View style={styles.batchRight}>
-                            <Text style={styles.expandIndicator}>{isExpanded ? '▼' : '▶'}</Text>
+                          <View style={styles.modalProductQty}>
                             <Text
                               style={[
-                                styles.quantityChange,
-                                batch.total_quantity_change > 0 && styles.quantityPositive,
-                                batch.total_quantity_change < 0 && styles.quantityNegative,
+                                styles.modalProductChange,
+                                adj.quantity_change > 0 && styles.quantityPositive,
+                                adj.quantity_change < 0 && styles.quantityNegative,
                               ]}
                             >
-                              {batch.total_quantity_change > 0 ? '+' : ''}{batch.total_quantity_change}g
+                              {adj.quantity_change > 0 ? '+' : ''}
+                              {adj.quantity_change}
+                              {unit}
                             </Text>
+                            <Text style={styles.modalProductBeforeAfter}>
+                              {adj.quantity_before}
+                              {unit} → {adj.quantity_after}
+                              {unit}
+                            </Text>
+                            {adj.notes && (
+                              <Text style={styles.modalProductNotes}>{adj.notes}</Text>
+                            )}
                           </View>
-                        </Pressable>
-
-                        {/* Expanded Product Details */}
-                        {isExpanded && (
-                          <View style={styles.batchExpanded}>
-                            {batch.adjustments.map((adj, adjIndex) => (
-                              <View key={adj.id} style={styles.batchItem}>
-                                <View style={styles.batchItemLeft}>
-                                  <Text style={styles.adjustmentProduct}>{adj.product?.name || 'Unknown'}</Text>
-                                  {adj.product?.sku && (
-                                    <Text style={styles.adjustmentSKU}>SKU: {adj.product.sku}</Text>
-                                  )}
-                                </View>
-                                <View style={styles.batchItemRight}>
-                                  <Text
-                                    style={[
-                                      styles.batchItemChange,
-                                      adj.quantity_change > 0 && styles.quantityPositive,
-                                      adj.quantity_change < 0 && styles.quantityNegative,
-                                    ]}
-                                  >
-                                    {adj.quantity_change > 0 ? '+' : ''}{adj.quantity_change}g
-                                  </Text>
-                                  <Text style={styles.batchItemBefore}>{adj.quantity_before}g → {adj.quantity_after}g</Text>
-                                </View>
-                                {adjIndex < batch.adjustments.length - 1 && (
-                                  <View style={styles.batchItemDivider} />
-                                )}
-                              </View>
-                            ))}
-                          </View>
+                        </View>
+                        {idx < selectedAuditBatch.adjustments.length - 1 && (
+                          <View style={styles.modalProductDivider} />
                         )}
-
-                        {index < dayItems.length - 1 && <View style={styles.divider} />}
                       </View>
                     )
-                  }
-
-                  // Regular adjustment
-                  const adj = item as InventoryAdjustment
-                  return (
-                    <View key={adj.id}>
-                      <View style={styles.adjustmentRow}>
-                        <View style={styles.adjustmentLeft}>
-                          {/* Time */}
-                          <Text style={styles.adjustmentTime}>{formatTime(adj.created_at)}</Text>
-
-                          {/* Product Info */}
-                          <View style={styles.adjustmentInfo}>
-                            <Text style={styles.adjustmentProduct}>{adj.product?.name || 'Unknown'}</Text>
-                            {adj.product?.sku && (
-                              <Text style={styles.adjustmentSKU}>SKU: {adj.product.sku}</Text>
-                            )}
-                            {adj.location?.name && (
-                              <Text style={styles.adjustmentLocation}>{adj.location.name}</Text>
-                            )}
-                          </View>
-
-                          {/* Reason */}
-                          <Text style={styles.adjustmentReason}>{adj.reason}</Text>
-                          {adj.notes && (
-                            <Text style={styles.adjustmentNotes}>Note: {adj.notes}</Text>
-                          )}
-                        </View>
-
-                        {/* Quantity Change */}
-                        <View style={styles.adjustmentRight}>
-                          <Text
-                            style={[
-                              styles.quantityChange,
-                              adj.quantity_change > 0 && styles.quantityPositive,
-                              adj.quantity_change < 0 && styles.quantityNegative,
-                            ]}
-                          >
-                            {adj.quantity_change > 0 ? '+' : ''}{adj.quantity_change}g
-                          </Text>
-                          <Text style={styles.quantityBefore}>{adj.quantity_before}g</Text>
-                          <Text style={styles.quantityArrow}>↓</Text>
-                          <Text style={styles.quantityAfter}>{adj.quantity_after}g</Text>
-                        </View>
-                      </View>
-
-                      {index < dayItems.length - 1 && <View style={styles.divider} />}
-                    </View>
-                  )
-                })}
+                  })}
+                </View>
               </View>
-            </View>
-      ))}
-    </ScrollView>
+            </ScrollView>
+          </View>
+        </Modal>
+      )}
+    </>
   )
 }
 
+// =====================================================
+// STYLES - MATCHING TRANSFERSLIST EXACTLY
+// =====================================================
+
 const styles = StyleSheet.create({
-  titleSectionContainer: {
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderRadius: radius.xxl,
-    borderCurve: 'continuous',
-    padding: spacing.lg,
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.12)',
-  },
-  titleWithLogo: {
-    flexDirection: 'row',
+  loadingContainer: {
+    padding: 40,
     alignItems: 'center',
-    gap: spacing.lg,
-  },
-  vendorLogoInline: {
-    width: 80,
-    height: 80,
-    borderRadius: radius.xxl,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.25)',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-  },
-  // Large Title
-  largeTitleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: 16,
-    paddingBottom: 8,
-  },
-  largeTitleHeader: {
-    fontSize: 34,
-    fontWeight: '700',
-    color: '#fff',
-    letterSpacing: -0.5,
   },
   cardWrapper: {
     marginHorizontal: layout.containerMargin,
     marginVertical: layout.containerMargin,
   },
-  addButton: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-    borderRadius: radius.md,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.2)',
+  auditsCardGlass: {
+    borderRadius: radius.xxl,
+    borderCurve: 'continuous',
+    overflow: 'hidden',
+    backgroundColor: 'rgba(255,255,255,0.05)',
   },
-  addButtonText: {
-    fontSize: 13,
+  auditItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: layout.rowPaddingVertical,
+    paddingHorizontal: layout.rowPaddingHorizontal,
+    gap: 12,
+    backgroundColor: 'transparent',
+    borderBottomWidth: 0.5,
+    borderBottomColor: 'rgba(255,255,255,0.05)',
+    minHeight: layout.minTouchTarget,
+  },
+  auditItemActive: {
+    backgroundColor: 'rgba(99,99,102,0.2)',
+  },
+  auditItemLast: {
+    borderBottomWidth: 0,
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  auditInfo: {
+    flex: 1,
+    gap: 2,
+    minWidth: 200,
+  },
+  staffName: {
+    fontSize: 15,
     fontWeight: '600',
-    color: colors.text.primary,
+    color: '#fff',
     letterSpacing: -0.2,
   },
-  headerSubtitle: {
-    fontSize: 13,
+  typeBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 12,
+    backgroundColor: '#0a84ff',
+  },
+  typeBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  locationText: {
+    fontSize: 11,
     fontWeight: '400',
-    color: colors.text.tertiary,
-    letterSpacing: -0.1,
-    marginTop: spacing.xxs,
+    color: 'rgba(235,235,245,0.6)',
+    letterSpacing: 0.2,
   },
-  filtersContainer: {
-    maxHeight: 60,
-    marginBottom: spacing.md,
+  reasonText: {
+    fontSize: 11,
+    fontWeight: '400',
+    color: 'rgba(235,235,245,0.6)',
+    letterSpacing: 0.2,
   },
-  filtersContent: {
-    paddingHorizontal: layout.containerMargin,
-    paddingBottom: spacing.sm,
-    gap: spacing.xs,
+  dataColumn: {
+    minWidth: 90,
+    alignItems: 'flex-end',
+    gap: 2,
   },
-  filterPill: {
-    borderRadius: radius.lg,
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.1)',
-    backgroundColor: 'rgba(255,255,255,0.03)',
-    paddingVertical: spacing.xs,
-    paddingHorizontal: spacing.md,
-    marginRight: spacing.xs,
-    minHeight: 36,
-    justifyContent: 'center',
-  },
-  filterPillActive: {
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    borderColor: 'rgba(255,255,255,0.2)',
-  },
-  filterPillText: {
-    fontSize: 13,
+  dataLabel: {
+    fontSize: 9,
     fontWeight: '600',
-    color: colors.text.secondary,
+    color: 'rgba(235,235,245,0.4)',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+  },
+  dataValue: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#fff',
     letterSpacing: -0.2,
   },
-  filterPillTextActive: {
-    color: colors.text.primary,
+  dateSection: {
+    marginBottom: 0,
   },
-  loadingContainer: {
+  sectionHeader: {
+    paddingVertical: 4,
+    paddingHorizontal: 20,
+    backgroundColor: '#000',
+    marginTop: 12,
+  },
+  sectionHeaderText: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#fff',
+    letterSpacing: -0.3,
+  },
+  emptyState: {
     flex: 1,
-    justifyContent: 'center',
     alignItems: 'center',
-    gap: spacing.md,
-  },
-  loadingText: {
-    fontSize: 13,
-    fontWeight: '400',
-    color: colors.text.tertiary,
-    letterSpacing: -0.1,
-  },
-  emptyContainer: {
-    flex: 1,
     justifyContent: 'center',
-    alignItems: 'center',
     paddingHorizontal: spacing.huge,
+    paddingVertical: 80,
     gap: spacing.xs,
   },
-  emptyTitle: {
+  emptyStateTitle: {
     fontSize: 20,
     fontWeight: '600',
     color: colors.text.primary,
     letterSpacing: -0.3,
   },
-  emptySubtitle: {
+  emptyStateText: {
     fontSize: 15,
     fontWeight: '400',
     color: colors.text.tertiary,
     textAlign: 'center',
     letterSpacing: -0.2,
   },
-  content: {
+  // Modal styles
+  modalContainer: {
+    flex: 1,
+    backgroundColor: '#1c1c1e',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    borderBottomWidth: 0.5,
+    borderBottomColor: 'rgba(255,255,255,0.1)',
+  },
+  modalTitle: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: colors.text.primary,
+  },
+  modalCloseButton: {
+    padding: 8,
+  },
+  modalCloseText: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: '#0a84ff',
+  },
+  modalContent: {
     flex: 1,
   },
-  dateGroup: {
-    marginBottom: spacing.lg,
-    marginHorizontal: layout.containerMargin,
+  modalSection: {
+    padding: 16,
   },
-  dateHeader: {
-    fontSize: 11,
+  modalSectionLabel: {
+    fontSize: 13,
     fontWeight: '600',
     color: colors.text.tertiary,
     letterSpacing: 0.6,
-    textTransform: 'uppercase',
-    marginBottom: spacing.xs,
-    paddingHorizontal: 0, // No padding - inherits from dateGroup margin
+    marginBottom: 12,
   },
-  card: {
+  modalInfoCard: {
     backgroundColor: 'rgba(255,255,255,0.05)',
     borderRadius: radius.xxl,
-    borderCurve: 'continuous',
-    padding: spacing.lg,
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.1)',
+    padding: 16,
+    gap: 12,
   },
-  adjustmentRow: {
+  modalInfoRow: {
     flexDirection: 'row',
-    paddingVertical: spacing.sm,
-    gap: spacing.md,
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
-  adjustmentLeft: {
-    flex: 1,
+  modalInfoLabel: {
+    fontSize: 15,
+    fontWeight: '500',
+    color: colors.text.secondary,
   },
-  adjustmentTime: {
-    fontSize: 12,
-    fontWeight: '400',
-    color: colors.text.quaternary,
-    letterSpacing: -0.1,
-    marginBottom: spacing.xs,
-  },
-  adjustmentInfo: {
-    marginBottom: spacing.xs,
-  },
-  adjustmentProduct: {
+  modalInfoValue: {
     fontSize: 15,
     fontWeight: '600',
     color: colors.text.primary,
-    letterSpacing: -0.2,
-    marginBottom: spacing.xxs,
+    textAlign: 'right',
+    flex: 1,
+    marginLeft: 16,
   },
-  adjustmentSKU: {
+  modalProductsCard: {
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: radius.xxl,
+    padding: 16,
+  },
+  modalProductRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    gap: 16,
+  },
+  modalProductInfo: {
+    flex: 1,
+  },
+  modalProductName: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: colors.text.primary,
+  },
+  modalProductSku: {
     fontSize: 13,
     fontWeight: '400',
     color: colors.text.tertiary,
-    letterSpacing: -0.1,
+    marginTop: 4,
   },
-  adjustmentLocation: {
-    fontSize: 13,
-    fontWeight: '400',
-    color: colors.text.quaternary,
-    letterSpacing: -0.1,
-    marginTop: spacing.xxs,
-  },
-  adjustmentReason: {
-    fontSize: 13,
-    fontWeight: '400',
-    color: colors.text.secondary,
-    letterSpacing: -0.1,
-    marginBottom: spacing.xxs,
-  },
-  adjustmentNotes: {
-    fontSize: 13,
-    fontWeight: '400',
-    color: colors.text.quaternary,
-    letterSpacing: -0.1,
-    fontStyle: 'italic',
-  },
-  adjustmentRight: {
+  modalProductQty: {
     alignItems: 'flex-end',
-    justifyContent: 'center',
   },
-  quantityChange: {
+  modalProductChange: {
     fontSize: 20,
     fontWeight: '700',
     color: colors.text.primary,
-    letterSpacing: -0.3,
-    marginBottom: spacing.xs,
   },
   quantityPositive: {
     color: colors.semantic.success,
@@ -655,104 +716,21 @@ const styles = StyleSheet.create({
   quantityNegative: {
     color: colors.semantic.error,
   },
-  quantityBefore: {
-    fontSize: 12,
-    fontWeight: '400',
-    color: colors.text.quaternary,
-    letterSpacing: -0.1,
-  },
-  quantityArrow: {
-    fontSize: 12,
-    fontWeight: '400',
-    color: colors.text.ghost,
-    letterSpacing: -0.1,
-    marginVertical: spacing.xxxs,
-  },
-  quantityAfter: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.text.secondary,
-    letterSpacing: -0.1,
-  },
-  divider: {
-    height: 0.5,
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    marginVertical: spacing.md,
-  },
-  // Batch styles
-  batchRow: {
-    flexDirection: 'row',
-    paddingVertical: spacing.sm,
-    gap: spacing.md,
-  },
-  batchHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    marginBottom: spacing.xxs,
-  },
-  batchTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: colors.text.primary,
-    letterSpacing: -0.2,
-  },
-  batchCount: {
+  modalProductBeforeAfter: {
     fontSize: 13,
-    fontWeight: '600',
-    color: colors.text.tertiary,
-    letterSpacing: -0.1,
-  },
-  batchRight: {
-    alignItems: 'flex-end',
-    justifyContent: 'center',
-    gap: spacing.xs,
-  },
-  expandIndicator: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.text.tertiary,
-    marginBottom: spacing.xxs,
-  },
-  batchExpanded: {
-    marginTop: spacing.sm,
-    marginLeft: spacing.xl,
-    paddingTop: spacing.md,
-    borderTopWidth: 0.5,
-    borderTopColor: 'rgba(255,255,255,0.1)',
-  },
-  batchItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    paddingVertical: spacing.sm,
-    gap: spacing.md,
-  },
-  batchItemLeft: {
-    flex: 1,
-  },
-  batchItemRight: {
-    alignItems: 'flex-end',
-    gap: spacing.xxxs,
-  },
-  batchItemChange: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: colors.text.primary,
-    letterSpacing: -0.2,
-  },
-  batchItemBefore: {
-    fontSize: 11,
     fontWeight: '400',
-    color: colors.text.quaternary,
-    letterSpacing: -0.1,
+    color: colors.text.tertiary,
+    marginTop: 4,
   },
-  batchItemDivider: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
+  modalProductNotes: {
+    fontSize: 12,
+    fontWeight: '400',
+    color: colors.text.tertiary,
+    fontStyle: 'italic',
+    marginTop: 4,
+  },
+  modalProductDivider: {
     height: 0.5,
-    backgroundColor: 'rgba(255,255,255,0.04)',
+    backgroundColor: 'rgba(255,255,255,0.1)',
   },
 })

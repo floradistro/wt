@@ -41,6 +41,7 @@ interface ProductEditState {
   loadingTemplates: boolean
 
   // Actions
+  initializeProduct: (product: Product) => void
   startEditing: (product: Product) => void
   stopEditing: () => void
   updateField: (field: keyof ProductEditState, value: any) => void
@@ -77,10 +78,74 @@ export const useProductEditStore = create<ProductEditState>()(
       ...initialState,
 
       /**
+       * Initialize product data without entering edit mode
+       * Used when opening ProductDetail in view mode
+       */
+      initializeProduct: (product: Product) => {
+        logger.debug('[ProductEdit] initializeProduct called', {
+          productId: product.id,
+          customFields: product.custom_fields,
+        })
+
+        // SINGLE SOURCE: Read from pricing_template, not pricing_data
+        const hasTiers = product.pricing_template?.default_tiers && product.pricing_template.default_tiers.length > 0
+        const pricingTiers = hasTiers
+          ? product.pricing_template.default_tiers.map((t: any) => ({
+              id: t.id,
+              label: t.label,
+              quantity: t.quantity,
+              unit: t.unit,
+              price: t.default_price,
+              enabled: true,
+              sort_order: t.sort_order,
+            }))
+          : []
+
+        set(
+          {
+            productId: product.id,
+            originalProduct: product,
+            isEditing: false,
+            editedName: product.name,
+            editedSKU: product.sku || '',
+            editedDescription: product.description || '',
+            editedPrice: product.price?.toString() || product.regular_price?.toString() || '',
+            editedCostPrice: product.cost_price?.toString() || '',
+            pricingMode: hasTiers ? 'tiered' : 'single',
+            pricingTiers,
+            selectedTemplateId: product.pricing_template_id || null,
+            editedCustomFields: product.custom_fields || {},
+          },
+          false,
+          'productEdit/initializeProduct'
+        )
+      },
+
+      /**
        * Start editing a product
        * ANTI-LOOP: Simple state initialization - no side effects
        */
       startEditing: (product: Product) => {
+        logger.info('[ProductEdit] Starting edit mode', {
+          productId: product.id,
+          productName: product.name,
+          customFields: product.custom_fields,
+        })
+
+        // SINGLE SOURCE: Read from pricing_template, not pricing_data
+        const hasTiers = product.pricing_template?.default_tiers && product.pricing_template.default_tiers.length > 0
+        const pricingTiers = hasTiers
+          ? product.pricing_template.default_tiers.map((t: any) => ({
+              id: t.id,
+              label: t.label,
+              quantity: t.quantity,
+              unit: t.unit,
+              price: t.default_price,
+              enabled: true,
+              sort_order: t.sort_order,
+            }))
+          : []
+
         set(
           {
             productId: product.id,
@@ -91,14 +156,16 @@ export const useProductEditStore = create<ProductEditState>()(
             editedDescription: product.description || '',
             editedPrice: product.price?.toString() || product.regular_price?.toString() || '',
             editedCostPrice: product.cost_price?.toString() || '',
-            pricingMode: product.pricing_data?.mode || 'single',
-            pricingTiers: product.pricing_data?.tiers || [],
-            selectedTemplateId: product.pricing_data?.template_id || null,
+            pricingMode: hasTiers ? 'tiered' : 'single',
+            pricingTiers,
+            selectedTemplateId: product.pricing_template_id || null,
             editedCustomFields: product.custom_fields || {},
           },
           false,
           'productEdit/startEditing'
         )
+
+        logger.info('[ProductEdit] Edit mode initialized with custom fields:', product.custom_fields || {})
       },
 
       /**
@@ -194,22 +261,46 @@ export const useProductEditStore = create<ProductEditState>()(
             updated_at: new Date().toISOString(),
           }
 
-          const { error: updateError } = await supabase
+          const updatePayload = {
+            name: state.editedName,
+            sku: state.editedSKU,
+            description: state.editedDescription,
+            cost_price: parseFloat(state.editedCostPrice) || null,
+            pricing_data: pricingData,
+            custom_fields: state.editedCustomFields,
+            updated_at: new Date().toISOString(),
+          }
+
+          logger.info('[ProductEdit] Saving product:', {
+            productId: state.originalProduct.id,
+            vendorId,
+            customFields: state.editedCustomFields,
+            payload: updatePayload,
+          })
+
+          const { data: updateData, error: updateError } = await supabase
             .from('products')
-            .update({
-              name: state.editedName,
-              sku: state.editedSKU,
-              description: state.editedDescription,
-              cost_price: parseFloat(state.editedCostPrice) || null,
-              pricing_data: pricingData,
-              custom_fields: state.editedCustomFields,
-              updated_at: new Date().toISOString(),
-            })
+            .update(updatePayload)
             .eq('id', state.originalProduct.id)
             .eq('vendor_id', vendorId)
+            .select()
+
+          logger.info('[ProductEdit] Update response:', {
+            data: updateData,
+            error: updateError,
+            rowsAffected: updateData?.length || 0,
+          })
 
           if (updateError) throw updateError
 
+          if (!updateData || updateData.length === 0) {
+            throw new Error('No rows were updated - check vendor_id or product_id')
+          }
+
+          logger.info('[ProductEdit] Product saved successfully', {
+            updatedProduct: updateData[0],
+            customFieldsInDB: updateData[0]?.custom_fields,
+          })
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
 
           set({ isEditing: false, saving: false }, false, 'productEdit/saveProduct/success')
@@ -237,6 +328,20 @@ export const useProductEditStore = create<ProductEditState>()(
 
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
 
+        // SINGLE SOURCE: Read from pricing_template, not pricing_data
+        const hasTiers = originalProduct.pricing_template?.default_tiers && originalProduct.pricing_template.default_tiers.length > 0
+        const pricingTiers = hasTiers
+          ? originalProduct.pricing_template.default_tiers.map((t: any) => ({
+              id: t.id,
+              label: t.label,
+              quantity: t.quantity,
+              unit: t.unit,
+              price: t.default_price,
+              enabled: true,
+              sort_order: t.sort_order,
+            }))
+          : []
+
         set(
           {
             isEditing: false,
@@ -245,9 +350,9 @@ export const useProductEditStore = create<ProductEditState>()(
             editedDescription: originalProduct.description || '',
             editedPrice: originalProduct.price?.toString() || originalProduct.regular_price?.toString() || '',
             editedCostPrice: originalProduct.cost_price?.toString() || '',
-            pricingMode: originalProduct.pricing_data?.mode || 'single',
-            pricingTiers: originalProduct.pricing_data?.tiers || [],
-            selectedTemplateId: originalProduct.pricing_data?.template_id || null,
+            pricingMode: hasTiers ? 'tiered' : 'single',
+            pricingTiers,
+            selectedTemplateId: originalProduct.pricing_template_id || null,
             editedCustomFields: originalProduct.custom_fields || {},
           },
           false,
@@ -333,6 +438,9 @@ export const useProductEditState = () =>
  * Use these directly - they're always stable and never cause re-renders
  */
 export const productEditActions = {
+  get initializeProduct() {
+    return useProductEditStore.getState().initializeProduct
+  },
   get startEditing() {
     return useProductEditStore.getState().startEditing
   },

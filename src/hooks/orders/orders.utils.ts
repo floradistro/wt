@@ -5,12 +5,17 @@
 
 import { type Order } from '@/services/orders.service'
 
-export type DateRange = 'today' | 'week' | 'month' | 'all'
+export type DateRange = 'today' | 'week' | 'month' | 'all' | 'custom'
 
 /**
  * Get the date filter cutoff for a given date range
+ * For custom ranges, pass startDate and endDate
  */
-export function getDateRangeFilter(range: DateRange): Date | null {
+export function getDateRangeFilter(
+  range: DateRange,
+  customStartDate?: Date | null,
+  customEndDate?: Date | null
+): Date | null | { start: Date; end: Date } {
   const now = new Date()
   switch (range) {
     case 'today':
@@ -25,6 +30,11 @@ export function getDateRangeFilter(range: DateRange): Date | null {
       const month = new Date(now)
       month.setDate(now.getDate() - 30)
       return month
+    case 'custom':
+      if (customStartDate && customEndDate) {
+        return { start: customStartDate, end: customEndDate }
+      }
+      return null
     case 'all':
       return null
   }

@@ -208,31 +208,29 @@ export const useOrderDetailStore = create<OrderDetailState>()(
       },
 
       /**
-       * Load tax details from location
+       * Load tax details from order
+       * Note: Tax rate is calculated as (tax_amount / subtotal) and stored as decimal (e.g., 0.0675 for 6.75%)
        */
       loadTaxDetails: async (orderId: string, locationId: string) => {
         try {
-          const { data: location, error } = await supabase
-            .from('locations')
-            .select('tax_name, tax_rate')
-            .eq('id', locationId)
+          // Get tax amount from order
+          const { data: order, error } = await supabase
+            .from('orders')
+            .select('tax_amount, subtotal')
+            .eq('id', orderId)
             .single()
 
           if (error) throw error
 
-          // Get tax amount from order
-          const { data: order } = await supabase
-            .from('orders')
-            .select('tax_amount')
-            .eq('id', orderId)
-            .single()
+          if (order) {
+            // Calculate tax rate from order data as decimal (0.0675 for 6.75%)
+            const taxRate = order.subtotal > 0 ? (order.tax_amount / order.subtotal) : 0
 
-          if (location && order) {
             set({
               taxDetails: [{
-                name: location.tax_name || 'Tax',
+                name: 'Sales Tax',
                 amount: order.tax_amount || 0,
-                rate: location.tax_rate || 0
+                rate: taxRate
               }]
             }, false, 'orderDetail/loadTaxDetails')
           }

@@ -10,11 +10,13 @@
  * - Computed selectors auto-update
  * - Badge counts always accurate
  * - Client-side filtering (fast, no API calls)
+ * - PERFORMANCE: Memoized selectors prevent redundant calculations
  */
 
 import { create } from 'zustand'
-import { devtools } from 'zustand/middleware'
+import { devtools, subscribeWithSelector } from 'zustand/middleware'
 import { useShallow } from 'zustand/react/shallow'
+import { useMemo } from 'react'
 import { type Order } from '@/services/orders.service'
 import { useOrdersStore } from './orders.store'
 import { useOrdersUIStore } from './orders-ui.store'
@@ -51,46 +53,51 @@ export const useOrderFilterStore = create<OrderFilterState>()(
         const allOrders = useOrdersStore.getState().orders
 
         // Read from orders UI store
-        const { activeNav, searchQuery, dateRange } = useOrdersUIStore.getState()
+        const { activeNav, searchQuery, dateRange, customStartDate, customEndDate } = useOrdersUIStore.getState()
 
         // Read from location filter store
         const { selectedLocationIds } = useLocationFilter.getState()
 
+        console.log('[OrderFilter] Filtering orders:', {
+          totalOrders: allOrders.length,
+          activeNav,
+          selectedLocationIds,
+          orderTypes: allOrders.map(o => o.order_type),
+          orderLocationIds: allOrders.map(o => o.pickup_location_id)
+        })
+
         // Get date filter cutoff
-        const dateFilter = getDateRangeFilter(dateRange)
+        const dateFilter = getDateRangeFilter(dateRange, customStartDate, customEndDate)
 
         // Apply all filters
         return allOrders.filter((order) => {
           // Location filter (FIRST - most important for staff users)
           if (selectedLocationIds.length > 0) {
             if (!order.pickup_location_id || !selectedLocationIds.includes(order.pickup_location_id)) {
+              console.log('[OrderFilter] Filtered out by location:', {
+                orderId: order.id,
+                orderLocation: order.pickup_location_id,
+                selectedLocations: selectedLocationIds
+              })
               return false
             }
           }
 
-          // Status filter - Smart groupings (The Apple Way)
+          // Order Type filter - Order type-based navigation (The Apple Way)
           if (activeNav !== 'all') {
-            if (activeNav === 'needs_action') {
-              // "Needs Action" = Orders requiring immediate attention
-              const needsAction = ['pending', 'ready', 'out_for_delivery', 'ready_to_ship']
-              if (!needsAction.includes(order.status)) {
+            if (activeNav === 'in-store') {
+              // "In-Store Sales" = POS walk-in transactions
+              if (order.order_type !== 'walk_in') {
                 return false
               }
-            } else if (activeNav === 'in_progress') {
-              // "In Progress" = Orders actively being worked on
-              const inProgress = ['preparing', 'shipped', 'in_transit']
-              if (!inProgress.includes(order.status)) {
+            } else if (activeNav === 'pickup') {
+              // "Store Pickup" = Online orders for pickup
+              if (order.order_type !== 'pickup') {
                 return false
               }
-            } else if (activeNav === 'completed') {
-              // "Completed" = Finished orders
-              const completed = ['completed', 'delivered']
-              if (!completed.includes(order.status)) {
-                return false
-              }
-            } else if (activeNav === 'cancelled') {
-              // "Cancelled" = Cancelled orders
-              if (order.status !== 'cancelled') {
+            } else if (activeNav === 'ecommerce') {
+              // "E-Commerce" = Shipping orders
+              if (order.order_type !== 'shipping') {
                 return false
               }
             }
@@ -99,8 +106,22 @@ export const useOrderFilterStore = create<OrderFilterState>()(
           // Date range filter
           if (dateFilter) {
             const orderDate = new Date(order.created_at)
-            if (orderDate < dateFilter) {
-              return false
+
+            // Handle custom date range (object with start and end)
+            if (typeof dateFilter === 'object' && 'start' in dateFilter && 'end' in dateFilter) {
+              const start = new Date(dateFilter.start)
+              start.setHours(0, 0, 0, 0)
+              const end = new Date(dateFilter.end)
+              end.setHours(23, 59, 59, 999)
+
+              if (orderDate < start || orderDate > end) {
+                return false
+              }
+            } else {
+              // Handle simple date cutoff (today, week, month)
+              if (orderDate < dateFilter) {
+                return false
+              }
             }
           }
 
@@ -194,9 +215,10 @@ export const useOrderFilterStore = create<OrderFilterState>()(
 
 /**
  * Selectors for optimal re-render performance
+ * Uses React.useMemo to prevent redundant calculations
  */
 
-// Get filtered orders (re-computes when dependencies change)
+// Get filtered orders (re-computes ONLY when dependencies change)
 export const useFilteredOrders = () => {
   // Subscribe to all dependencies to trigger re-computation
   const orders = useOrdersStore((state) => state.orders)
@@ -205,8 +227,10 @@ export const useFilteredOrders = () => {
   const dateRange = useOrdersUIStore((state) => state.dateRange)
   const selectedLocationIds = useLocationFilter((state) => state.selectedLocationIds)
 
-  // Compute filtered orders
-  return useOrderFilterStore.getState().getFilteredOrders()
+  // ⚡ PERFORMANCE: Memoize filtered orders
+  return useMemo(() => {
+    return useOrderFilterStore.getState().getFilteredOrders()
+  }, [orders, activeNav, searchQuery, dateRange, selectedLocationIds])
 }
 
 // Get grouped orders (for FlatList)
@@ -214,18 +238,22 @@ export const useGroupedOrders = () => {
   // Subscribe to filtered orders
   const filteredOrders = useFilteredOrders()
 
-  // Group by date
-  return useOrderFilterStore.getState().getGroupedOrders()
+  // ⚡ PERFORMANCE: Memoize grouped orders
+  return useMemo(() => {
+    return useOrderFilterStore.getState().getGroupedOrders()
+  }, [filteredOrders])
 }
 
-// Get badge counts (re-computes when orders or location filter changes)
+// Get badge counts (re-computes ONLY when orders or location filter changes)
 export const useBadgeCounts = () => {
   // Subscribe to dependencies
   const orders = useOrdersStore((state) => state.orders)
   const selectedLocationIds = useLocationFilter((state) => state.selectedLocationIds)
 
-  // Compute badge counts
-  return useOrderFilterStore.getState().getBadgeCounts()
+  // ⚡ PERFORMANCE: Memoize badge counts
+  return useMemo(() => {
+    return useOrderFilterStore.getState().getBadgeCounts()
+  }, [orders, selectedLocationIds])
 }
 
 // Export types

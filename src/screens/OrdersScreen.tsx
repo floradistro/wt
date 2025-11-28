@@ -21,10 +21,21 @@ import { LinearGradient } from 'expo-linear-gradient'
 import { colors } from '@/theme/tokens'
 import { layout } from '@/theme/layout'
 import { NavSidebar, type NavItem } from '@/components/NavSidebar'
-import { LocationSelector } from '@/components/LocationSelector'
+import { LocationSelectorModal, TitleSection } from '@/components/shared'
+import type { FilterPill } from '@/components/shared'
 import { OrderItem, SectionHeader, OrderDetail } from '@/components/orders'
+import { StorePickupView, ECommerceView, InStoreSalesView } from '@/components/orders/views'
+import { StorePickupDetail, ECommerceDetail } from '@/components/orders/detail'
+import {
+  ConfirmPickupOrderModal,
+  MarkReadyModal,
+  ConfirmECommerceOrderModal,
+  PackOrderModal,
+  ShipOrderModal,
+  MarkDeliveredModal,
+  CustomDateRangeModal,
+} from '@/components/orders/modals'
 import { ordersStyles as styles } from '@/components/orders/orders.styles'
-import { useUserLocations } from '@/hooks/useUserLocations'
 import { type Order } from '@/services/orders.service'
 import { logger } from '@/utils/logger'
 
@@ -50,7 +61,7 @@ function OrdersScreenComponent() {
   // ========================================
   // FOUNDATION from Context (user, vendor, locations)
   // ========================================
-  const { user, vendor, locations: vendorLocations } = useAppAuth()
+  const { user, vendor, locations } = useAppAuth()
 
   // ========================================
   // BUSINESS LOGIC from Zustand (orders data)
@@ -80,7 +91,6 @@ function OrdersScreenComponent() {
   // ========================================
   // LOCATION FILTERING from Zustand (shared store)
   // ========================================
-  const { locations: userLocations } = useUserLocations()
   const { selectedLocationIds, setSelectedLocationIds, initializeFromUserLocations } = useLocationFilter()
 
   // ========================================
@@ -94,7 +104,6 @@ function OrdersScreenComponent() {
   // LOCAL UI STATE (animations, dimensions)
   // ========================================
   const slideAnim = useRef(new Animated.Value(0)).current
-  const ordersHeaderOpacity = useRef(new Animated.Value(0)).current
   const { width } = useWindowDimensions()
   const contentWidth = width - layout.sidebarWidth
 
@@ -108,10 +117,10 @@ function OrdersScreenComponent() {
   // Calculate selected location names for display
   const selectedLocationNames = useMemo(() => {
     if (selectedLocationIds.length === 0) return []
-    return userLocations
-      .filter(ul => selectedLocationIds.includes(ul.location.id))
-      .map(ul => ul.location.name)
-  }, [selectedLocationIds, userLocations])
+    return locations
+      .filter(loc => selectedLocationIds.includes(loc.id))
+      .map(loc => loc.name)
+  }, [selectedLocationIds, locations])
 
   // Show location column when viewing multiple/all locations
   const showLocationColumn = selectedLocationIds.length === 0 || selectedLocationIds.length > 1
@@ -122,6 +131,7 @@ function OrdersScreenComponent() {
       case 'today': return 'Today'
       case 'week': return 'This Week'
       case 'month': return 'This Month'
+      case 'custom': return 'Custom Range'
       case 'all': return 'All Time'
     }
   }, [dateRange])
@@ -134,8 +144,8 @@ function OrdersScreenComponent() {
   useEffect(() => {
     logger.info('[OrdersScreen] Initializing - loading orders and subscribing to real-time')
 
-    // Load initial orders
-    loadOrders({ limit: 500 })
+    // Load ALL orders (no limit)
+    loadOrders({})
 
     // Subscribe to real-time updates
     subscribeToOrders()
@@ -147,52 +157,55 @@ function OrdersScreenComponent() {
     }
   }, []) // Empty deps - run once on mount
 
-  // Auto-select location for staff users
+  // ✅ INITIALIZE LOCATION FILTER: Default to all locations for Orders screen
+  // This ensures orders screen shows ALL orders by default
   useEffect(() => {
-    if (userLocations.length > 0) {
-      const isAdmin = userLocations.some(ul => ul.role === 'owner')
-      const assignedIds = userLocations.map(ul => ul.location.id)
-      initializeFromUserLocations(assignedIds, isAdmin)
+    if (locations.length > 0 && user) {
+      // For OrdersScreen, ALWAYS show all locations by default (empty array)
+      // Users can manually filter if needed via location selector
+      initializeFromUserLocations([], true)
     }
-  }, [userLocations.length, initializeFromUserLocations])
+  }, [locations.length, user?.id, initializeFromUserLocations])
 
   // ========================================
   // NAV ITEMS (with badge counts from store)
   // ========================================
 
+  // Calculate order type counts
+  const orderTypeCounts = useMemo(() => {
+    return {
+      inStore: orders.filter(o => o.order_type === 'walk_in').length,
+      pickup: orders.filter(o => o.order_type === 'pickup').length,
+      ecommerce: orders.filter(o => o.order_type === 'shipping').length,
+    }
+  }, [orders])
+
   const navItems: NavItem[] = useMemo(() => [
+    {
+      id: 'in-store',
+      icon: 'box',
+      label: 'In-Store Sales',
+      count: orderTypeCounts.inStore,
+    },
+    {
+      id: 'pickup',
+      icon: 'box',
+      label: 'Store Pickup',
+      count: orderTypeCounts.pickup,
+    },
+    {
+      id: 'ecommerce',
+      icon: 'move',
+      label: 'E-Commerce',
+      count: orderTypeCounts.ecommerce,
+    },
     {
       id: 'all',
       icon: 'grid',
       label: 'All Orders',
-      count: badgeCounts.all,
+      count: orders.length,
     },
-    {
-      id: 'needs_action',
-      icon: 'warning',
-      label: 'Needs Action',
-      count: badgeCounts.needsAction,
-      badge: badgeCounts.needsAction > 0 ? 'warning' as const : undefined,
-    },
-    {
-      id: 'in_progress',
-      icon: 'box',
-      label: 'In Progress',
-      count: badgeCounts.inProgress,
-    },
-    {
-      id: 'completed',
-      icon: 'box',
-      label: 'Completed',
-      count: badgeCounts.completed,
-    },
-    {
-      id: 'cancelled',
-      icon: 'box',
-      label: 'Cancelled',
-      count: badgeCounts.cancelled,
-    },
-  ], [badgeCounts])
+  ], [orderTypeCounts, orders.length])
 
   // ========================================
   // EVENT HANDLERS
@@ -224,47 +237,142 @@ function OrdersScreenComponent() {
   })
 
   // ========================================
-  // FLATLIST RENDERING
+  // VIEW RENDERING (Products Screen Pattern)
   // ========================================
 
-  // Flatten for FlatList
-  const flatListData = useMemo(() => {
-    const items: Array<{ type: 'section'; group: { title: string; data: Order[] }; isFirst: boolean }> = []
+  const renderContent = () => {
+    switch (activeNav) {
+      case 'in-store':
+        return <InStoreSalesView isLoading={loading} />
 
-    groupedOrders.forEach((group, groupIndex) => {
-      items.push({
-        type: 'section',
-        group,
-        isFirst: groupIndex === 0
-      })
-    })
-    return items
-  }, [groupedOrders])
+      case 'pickup':
+        return <StorePickupView isLoading={loading} />
 
-  const renderItem = useCallback(({ item }: { item: typeof flatListData[0] }) => {
-    const { group, isFirst } = item
-    return (
-      <>
-        <SectionHeader title={group.title} isFirst={isFirst} />
-        <View style={styles.cardWrapper}>
-          <View style={styles.ordersCardGlass}>
-            {group.data.map((order, index) => (
-              <OrderItem
-                key={order.id}
-                order={order}
-                showLocation={showLocationColumn}
-                isLast={index === group.data.length - 1}
+      case 'ecommerce':
+        return <ECommerceView isLoading={loading} />
+
+      case 'all':
+      default:
+        // Fallback to original FlatList for "All Orders"
+        const flatListData = groupedOrders.map((group, index) => ({
+          type: 'section' as const,
+          group,
+          isFirst: index === 0,
+        }))
+
+        if (loading) {
+          return (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator color={colors.text.secondary} />
+            </View>
+          )
+        }
+
+        if (flatListData.length === 0) {
+          return (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyStateTitle}>No Orders Found</Text>
+              <Text style={styles.emptyStateText}>
+                {searchQuery
+                  ? `No results for "${searchQuery}"`
+                  : `No orders for ${dateRangeLabel.toLowerCase()}`}
+              </Text>
+            </View>
+          )
+        }
+
+        // Date range filter pills
+        const dateFilterPills: FilterPill[] = [
+          { id: 'today', label: '1 Day' },
+          { id: 'week', label: '7 Days' },
+          { id: 'month', label: '30 Days' },
+          { id: 'all', label: 'All' },
+          { id: 'custom', label: 'Custom' },
+        ]
+
+        return (
+          <FlatList
+            data={flatListData}
+            renderItem={({ item }) => {
+              const { group, isFirst } = item
+              return (
+                <>
+                  <SectionHeader title={group.title} isFirst={isFirst} />
+                  <View style={styles.cardWrapper}>
+                    <View style={styles.ordersCardGlass}>
+                      {group.data.map((order, index) => (
+                        <OrderItem
+                          key={order.id}
+                          order={order}
+                          showLocation={showLocationColumn}
+                          isLast={index === group.data.length - 1}
+                        />
+                      ))}
+                    </View>
+                  </View>
+                </>
+              )
+            }}
+            keyExtractor={(item, index) => `section-${item.group.title}-${index}`}
+            ListHeaderComponent={() => (
+              <TitleSection
+                title="All Orders"
+                logo={vendor?.logo_url}
+                subtitle={`${orders.length} total ${orders.length === 1 ? 'order' : 'orders'}`}
+                hideButton
+                filterPills={dateFilterPills}
+                activeFilterId={dateRange}
+                onFilterSelect={(id) => setDateRange(id as DateRange)}
               />
-            ))}
-          </View>
-        </View>
-      </>
-    )
-  }, [showLocationColumn])
+            )}
+            contentContainerStyle={styles.flatListContent}
+            showsVerticalScrollIndicator={true}
+            indicatorStyle="white"
+            scrollIndicatorInsets={{ right: 2, top: 0, bottom: layout.dockHeight }}
+            refreshControl={
+              <RefreshControl
+                refreshing={loading}
+                onRefresh={refreshOrders}
+                tintColor={colors.text.secondary}
+              />
+            }
+            maxToRenderPerBatch={2}
+            updateCellsBatchingPeriod={100}
+            initialNumToRender={2}
+            windowSize={3}
+            removeClippedSubviews={true}
+          />
+        )
+    }
+  }
 
-  const keyExtractor = useCallback((item: typeof flatListData[0], index: number) => {
-    return `section-${item.group.title}-${index}`
-  }, [])
+  // Render specialized detail component based on order type
+  const renderDetail = () => {
+    if (!selectedOrder) {
+      return (
+        <View style={styles.emptyDetail}>
+          <Text style={styles.emptyTitle}>Select an order</Text>
+          <Text style={styles.emptyText}>
+            Choose an order from the list to view details
+          </Text>
+        </View>
+      )
+    }
+
+    const orderType = selectedOrder.order_type || 'walk_in'
+
+    switch (orderType) {
+      case 'pickup':
+        return <StorePickupDetail />
+
+      case 'shipping':
+        return <ECommerceDetail />
+
+      case 'walk_in':
+      default:
+        return <OrderDetail />
+    }
+  }
 
   // ========================================
   // RENDER
@@ -281,7 +389,6 @@ function OrdersScreenComponent() {
           items={navItems}
           activeItemId={activeNav}
           onItemPress={(id) => setActiveNav(id as NavSection)}
-          userName={user?.email?.split('@')[0] || 'User'}
           vendorName={vendor?.store_name || ''}
           vendorLogo={vendor?.logo_url || null}
           onUserProfilePress={openLocationSelector}
@@ -290,7 +397,7 @@ function OrdersScreenComponent() {
 
         {/* SLIDING CONTENT AREA */}
         <View style={styles.contentArea}>
-          {/* MIDDLE LIST - Orders */}
+          {/* MIDDLE LIST - View-Based Rendering */}
           <Animated.View
             style={[
               styles.ordersList,
@@ -299,135 +406,10 @@ function OrdersScreenComponent() {
               },
             ]}
           >
-            {/* Fixed Header Title - appears on scroll */}
-            <Animated.View style={[styles.fixedHeader, { opacity: ordersHeaderOpacity }]}>
-              <Text style={styles.fixedHeaderTitle}>
-                {activeNav === 'all' ? 'All Orders' :
-                 activeNav === 'needs_action' ? 'Needs Action' :
-                 activeNav === 'in_progress' ? 'In Progress' :
-                 activeNav === 'completed' ? 'Completed' :
-                 activeNav === 'cancelled' ? 'Cancelled' :
-                 'Orders'}
-              </Text>
-            </Animated.View>
-
-            {/* Date Range Selector - Always visible, fixed position */}
-            <View style={styles.fixedDateRangeSelector}>
-              <Pressable
-                style={[styles.dateRangeButton, dateRange === 'today' && styles.dateRangeButtonActive]}
-                onPress={() => setDateRange('today')}
-              >
-                <Text style={[styles.dateRangeButtonText, dateRange === 'today' && styles.dateRangeButtonTextActive]}>
-                  Today
-                </Text>
-              </Pressable>
-              <Pressable
-                style={[styles.dateRangeButton, dateRange === 'week' && styles.dateRangeButtonActive]}
-                onPress={() => setDateRange('week')}
-              >
-                <Text style={[styles.dateRangeButtonText, dateRange === 'week' && styles.dateRangeButtonTextActive]}>
-                  Week
-                </Text>
-              </Pressable>
-              <Pressable
-                style={[styles.dateRangeButton, dateRange === 'month' && styles.dateRangeButtonActive]}
-                onPress={() => setDateRange('month')}
-              >
-                <Text style={[styles.dateRangeButtonText, dateRange === 'month' && styles.dateRangeButtonTextActive]}>
-                  Month
-                </Text>
-              </Pressable>
-              <Pressable
-                style={[styles.dateRangeButton, dateRange === 'all' && styles.dateRangeButtonActive]}
-                onPress={() => setDateRange('all')}
-              >
-                <Text style={[styles.dateRangeButtonText, dateRange === 'all' && styles.dateRangeButtonTextActive]}>
-                  All
-                </Text>
-              </Pressable>
-            </View>
-
-            {/* Fade Gradient */}
-            <LinearGradient
-              colors={['rgba(0,0,0,0.95)', 'rgba(0,0,0,0.8)', 'rgba(0,0,0,0)']}
-              style={styles.fadeGradient}
-              pointerEvents="none"
-            />
-
-            {/* Orders List - Virtualized FlatList */}
-            {loading ? (
-              <View style={styles.loadingContainer}>
-                <ActivityIndicator color={colors.text.secondary} />
-              </View>
-            ) : flatListData.length === 0 ? (
-              <View style={styles.emptyState}>
-                <Text style={styles.emptyStateTitle}>No Orders Found</Text>
-                <Text style={styles.emptyStateText}>
-                  {searchQuery
-                    ? `No results for "${searchQuery}"`
-                    : `No orders for ${dateRangeLabel.toLowerCase()}`}
-                </Text>
-              </View>
-            ) : (
-              <FlatList
-                data={flatListData}
-                renderItem={renderItem}
-                keyExtractor={keyExtractor}
-                ListHeaderComponent={() => (
-                  <View style={styles.cardWrapper}>
-                    <View style={styles.titleSectionContainer}>
-                      <View style={styles.titleWithLogo}>
-                        {vendor?.logo_url ? (
-                          <Image
-                            source={{ uri: vendor.logo_url }}
-                            style={styles.vendorLogoInline}
-                            resizeMode="contain"
-                            fadeDuration={0}
-                          />
-                        ) : (
-                          <View style={[styles.vendorLogoInline, { backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' }]}>
-                            <Text style={{ color: 'rgba(255,255,255,0.3)', fontSize: 12 }}>No Logo</Text>
-                          </View>
-                        )}
-                        <Text style={styles.largeTitleHeader}>
-                          {activeNav === 'all' ? 'All Orders' :
-                           activeNav === 'needs_action' ? 'Needs Action' :
-                           activeNav === 'in_progress' ? 'In Progress' :
-                           activeNav === 'completed' ? 'Completed' :
-                           activeNav === 'cancelled' ? 'Cancelled' :
-                           'Orders'}
-                        </Text>
-                      </View>
-                    </View>
-                  </View>
-                )}
-                contentContainerStyle={styles.flatListContent}
-                showsVerticalScrollIndicator={true}
-                indicatorStyle="white"
-                scrollIndicatorInsets={{ right: 2, top: layout.contentStartTop, bottom: layout.dockHeight }}
-                onScroll={(e) => {
-                  const offsetY = e.nativeEvent.contentOffset.y
-                  const threshold = 40
-                  ordersHeaderOpacity.setValue(offsetY > threshold ? 1 : 0)
-                }}
-                scrollEventThrottle={16}
-                refreshControl={
-                  <RefreshControl
-                    refreshing={loading}
-                    onRefresh={refreshOrders}
-                    tintColor={colors.text.secondary}
-                  />
-                }
-                maxToRenderPerBatch={20}
-                updateCellsBatchingPeriod={50}
-                initialNumToRender={20}
-                windowSize={21}
-                removeClippedSubviews={true}
-              />
-            )}
+            {renderContent()}
           </Animated.View>
 
-          {/* RIGHT DETAIL PANEL */}
+          {/* RIGHT DETAIL PANEL - Specialized Detail Components */}
           <Animated.View
             style={[
               styles.detailPanel,
@@ -436,29 +418,53 @@ function OrdersScreenComponent() {
               },
             ]}
           >
-            {selectedOrder ? (
-              <OrderDetail />
-            ) : (
-              <View style={styles.emptyDetail}>
-                <Text style={styles.emptyTitle}>Select an order</Text>
-                <Text style={styles.emptyText}>
-                  Choose an order from the list to view details
-                </Text>
-              </View>
-            )}
+            {renderDetail()}
           </Animated.View>
         </View>
       </View>
 
-      {/* LOCATION SELECTOR MODAL */}
-      <LocationSelector
+      {/* MODALS - Zero Prop Architecture ✅ */}
+      <LocationSelectorModal
         visible={showLocationSelector}
-        userLocations={userLocations}
-        selectedLocationIds={selectedLocationIds}
         onClose={closeLocationSelector}
-        onSelect={setSelectedLocationIds}
-        context="orders"
       />
+
+      {/* Store Pickup Modals */}
+      <ConfirmPickupOrderModal
+        visible={false}
+        onClose={() => {}}
+        orderId={null}
+      />
+      <MarkReadyModal
+        visible={false}
+        onClose={() => {}}
+        orderId={null}
+      />
+
+      {/* E-Commerce Modals */}
+      <ConfirmECommerceOrderModal
+        visible={false}
+        onClose={() => {}}
+        orderId={null}
+      />
+      <PackOrderModal
+        visible={false}
+        onClose={() => {}}
+        orderId={null}
+      />
+      <ShipOrderModal
+        visible={false}
+        onClose={() => {}}
+        orderId={null}
+      />
+      <MarkDeliveredModal
+        visible={false}
+        onClose={() => {}}
+        orderId={null}
+      />
+
+      {/* Custom Date Range Modal */}
+      <CustomDateRangeModal />
     </SafeAreaView>
   )
 }

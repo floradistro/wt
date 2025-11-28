@@ -350,20 +350,11 @@ export async function createPurchaseOrder(
     })
 
     // Fetch the full PO record with joined data for return
-    const { data: po, error: fetchError } = await supabase
-      .from('purchase_orders')
-      .select()
-      .eq('id', poResult.po_id)
-      .single()
-
-    if (fetchError) {
-      logger.error('Failed to fetch created purchase order', { error: fetchError })
-      throw new Error(`Failed to fetch purchase order: ${fetchError.message}`)
-    }
+    const createdPO = await getPurchaseOrderById(poResult.po_id)
 
     span.finish()
 
-    return po
+    return createdPO
   } catch (error) {
     span.finish()
 
@@ -536,36 +527,26 @@ export async function receiveItems(
 }
 
 /**
- * Delete purchase order (only if draft/pending)
+ * Delete purchase order atomically (only if draft/pending)
+ * Uses atomic database function for transactional safety
  */
 export async function deletePurchaseOrder(poId: string): Promise<void> {
-  // Delete items first (cascade should handle this, but being explicit)
-  const { error: itemsError } = await supabase
-    .from('purchase_order_items')
-    .delete()
-    .eq('purchase_order_id', poId)
+  const { error } = await supabase.rpc('delete_purchase_order_atomic', {
+    p_po_id: poId,
+  })
 
-  if (itemsError) {
-    logger.error('Failed to delete purchase order items', { error: itemsError })
-    throw new Error(`Failed to delete purchase order items: ${itemsError.message}`)
+  if (error) {
+    logger.error('Failed to delete purchase order', { error, poId })
+    throw new Error(`Failed to delete purchase order: ${error.message}`)
   }
 
-  // Delete the PO
-  const { error: poError } = await supabase
-    .from('purchase_orders')
-    .delete()
-    .eq('id', poId)
-
-  if (poError) {
-    logger.error('Failed to delete purchase order', { error: poError })
-    throw new Error(`Failed to delete purchase order: ${poError.message}`)
-  }
+  logger.info('Purchase order deleted atomically', { poId })
 }
 
 /**
  * Generate unique PO number
  */
-async function generatePONumber(): Promise<string> {
+async function generatePONumber(vendorId?: string): Promise<string> {
   // Format: PO-YYYYMMDD-XXXX
   const date = new Date()
   const dateStr = date.toISOString().slice(0, 10).replace(/-/g, '')
@@ -574,10 +555,17 @@ async function generatePONumber(): Promise<string> {
   const todayStart = new Date()
   todayStart.setHours(0, 0, 0, 0)
 
-  const { count } = await supabase
+  let query = supabase
     .from('purchase_orders')
     .select('*', { count: 'exact', head: true })
     .gte('created_at', todayStart.toISOString())
+
+  // Optionally filter by vendor
+  if (vendorId) {
+    query = query.eq('vendor_id', vendorId)
+  }
+
+  const { count } = await query
 
   const sequential = String((count || 0) + 1).padStart(4, '0')
 
@@ -623,6 +611,134 @@ export async function getPurchaseOrderStats(params?: {
 }
 
 /**
+ * Save or update a draft purchase order
+ * Drafts can be saved without supplier/location (incomplete state)
+ */
+export async function saveDraftPurchaseOrder(
+  vendorId: string,
+  params: {
+    id?: string // If provided, updates existing draft
+    po_type: PurchaseOrderType
+    supplier_id?: string | null
+    location_id?: string | null
+    notes?: string | null
+    items: {
+      product_id: string
+      quantity: number
+      unit_price: number
+    }[]
+  }
+): Promise<PurchaseOrder> {
+  try {
+    if (!vendorId) {
+      throw new Error('Vendor ID is required')
+    }
+
+    if (!params.items || params.items.length === 0) {
+      throw new Error('At least one item is required for draft')
+    }
+
+    // Calculate totals
+    const subtotal = params.items.reduce((sum, item) => sum + (item.quantity * item.unit_price), 0)
+    const tax_amount = 0
+    const shipping_cost = 0
+    const total_amount = subtotal + tax_amount + shipping_cost
+
+    if (params.id) {
+      // Update existing draft
+      const { data: po, error: poError } = await supabase
+        .from('purchase_orders')
+        .update({
+          supplier_id: params.supplier_id,
+          location_id: params.location_id,
+          notes: params.notes,
+          subtotal,
+          tax_amount,
+          shipping_cost,
+          total_amount,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', params.id)
+        .eq('status', 'draft') // Only update drafts
+        .select()
+        .single()
+
+      if (poError) {
+        throw new Error(`Failed to update draft: ${poError.message}`)
+      }
+
+      // Delete existing items and recreate
+      await supabase
+        .from('purchase_order_items')
+        .delete()
+        .eq('purchase_order_id', params.id)
+
+      // Insert new items
+      const itemsToInsert = params.items.map(item => ({
+        purchase_order_id: params.id!,
+        product_id: item.product_id,
+        quantity: item.quantity,
+        unit_price: item.unit_price,
+        subtotal: item.quantity * item.unit_price,
+        received_quantity: 0,
+      }))
+
+      await supabase
+        .from('purchase_order_items')
+        .insert(itemsToInsert)
+
+      return po as PurchaseOrder
+    } else {
+      // Create new draft - generate PO number
+      const poNumber = await generatePONumber(vendorId)
+
+      const { data: po, error: poError } = await supabase
+        .from('purchase_orders')
+        .insert({
+          vendor_id: vendorId,
+          po_number: poNumber,
+          po_type: params.po_type,
+          status: 'draft',
+          supplier_id: params.supplier_id,
+          location_id: params.location_id,
+          notes: params.notes,
+          subtotal,
+          tax_amount,
+          shipping_cost,
+          total_amount,
+        })
+        .select()
+        .single()
+
+      if (poError) {
+        throw new Error(`Failed to create draft: ${poError.message}`)
+      }
+
+      // Insert items
+      const itemsToInsert = params.items.map(item => ({
+        purchase_order_id: po.id,
+        product_id: item.product_id,
+        quantity: item.quantity,
+        unit_price: item.unit_price,
+        subtotal: item.quantity * item.unit_price,
+        received_quantity: 0,
+      }))
+
+      await supabase
+        .from('purchase_order_items')
+        .insert(itemsToInsert)
+
+      logger.info('Draft PO saved', { id: po.id, poNumber, itemCount: params.items.length })
+
+      return po as PurchaseOrder
+    }
+  } catch (error) {
+    logger.error('Failed to save draft PO', { error })
+    throw error
+  }
+}
+
+/**
  * Export service object
  */
 export const purchaseOrdersService = {
@@ -633,4 +749,5 @@ export const purchaseOrdersService = {
   receiveItems,
   deletePurchaseOrder,
   getPurchaseOrderStats,
+  saveDraftPurchaseOrder,
 }
