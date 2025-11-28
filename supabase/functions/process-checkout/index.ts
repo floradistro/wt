@@ -154,6 +154,12 @@ interface CheckoutRequest {
     zip: string
     phone?: string
   }
+  billing_address?: {
+    address: string
+    city: string
+    state: string
+    zip: string
+  }
 
   // Loyalty
   loyaltyPointsRedeemed?: number
@@ -1155,6 +1161,7 @@ serve(async (req) => {
           register_id: body.registerId,
           request_id: requestId,
           is_ecommerce: body.is_ecommerce || false,
+          billing_address: body.billing_address || null,
         },
       })
       .select()
