@@ -1059,7 +1059,11 @@ serve(async (req) => {
     // ========================================================================
     // STEP 6: CREATE DRAFT ORDER
     // ========================================================================
-    const orderNumber = `ORD-${Date.now()}-${Math.random().toString(36).substring(7).toUpperCase()}`
+    // Generate order number (max 20 chars for Authorize.Net compatibility)
+    // Format: timestamp(12 digits) + random(7 chars) = 19 chars total
+    const timestamp = Date.now().toString().slice(-12) // Last 12 digits
+    const random = Math.random().toString(36).substring(2, 9).toUpperCase() // 7 chars
+    const orderNumber = `${timestamp}${random}`
 
     // Validate that created_by_user_id exists in users table (FK constraint protection)
     console.log(`[${requestId}] 🔍 STAFF TRACKING v3: customUserId=${body.customUserId}`)
