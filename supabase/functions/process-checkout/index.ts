@@ -1219,7 +1219,6 @@ serve(async (req) => {
         line_subtotal: item.lineTotal, // Subtotal before tax
         line_total: item.lineTotal, // Total including tax
         tax_amount: 0, // Tax is calculated at order level
-        discount_amount: 0, // No item-level discounts for e-commerce
         inventory_id: item.inventoryId,
         tier_name: item.tierName || null, // e.g., "28g (Ounce)", "3.5g (Eighth)"
         quantity_grams: item.gramsToDeduct, // CRITICAL: Actual quantity to deduct (grams, units, etc.)
