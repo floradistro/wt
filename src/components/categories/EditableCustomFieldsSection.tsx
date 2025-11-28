@@ -161,6 +161,7 @@ export function EditableCustomFieldsSection({
             .update({
               field_definition: fieldDefinition,
               updated_at: new Date().toISOString(),
+              updated_by_user_id: user.id, // Track who updated
             })
             .eq('id', field.id)
             .eq('vendor_id', userData.vendor_id)
@@ -182,6 +183,8 @@ export function EditableCustomFieldsSection({
               field_definition: fieldDefinition,
               is_active: true,
               sort_order: editedFields.length + 1,
+              created_by_user_id: user.id, // Required by RLS policy
+              updated_by_user_id: user.id, // Required by RLS policy
             })
 
           if (error) {
