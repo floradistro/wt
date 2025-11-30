@@ -2,14 +2,12 @@
  * ShipOrderModal Component
  *
  * STANDARD FULLSCREENMODAL PATTERN ✅
- * Used when shipping an order and adding tracking information
- * Status: packed → shipped
+ * Apple-style: One action to ship order with tracking
  *
  * Allows staff to:
  * - Select carrier
  * - Add tracking number (REQUIRED)
- * - Add shipping cost
- * - Auto-notify customer with tracking info
+ * - Auto-notify customer with tracking info via email
  */
 
 import {
@@ -25,7 +23,18 @@ import { useState } from 'react'
 import * as Haptics from 'expo-haptics'
 import { FullScreenModal, modalStyles } from '@/components/shared'
 import { useOrdersStore } from '@/stores/orders.store'
+import { supabase } from '@/lib/supabase/client'
+import { useAppAuth } from '@/contexts/AppAuthContext'
 import { logger } from '@/utils/logger'
+
+// Carrier tracking URL templates
+const CARRIER_URLS: Record<string, string> = {
+  'USPS': 'https://tools.usps.com/go/TrackConfirmAction?tLabels=',
+  'UPS': 'https://www.ups.com/track?tracknum=',
+  'FedEx': 'https://www.fedex.com/fedextrack/?trknbr=',
+  'DHL': 'https://www.dhl.com/en/express/tracking.html?AWB=',
+  'Other': '',
+}
 
 interface ShipOrderModalProps {
   visible: boolean
@@ -40,6 +49,7 @@ export function ShipOrderModal({
   onClose,
   orderId,
 }: ShipOrderModalProps) {
+  const { vendor } = useAppAuth()
   const [carrier, setCarrier] = useState('USPS')
   const [trackingNumber, setTrackingNumber] = useState('')
   const [shippingCost, setShippingCost] = useState('')
@@ -59,11 +69,58 @@ export function ShipOrderModal({
       setSaving(true)
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy)
 
-      // Update order status to shipped
-      await useOrdersStore.getState().updateOrderStatus(orderId, 'shipped')
+      // Build tracking URL
+      const trackingUrl = CARRIER_URLS[carrier]
+        ? `${CARRIER_URLS[carrier]}${trackingNumber.trim()}`
+        : undefined
 
-      // TODO: Update order with tracking info, carrier, shipping cost
-      // TODO: Send customer notification if enabled
+      // Update order with tracking info and status in one call
+      const { error: updateError } = await supabase
+        .from('orders')
+        .update({
+          status: 'shipped',
+          tracking_number: trackingNumber.trim(),
+          shipping_carrier: carrier,
+          tracking_url: trackingUrl,
+          ...(shippingCost && { shipping_cost: parseFloat(shippingCost) }),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', orderId)
+
+      if (updateError) {
+        throw updateError
+      }
+
+      // Send "Order Shipped" email notification if enabled
+      if (notifyCustomer && vendor?.ecommerce_url) {
+        try {
+          const ecommerceUrl = vendor.ecommerce_url.replace(/\/$/, '') // Remove trailing slash
+          const response = await fetch(`${ecommerceUrl}/api/orders/${orderId}/send-status-update`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              status: 'shipped',
+              trackingNumber: trackingNumber.trim(),
+              trackingUrl,
+              updateStatus: false, // Already updated above
+            }),
+          })
+
+          if (!response.ok) {
+            logger.warn('Failed to send shipped email, but order was updated', {
+              status: response.status,
+            })
+          } else {
+            logger.info('Shipped email sent successfully')
+          }
+        } catch (emailError) {
+          // Don't fail the ship action if email fails
+          logger.warn('Email notification failed', { error: emailError })
+        }
+      }
+
+      // Refresh orders in store
+      await useOrdersStore.getState().refreshOrders()
 
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
 
@@ -211,7 +268,7 @@ export function ShipOrderModal({
         {saving ? (
           <ActivityIndicator size="small" color="#fff" />
         ) : (
-          <Text style={modalStyles.buttonText}>MARK SHIPPED</Text>
+          <Text style={modalStyles.buttonText}>Ship</Text>
         )}
       </Pressable>
     </FullScreenModal>

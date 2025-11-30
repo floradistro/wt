@@ -14,15 +14,12 @@
  * - locationId, registerId → POSSessionContext
  */
 
-import { useState, useMemo } from 'react'
+import { useState } from 'react'
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native'
 import { LiquidGlassView } from '@callstack/liquid-glass'
 import { Ionicons } from '@expo/vector-icons'
 import * as Haptics from 'expo-haptics'
-import { useCartTotals } from '@/stores/cart.store'
-import { usePOSSession } from '@/contexts/POSSessionContext'
-import { taxActions } from '@/stores/tax.store'
-import { useLoyaltyState } from '@/stores/loyalty.store'
+import { useCheckoutTotals } from '@/hooks/useCheckoutTotals'
 import { usePaymentProcessor } from '@/stores/payment-processor.store'
 import type { PaymentData } from './PaymentTypes'
 
@@ -34,31 +31,11 @@ export function CardPaymentView({
   onComplete,
 }: CardPaymentViewProps) {
   // ========================================
-  // STORES - TRUE ZERO PROPS (read from environment)
+  // SINGLE SOURCE OF TRUTH - Centralized total calculation
   // ========================================
-  const { subtotal, itemCount } = useCartTotals()
-  const { session } = usePOSSession()
-  const { loyaltyProgram, pointsToRedeem } = useLoyaltyState()
+  const { total } = useCheckoutTotals()
   const currentProcessor = usePaymentProcessor((state) => state.currentProcessor)
   const processorStatus = usePaymentProcessor((state) => state.status)
-
-  // Calculate tax
-  const { taxAmount, taxRate, taxName } = useMemo(() => {
-    if (!session?.locationId) return { taxAmount: 0, taxRate: 0, taxName: undefined }
-    return taxActions.calculateTax(subtotal, session.locationId)
-  }, [subtotal, session?.locationId])
-
-  // Calculate loyalty discount
-  const loyaltyDiscountAmount = useMemo(() => {
-    if (!loyaltyProgram || pointsToRedeem === 0) return 0
-    return (pointsToRedeem * (loyaltyProgram.point_value || 0.01))
-  }, [loyaltyProgram, pointsToRedeem])
-
-  // Calculate total
-  const total = useMemo(() => {
-    const subtotalAfterDiscount = Math.max(0, subtotal - loyaltyDiscountAmount)
-    return subtotalAfterDiscount + taxAmount
-  }, [subtotal, loyaltyDiscountAmount, taxAmount])
 
   // ========================================
   // LOCAL STATE (UI only)

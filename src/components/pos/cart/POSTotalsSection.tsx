@@ -97,18 +97,20 @@ function POSTotalsSection() {
     const maxFromSubtotal = Math.floor(subtotal / pointValue)
     const maxPoints = Math.min(customerPoints, maxFromSubtotal)
 
-    // Debug logging
-    logger.warn('🎯 LOYALTY DEBUG:', {
-      customerName: `${selectedCustomer.first_name} ${selectedCustomer.last_name}`,
-      customerPoints,
-      subtotal,
-      pointValue,
-      pointValueFromDB: loyaltyProgram?.point_value,
-      wasFixed: (loyaltyProgram?.point_value || 0) > 1,
-      calculation: `${subtotal} / ${pointValue} = ${maxFromSubtotal}`,
-      maxFromSubtotal,
-      finalMaxPoints: maxPoints,
-    })
+    // Debug logging - only log in development to reduce Sentry noise
+    if (__DEV__) {
+      logger.debug('🎯 LOYALTY CALCULATION:', {
+        customerName: `${selectedCustomer.first_name} ${selectedCustomer.last_name}`,
+        customerPoints,
+        subtotal,
+        pointValue,
+        pointValueFromDB: loyaltyProgram?.point_value,
+        wasFixed: (loyaltyProgram?.point_value || 0) > 1,
+        calculation: `${subtotal} / ${pointValue} = ${maxFromSubtotal}`,
+        maxFromSubtotal,
+        finalMaxPoints: maxPoints,
+      })
+    }
 
     return maxPoints
   }, [selectedCustomer, subtotal, loyaltyProgram])

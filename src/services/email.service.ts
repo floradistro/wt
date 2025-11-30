@@ -11,6 +11,7 @@
 
 import { supabase } from '@/lib/supabase/client'
 import { logger } from '@/utils/logger'
+import { EmailTemplateService, TemplateVariables, TemplateCategory } from './email-template.service'
 
 // ============================================
 // TYPES
@@ -60,6 +61,7 @@ export interface VendorEmailSettings {
   require_double_opt_in: boolean
   signature_html?: string
   unsubscribe_footer_html?: string
+  email_header_image_url?: string
   created_at: string
   updated_at: string
 }
@@ -170,6 +172,184 @@ export class EmailService {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error',
       }
+    }
+  }
+
+  /**
+   * Send email using a template from the database
+   * This is the preferred method for sending templated emails
+   */
+  static async sendTemplatedEmail(params: {
+    vendorId: string
+    templateSlug: string
+    to: string
+    toName?: string
+    variables: TemplateVariables
+    customerId?: string
+    orderId?: string
+    fromName?: string
+    fromEmail?: string
+  }): Promise<SendEmailResponse> {
+    try {
+      // Get the template from database
+      const template = await EmailTemplateService.getTemplateBySlug(
+        params.vendorId,
+        params.templateSlug
+      )
+
+      if (!template) {
+        logger.error('Email template not found', {
+          vendorId: params.vendorId,
+          slug: params.templateSlug,
+        })
+        return {
+          success: false,
+          error: `Template "${params.templateSlug}" not found`,
+        }
+      }
+
+      if (!template.is_active) {
+        logger.warn('Attempting to use inactive template', { templateId: template.id })
+        return {
+          success: false,
+          error: 'Template is inactive',
+        }
+      }
+
+      // Render the template with variables
+      const html = EmailTemplateService.render(template.html_content, params.variables)
+      const subject = EmailTemplateService.renderSubject(template.subject, params.variables)
+      const text = template.text_content
+        ? EmailTemplateService.render(template.text_content, params.variables)
+        : undefined
+
+      // Send the email
+      return this.sendEmail({
+        to: params.to,
+        toName: params.toName,
+        subject,
+        html,
+        text,
+        emailType: template.type,
+        category: template.category || undefined,
+        vendorId: params.vendorId,
+        customerId: params.customerId,
+        orderId: params.orderId,
+        templateId: template.id,
+        fromName: params.fromName || template.from_name,
+        fromEmail: params.fromEmail || template.from_email || undefined,
+        replyTo: template.reply_to || undefined,
+      })
+    } catch (error) {
+      logger.error('Error sending templated email', { error })
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      }
+    }
+  }
+
+  /**
+   * Send email using a template category (uses default template for that category)
+   */
+  static async sendByCategory(params: {
+    vendorId: string
+    category: TemplateCategory
+    to: string
+    toName?: string
+    variables: TemplateVariables
+    customerId?: string
+    orderId?: string
+    fromName?: string
+    fromEmail?: string
+  }): Promise<SendEmailResponse> {
+    try {
+      // Get the default template for this category
+      const template = await EmailTemplateService.getDefaultTemplate(
+        params.vendorId,
+        params.category
+      )
+
+      if (!template) {
+        logger.warn('No template found for category, falling back to hardcoded', {
+          vendorId: params.vendorId,
+          category: params.category,
+        })
+        // Fallback to hardcoded templates for backwards compatibility
+        return this.sendFallbackEmail(params)
+      }
+
+      // Render and send
+      const html = EmailTemplateService.render(template.html_content, params.variables)
+      const subject = EmailTemplateService.renderSubject(template.subject, params.variables)
+      const text = template.text_content
+        ? EmailTemplateService.render(template.text_content, params.variables)
+        : undefined
+
+      return this.sendEmail({
+        to: params.to,
+        toName: params.toName,
+        subject,
+        html,
+        text,
+        emailType: template.type,
+        category: params.category,
+        vendorId: params.vendorId,
+        customerId: params.customerId,
+        orderId: params.orderId,
+        templateId: template.id,
+        fromName: params.fromName || template.from_name,
+        fromEmail: params.fromEmail || template.from_email || undefined,
+        replyTo: template.reply_to || undefined,
+      })
+    } catch (error) {
+      logger.error('Error sending email by category', { error })
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      }
+    }
+  }
+
+  /**
+   * Fallback for when no template exists (uses hardcoded templates)
+   */
+  private static async sendFallbackEmail(params: {
+    vendorId: string
+    category: TemplateCategory
+    to: string
+    toName?: string
+    variables: TemplateVariables
+    customerId?: string
+    orderId?: string
+    fromName?: string
+    fromEmail?: string
+  }): Promise<SendEmailResponse> {
+    // This uses the old hardcoded templates as fallback
+    // TODO: Remove this once all vendors have templates seeded
+    logger.warn('Using fallback hardcoded template', { category: params.category })
+
+    const vendorName = (params.variables.vendor_name as string) || 'Your Store'
+
+    switch (params.category) {
+      case 'receipt':
+        return this.sendReceipt({
+          vendorId: params.vendorId,
+          orderId: params.orderId || '',
+          customerEmail: params.to,
+          customerName: params.toName,
+          orderNumber: (params.variables.order_number as string) || '',
+          total: (params.variables.total as number) || 0,
+          items: (params.variables.items as Array<{ name: string; quantity: number; price: number }>) || [],
+          customerId: params.customerId,
+          vendorName,
+        })
+
+      default:
+        return {
+          success: false,
+          error: `No fallback available for category: ${params.category}`,
+        }
     }
   }
 
@@ -330,20 +510,112 @@ export class EmailService {
     fromEmail?: string
     vendorName?: string
     vendorLogo?: string
+    emailHeaderImage?: string
+    emailType?: 'receipt' | 'order_confirmation' | 'order_update' | 'loyalty' | 'welcome' | 'marketing'
   }): Promise<SendEmailResponse> {
-    const html = this.generateTestEmailHTML({
-      vendorName: params.vendorName || 'Flora Distro',
-      vendorLogo: params.vendorLogo,
-    })
-    const text = 'This is a test email. If you received this, your email settings are configured correctly!'
+    const vendorName = params.vendorName || 'Your Store'
+
+    // Generate appropriate HTML based on email type
+    let html: string
+    let subject: string
+    let text: string
+    const category = params.emailType || 'test'
+
+    switch (params.emailType) {
+      case 'receipt':
+        html = this.generateReceiptHTML({
+          orderNumber: 'TEST-001',
+          total: 99.99,
+          items: [
+            { name: 'Sample Product 1', quantity: 2, price: 39.99 },
+            { name: 'Sample Product 2', quantity: 1, price: 20.01 },
+          ],
+          vendorName,
+          vendorLogo: params.vendorLogo,
+          emailHeaderImage: params.emailHeaderImage,
+        })
+        subject = `Test Receipt #TEST-001`
+        text = 'This is a test receipt email.'
+        break
+
+      case 'order_confirmation':
+        html = this.generateOrderConfirmationTestHTML({
+          orderNumber: 'TEST-001',
+          orderType: 'pickup',
+          total: 99.99,
+          items: [
+            { name: 'Sample Product 1', quantity: 2, price: 39.99 },
+            { name: 'Sample Product 2', quantity: 1, price: 20.01 },
+          ],
+          pickupLocation: 'Main Store - 123 Test Street',
+          estimatedTime: '30 minutes',
+          vendorName,
+          vendorLogo: params.vendorLogo,
+          emailHeaderImage: params.emailHeaderImage,
+        })
+        subject = `Test Order Confirmation #TEST-001`
+        text = 'This is a test order confirmation email.'
+        break
+
+      case 'order_update':
+        html = this.generateOrderUpdateTestHTML({
+          orderNumber: 'TEST-001',
+          pickupLocation: 'Main Store - 123 Test Street',
+          vendorName,
+          vendorLogo: params.vendorLogo,
+          emailHeaderImage: params.emailHeaderImage,
+        })
+        subject = `Test: Your order #TEST-001 is ready!`
+        text = 'This is a test order ready email.'
+        break
+
+      case 'loyalty':
+        html = this.generateLoyaltyTestHTML({
+          vendorName,
+          vendorLogo: params.vendorLogo,
+          emailHeaderImage: params.emailHeaderImage,
+        })
+        subject = `Test Loyalty Update - ${vendorName}`
+        text = 'This is a test loyalty update email.'
+        break
+
+      case 'welcome':
+        html = this.generateWelcomeTestHTML({
+          vendorName,
+          vendorLogo: params.vendorLogo,
+          emailHeaderImage: params.emailHeaderImage,
+        })
+        subject = `Test Welcome Email - ${vendorName}`
+        text = 'This is a test welcome email.'
+        break
+
+      case 'marketing':
+        html = this.generateMarketingTestHTML({
+          vendorName,
+          vendorLogo: params.vendorLogo,
+          emailHeaderImage: params.emailHeaderImage,
+        })
+        subject = `Test Marketing Email - ${vendorName}`
+        text = 'This is a test marketing email.'
+        break
+
+      default:
+        html = this.generateTestEmailHTML({
+          vendorName,
+          vendorLogo: params.vendorLogo,
+          emailHeaderImage: params.emailHeaderImage,
+        })
+        subject = 'Test Email - Email System Configured'
+        text = 'This is a test email. If you received this, your email settings are configured correctly!'
+    }
 
     return this.sendEmail({
       to: params.to,
-      subject: 'Test Email - Email System Configured',
+      subject,
       html,
       text,
-      emailType: 'transactional',
-      category: 'test',
+      emailType: params.emailType === 'marketing' ? 'marketing' : 'transactional',
+      category,
       vendorId: params.vendorId,
       fromName: params.fromName,
       fromEmail: params.fromEmail,
@@ -528,6 +800,7 @@ export class EmailService {
     items: Array<{ name: string; quantity: number; price: number }>
     vendorName: string
     vendorLogo?: string
+    emailHeaderImage?: string
   }): string {
     const itemsHTML = params.items
       .map(
@@ -563,7 +836,7 @@ export class EmailService {
 
             @media only screen and (max-width: 600px) {
               .brand-name {
-                font-size: 32px !important;
+                font-size: 36px !important;
               }
               .receipt-header {
                 font-size: 24px !important;
@@ -577,22 +850,22 @@ export class EmailService {
           <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff;">
 
             <!-- Header with Logo -->
-            <div style="text-align: center; padding: 50px 20px; background-color: #000000;">
-              <table cellpadding="0" cellspacing="0" border="0" style="margin: 0 auto;">
-                <tr>
-                  ${params.vendorLogo ? `
-                    <td style="vertical-align: middle; padding-right: 16px;">
-                      <img src="${params.vendorLogo}" alt="${params.vendorName}" width="56" height="56" style="display: block; max-width: 56px; max-height: 56px;" />
-                    </td>
-                  ` : ``}
-                  <td style="vertical-align: middle;">
-                    <h1 class="brand-name" style="margin: 0; font-size: 48px; font-weight: 400; letter-spacing: 1px; color: #ffffff; font-family: 'DonGraffiti', -apple-system, serif; line-height: 56px;">
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #000000;">
+              <tr>
+                <td align="center" style="padding: 80px 30px;">
+                  ${params.emailHeaderImage ? `
+                    <img src="${params.emailHeaderImage}" alt="${params.vendorName}" class="email-header-img" style="display: block; margin: 0 auto; max-width: 100%; width: 100%; height: auto;" />
+                  ` : `
+                    ${params.vendorLogo ? `
+                      <img src="${params.vendorLogo}" alt="" width="80" height="80" style="display: block; margin: 0 auto 24px auto;" />
+                    ` : ``}
+                    <div style="font-family: 'DonGraffiti', Georgia, 'Times New Roman', serif; font-size: 48px; color: #ffffff; font-weight: 400; letter-spacing: 3px; line-height: 1.2;">
                       ${params.vendorName}
-                    </h1>
-                  </td>
-                </tr>
-              </table>
-            </div>
+                    </div>
+                  `}
+                </td>
+              </tr>
+            </table>
 
             <!-- Receipt Content -->
             <div style="padding: 40px 20px;">
@@ -894,6 +1167,7 @@ Your package is on its way!
   private static generateTestEmailHTML(params: {
     vendorName: string
     vendorLogo?: string
+    emailHeaderImage?: string
   }): string {
     return `
       <!DOCTYPE html>
@@ -912,10 +1186,13 @@ Your package is on its way!
 
             @media only screen and (max-width: 600px) {
               .brand-name {
-                font-size: 32px !important;
+                font-size: 36px !important;
               }
               .receipt-header {
                 font-size: 24px !important;
+              }
+              .email-header-img {
+                max-width: 90% !important;
               }
             }
           </style>
@@ -926,30 +1203,32 @@ Your package is on its way!
           <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff;">
 
             <!-- Header with Logo -->
-            <div style="text-align: center; padding: 50px 20px; background-color: #000000;">
-              <table cellpadding="0" cellspacing="0" border="0" style="margin: 0 auto;">
-                <tr>
-                  ${params.vendorLogo ? `
-                    <td style="vertical-align: middle; padding-right: 16px;">
-                      <img src="${params.vendorLogo}" alt="${params.vendorName}" width="56" height="56" style="display: block; max-width: 56px; max-height: 56px;" />
-                    </td>
-                  ` : ``}
-                  <td style="vertical-align: middle;">
-                    <h1 class="brand-name" style="margin: 0; font-size: 48px; font-weight: 400; letter-spacing: 1px; color: #ffffff; font-family: 'DonGraffiti', -apple-system, serif; line-height: 56px;">
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #000000;">
+              <tr>
+                <td align="center" style="padding: 80px 30px;">
+                  ${params.emailHeaderImage ? `
+                    <img src="${params.emailHeaderImage}" alt="${params.vendorName}" class="email-header-img" style="display: block; margin: 0 auto; max-width: 100%; width: 100%; height: auto;" />
+                  ` : `
+                    ${params.vendorLogo ? `
+                      <img src="${params.vendorLogo}" alt="" width="80" height="80" style="display: block; margin: 0 auto 24px auto;" />
+                    ` : ``}
+                    <div style="font-family: 'DonGraffiti', Georgia, 'Times New Roman', serif; font-size: 48px; color: #ffffff; font-weight: 400; letter-spacing: 3px; line-height: 1.2;">
                       ${params.vendorName}
-                    </h1>
-                  </td>
-                </tr>
-              </table>
-            </div>
+                    </div>
+                  `}
+                </td>
+              </tr>
+            </table>
 
             <!-- Success Message -->
             <div style="text-align: center; padding: 40px 20px;">
-              <div style="width: 72px; height: 72px; background-color: #000000; border-radius: 50%; margin: 0 auto 24px; display: flex; align-items: center; justify-content: center;">
-                <svg width="36" height="36" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M20 6L9 17L4 12" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-              </div>
+              <table cellpadding="0" cellspacing="0" border="0" style="margin: 0 auto 24px;">
+                <tr>
+                  <td align="center" style="width: 72px; height: 72px; background-color: #000000; border-radius: 50%; font-size: 40px; color: #ffffff; line-height: 72px; vertical-align: middle;">
+                    ✓
+                  </td>
+                </tr>
+              </table>
 
               <h2 style="margin: 0 0 16px 0; font-size: 28px; font-weight: 600; color: #1d1d1f; letter-spacing: -0.5px;">
                 Your email is ready
@@ -996,6 +1275,327 @@ Your package is on its way!
               </p>
             </div>
 
+          </div>
+        </body>
+      </html>
+    `
+  }
+
+  private static generateLoyaltyTestHTML(params: {
+    vendorName: string
+    vendorLogo?: string
+    emailHeaderImage?: string
+  }): string {
+    return `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Loyalty Update</title>
+        </head>
+        <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif; line-height: 1.5; background-color: #f5f5f7; color: #1d1d1f; margin: 0; padding: 0;">
+          <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff;">
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #000000;">
+              <tr>
+                <td align="center" style="padding: 60px 30px;">
+                  ${params.emailHeaderImage ? `
+                    <img src="${params.emailHeaderImage}" alt="${params.vendorName}" style="display: block; margin: 0 auto; max-width: 100%; width: 100%; height: auto;" />
+                  ` : `
+                    ${params.vendorLogo ? `<img src="${params.vendorLogo}" alt="" width="60" height="60" style="display: block; margin: 0 auto 16px auto;" />` : ''}
+                    <div style="font-size: 32px; color: #ffffff; font-weight: 600;">${params.vendorName}</div>
+                  `}
+                </td>
+              </tr>
+            </table>
+            <div style="text-align: center; padding: 40px 20px;">
+              <div style="font-size: 48px; margin-bottom: 16px;">🎉</div>
+              <h2 style="margin: 0 0 16px 0; font-size: 24px; font-weight: 600; color: #1d1d1f;">
+                Your Loyalty Update
+              </h2>
+              <p style="margin: 0 0 24px 0; font-size: 17px; color: #86868b;">
+                You've earned 150 points from your recent purchase!
+              </p>
+              <div style="background: #f5f5f7; border-radius: 12px; padding: 24px; margin: 0 auto; max-width: 300px;">
+                <p style="margin: 0 0 8px 0; font-size: 15px; color: #86868b;">Current Balance</p>
+                <p style="margin: 0; font-size: 36px; font-weight: 700; color: #1d1d1f;">1,250 pts</p>
+              </div>
+            </div>
+            <div style="text-align: center; padding: 32px 20px; background-color: #f5f5f7; border-top: 1px solid #d2d2d7;">
+              <p style="margin: 0; font-size: 12px; color: #86868b;">${params.vendorName} © ${new Date().getFullYear()}</p>
+            </div>
+          </div>
+        </body>
+      </html>
+    `
+  }
+
+  private static generateWelcomeTestHTML(params: {
+    vendorName: string
+    vendorLogo?: string
+    emailHeaderImage?: string
+  }): string {
+    return `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Welcome</title>
+        </head>
+        <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif; line-height: 1.5; background-color: #f5f5f7; color: #1d1d1f; margin: 0; padding: 0;">
+          <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff;">
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #000000;">
+              <tr>
+                <td align="center" style="padding: 60px 30px;">
+                  ${params.emailHeaderImage ? `
+                    <img src="${params.emailHeaderImage}" alt="${params.vendorName}" style="display: block; margin: 0 auto; max-width: 100%; width: 100%; height: auto;" />
+                  ` : `
+                    ${params.vendorLogo ? `<img src="${params.vendorLogo}" alt="" width="60" height="60" style="display: block; margin: 0 auto 16px auto;" />` : ''}
+                    <div style="font-size: 32px; color: #ffffff; font-weight: 600;">${params.vendorName}</div>
+                  `}
+                </td>
+              </tr>
+            </table>
+            <div style="text-align: center; padding: 40px 20px;">
+              <h2 style="margin: 0 0 16px 0; font-size: 28px; font-weight: 600; color: #1d1d1f;">
+                Welcome to ${params.vendorName}!
+              </h2>
+              <p style="margin: 0 0 24px 0; font-size: 17px; color: #86868b; max-width: 400px; margin-left: auto; margin-right: auto;">
+                Thanks for joining our loyalty program. You'll earn points on every purchase and get access to exclusive rewards.
+              </p>
+              <div style="background: #10b981; color: white; display: inline-block; padding: 14px 28px; border-radius: 8px; font-size: 17px; font-weight: 600;">
+                Start Shopping
+              </div>
+            </div>
+            <div style="text-align: center; padding: 32px 20px; background-color: #f5f5f7; border-top: 1px solid #d2d2d7;">
+              <p style="margin: 0; font-size: 12px; color: #86868b;">${params.vendorName} © ${new Date().getFullYear()}</p>
+            </div>
+          </div>
+        </body>
+      </html>
+    `
+  }
+
+  private static generateMarketingTestHTML(params: {
+    vendorName: string
+    vendorLogo?: string
+    emailHeaderImage?: string
+  }): string {
+    return `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Special Offer</title>
+        </head>
+        <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif; line-height: 1.5; background-color: #f5f5f7; color: #1d1d1f; margin: 0; padding: 0;">
+          <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff;">
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #000000;">
+              <tr>
+                <td align="center" style="padding: 60px 30px;">
+                  ${params.emailHeaderImage ? `
+                    <img src="${params.emailHeaderImage}" alt="${params.vendorName}" style="display: block; margin: 0 auto; max-width: 100%; width: 100%; height: auto;" />
+                  ` : `
+                    ${params.vendorLogo ? `<img src="${params.vendorLogo}" alt="" width="60" height="60" style="display: block; margin: 0 auto 16px auto;" />` : ''}
+                    <div style="font-size: 32px; color: #ffffff; font-weight: 600;">${params.vendorName}</div>
+                  `}
+                </td>
+              </tr>
+            </table>
+            <div style="text-align: center; padding: 40px 20px;">
+              <p style="margin: 0 0 8px 0; font-size: 13px; color: #86868b; text-transform: uppercase; letter-spacing: 1px;">Limited Time Offer</p>
+              <h2 style="margin: 0 0 16px 0; font-size: 36px; font-weight: 700; color: #1d1d1f;">
+                20% OFF
+              </h2>
+              <p style="margin: 0 0 24px 0; font-size: 17px; color: #86868b; max-width: 400px; margin-left: auto; margin-right: auto;">
+                Use code <strong style="color: #1d1d1f;">SAVE20</strong> at checkout to save on your next order.
+              </p>
+              <div style="background: #000000; color: white; display: inline-block; padding: 14px 28px; border-radius: 8px; font-size: 17px; font-weight: 600;">
+                Shop Now
+              </div>
+              <p style="margin: 24px 0 0 0; font-size: 13px; color: #86868b;">
+                Offer expires in 7 days
+              </p>
+            </div>
+            <div style="text-align: center; padding: 32px 20px; background-color: #f5f5f7; border-top: 1px solid #d2d2d7;">
+              <p style="margin: 0 0 8px 0; font-size: 12px; color: #86868b;">${params.vendorName} © ${new Date().getFullYear()}</p>
+              <p style="margin: 0; font-size: 11px; color: #86868b;">
+                <a href="#" style="color: #86868b;">Unsubscribe</a> | <a href="#" style="color: #86868b;">Preferences</a>
+              </p>
+            </div>
+          </div>
+        </body>
+      </html>
+    `
+  }
+
+  private static generateOrderConfirmationTestHTML(params: {
+    orderNumber: string
+    orderType: 'pickup' | 'shipping'
+    total: number
+    items: Array<{ name: string; quantity: number; price: number }>
+    pickupLocation?: string
+    estimatedTime?: string
+    vendorName: string
+    vendorLogo?: string
+    emailHeaderImage?: string
+  }): string {
+    const itemsHTML = params.items
+      .map(
+        item => `
+        <tr>
+          <td style="padding: 16px 0; border-bottom: 1px solid #d2d2d7;">
+            <span style="color: #1d1d1f; font-size: 17px; font-weight: 500;">${item.name}</span>
+            <br>
+            <span style="color: #86868b; font-size: 15px;">Qty: ${item.quantity}</span>
+          </td>
+          <td style="padding: 16px 0; border-bottom: 1px solid #d2d2d7; text-align: right; color: #1d1d1f; font-size: 17px; font-weight: 500; vertical-align: top;">
+            $${item.price.toFixed(2)}
+          </td>
+        </tr>
+      `
+      )
+      .join('')
+
+    return `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Order Confirmation #${params.orderNumber}</title>
+        </head>
+        <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif; line-height: 1.5; background-color: #f5f5f7; color: #1d1d1f; margin: 0; padding: 0;">
+          <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff;">
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #000000;">
+              <tr>
+                <td align="center" style="padding: 60px 30px;">
+                  ${params.emailHeaderImage ? `
+                    <img src="${params.emailHeaderImage}" alt="${params.vendorName}" style="display: block; margin: 0 auto; max-width: 100%; width: 100%; height: auto;" />
+                  ` : `
+                    ${params.vendorLogo ? `<img src="${params.vendorLogo}" alt="" width="60" height="60" style="display: block; margin: 0 auto 16px auto;" />` : ''}
+                    <div style="font-size: 32px; color: #ffffff; font-weight: 600;">${params.vendorName}</div>
+                  `}
+                </td>
+              </tr>
+            </table>
+
+            <div style="text-align: center; padding: 40px 20px;">
+              <div style="width: 72px; height: 72px; background-color: #10b981; border-radius: 50%; margin: 0 auto 24px; display: flex; align-items: center; justify-content: center;">
+                <span style="font-size: 36px; color: white; line-height: 72px;">✓</span>
+              </div>
+              <h2 style="margin: 0 0 8px 0; font-size: 28px; font-weight: 600; color: #1d1d1f;">
+                Order Confirmed
+              </h2>
+              <p style="margin: 0; font-size: 15px; color: #86868b;">
+                Order #${params.orderNumber}
+              </p>
+            </div>
+
+            ${params.orderType === 'pickup' ? `
+            <div style="margin: 0 20px 24px; background: #f5f5f7; border-radius: 12px; padding: 20px;">
+              <p style="margin: 0 0 8px 0; font-size: 13px; color: #86868b; text-transform: uppercase; letter-spacing: 0.5px;">Pickup Location</p>
+              <p style="margin: 0 0 4px 0; font-size: 17px; font-weight: 600; color: #1d1d1f;">
+                ${params.pickupLocation || 'Location TBD'}
+              </p>
+              ${params.estimatedTime ? `<p style="margin: 0; font-size: 15px; color: #86868b;">Ready in ${params.estimatedTime}</p>` : ''}
+            </div>
+            ` : `
+            <div style="margin: 0 20px 24px; background: #f5f5f7; border-radius: 12px; padding: 20px;">
+              <p style="margin: 0 0 8px 0; font-size: 13px; color: #86868b; text-transform: uppercase; letter-spacing: 0.5px;">Shipping</p>
+              <p style="margin: 0; font-size: 17px; color: #1d1d1f;">
+                You'll receive tracking info when your order ships.
+              </p>
+            </div>
+            `}
+
+            <div style="padding: 0 20px 40px;">
+              <table style="width: 100%; border-collapse: collapse;">
+                ${itemsHTML}
+              </table>
+              <div style="background-color: #f5f5f7; border-radius: 12px; padding: 20px; margin-top: 24px;">
+                <table style="width: 100%;">
+                  <tr>
+                    <td style="font-size: 19px; font-weight: 600; color: #1d1d1f;">Total</td>
+                    <td style="text-align: right; font-size: 24px; font-weight: 600; color: #1d1d1f;">
+                      $${params.total.toFixed(2)}
+                    </td>
+                  </tr>
+                </table>
+              </div>
+            </div>
+
+            <div style="text-align: center; padding: 32px 20px; background-color: #f5f5f7; border-top: 1px solid #d2d2d7;">
+              <p style="margin: 0; font-size: 12px; color: #86868b;">
+                ${params.vendorName} © ${new Date().getFullYear()}
+              </p>
+            </div>
+          </div>
+        </body>
+      </html>
+    `
+  }
+
+  private static generateOrderUpdateTestHTML(params: {
+    orderNumber: string
+    pickupLocation: string
+    vendorName: string
+    vendorLogo?: string
+    emailHeaderImage?: string
+  }): string {
+    return `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Order Ready #${params.orderNumber}</title>
+        </head>
+        <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif; line-height: 1.5; background-color: #f5f5f7; color: #1d1d1f; margin: 0; padding: 0;">
+          <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff;">
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #000000;">
+              <tr>
+                <td align="center" style="padding: 60px 30px;">
+                  ${params.emailHeaderImage ? `
+                    <img src="${params.emailHeaderImage}" alt="${params.vendorName}" style="display: block; margin: 0 auto; max-width: 100%; width: 100%; height: auto;" />
+                  ` : `
+                    ${params.vendorLogo ? `<img src="${params.vendorLogo}" alt="" width="60" height="60" style="display: block; margin: 0 auto 16px auto;" />` : ''}
+                    <div style="font-size: 32px; color: #ffffff; font-weight: 600;">${params.vendorName}</div>
+                  `}
+                </td>
+              </tr>
+            </table>
+
+            <div style="text-align: center; padding: 40px 20px;">
+              <div style="font-size: 64px; margin-bottom: 16px;">🎉</div>
+              <h2 style="margin: 0 0 8px 0; font-size: 28px; font-weight: 600; color: #1d1d1f;">
+                Your Order is Ready!
+              </h2>
+              <p style="margin: 0; font-size: 15px; color: #86868b;">
+                Order #${params.orderNumber}
+              </p>
+            </div>
+
+            <div style="margin: 0 20px 40px; background: #10b98115; border-radius: 12px; padding: 24px; text-align: center;">
+              <p style="margin: 0 0 8px 0; font-size: 13px; color: #10b981; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;">Pickup Location</p>
+              <p style="margin: 0; font-size: 20px; font-weight: 600; color: #1d1d1f;">
+                ${params.pickupLocation}
+              </p>
+            </div>
+
+            <div style="text-align: center; padding: 0 20px 40px;">
+              <p style="margin: 0; font-size: 17px; color: #86868b;">
+                We can't wait to see you!
+              </p>
+            </div>
+
+            <div style="text-align: center; padding: 32px 20px; background-color: #f5f5f7; border-top: 1px solid #d2d2d7;">
+              <p style="margin: 0; font-size: 12px; color: #86868b;">
+                ${params.vendorName} © ${new Date().getFullYear()}
+              </p>
+            </div>
           </div>
         </body>
       </html>

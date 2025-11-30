@@ -7,12 +7,15 @@ import { create } from 'zustand'
 import { EmailService, VendorEmailSettings, EmailSend } from '@/services/email.service'
 import { logger } from '@/utils/logger'
 
+export type EmailTestType = 'receipt' | 'order_confirmation' | 'order_update' | 'loyalty' | 'welcome' | 'marketing'
+
 interface EmailSettingsState {
   // State
   settings: VendorEmailSettings | null
   recentSends: EmailSend[]
   isLoading: boolean
   isSendingTest: boolean
+  testingEmailType: EmailTestType | null
   error: string | null
 
   // Actions
@@ -23,7 +26,7 @@ interface EmailSettingsState {
     userId: string
   ) => Promise<boolean>
   loadRecentSends: (vendorId: string, limit?: number) => Promise<void>
-  sendTestEmail: (vendorId: string, to: string) => Promise<boolean>
+  sendTestEmail: (vendorId: string, to: string, vendorName?: string, vendorLogo?: string, emailType?: EmailTestType) => Promise<boolean>
   reset: () => void
 }
 
@@ -33,6 +36,7 @@ export const useEmailSettingsStore = create<EmailSettingsState>((set, get) => ({
   recentSends: [],
   isLoading: false,
   isSendingTest: false,
+  testingEmailType: null,
   error: null,
 
   // Load vendor email settings
@@ -104,11 +108,11 @@ export const useEmailSettingsStore = create<EmailSettingsState>((set, get) => ({
   },
 
   // Send test email
-  sendTestEmail: async (vendorId: string, to: string, vendorName?: string, vendorLogo?: string) => {
-    set({ isSendingTest: true, error: null })
+  sendTestEmail: async (vendorId: string, to: string, vendorName?: string, vendorLogo?: string, emailType?: EmailTestType) => {
+    set({ isSendingTest: true, testingEmailType: emailType || null, error: null })
 
     try {
-      logger.info('Sending test email', { vendorId, to })
+      logger.info('Sending test email', { vendorId, to, emailType })
 
       const { settings } = get()
 
@@ -119,11 +123,13 @@ export const useEmailSettingsStore = create<EmailSettingsState>((set, get) => ({
         fromEmail: settings?.from_email,
         vendorName,
         vendorLogo,
+        emailHeaderImage: settings?.email_header_image_url,
+        emailType,
       })
 
       if (result.success) {
-        logger.info('Test email sent successfully', { resendId: result.resendId })
-        set({ isSendingTest: false })
+        logger.info('Test email sent successfully', { resendId: result.resendId, emailType })
+        set({ isSendingTest: false, testingEmailType: null })
 
         // Reload recent sends to show the test email
         await get().loadRecentSends(vendorId, 10)
@@ -135,7 +141,7 @@ export const useEmailSettingsStore = create<EmailSettingsState>((set, get) => ({
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to send test email'
       logger.error('Error sending test email', { error })
-      set({ error: errorMessage, isSendingTest: false })
+      set({ error: errorMessage, isSendingTest: false, testingEmailType: null })
       return false
     }
   },
@@ -147,6 +153,7 @@ export const useEmailSettingsStore = create<EmailSettingsState>((set, get) => ({
       recentSends: [],
       isLoading: false,
       isSendingTest: false,
+      testingEmailType: null,
       error: null,
     })
   },

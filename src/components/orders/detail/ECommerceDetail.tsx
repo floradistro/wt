@@ -105,15 +105,25 @@ export function ECommerceDetail() {
 
   const getStatusColor = (status: Order['status']) => {
     switch (status) {
-      case 'delivered': return '#34c759'
-      case 'cancelled': return '#ff3b30'
-      case 'pending': return '#ff9500'
+      case 'delivered':
+      case 'completed':
+        return '#34c759' // Green - Done
+      case 'cancelled':
+        return '#ff3b30' // Red
+      case 'pending':
+        return '#ff9500' // Orange - Needs attention
       case 'confirmed':
+        return '#0a84ff' // Blue - Confirmed/Ready
+      case 'shipped':
+      case 'in_transit':
+        return '#bf5af2' // Purple - In transit
+      case 'preparing':
       case 'packing':
       case 'packed':
-      case 'shipped':
-      case 'in_transit': return '#0a84ff'
-      default: return '#8e8e93'
+      case 'ready_to_ship':
+        return '#0a84ff' // Blue for in-progress
+      default:
+        return '#8e8e93' // Gray
     }
   }
 
@@ -121,43 +131,39 @@ export function ECommerceDetail() {
     switch (status) {
       case 'pending': return 'Pending'
       case 'confirmed': return 'Confirmed'
+      case 'preparing': return 'Preparing'
       case 'packing': return 'Packing'
       case 'packed': return 'Packed'
+      case 'ready_to_ship': return 'Ready to Ship'
       case 'shipped': return 'Shipped'
       case 'in_transit': return 'In Transit'
       case 'delivered': return 'Delivered'
+      case 'completed': return 'Completed'
       case 'cancelled': return 'Cancelled'
       default: return status
     }
   }
 
   // Get button text and handler based on status
+  // Apple-style: processing → shipped → delivered (3 states, 1 action)
   const getActionButton = () => {
     if (!order) {
       return { text: undefined, handler: undefined, disabled: true }
     }
 
+    // Terminal states - no action
     if (order.status === 'delivered' || order.status === 'cancelled' || order.status === 'completed') {
       return { text: undefined, handler: undefined, disabled: true }
     }
 
-    if (order.status === 'pending') {
-      return { text: '✓ Confirm Order', handler: () => setShowConfirmModal(true), disabled: isUpdating }
+    // Confirmed/Pending/etc - show Ship button (Apple-style: one action)
+    if (['confirmed', 'pending', 'preparing', 'packing', 'packed', 'ready_to_ship'].includes(order.status)) {
+      return { text: 'Ship', handler: () => setShowShipModal(true), disabled: isUpdating }
     }
-    if (order.status === 'confirmed') {
-      return { text: 'Start Packing', handler: () => handleStatusUpdate('packing'), disabled: isUpdating }
-    }
-    if (order.status === 'packing') {
-      return { text: '✓ Mark Packed', handler: () => setShowPackModal(true), disabled: isUpdating }
-    }
-    if (order.status === 'packed') {
-      return { text: '✈ Ship Order', handler: () => setShowShipModal(true), disabled: isUpdating }
-    }
-    if (order.status === 'shipped') {
-      return { text: 'In Transit', handler: () => handleStatusUpdate('in_transit'), disabled: isUpdating }
-    }
-    if (order.status === 'in_transit') {
-      return { text: '✓ Delivered', handler: () => setShowDeliveredModal(true), disabled: isUpdating }
+
+    // Shipped/In Transit - show Delivered button
+    if (order.status === 'shipped' || order.status === 'in_transit') {
+      return { text: 'Mark Delivered', handler: () => setShowDeliveredModal(true), disabled: isUpdating }
     }
 
     return { text: undefined, handler: undefined, disabled: true }

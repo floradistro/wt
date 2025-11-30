@@ -26,6 +26,7 @@ import { POSCheckoutModals } from './POSCheckoutModals'
 // Hooks
 import { useCustomerSelection } from '@/hooks/pos/useCustomerSelection'
 import { useCampaigns } from '@/hooks/useCampaigns'
+import { useCheckoutTotals } from '@/hooks/useCheckoutTotals'
 import { usePaymentProcessor } from '@/stores/payment-processor.store'
 import { useAuthStore } from '@/stores/auth.store'
 import { useCartItems, useCartTotals, cartActions } from '@/stores/cart.store'
@@ -111,8 +112,22 @@ export function POSCheckout({
   // CART STATE (for payment processing)
   // ========================================
   const cart = useCartItems()
-  const { subtotal, itemCount } = useCartTotals()
+  const { itemCount } = useCartTotals() // Only need itemCount, rest comes from useCheckoutTotals
   const selectedDiscountId = useSelectedDiscountId()
+
+  // ========================================
+  // SINGLE SOURCE OF TRUTH - Use centralized hook ✅
+  // ========================================
+  const {
+    total,
+    subtotal,
+    taxAmount,
+    taxRate,
+    taxName,
+    loyaltyDiscount: loyaltyDiscountAmount,
+    campaignDiscount: discountAmount,
+    subtotalAfterDiscounts,
+  } = useCheckoutTotals()
 
   // Loyalty state from store (same as slider)
   const { loyaltyProgram, pointsToRedeem } = useLoyaltyState()
@@ -121,9 +136,6 @@ export function POSCheckout({
   // Loyalty actions
   const setLoyaltyPointsToRedeem = loyaltyActions.setPointsToRedeem
   const resetLoyalty = loyaltyActions.resetLoyalty
-
-  // Calculate loyalty discount amount (use the store's getter)
-  const loyaltyDiscountAmount = loyaltyActions.getDiscountAmount()
 
   // Calculate max redeemable points
   const getMaxRedeemablePoints = (subtotal: number): number => {
@@ -146,37 +158,9 @@ export function POSCheckout({
     [activeDiscounts, selectedDiscountId]
   )
 
-  // ========================================
-  // CALCULATIONS
-  // ========================================
-  const subtotalAfterLoyalty = Math.max(0, subtotal - loyaltyDiscountAmount)
-
-  const discountAmount = useMemo(() => {
-    if (!selectedDiscount) return 0
-
-    if (selectedDiscount.discount_type === 'percentage') {
-      return subtotalAfterLoyalty * (selectedDiscount.discount_value / 100)
-    } else {
-      return Math.min(selectedDiscount.discount_value, subtotalAfterLoyalty)
-    }
-  }, [selectedDiscount, subtotalAfterLoyalty])
-
-  const subtotalAfterDiscount = Math.max(0, subtotalAfterLoyalty - discountAmount)
-
   // Extract session properties for stable dependencies
   const locationId = session?.locationId
   const sessionId = session?.sessionId
-
-  // Tax calculation - use apiConfig from Context
-  const taxAmount = useMemo(() => {
-    const rate = apiConfig?.taxRate || 0.08
-    return subtotalAfterDiscount * rate
-  }, [subtotalAfterDiscount, apiConfig?.taxRate])
-
-  const taxRate = apiConfig?.taxRate || 0.08
-  const taxName = apiConfig?.taxName || 'Sales Tax'
-
-  const total = subtotalAfterDiscount + taxAmount
 
   const loyaltyPointsEarned = useMemo(() => {
     if (!selectedCustomer) return 0
@@ -321,11 +305,22 @@ export function POSCheckout({
     }
 
     try {
+      // DEBUG: Log all payment calculations
+      logger.debug('💰 PAYMENT CALCULATIONS (from useCheckoutTotals hook):', {
+        rawSubtotal: subtotal,
+        loyaltyDiscountAmount,
+        campaignDiscountAmount: discountAmount,
+        subtotalAfterDiscounts,
+        taxAmount,
+        total,
+        calculation: `${subtotal} - ${loyaltyDiscountAmount} - ${discountAmount} = ${subtotalAfterDiscounts} + ${taxAmount} tax = ${total}`,
+      })
+
       // Call payment store to process payment
       const completionData = await paymentActions.processPayment({
         paymentData,
         cart,
-        subtotal,
+        subtotal, // ✅ Raw cart subtotal (Edge Function validates this matches sum of line items)
         taxAmount,
         total,
         itemCount,
@@ -335,7 +330,7 @@ export function POSCheckout({
         selectedCustomer,
         loyaltyPointsToRedeem,
         loyaltyDiscountAmount,
-        discountAmount,
+        discountAmount, // Edge Function subtracts discounts to get final total
         selectedDiscountId,
         currentProcessor,
         onSuccess: () => {

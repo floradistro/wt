@@ -63,7 +63,7 @@ export function validateRealPaymentData(paymentData: PaymentData): void {
  * @throws Error if payment method doesn't match database constraints
  */
 export function validatePaymentMethod(method: string): void {
-  const validMethods = ['credit', 'debit', 'ebt_food', 'ebt_cash', 'gift', 'cash', 'check']
+  const validMethods = ['credit', 'debit', 'ebt_food', 'ebt_cash', 'gift', 'cash', 'check', 'split']
 
   const normalized = method.toLowerCase()
 
@@ -87,10 +87,9 @@ export function normalizePaymentMethod(method: string): string {
     return 'credit'
   }
 
-  // Map 'split' to 'credit' (split details are stored separately in split_payments array)
-  if (method.toLowerCase() === 'split') {
-    return 'credit'
-  }
+  // IMPORTANT: Keep 'split' as 'split' so Edge Function can detect split payments
+  // The split payment details (cash/card amounts) are sent separately
+  // DO NOT convert split to credit!
 
   return method.toLowerCase()
 }

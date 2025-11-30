@@ -17,10 +17,7 @@ import { Ionicons } from '@expo/vector-icons'
 import * as Haptics from 'expo-haptics'
 import { logger } from '@/utils/logger'
 import { Sentry } from '@/utils/sentry'
-import { useCartTotals } from '@/stores/cart.store'
-import { usePOSSession } from '@/contexts/POSSessionContext'
-import { taxActions } from '@/stores/tax.store'
-import { useLoyaltyState } from '@/stores/loyalty.store'
+import { useCheckoutTotals } from '@/hooks/useCheckoutTotals'
 import type { PaymentData, SaleCompletionData, PaymentStage } from './PaymentTypes'
 
 interface CashPaymentViewProps {
@@ -31,29 +28,9 @@ export function CashPaymentView({
   onComplete,
 }: CashPaymentViewProps) {
   // ========================================
-  // STORES - TRUE ZERO PROPS (read from environment)
+  // SINGLE SOURCE OF TRUTH - Centralized total calculation
   // ========================================
-  const { subtotal, itemCount } = useCartTotals()
-  const { session } = usePOSSession()
-  const { loyaltyProgram, pointsToRedeem } = useLoyaltyState()
-
-  // Calculate tax
-  const { taxAmount, taxRate, taxName } = useMemo(() => {
-    if (!session?.locationId) return { taxAmount: 0, taxRate: 0, taxName: undefined }
-    return taxActions.calculateTax(subtotal, session.locationId)
-  }, [subtotal, session?.locationId])
-
-  // Calculate loyalty discount
-  const loyaltyDiscountAmount = useMemo(() => {
-    if (!loyaltyProgram || pointsToRedeem === 0) return 0
-    return (pointsToRedeem * (loyaltyProgram.point_value || 0.01))
-  }, [loyaltyProgram, pointsToRedeem])
-
-  // Calculate total
-  const total = useMemo(() => {
-    const subtotalAfterDiscount = Math.max(0, subtotal - loyaltyDiscountAmount)
-    return subtotalAfterDiscount + taxAmount
-  }, [subtotal, loyaltyDiscountAmount, taxAmount])
+  const { total, subtotal, taxAmount, itemCount, loyaltyDiscount, campaignDiscount } = useCheckoutTotals()
 
   // ========================================
   // LOCAL STATE (UI only)

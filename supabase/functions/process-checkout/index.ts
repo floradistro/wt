@@ -126,7 +126,7 @@ interface CheckoutRequest {
   total: number
 
   // Payment (flexible format)
-  paymentMethod?: 'cash' | 'credit' | 'debit' | 'ebt_food' | 'ebt_cash' | 'gift'
+  paymentMethod?: 'cash' | 'card' | 'split' | 'credit' | 'debit' | 'ebt_food' | 'ebt_cash' | 'gift'
   payment?: {  // E-commerce format
     method: string
     amount: number
@@ -169,6 +169,15 @@ interface CheckoutRequest {
   campaignDiscountAmount?: number
   campaignId?: string
 
+  // Split Payment
+  splitPayments?: Array<{ method: 'cash' | 'card'; amount: number }>
+  cashAmount?: number
+  cardAmount?: number
+
+  // Cash Payment
+  cashTendered?: number
+  changeGiven?: number
+
   // Metadata
   metadata?: Record<string, any>
 }
@@ -182,7 +191,14 @@ interface OrderItem {
   lineTotal: number
   discountAmount?: number
   inventoryId?: string
-  gramsToDeduct?: number // For cannabis products with pricing tiers (e.g., 28g, 3.5g)
+  // Tier quantity fields (at least one is required)
+  gramsToDeduct?: number // Legacy field: tier quantity (could be grams, units, etc.)
+  tierQty?: number // Preferred field: tier quantity to deduct from inventory
+  quantity_grams?: number // Alternative field: tier quantity
+  tierName?: string // Display name for the tier (e.g., "28g (Ounce)", "1 Unit")
+  // Multi-location support: which location fulfills this item
+  locationId?: string  // POS format (camelCase)
+  location_id?: string // E-commerce format (snake_case)
 }
 
 interface SPINSaleRequest {
@@ -862,6 +878,16 @@ serve(async (req) => {
     // STEP 3.5: COMPREHENSIVE INPUT VALIDATION (Apple Security Standards)
     // ========================================================================
 
+    // DEBUG: Log payment calculation inputs
+    console.log(`[${requestId}] 💰 EDGE FUNCTION RECEIVED:`, {
+      subtotal: body.subtotal,
+      loyaltyDiscount: body.loyaltyDiscountAmount || 0,
+      campaignDiscount: body.campaignDiscountAmount || 0,
+      taxAmount: body.taxAmount,
+      total: body.total,
+      calculation: `${body.subtotal} - ${body.loyaltyDiscountAmount || 0} - ${body.campaignDiscountAmount || 0} + ${body.taxAmount} tax = ${body.total}`,
+    })
+
     // Validate each line item
     let calculatedSubtotal = 0
     for (let i = 0; i < body.items.length; i++) {
@@ -1261,9 +1287,20 @@ serve(async (req) => {
     // STEP 8: CREATE ORDER ITEMS
     // ========================================================================
     const orderItems = body.items.map(item => {
-      // MISSION CRITICAL: No fallback for gramsToDeduct!
-      if (!item.gramsToDeduct) {
-        throw new Error(`CRITICAL: Missing gramsToDeduct for item ${item.productName}. Inventory deduction would be incorrect!`)
+      // MISSION CRITICAL: Validate tier quantity for inventory deduction
+      // Note: gramsToDeduct is a legacy name - it's actually the tier quantity (could be grams, units, ounces, etc.)
+      const tierQtyToDeduct = item.gramsToDeduct || item.tierQty || item.quantity_grams
+
+      if (!tierQtyToDeduct || tierQtyToDeduct <= 0) {
+        console.error(`[${requestId}] Invalid tier quantity for item:`, {
+          productName: item.productName,
+          gramsToDeduct: item.gramsToDeduct,
+          tierQty: item.tierQty,
+          quantity_grams: item.quantity_grams,
+          quantity: item.quantity,
+          fullItem: JSON.stringify(item, null, 2)
+        })
+        throw new Error(`CRITICAL: Missing or invalid tier quantity for item ${item.productName}. Inventory deduction would be incorrect! Received: ${tierQtyToDeduct}`)
       }
 
       return {
@@ -1281,10 +1318,10 @@ serve(async (req) => {
         tax_amount: 0, // Tax is calculated at order level
         inventory_id: item.inventoryId, // Now populated with actual inventory record ID
         stock_movement_id: null,
-        tier_name: item.tierName || null, // e.g., "28g (Ounce)", "3.5g (Eighth)"
-        tier_qty: item.gramsToDeduct, // Same as quantity_grams
+        tier_name: item.tierName || null, // e.g., "28g (Ounce)", "3.5g (Eighth)", "1 Unit"
+        tier_qty: tierQtyToDeduct, // Tier quantity to deduct from inventory
         tier_price: item.unitPrice, // Price for this tier
-        quantity_grams: item.gramsToDeduct, // CRITICAL: Actual quantity to deduct (grams, units, etc.)
+        quantity_grams: tierQtyToDeduct, // CRITICAL: Actual quantity to deduct (grams, units, etc.)
         quantity_display: item.tierName || `${item.quantity}`, // Display string for UI
         meta_data: {},
         // Required fields for order item tracking
@@ -1299,6 +1336,8 @@ serve(async (req) => {
         cost_per_unit: null,
         profit_per_unit: null,
         margin_percentage: null,
+        // Multi-location support: which location fulfills this item
+        location_id: item.locationId || item.location_id || body.locationId || null,
       }
     })
 
@@ -1311,6 +1350,8 @@ serve(async (req) => {
     if (itemsError) {
       // Rollback order
       await supabaseAdmin.from('orders').delete().eq('id', order.id)
+
+      // Log detailed error information
       console.error(`[${requestId}] Failed to create order items:`, {
         error: itemsError,
         message: itemsError.message,
@@ -1319,7 +1360,9 @@ serve(async (req) => {
         code: itemsError.code,
       })
       console.error(`[${requestId}] Order items that failed:`, JSON.stringify(orderItems, null, 2))
+      console.error(`[${requestId}] Original request items:`, JSON.stringify(body.items, null, 2))
 
+      // Capture to Sentry with full context
       Sentry.captureException(itemsError, {
         tags: { operation: 'order_items_creation', requestId },
         contexts: {
@@ -1328,11 +1371,21 @@ serve(async (req) => {
             orderNumber: order.order_number,
             itemCount: body.items.length,
           },
+          error_details: {
+            code: itemsError.code,
+            message: itemsError.message,
+            details: itemsError.details,
+            hint: itemsError.hint,
+          },
+          items_sample: orderItems.length > 0 ? orderItems[0] : null,
         },
       })
 
+      // Return detailed error message for debugging
+      const detailedError = `Failed to create order items: ${itemsError.message}${itemsError.hint ? ` (Hint: ${itemsError.hint})` : ''}${itemsError.details ? ` (Details: ${itemsError.details})` : ''}`
+
       // Connection will be closed by finally block
-      return await errorResponse('Failed to create order items', 500, requestId, allowedOrigin)
+      return await errorResponse(detailedError, 500, requestId, allowedOrigin)
     }
 
     Sentry.addBreadcrumb({
@@ -1414,24 +1467,31 @@ serve(async (req) => {
     let paymentResult: SPINSaleResponse | null = null
     let paymentError: Error | null = null
 
-    if (body.paymentMethod === 'cash') {
-      // Cash payment - no processor needed
-      console.log(`[${requestId}] Cash payment - skipping processor`)
+    if (body.paymentMethod === 'cash' || body.paymentMethod === 'split') {
+      // Cash or Split payment
+      const isSplit = body.paymentMethod === 'split'
+      const cashAmount = isSplit ? (body.cashAmount || 0) : body.total
+
+      console.log(`[${requestId}] ${isSplit ? 'Split' : 'Cash'} payment - ${isSplit ? `cash portion: $${cashAmount}` : 'skipping processor'}`)
 
       Sentry.addBreadcrumb({
         category: 'payment',
-        message: 'Processing cash payment',
+        message: `Processing ${isSplit ? 'split' : 'cash'} payment`,
         level: 'info',
-        data: { amount: body.total },
+        data: {
+          amount: body.total,
+          cashAmount: isSplit ? cashAmount : body.total,
+          cardAmount: isSplit ? body.cardAmount : 0,
+        },
       })
 
       const { error: cashUpdateError } = await supabaseAdmin
         .from('orders')
         .update({
-          status: OrderStatus.COMPLETED,
-          payment_status: PaymentStatus.PAID,
-          processor_transaction_id: `CASH-${orderNumber}`,
-          payment_authorization_code: 'CASH',
+          status: isSplit ? OrderStatus.PENDING : OrderStatus.COMPLETED, // Split payment will be completed after card processing
+          payment_status: isSplit ? PaymentStatus.PENDING : PaymentStatus.PAID,
+          processor_transaction_id: `${isSplit ? 'SPLIT' : 'CASH'}-${orderNumber}`,
+          payment_authorization_code: isSplit ? 'SPLIT-PAYMENT' : 'CASH',
         })
         .eq('id', order.id)
 
@@ -1444,8 +1504,8 @@ serve(async (req) => {
         return await errorResponse(`Failed to complete cash payment: ${cashUpdateError.message}`, 500, requestId, allowedOrigin)
       }
 
-      // CRITICAL: Log cash transaction for audit trail (same as card payments)
-      const { error: cashTransactionError } = await supabaseAdmin
+      // CRITICAL: Log cash transaction for audit trail
+      const { error: cashTransactionError} = await supabaseAdmin
         .from('payment_transactions')
         .insert({
           vendor_id: body.vendorId,
@@ -1454,15 +1514,15 @@ serve(async (req) => {
           order_id: order.id,
           processor_type: 'manual',
           transaction_type: 'sale',
-          payment_method: 'cash',
-          amount: body.total,
-          total_amount: body.total,
+          payment_method: isSplit ? 'split-cash' : 'cash',
+          amount: cashAmount,
+          total_amount: cashAmount,
           status: 'approved',
           processor_transaction_id: `CASH-${orderNumber}`,
           processor_reference_id: orderNumber,
           authorization_code: 'CASH',
           processed_at: new Date().toISOString(),
-          idempotency_key: idempotencyKey,
+          idempotency_key: `${idempotencyKey}-cash`,
         })
 
       if (cashTransactionError) {
@@ -1476,13 +1536,26 @@ serve(async (req) => {
 
       Sentry.addBreadcrumb({
         category: 'payment',
-        message: 'Cash payment completed and logged',
+        message: `${isSplit ? 'Split payment cash portion' : 'Cash payment'} completed and logged`,
         level: 'info',
       })
 
-    } else {
+      // For split payments, fall through to process card portion
+      if (!isSplit) {
+        // Pure cash payment is complete, skip card processing
+        console.log(`[${requestId}] Cash-only payment complete`)
+      }
+    }
+
+    // Process card payment (either full card or split payment card portion)
+    // Accept all card types: credit, debit, card, split, ebt_food, ebt_cash, gift
+    const isCardPayment = ['card', 'credit', 'debit', 'ebt_food', 'ebt_cash', 'gift', 'split'].includes(body.paymentMethod)
+    if (isCardPayment && body.paymentMethod !== 'cash') {
+      const isSplit = body.paymentMethod === 'split'
+      const cardAmount = isSplit ? (body.cardAmount || 0) : body.total
+
       // Card payment via processor (Dejavoo SPIN or Authorize.Net)
-      console.log(`[${requestId}] Processing card payment via ${paymentProcessor.processor_type}`)
+      console.log(`[${requestId}] Processing ${isSplit ? 'split payment card portion' : 'card payment'} (${body.paymentMethod}) via ${paymentProcessor.processor_type}: $${cardAmount}`)
 
       // Keep status as PENDING while processing payment
       await supabaseAdmin
@@ -1502,7 +1575,7 @@ serve(async (req) => {
         )
 
         const spinRequest: SPINSaleRequest = {
-          Amount: body.total,
+          Amount: cardAmount, // Use cardAmount for split payments, body.total for card-only
           TipAmount: body.tipAmount || 0,
           PaymentType: mapPaymentType(body.paymentMethod),
           ReferenceId: orderNumber,
@@ -1521,9 +1594,10 @@ serve(async (req) => {
             message: 'Sending payment to SPIN processor',
             level: 'info',
             data: {
-              amount: body.total,
+              amount: cardAmount,
               paymentType: mapPaymentType(body.paymentMethod),
               environment: paymentProcessor.environment,
+              isSplit,
             },
           })
 
@@ -1557,8 +1631,8 @@ serve(async (req) => {
             order_id: order.id,
             processor_type: 'dejavoo',
             transaction_type: 'sale',
-            payment_method: body.paymentMethod,
-            amount: body.total,
+            payment_method: isSplit ? 'split-card' : body.paymentMethod,
+            amount: cardAmount,
             total_amount: body.total,
             status: resultCode === '0' && statusCode === '0000' ? 'approved' : 'declined',
             processor_transaction_id: paymentResult.GeneralResponse.ReferenceId,
@@ -1621,8 +1695,8 @@ serve(async (req) => {
           order_id: order.id,
           processor_type: 'dejavoo',
           transaction_type: 'sale',
-          payment_method: body.paymentMethod,
-          amount: body.total,
+          payment_method: isSplit ? 'split-card' : body.paymentMethod,
+          amount: cardAmount,
           total_amount: body.total,
           status: 'error',
           error_message: error.message,
@@ -1664,7 +1738,7 @@ serve(async (req) => {
         )
 
         const anetRequest: AuthorizeNetSaleRequest = {
-          amount: body.total,
+          amount: cardAmount, // Use cardAmount for split payments, body.total for card-only
           invoiceNumber: orderNumber,
           description: `POS Sale - ${orderNumber}`,
           customerId: body.customerId,
@@ -1676,8 +1750,9 @@ serve(async (req) => {
             message: 'Sending payment to Authorize.Net processor',
             level: 'info',
             data: {
-              amount: body.total,
+              amount: cardAmount,
               environment: paymentProcessor.environment,
+              isSplit,
             },
           })
 
@@ -1713,8 +1788,8 @@ serve(async (req) => {
             order_id: order.id,
             processor_type: 'authorizenet',
             transaction_type: 'sale',
-            payment_method: body.paymentMethod,
-            amount: body.total,
+            payment_method: isSplit ? 'split-card' : body.paymentMethod,
+            amount: cardAmount,
             total_amount: body.total,
             status: responseCode === '1' ? 'approved' : responseCode === '2' ? 'declined' : 'error',
             processor_transaction_id: paymentResult.transactionResponse.transId,
@@ -1776,8 +1851,8 @@ serve(async (req) => {
             order_id: order.id,
             processor_type: 'authorizenet',
             transaction_type: 'sale',
-            payment_method: body.paymentMethod,
-            amount: body.total,
+            payment_method: isSplit ? 'split-card' : body.paymentMethod,
+            amount: cardAmount,
             total_amount: body.total,
             status: 'error',
             error_message: error.message,
@@ -1900,6 +1975,41 @@ serve(async (req) => {
       })
 
       try {
+        // CRITICAL: Validate customer exists before trying to update loyalty points
+        const { data: customerExists, error: customerCheckError } = await supabaseAdmin
+          .from('customers')
+          .select('id, loyalty_points')
+          .eq('id', body.customerId)
+          .maybeSingle()
+
+        if (customerCheckError) {
+          throw new Error(`Failed to validate customer: ${customerCheckError.message}`)
+        }
+
+        if (!customerExists) {
+          console.warn(`[${requestId}] Customer ${body.customerId} not found in database - skipping loyalty update`)
+          Sentry.captureMessage('Customer not found during loyalty update', {
+            level: 'warning',
+            tags: { requestId, customerId: body.customerId },
+          })
+          loyaltySpan.setStatus('failed_precondition')
+          // Don't throw - just skip loyalty update for invalid customer
+        } else {
+
+        console.log(`[${requestId}] Customer validated for loyalty update:`, {
+          customerId: body.customerId,
+          currentPoints: customerExists.loyalty_points,
+          pointsToRedeem: body.loyaltyPointsRedeemed || 0,
+        })
+
+        // Validate sufficient points for redemption
+        if (body.loyaltyPointsRedeemed && body.loyaltyPointsRedeemed > 0) {
+          if (customerExists.loyalty_points < body.loyaltyPointsRedeemed) {
+            throw new Error(
+              `Insufficient loyalty points. Customer has ${customerExists.loyalty_points} points but trying to redeem ${body.loyaltyPointsRedeemed} points.`
+            )
+          }
+        }
         // Calculate points earned server-side using loyalty program rules
         const pointsEarnedResult = await dbClient.queryObject(
           `SELECT calculate_loyalty_points_to_earn($1, $2) as points_earned`,
@@ -1950,8 +2060,18 @@ serve(async (req) => {
             pointsRedeemed: body.loyaltyPointsRedeemed || 0,
           },
         })
+        } // End of else block (customer exists)
       } catch (error) {
         console.error(`[${requestId}] Loyalty points update failed:`, error)
+        console.error(`[${requestId}] Loyalty error details:`, {
+          errorMessage: error instanceof Error ? error.message : String(error),
+          errorStack: error instanceof Error ? error.stack : undefined,
+          customerId: body.customerId,
+          pointsRedeemed: body.loyaltyPointsRedeemed,
+          pointsToEarn: loyaltyPointsEarned,
+          subtotal: body.subtotal,
+          orderId: order.id,
+        })
         loyaltySpan.setStatus('unknown_error')
 
         // CRITICAL: Loyalty points failure is logged but doesn't fail the transaction
@@ -1970,8 +2090,10 @@ serve(async (req) => {
               customerId: body.customerId,
               orderId: order.id,
               pointsRedeemed: body.loyaltyPointsRedeemed || 0,
+              pointsToEarn: loyaltyPointsEarned,
               orderTotal: body.total,
               subtotal: body.subtotal,
+              errorMessage: error instanceof Error ? error.message : String(error),
             },
           },
         })

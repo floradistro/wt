@@ -42,60 +42,47 @@ export function ECommerceView({ isLoading = false }: ECommerceViewProps) {
     return filteredOrders.filter((order) => order.order_type === 'shipping')
   }, [filteredOrders])
 
-  // Group shipping orders by status with filter
+  // Group shipping orders by status - Apple-style (3 groups max)
   const shippingGrouped = useMemo(() => {
     const groups: Array<{ title: string; data: Order[] }> = []
 
-    // Needs attention (pending, confirmed)
-    const needsAction = shippingOrders.filter(
-      (o) => ['pending', 'confirmed'].includes(o.status)
+    // NEW - Orders waiting to be shipped (confirmed, pending, preparing, packing, packed)
+    const newOrders = shippingOrders.filter(
+      (o) => ['confirmed', 'pending', 'preparing', 'packing', 'packed', 'ready_to_ship'].includes(o.status)
     )
 
-    // In progress (packing, packed)
-    const inProgress = shippingOrders.filter(
-      (o) => ['packing', 'packed'].includes(o.status)
-    )
-
-    // Shipped / In Transit
+    // SHIPPED - Orders in transit
     const shipped = shippingOrders.filter(
       (o) => ['shipped', 'in_transit'].includes(o.status)
     )
 
-    // Delivered today
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
+    // DELIVERED - Completed orders (show recent)
     const delivered = shippingOrders.filter(
-      (o) => o.status === 'delivered' && new Date(o.created_at) >= today
+      (o) => o.status === 'delivered'
     )
 
-    // Apply filter
+    // Apply filter - Apple style: simple groups
     if (statusFilter === 'all') {
-      if (needsAction.length > 0) {
-        groups.push({ title: 'Needs Action', data: needsAction })
-      }
-      if (inProgress.length > 0) {
-        groups.push({ title: 'Ready to Ship', data: inProgress })
+      if (newOrders.length > 0) {
+        groups.push({ title: 'New', data: newOrders })
       }
       if (shipped.length > 0) {
-        groups.push({ title: 'In Transit', data: shipped })
+        groups.push({ title: 'Shipped', data: shipped })
       }
       if (delivered.length > 0) {
-        groups.push({ title: 'Delivered Today', data: delivered })
+        groups.push({ title: 'Delivered', data: delivered.slice(0, 10) }) // Show last 10
       }
     } else if (statusFilter === 'active') {
-      if (needsAction.length > 0) {
-        groups.push({ title: 'Needs Action', data: needsAction })
-      }
-      if (inProgress.length > 0) {
-        groups.push({ title: 'Ready to Ship', data: inProgress })
+      if (newOrders.length > 0) {
+        groups.push({ title: 'New', data: newOrders })
       }
     } else if (statusFilter === 'shipped') {
       if (shipped.length > 0) {
-        groups.push({ title: 'In Transit', data: shipped })
+        groups.push({ title: 'Shipped', data: shipped })
       }
     } else if (statusFilter === 'delivered') {
       if (delivered.length > 0) {
-        groups.push({ title: 'Delivered Today', data: delivered })
+        groups.push({ title: 'Delivered', data: delivered })
       }
     }
 
@@ -132,10 +119,10 @@ export function ECommerceView({ isLoading = false }: ECommerceViewProps) {
     )
   }
 
-  // Filter pills for status filtering
+  // Filter pills for status filtering - Apple simple
   const filterPills: FilterPill[] = [
     { id: 'all', label: 'All' },
-    { id: 'active', label: 'Active' },
+    { id: 'active', label: 'New' },
     { id: 'shipped', label: 'Shipped' },
     { id: 'delivered', label: 'Delivered' },
   ]

@@ -20,14 +20,12 @@ import { ordersStyles as styles } from '../orders.styles'
 import { useSelectedOrderId, useOrdersUIActions } from '@/stores/orders-ui.store'
 
 interface OrderItemProps {
-  order: Order             // ✅ KEEP: Visual data (needed for rendering)
-  showLocation: boolean    // ✅ KEEP: Visual prop (conditional rendering)
-  isLast: boolean          // ✅ KEEP: Visual prop (styling)
-  // ❌ REMOVED: isSelected (derived from store)
-  // ❌ REMOVED: onPress (uses store action)
+  order: Order             // Order data
+  showLocation?: boolean   // Legacy - no longer used in Apple-style layout
+  isLast: boolean          // Styling for last item (no border)
 }
 
-const OrderItem = React.memo<OrderItemProps>(({ order, showLocation, isLast }) => {
+const OrderItem = React.memo<OrderItemProps>(({ order, isLast }) => {
   // ========================================
   // DERIVED STATE from Zustand
   // ========================================
@@ -60,19 +58,24 @@ const OrderItem = React.memo<OrderItemProps>(({ order, showLocation, isLast }) =
   // Get status color - Clean color coding like stock colors
   const getStatusColor = (status: Order['status']) => {
     switch (status) {
+      case 'delivered':
       case 'completed':
-        return '#34c759' // Green
+        return '#34c759' // Green - Done
       case 'cancelled':
         return '#ff3b30' // Red
       case 'pending':
-      case 'ready_to_ship':
-        return '#ff9500' // Orange
-      case 'preparing':
-      case 'ready':
-      case 'out_for_delivery':
+        return '#ff9500' // Orange - Needs attention
+      case 'confirmed':
+        return '#0a84ff' // Blue - Confirmed/Ready
       case 'shipped':
       case 'in_transit':
-      case 'delivered':
+        return '#bf5af2' // Purple - In transit
+      case 'preparing':
+      case 'packing':
+      case 'packed':
+      case 'ready':
+      case 'ready_to_ship':
+      case 'out_for_delivery':
         return '#fff' // White for in-progress
       default:
         return '#8e8e93' // Gray
@@ -84,8 +87,14 @@ const OrderItem = React.memo<OrderItemProps>(({ order, showLocation, isLast }) =
     switch (status) {
       case 'pending':
         return 'Pending'
+      case 'confirmed':
+        return 'Confirmed'
       case 'preparing':
         return 'Preparing'
+      case 'packing':
+        return 'Packing'
+      case 'packed':
+        return 'Packed'
       case 'ready':
         return 'Ready'
       case 'out_for_delivery':
@@ -102,31 +111,12 @@ const OrderItem = React.memo<OrderItemProps>(({ order, showLocation, isLast }) =
         return 'Completed'
       case 'cancelled':
         return 'Cancelled'
-    }
-  }
-
-  // Get order type - Clean, no emojis
-  const getOrderType = () => {
-    // Prefer new order_type field, fallback to legacy delivery_type
-    const type = order.order_type || order.delivery_type || 'walk_in'
-    switch (type.toLowerCase()) {
-      case 'walk_in':
-      case 'instore':
-        return 'Walk-in'
-      case 'pickup':
-        return 'Pickup'
-      case 'delivery':
-        return 'Delivery'
-      case 'shipping':
-        return 'Shipping'
       default:
-        return 'Store'
+        return status
     }
   }
 
-  const orderType = getOrderType()
-
-  // Get customer initials for icon
+  // Get customer initials for avatar
   const customerInitials = order.customer_name
     ? order.customer_name
         .split(' ')
@@ -137,7 +127,7 @@ const OrderItem = React.memo<OrderItemProps>(({ order, showLocation, isLast }) =
     : 'G'
 
   // ========================================
-  // RENDER (unchanged)
+  // RENDER - Apple-style two-line layout
   // ========================================
 
   return (
@@ -150,7 +140,7 @@ const OrderItem = React.memo<OrderItemProps>(({ order, showLocation, isLast }) =
       onPress={handlePress}
       accessibilityRole="none"
     >
-      {/* Icon/Placeholder */}
+      {/* Avatar */}
       <View style={styles.orderIcon}>
         <View style={[styles.orderIconPlaceholder, styles.orderIconImage]}>
           <Text style={styles.orderIconText}>
@@ -159,54 +149,27 @@ const OrderItem = React.memo<OrderItemProps>(({ order, showLocation, isLast }) =
         </View>
       </View>
 
-      {/* Customer Name & Time */}
+      {/* Content - Two lines */}
       <View style={styles.orderInfo}>
-        <Text style={styles.customerName} numberOfLines={1}>
-          {order.customer_name || 'Guest'}
-        </Text>
-        <Text style={styles.orderMeta} numberOfLines={1}>
-          {timeStr}
-          {order.created_by_user && ` • by ${order.created_by_user.first_name} ${order.created_by_user.last_name}`}
-        </Text>
-      </View>
-
-      {/* Location Column (conditional) */}
-      {showLocation && (
-        <View style={styles.dataColumn}>
-          <Text style={styles.dataLabel}>LOCATION</Text>
-          <Text style={styles.dataValue} numberOfLines={1}>
-            {order.pickup_location_name || 'Online'}
+        {/* Line 1: Name + Total */}
+        <View style={styles.orderLine}>
+          <Text style={styles.customerName} numberOfLines={1}>
+            {order.customer_name || 'Guest'}
+          </Text>
+          <Text style={styles.orderTotal}>
+            ${order.total_amount.toFixed(2)}
           </Text>
         </View>
-      )}
 
-      {/* Type Column */}
-      <View style={styles.dataColumn}>
-        <Text style={styles.dataLabel}>TYPE</Text>
-        <Text style={styles.dataValue}>
-          {orderType}
-        </Text>
-      </View>
-
-      {/* Status Column - Apple-style badge */}
-      <View style={styles.dataColumn}>
-        <Text style={styles.dataLabel}>STATUS</Text>
-        <Text
-          style={[
-            styles.dataValue,
-            { color: getStatusColor(order.status) }
-          ]}
-        >
-          {getStatusLabel(order.status)}
-        </Text>
-      </View>
-
-      {/* Total Column */}
-      <View style={styles.dataColumn}>
-        <Text style={styles.dataLabel}>TOTAL</Text>
-        <Text style={styles.dataValue}>
-          ${order.total_amount.toFixed(2)}
-        </Text>
+        {/* Line 2: Time + Status */}
+        <View style={styles.orderLine}>
+          <Text style={styles.orderMeta} numberOfLines={1}>
+            {timeStr}
+          </Text>
+          <Text style={[styles.orderStatus, { color: getStatusColor(order.status) }]}>
+            {getStatusLabel(order.status)}
+          </Text>
+        </View>
       </View>
     </Pressable>
   )

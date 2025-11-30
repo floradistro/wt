@@ -88,6 +88,10 @@ export interface Order {
     first_name: string
     last_name: string
   } | null
+
+  // Multi-location fulfillment (from order_locations table)
+  fulfillment_locations?: OrderLocation[]
+  location_count?: number
 }
 
 export interface OrderItem {
@@ -102,6 +106,24 @@ export interface OrderItem {
   discount_amount: number
   total: number
   line_total: number
+  // Multi-location support: which location fulfills this item
+  location_id?: string
+  location_name?: string
+}
+
+// Multi-location order tracking
+export interface OrderLocation {
+  id: string
+  order_id: string
+  location_id: string
+  location_name?: string
+  item_count: number
+  total_quantity: number
+  fulfillment_status: 'unfulfilled' | 'partial' | 'fulfilled' | 'shipped'
+  notes?: string
+  created_at: string
+  updated_at: string
+  fulfilled_at?: string
 }
 
 export interface CreateOrderParams {
@@ -115,6 +137,8 @@ export interface CreateOrderParams {
     tax_amount: number
     discount_amount: number
     total: number
+    // Multi-location: specify which location fulfills this item
+    location_id?: string
   }[]
   subtotal: number
   tax_amount: number
@@ -123,6 +147,8 @@ export interface CreateOrderParams {
   payment_method?: string
   payment_status?: 'pending' | 'paid'
   status?: 'pending' | 'completed'
+  // Primary location (for pickup orders or default fulfillment)
+  pickup_location_id?: string
 }
 
 /**

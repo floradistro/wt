@@ -276,6 +276,17 @@ export const usePaymentStore = create<PaymentState>()(
             loyaltyDiscountAmount: loyaltyDiscountAmount || 0,
             campaignDiscountAmount: discountAmount || 0,
             campaignId: selectedDiscountId || null,
+            // Split payment support
+            ...(paymentData.paymentMethod === 'split' && paymentData.splitPayments ? {
+              splitPayments: paymentData.splitPayments,
+              cashAmount: paymentData.splitPayments.find(p => p.method === 'cash')?.amount || 0,
+              cardAmount: paymentData.splitPayments.find(p => p.method === 'card')?.amount || 0,
+            } : {}),
+            // Cash payment support
+            ...(paymentData.paymentMethod === 'cash' ? {
+              cashTendered: paymentData.cashTendered,
+              changeGiven: paymentData.changeGiven,
+            } : {}),
           }
 
           logger.info('🔍 STAFF TRACKING DEBUG:', {

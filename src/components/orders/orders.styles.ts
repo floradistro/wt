@@ -184,21 +184,38 @@ export const ordersStyles = StyleSheet.create({
   },
   orderInfo: {
     flex: 1,
-    gap: 2,
-    minWidth: 180,
+    gap: 4,
+  },
+  orderLine: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   customerName: {
-    fontSize: 15,
+    fontSize: 17,
     fontWeight: '600',
-    color: colors.text.primary, // ✅ Using token
+    color: colors.text.primary,
+    letterSpacing: -0.4,
+    flex: 1,
+  },
+  orderTotal: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: colors.text.primary,
     letterSpacing: -0.2,
   },
   orderMeta: {
-    fontSize: 11,
+    fontSize: 15,
     fontWeight: '400',
-    color: colors.text.tertiary, // ✅ Using token
-    letterSpacing: 0.2,
+    color: colors.text.tertiary,
+    letterSpacing: -0.2,
   },
+  orderStatus: {
+    fontSize: 15,
+    fontWeight: '500',
+    letterSpacing: -0.2,
+  },
+  // Legacy columns (kept for backward compatibility)
   dataColumn: {
     minWidth: 80,
     alignItems: 'flex-end',
@@ -207,14 +224,14 @@ export const ordersStyles = StyleSheet.create({
   dataLabel: {
     fontSize: 9,
     fontWeight: '600',
-    color: colors.text.subtle, // ✅ Using token (0.4 matches)
+    color: colors.text.subtle,
     letterSpacing: 0.5,
     textTransform: 'uppercase',
   },
   dataValue: {
     fontSize: 15,
     fontWeight: '600',
-    color: colors.text.primary, // ✅ Using token
+    color: colors.text.primary,
     letterSpacing: -0.2,
   },
 

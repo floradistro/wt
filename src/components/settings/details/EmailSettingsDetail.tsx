@@ -3,29 +3,34 @@
  * Jobs Principle: Simple, focused email management
  */
 
-import { View, Text, StyleSheet, ScrollView, Animated, Pressable, ActivityIndicator, Switch, TextInput, Alert } from 'react-native'
+import { View, Text, StyleSheet, ScrollView, Animated, Pressable, ActivityIndicator, Switch, TextInput, Alert, Image } from 'react-native'
 import { useState, useEffect } from 'react'
 import * as Haptics from 'expo-haptics'
+import * as ImagePicker from 'expo-image-picker'
+import { Ionicons } from '@expo/vector-icons'
 import { colors, typography, spacing, radius } from '@/theme/tokens'
 import { layout } from '@/theme/layout'
 import { TitleSection } from '@/components/shared'
 import { DetailRow } from './DetailRow'
 import { detailCommonStyles } from './detailCommon.styles'
-import { useEmailSettingsStore } from '@/stores/email-settings.store'
+import { useEmailSettingsStore, EmailTestType } from '@/stores/email-settings.store'
 import { useAppAuth } from '@/contexts/AppAuthContext'
+import { uploadProductImage } from '@/services/media.service'
 
 interface EmailSettingsDetailProps {
   headerOpacity: Animated.Value
   vendorLogo?: string | null
+  onNavigateToTemplates?: () => void
 }
 
-export function EmailSettingsDetail({ headerOpacity, vendorLogo }: EmailSettingsDetailProps) {
+export function EmailSettingsDetail({ headerOpacity, vendorLogo, onNavigateToTemplates }: EmailSettingsDetailProps) {
   const { vendorId, user, vendor } = useAppAuth()
   const {
     settings,
     recentSends,
     isLoading,
     isSendingTest,
+    testingEmailType,
     error,
     loadSettings,
     updateSettings,
@@ -35,12 +40,14 @@ export function EmailSettingsDetail({ headerOpacity, vendorLogo }: EmailSettings
 
   const [isEditing, setIsEditing] = useState(false)
   const [testEmail, setTestEmail] = useState(user?.email || '')
+  const [isUploadingImage, setIsUploadingImage] = useState(false)
 
   // Form state
   const [fromName, setFromName] = useState('')
   const [fromEmail, setFromEmail] = useState('')
   const [replyTo, setReplyTo] = useState('')
   const [domain, setDomain] = useState('')
+  const [emailHeaderImageUrl, setEmailHeaderImageUrl] = useState('')
 
   // Toggle states
   const [enableReceipts, setEnableReceipts] = useState(true)
@@ -69,6 +76,7 @@ export function EmailSettingsDetail({ headerOpacity, vendorLogo }: EmailSettings
       setFromEmail(settings.from_email)
       setReplyTo(settings.reply_to || '')
       setDomain(settings.domain)
+      setEmailHeaderImageUrl(settings.email_header_image_url || '')
       setEnableReceipts(settings.enable_receipts)
       setEnableOrderConfirmations(settings.enable_order_confirmations)
       setEnableOrderUpdates(settings.enable_order_updates)
@@ -107,6 +115,7 @@ export function EmailSettingsDetail({ headerOpacity, vendorLogo }: EmailSettings
         from_email: fromEmail,
         reply_to: replyTo || undefined,
         domain,
+        email_header_image_url: emailHeaderImageUrl || undefined,
         enable_receipts: enableReceipts,
         enable_order_confirmations: enableOrderConfirmations,
         enable_order_updates: enableOrderUpdates,
@@ -125,18 +134,67 @@ export function EmailSettingsDetail({ headerOpacity, vendorLogo }: EmailSettings
     }
   }
 
-  const handleSendTest = async () => {
-    if (!vendorId || !testEmail) return
+  const handleSendTest = async (emailType?: EmailTestType) => {
+    if (!vendorId || !testEmail) {
+      Alert.alert('Email Required', 'Please enter a test email address in the Testing section below.')
+      return
+    }
 
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
 
-    const success = await sendTestEmail(vendorId, testEmail, vendor?.store_name, vendor?.logo_url)
+    const success = await sendTestEmail(vendorId, testEmail, vendor?.store_name, vendor?.logo_url, emailType)
 
     if (success) {
-      Alert.alert('Test Email Sent!', `Check your inbox at ${testEmail}`)
+      const typeLabel = emailType ? emailType.replace('_', ' ') : 'test'
+      Alert.alert('Test Email Sent!', `${typeLabel.charAt(0).toUpperCase() + typeLabel.slice(1)} email sent to ${testEmail}`)
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
     } else {
       Alert.alert('Error', error || 'Failed to send test email')
+    }
+  }
+
+  const handleUploadHeaderImage = async () => {
+    if (!vendorId) return
+
+    try {
+      // Request permissions
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync()
+      if (status !== 'granted') {
+        Alert.alert('Permission needed', 'Please grant photo library access to upload an image.')
+        return
+      }
+
+      // Pick image
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        aspect: [4, 1],
+        quality: 0.9,
+      })
+
+      if (result.canceled) return
+
+      setIsUploadingImage(true)
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+
+      const asset = result.assets[0]
+
+      // Upload using media service
+      const uploadResult = await uploadProductImage({
+        vendorId,
+        uri: asset.uri,
+        filename: `email-header-${Date.now()}.${asset.uri.split('.').pop() || 'jpg'}`,
+      })
+
+      setEmailHeaderImageUrl(uploadResult.url)
+      setIsUploadingImage(false)
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+
+      Alert.alert('Success', 'Header image uploaded! Remember to save your settings.')
+    } catch (err) {
+      console.error('Error uploading header image:', err)
+      setIsUploadingImage(false)
+      Alert.alert('Error', 'Failed to upload image. Please try again.')
     }
   }
 
@@ -216,7 +274,7 @@ export function EmailSettingsDetail({ headerOpacity, vendorLogo }: EmailSettings
                     width: 48,
                     height: 48,
                     borderRadius: 24,
-                    backgroundColor: 'rgba(139,92,246,0.1)',
+                    backgroundColor: colors.glass.regular,
                     alignItems: 'center',
                     justifyContent: 'center',
                     marginBottom: spacing.xs,
@@ -236,13 +294,13 @@ export function EmailSettingsDetail({ headerOpacity, vendorLogo }: EmailSettings
                   style={{
                     paddingVertical: spacing.sm,
                     paddingHorizontal: spacing.lg,
-                    backgroundColor: '#8B5CF620',
-                    borderRadius: radius.md,
+                    backgroundColor: isLoading ? colors.interactive.disabled : colors.glass.thick,
+                    borderRadius: 20,
                     borderWidth: 1,
-                    borderColor: '#8B5CF6',
+                    borderColor: isLoading ? colors.border.subtle : colors.border.emphasis,
                   }}
                 >
-                  <Text style={{ ...typography.body, color: '#8B5CF6', fontWeight: '600' }}>
+                  <Text style={{ ...typography.body, color: isLoading ? colors.text.tertiary : colors.text.primary, fontWeight: '600' }}>
                     {isLoading ? 'Setting up...' : 'Set Up Email'}
                   </Text>
                 </Pressable>
@@ -263,7 +321,13 @@ export function EmailSettingsDetail({ headerOpacity, vendorLogo }: EmailSettings
         scrollIndicatorInsets={{ right: 2, top: 0, bottom: layout.dockHeight }}
         contentContainerStyle={{ paddingTop: 0, paddingBottom: layout.dockHeight }}
       >
-        <TitleSection title="Email Settings" logo={vendorLogo} subtitle="System email configuration" />
+        <TitleSection
+          title="Email Settings"
+          logo={vendorLogo}
+          subtitle="System email configuration"
+          buttonText={isEditing ? undefined : 'Edit'}
+          onButtonPress={isEditing ? undefined : handleEdit}
+        />
 
         {/* Sender Configuration */}
         <Text style={styles.cardSectionTitle}>SENDER CONFIGURATION</Text>
@@ -341,6 +405,94 @@ export function EmailSettingsDetail({ headerOpacity, vendorLogo }: EmailSettings
           </View>
         </View>
 
+        {/* Email Header Image */}
+        <Text style={[styles.cardSectionTitle, { marginTop: spacing.xl }]}>EMAIL HEADER IMAGE</Text>
+        <View style={styles.cardWrapper}>
+          <View style={styles.detailCard}>
+            <View style={styles.cardInner}>
+              <Text style={styles.cardTitle}>Custom Header</Text>
+              <Text style={[styles.cardDescription, { marginBottom: spacing.md }]}>
+                Upload a custom header image for all system emails (e.g., logo + brand name in Don Graffiti font)
+              </Text>
+              <View style={styles.cardDivider} />
+
+              {emailHeaderImageUrl ? (
+                <View style={{ marginBottom: spacing.md }}>
+                  <Text style={[styles.inputLabel, { marginBottom: spacing.xs }]}>Current Header Image</Text>
+                  <Image
+                    source={{ uri: emailHeaderImageUrl }}
+                    style={{
+                      width: '100%',
+                      height: 200,
+                      backgroundColor: '#000',
+                      borderRadius: radius.sm,
+                      resizeMode: 'contain',
+                    }}
+                  />
+                  <Pressable
+                    onPress={() => setEmailHeaderImageUrl('')}
+                    style={{
+                      marginTop: spacing.sm,
+                      paddingVertical: spacing.xs,
+                      alignItems: 'center',
+                    }}
+                  >
+                    <Text style={{ color: colors.text.tertiary, fontSize: 13 }}>Remove Image</Text>
+                  </Pressable>
+                </View>
+              ) : null}
+
+              <Pressable
+                onPress={handleUploadHeaderImage}
+                disabled={isUploadingImage}
+                style={{
+                  paddingVertical: spacing.sm,
+                  paddingHorizontal: spacing.md,
+                  backgroundColor: isUploadingImage ? colors.interactive.disabled : colors.glass.regular,
+                  borderRadius: 20,
+                  borderWidth: 1,
+                  borderColor: isUploadingImage ? colors.border.subtle : colors.border.regular,
+                  alignItems: 'center',
+                }}
+              >
+                {isUploadingImage ? (
+                  <ActivityIndicator size="small" color={colors.text.tertiary} />
+                ) : (
+                  <Text style={{ color: colors.text.primary, fontWeight: '600', fontSize: 15 }}>
+                    {emailHeaderImageUrl ? 'Change Header Image' : 'Upload Header Image'}
+                  </Text>
+                )}
+              </Pressable>
+            </View>
+          </View>
+        </View>
+
+        {/* Template Customization */}
+        {onNavigateToTemplates && (
+          <>
+            <Text style={[styles.cardSectionTitle, { marginTop: spacing.xl }]}>DESIGN</Text>
+            <View style={styles.cardWrapper}>
+              <Pressable
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                  onNavigateToTemplates()
+                }}
+                style={styles.detailCard}
+              >
+                <View style={[styles.cardInner, { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }]}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.cardTitle}>Customize Templates</Text>
+                    <Text style={[styles.cardDescription, { marginTop: 4 }]}>
+                      Edit the design of your receipts, order confirmations, and other emails
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={20} color={colors.text.tertiary} />
+                </View>
+              </Pressable>
+            </View>
+          </>
+        )}
+
         {/* Email Types */}
         <Text style={[styles.cardSectionTitle, { marginTop: spacing.xl }]}>EMAIL TYPES</Text>
         <View style={styles.cardWrapper}>
@@ -349,11 +501,41 @@ export function EmailSettingsDetail({ headerOpacity, vendorLogo }: EmailSettings
               <Text style={styles.cardTitle}>Transactional Emails</Text>
               <View style={styles.cardDivider} />
 
-              <ToggleRow label="Receipts" value={enableReceipts} onChange={setEnableReceipts} />
-              <ToggleRow label="Order Confirmations" value={enableOrderConfirmations} onChange={setEnableOrderConfirmations} />
-              <ToggleRow label="Order Updates" value={enableOrderUpdates} onChange={setEnableOrderUpdates} />
-              <ToggleRow label="Loyalty Updates" value={enableLoyaltyUpdates} onChange={setEnableLoyaltyUpdates} />
-              <ToggleRow label="Welcome Emails" value={enableWelcomeEmails} onChange={setEnableWelcomeEmails} />
+              <ToggleRow
+                label="Receipts"
+                value={enableReceipts}
+                onChange={setEnableReceipts}
+                onTest={() => handleSendTest('receipt')}
+                isTesting={isSendingTest && testingEmailType === 'receipt'}
+              />
+              <ToggleRow
+                label="Order Confirmations"
+                value={enableOrderConfirmations}
+                onChange={setEnableOrderConfirmations}
+                onTest={() => handleSendTest('order_confirmation')}
+                isTesting={isSendingTest && testingEmailType === 'order_confirmation'}
+              />
+              <ToggleRow
+                label="Order Updates"
+                value={enableOrderUpdates}
+                onChange={setEnableOrderUpdates}
+                onTest={() => handleSendTest('order_update')}
+                isTesting={isSendingTest && testingEmailType === 'order_update'}
+              />
+              <ToggleRow
+                label="Loyalty Updates"
+                value={enableLoyaltyUpdates}
+                onChange={setEnableLoyaltyUpdates}
+                onTest={() => handleSendTest('loyalty')}
+                isTesting={isSendingTest && testingEmailType === 'loyalty'}
+              />
+              <ToggleRow
+                label="Welcome Emails"
+                value={enableWelcomeEmails}
+                onChange={setEnableWelcomeEmails}
+                onTest={() => handleSendTest('welcome')}
+                isTesting={isSendingTest && testingEmailType === 'welcome'}
+              />
             </View>
           </View>
         </View>
@@ -363,7 +545,13 @@ export function EmailSettingsDetail({ headerOpacity, vendorLogo }: EmailSettings
             <View style={styles.cardInner}>
               <Text style={styles.cardTitle}>Marketing Emails</Text>
               <View style={styles.cardDivider} />
-              <ToggleRow label="Enable Marketing" value={enableMarketing} onChange={setEnableMarketing} />
+              <ToggleRow
+                label="Enable Marketing"
+                value={enableMarketing}
+                onChange={setEnableMarketing}
+                onTest={() => handleSendTest('marketing')}
+                isTesting={isSendingTest && testingEmailType === 'marketing'}
+              />
             </View>
           </View>
         </View>
@@ -373,7 +561,10 @@ export function EmailSettingsDetail({ headerOpacity, vendorLogo }: EmailSettings
         <View style={styles.cardWrapper}>
           <View style={styles.detailCard}>
             <View style={styles.cardInner}>
-              <Text style={styles.cardTitle}>Send Test Email</Text>
+              <Text style={styles.cardTitle}>Test Email Address</Text>
+              <Text style={[styles.cardDescription, { marginBottom: spacing.md }]}>
+                Enter your email to receive test emails. Use the Test buttons above to send specific email types.
+              </Text>
               <View style={styles.cardDivider} />
 
               <TextInput
@@ -387,20 +578,20 @@ export function EmailSettingsDetail({ headerOpacity, vendorLogo }: EmailSettings
               />
 
               <Pressable
-                onPress={handleSendTest}
+                onPress={() => handleSendTest()}
                 disabled={isSendingTest || !testEmail}
                 style={{
                   paddingVertical: spacing.sm,
                   paddingHorizontal: spacing.md,
-                  backgroundColor: isSendingTest || !testEmail ? 'rgba(255,255,255,0.02)' : 'rgba(139,92,246,0.1)',
-                  borderRadius: radius.md,
+                  backgroundColor: isSendingTest || !testEmail ? colors.interactive.disabled : colors.glass.regular,
+                  borderRadius: 20,
                   borderWidth: 1,
-                  borderColor: isSendingTest || !testEmail ? 'rgba(255,255,255,0.05)' : '#8B5CF6',
+                  borderColor: isSendingTest || !testEmail ? colors.border.subtle : colors.border.regular,
                   alignItems: 'center',
                 }}
               >
-                <Text style={{ ...typography.body, color: isSendingTest || !testEmail ? colors.text.tertiary : '#8B5CF6', fontWeight: '600' }}>
-                  {isSendingTest ? 'Sending...' : 'Send Test Email'}
+                <Text style={{ ...typography.body, color: isSendingTest || !testEmail ? colors.text.tertiary : colors.text.primary, fontWeight: '600' }}>
+                  {isSendingTest && !testingEmailType ? 'Sending...' : 'Send System Test Email'}
                 </Text>
               </Pressable>
             </View>
@@ -451,25 +642,8 @@ export function EmailSettingsDetail({ headerOpacity, vendorLogo }: EmailSettings
           </>
         )}
 
-        {/* Action Buttons */}
-        {!isEditing ? (
-          <View style={{ marginHorizontal: spacing.lg, marginTop: spacing.xl, marginBottom: spacing.xl }}>
-            <Pressable
-              onPress={handleEdit}
-              style={{
-                paddingVertical: spacing.md,
-                paddingHorizontal: spacing.lg,
-                backgroundColor: 'rgba(139,92,246,0.1)',
-                borderRadius: radius.md,
-                borderWidth: 1,
-                borderColor: '#8B5CF6',
-                alignItems: 'center',
-              }}
-            >
-              <Text style={{ ...typography.body, color: '#8B5CF6', fontWeight: '600' }}>Edit Settings</Text>
-            </Pressable>
-          </View>
-        ) : (
+        {/* Save/Cancel Buttons (only shown when editing) */}
+        {isEditing && (
           <View style={{ marginHorizontal: spacing.lg, marginTop: spacing.xl, marginBottom: spacing.xl, flexDirection: 'row', gap: spacing.sm }}>
             <Pressable
               onPress={handleCancel}
@@ -477,8 +651,10 @@ export function EmailSettingsDetail({ headerOpacity, vendorLogo }: EmailSettings
                 flex: 1,
                 paddingVertical: spacing.md,
                 paddingHorizontal: spacing.lg,
-                backgroundColor: 'rgba(255,255,255,0.05)',
-                borderRadius: radius.md,
+                backgroundColor: colors.glass.thin,
+                borderRadius: 20,
+                borderWidth: 1,
+                borderColor: colors.border.subtle,
                 alignItems: 'center',
               }}
             >
@@ -492,14 +668,14 @@ export function EmailSettingsDetail({ headerOpacity, vendorLogo }: EmailSettings
                 flex: 1,
                 paddingVertical: spacing.md,
                 paddingHorizontal: spacing.lg,
-                backgroundColor: isLoading ? 'rgba(139,92,246,0.05)' : 'rgba(139,92,246,0.1)',
-                borderRadius: radius.md,
+                backgroundColor: isLoading ? colors.interactive.disabled : colors.glass.thick,
+                borderRadius: 20,
                 borderWidth: 1,
-                borderColor: '#8B5CF6',
+                borderColor: isLoading ? colors.border.subtle : colors.border.emphasis,
                 alignItems: 'center',
               }}
             >
-              <Text style={{ ...typography.body, color: isLoading ? colors.text.tertiary : '#8B5CF6', fontWeight: '600' }}>
+              <Text style={{ ...typography.body, color: isLoading ? colors.text.tertiary : colors.text.primary, fontWeight: '600' }}>
                 {isLoading ? 'Saving...' : 'Save Changes'}
               </Text>
             </Pressable>
@@ -510,7 +686,15 @@ export function EmailSettingsDetail({ headerOpacity, vendorLogo }: EmailSettings
   )
 }
 
-function ToggleRow({ label, value, onChange }: { label: string; value: boolean; onChange: (value: boolean) => void }) {
+interface ToggleRowProps {
+  label: string
+  value: boolean
+  onChange: (value: boolean) => void
+  onTest?: () => void
+  isTesting?: boolean
+}
+
+function ToggleRow({ label, value, onChange, onTest, isTesting }: ToggleRowProps) {
   const handleToggle = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
     onChange(!value)
@@ -518,11 +702,31 @@ function ToggleRow({ label, value, onChange }: { label: string; value: boolean; 
 
   return (
     <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: spacing.sm }}>
-      <Text style={{ ...typography.body, color: colors.text.secondary }}>{label}</Text>
+      <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
+        <Text style={{ ...typography.body, color: colors.text.secondary }}>{label}</Text>
+        {onTest && value && (
+          <Pressable
+            onPress={onTest}
+            disabled={isTesting}
+            style={{
+              paddingVertical: 4,
+              paddingHorizontal: 10,
+              backgroundColor: colors.glass.regular,
+              borderRadius: 12,
+              borderWidth: 1,
+              borderColor: colors.border.regular,
+            }}
+          >
+            <Text style={{ fontSize: 11, fontWeight: '600', color: isTesting ? colors.text.tertiary : colors.text.secondary }}>
+              {isTesting ? 'Sending...' : 'Test'}
+            </Text>
+          </Pressable>
+        )}
+      </View>
       <Switch
         value={value}
         onValueChange={handleToggle}
-        trackColor={{ false: '#3e3e3e', true: '#8B5CF6' }}
+        trackColor={{ false: '#3e3e3e', true: colors.semantic.success }}
         thumbColor={value ? '#ffffff' : '#f4f3f4'}
         ios_backgroundColor="#3e3e3e"
       />
@@ -546,6 +750,11 @@ const styles = StyleSheet.create({
     ...typography.headline,
     color: colors.text.primary,
     marginBottom: spacing.xs,
+  },
+  cardDescription: {
+    ...typography.footnote,
+    color: colors.text.tertiary,
+    lineHeight: 18,
   },
   cardDivider: {
     height: 0.5,

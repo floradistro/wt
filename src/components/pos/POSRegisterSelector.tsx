@@ -199,33 +199,7 @@ function POSRegisterSelector({
     }).start()
   }, [])
 
-  useEffect(() => {
-    /**
-     * APPLE RETAIL ARCHITECTURE: Reliable 3-second polling
-     *
-     * Why polling over Realtime:
-     * - Retail WiFi is unreliable - Realtime drops silently
-     * - Polling guarantees updates every 3 seconds
-     * - Battery efficient with controlled intervals
-     * - Debuggable and predictable
-     *
-     * Same approach used by:
-     * - Apple Retail (Square Register)
-     * - Shopify POS
-     * - Toast POS
-     */
-    loadRegisters()
-
-    const pollInterval = setInterval(() => {
-      loadRegisters()
-    }, 3000) // 3 seconds - Apple's sweet spot for "live" feel
-
-    return () => {
-      clearInterval(pollInterval)
-    }
-  }, [locationId])
-
-  const loadRegisters = async () => {
+  const loadRegisters = useCallback(async () => {
     if (!locationId) return
 
     const startTime = Date.now()
@@ -350,7 +324,41 @@ function POSRegisterSelector({
     } finally {
       setLoading(false)
     }
-  }
+  }, [locationId])
+
+  useEffect(() => {
+    /**
+     * APPLE RETAIL ARCHITECTURE: Reliable 3-second polling
+     *
+     * Why polling over Realtime:
+     * - Retail WiFi is unreliable - Realtime drops silently
+     * - Polling guarantees updates every 3 seconds
+     * - Battery efficient with controlled intervals
+     * - Debuggable and predictable
+     *
+     * Same approach used by:
+     * - Apple Retail (Square Register)
+     * - Shopify POS
+     * - Toast POS
+     */
+    if (!locationId) {
+      logger.debug('[POSRegisterSelector] No locationId, skipping polling')
+      return
+    }
+
+    logger.debug('[POSRegisterSelector] Starting polling for location:', locationId)
+    loadRegisters()
+
+    const pollInterval = setInterval(() => {
+      logger.debug('[POSRegisterSelector] Polling tick for location:', locationId)
+      loadRegisters()
+    }, 3000) // 3 seconds - Apple's sweet spot for "live" feel
+
+    return () => {
+      logger.debug('[POSRegisterSelector] Stopping polling for location:', locationId)
+      clearInterval(pollInterval)
+    }
+  }, [locationId, loadRegisters])
 
   const handleBackPress = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)

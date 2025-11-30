@@ -29,7 +29,7 @@ import { logger } from '@/utils/logger'
 function POSSessionSetup() {
   // Context - Environmental data (no prop drilling!)
   const { vendor, locations } = useAppAuth()
-  const { session, selectLocation, selectRegister, joinExistingSession, openCashDrawer } = usePOSSession()
+  const { session, selectLocation, selectRegister, joinExistingSession, openCashDrawer, clearSession } = usePOSSession()
 
   // Local UI state
   const [selectedRegister, setSelectedRegister] = useState<{ id: string; name: string } | null>(null)
@@ -81,8 +81,17 @@ function POSSessionSetup() {
     }
   }
 
-  const handleBackToLocationSelector = () => {
-    closeModal()
+  const handleBackToLocationSelector = async () => {
+    // Clear register selection and go back to location selector
+    logger.debug('[POSSessionSetup] Going back to location selector')
+
+    try {
+      // Clear session state to show location selector again
+      await clearSession()
+      closeModal()
+    } catch (error) {
+      logger.error('[POSSessionSetup] Error clearing session:', error)
+    }
   }
 
   const handleCashDrawerSubmit = async (openingCash: number, notes: string) => {
@@ -126,13 +135,16 @@ function POSSessionSetup() {
   const renderScreen = () => {
     logger.debug('[POSSessionSetup] renderScreen:', {
       hasSession: !!session,
+      hasLocationId: !!session?.locationId,
+      hasSessionId: !!session?.sessionId,
+      registerModalOpen: isModalOpen('registerSelector'),
       locationsCount: locations.length,
       hasVendor: !!vendor
     })
 
-    // Show location selector if no session
+    // Show location selector if no location selected
     if (!session?.locationId) {
-      logger.debug('[POSSessionSetup] Rendering location selector')
+      logger.debug('[POSSessionSetup] Rendering location selector (no location)')
       return (
         <POSLocationSelector
           locations={locations}
@@ -143,8 +155,11 @@ function POSSessionSetup() {
       )
     }
 
-    // Show register selector if location selected
-    if (session.locationId && isModalOpen('registerSelector')) {
+    // Show register selector if location selected but no session yet
+    // CRITICAL: Show register selector when location is selected AND we don't have a sessionId yet
+    // This ensures we show register selector even after closing the modal
+    if (session.locationId && !session.sessionId) {
+      logger.debug('[POSSessionSetup] Rendering register selector (have location, no session)')
       return (
         <POSRegisterSelector
           locationId={session.locationId}
@@ -157,6 +172,7 @@ function POSSessionSetup() {
     }
 
     // Session is ready - return null (parent will handle rendering main POS)
+    logger.debug('[POSSessionSetup] Session ready, returning null')
     return null
   }
 

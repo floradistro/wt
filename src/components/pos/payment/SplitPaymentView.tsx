@@ -19,10 +19,7 @@ import { View, Text, TextInput, TouchableOpacity, StyleSheet } from 'react-nativ
 import { LiquidGlassView } from '@callstack/liquid-glass'
 import { Ionicons } from '@expo/vector-icons'
 import * as Haptics from 'expo-haptics'
-import { useCartTotals } from '@/stores/cart.store'
-import { usePOSSession } from '@/contexts/POSSessionContext'
-import { taxActions } from '@/stores/tax.store'
-import { useLoyaltyState } from '@/stores/loyalty.store'
+import { useCheckoutTotals } from '@/hooks/useCheckoutTotals'
 import { usePaymentProcessor } from '@/stores/payment-processor.store'
 import type { PaymentData, SaleCompletionData } from './PaymentTypes'
 
@@ -34,30 +31,10 @@ export function SplitPaymentView({
   onComplete,
 }: SplitPaymentViewProps) {
   // ========================================
-  // STORES - TRUE ZERO PROPS (read from environment)
+  // SINGLE SOURCE OF TRUTH - Centralized total calculation
   // ========================================
-  const { subtotal, itemCount } = useCartTotals()
-  const { session } = usePOSSession()
-  const { loyaltyProgram, pointsToRedeem } = useLoyaltyState()
+  const { total } = useCheckoutTotals()
   const currentProcessor = usePaymentProcessor((state) => state.currentProcessor)
-
-  // Calculate tax
-  const { taxAmount, taxRate, taxName } = useMemo(() => {
-    if (!session?.locationId) return { taxAmount: 0, taxRate: 0, taxName: undefined }
-    return taxActions.calculateTax(subtotal, session.locationId)
-  }, [subtotal, session?.locationId])
-
-  // Calculate loyalty discount
-  const loyaltyDiscountAmount = useMemo(() => {
-    if (!loyaltyProgram || pointsToRedeem === 0) return 0
-    return (pointsToRedeem * (loyaltyProgram.point_value || 0.01))
-  }, [loyaltyProgram, pointsToRedeem])
-
-  // Calculate total
-  const total = useMemo(() => {
-    const subtotalAfterDiscount = Math.max(0, subtotal - loyaltyDiscountAmount)
-    return subtotalAfterDiscount + taxAmount
-  }, [subtotal, loyaltyDiscountAmount, taxAmount])
 
   // ========================================
   // LOCAL STATE (UI only)
@@ -120,14 +97,32 @@ export function SplitPaymentView({
         <View style={styles.processingContainer}>
           <View style={styles.processingHeader}>
             <Ionicons name="radio-outline" size={20} color="#10b981" />
-            <Text style={styles.listeningText}>PROCESSING</Text>
+            <Text style={styles.listeningText}>PROCESSING SPLIT PAYMENT</Text>
           </View>
           <View style={styles.processingBody}>
-            <Text style={styles.processingAmount}>${total.toFixed(2)}</Text>
+            {/* Show breakdown prominently */}
+            <View style={styles.splitAmountsContainer}>
+              <View style={styles.splitAmountRow}>
+                <Ionicons name="cash-outline" size={24} color="#10b981" />
+                <Text style={styles.splitAmountLabel}>Cash</Text>
+                <Text style={styles.splitAmountValue}>${splitCash.toFixed(2)}</Text>
+              </View>
+              <View style={styles.splitAmountRow}>
+                <Ionicons name="card-outline" size={24} color="#3b82f6" />
+                <Text style={styles.splitAmountLabel}>Card</Text>
+                <Text style={styles.splitAmountValue}>${splitCard.toFixed(2)}</Text>
+              </View>
+            </View>
+
             <View style={styles.statusDivider} />
-            <Text style={styles.statusText}>Processing split payment...</Text>
-            <Text style={styles.splitBreakdown}>
-              Cash: ${splitCash.toFixed(2)} | Card: ${splitCard.toFixed(2)}
+
+            <View style={styles.totalRow}>
+              <Text style={styles.totalLabel}>Total</Text>
+              <Text style={styles.processingAmount}>${total.toFixed(2)}</Text>
+            </View>
+
+            <Text style={styles.statusText}>
+              Processing card payment for ${splitCard.toFixed(2)}...
             </Text>
           </View>
         </View>
@@ -261,30 +256,61 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     width: '100%',
   },
-  processingAmount: {
-    fontSize: 56,
-    fontWeight: '400',
+  splitAmountsContainer: {
+    width: '100%',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 16,
+    padding: 20,
+    gap: 16,
+    marginBottom: 20,
+  },
+  splitAmountRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  splitAmountLabel: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.8)',
+    flex: 1,
+  },
+  splitAmountValue: {
+    fontSize: 24,
+    fontWeight: '700',
     color: '#fff',
-    letterSpacing: -0.4,
-    marginBottom: 24,
+    letterSpacing: -0.5,
+  },
+  totalRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    width: '100%',
+    marginBottom: 16,
+  },
+  totalLabel: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.6)',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  processingAmount: {
+    fontSize: 32,
+    fontWeight: '700',
+    color: '#10b981',
+    letterSpacing: -0.5,
   },
   statusDivider: {
-    width: 60,
+    width: '100%',
     height: 1,
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    marginBottom: 24,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    marginVertical: 16,
   },
   statusText: {
-    fontSize: 17,
-    fontWeight: '400',
-    color: 'rgba(255,255,255,0.8)',
-    marginBottom: 12,
-    textAlign: 'center',
-  },
-  splitBreakdown: {
-    fontSize: 13,
-    fontWeight: '400',
-    color: 'rgba(255,255,255,0.6)',
+    fontSize: 15,
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.7)',
     textAlign: 'center',
   },
   splitHeader: {
