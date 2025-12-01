@@ -10,7 +10,7 @@
  * Displays inventory transfers in iPad Settings-style glass card layout
  */
 
-import React, { useMemo } from 'react'
+import React, { useMemo, useState } from 'react'
 import {
   View,
   Text,
@@ -23,10 +23,11 @@ import * as Haptics from 'expo-haptics'
 import { colors, spacing, radius } from '@/theme/tokens'
 import { layout } from '@/theme/layout'
 import type { InventoryTransfer, TransferStatus } from '@/types/pos'
-import { TitleSection } from '@/components/shared'
+import { TitleSection, LocationSelectorModal } from '@/components/shared'
 import type { FilterPill } from '@/components/shared'
 import { useAppAuth } from '@/contexts/AppAuthContext'
 import { useProductsScreenStore, productsScreenActions } from '@/stores/products-list.store'
+import { useLocationFilter } from '@/stores/location-filter.store'
 import { useTransfersStore } from '@/stores/inventory-transfers.store'
 import * as transferService from '@/services/inventory-transfers.service'
 
@@ -120,7 +121,9 @@ export function TransfersList({
   // ========================================
   // STORES - ZERO PROP DRILLING
   // ========================================
-  const { vendor } = useAppAuth()
+  const { vendor, locations } = useAppAuth()
+  // Use selector pattern for Zustand to ensure proper subscription
+  const selectedLocationIds = useLocationFilter((state) => state.selectedLocationIds)
   const selectedTransfer = useProductsScreenStore((state) => state.selectedTransfer)
 
   // Read from transfers store
@@ -128,13 +131,34 @@ export function TransfersList({
   const isLoading = useTransfersStore((state) => state.loading)
   const statusFilter = useTransfersStore((state) => state.statusFilter)
 
+  // Location selector modal state
+  const [showLocationModal, setShowLocationModal] = useState(false)
+
+  // Compute location display text
+  const locationDisplayText = useMemo(() => {
+    if (selectedLocationIds.length === 0) {
+      return 'All Locations'
+    }
+    if (selectedLocationIds.length === 1) {
+      const loc = locations.find(l => l.id === selectedLocationIds[0])
+      return loc?.name || '1 Location'
+    }
+    return `${selectedLocationIds.length} Locations`
+  }, [selectedLocationIds, locations])
+
   // Load data and subscribe to real-time updates
   React.useEffect(() => {
     if (!vendor?.id) return
 
-    // Initial load with default filter (in_transit)
-    const filters = statusFilter !== 'all' ? { status: statusFilter as TransferStatus } : undefined
-    useTransfersStore.getState().loadTransfers(vendor.id, filters)
+    // Build filters - for single location, filter server-side
+    const filters: { status?: TransferStatus; source_location_id?: string; destination_location_id?: string } = {}
+    if (statusFilter !== 'all') {
+      filters.status = statusFilter as TransferStatus
+    }
+    // Note: For single location, we load all and filter client-side to show transfers where
+    // the location is either source OR destination
+
+    useTransfersStore.getState().loadTransfers(vendor.id, Object.keys(filters).length > 0 ? filters : undefined)
 
     // Subscribe to real-time updates
     useTransfersStore.getState().subscribe(vendor.id)
@@ -142,7 +166,36 @@ export function TransfersList({
     return () => {
       useTransfersStore.getState().unsubscribe()
     }
-  }, [vendor?.id, statusFilter])
+  }, [vendor?.id, statusFilter, selectedLocationIds])
+
+  // Debug: Log when component re-renders with new location selection
+  React.useEffect(() => {
+    console.log('[TransfersList] Location selection changed', {
+      selectedLocationIds,
+      locationDisplayText,
+    })
+  }, [selectedLocationIds, locationDisplayText])
+
+  // Filter transfers by location (source OR destination matches selected locations)
+  const filteredTransfers = useMemo(() => {
+    console.log('[TransfersList] Computing filteredTransfers', {
+      selectedLocationIds,
+      totalTransfers: transfers.length,
+    })
+
+    if (selectedLocationIds.length === 0) {
+      console.log('[TransfersList] No filter - showing all', transfers.length)
+      return transfers // No location filter - show all
+    }
+
+    const filtered = transfers.filter(transfer => {
+      const matches = selectedLocationIds.includes(transfer.source_location_id) ||
+        selectedLocationIds.includes(transfer.destination_location_id)
+      return matches
+    })
+    console.log('[TransfersList] Filtered result:', filtered.length, 'of', transfers.length)
+    return filtered
+  }, [transfers, selectedLocationIds])
 
   // Handlers - call store actions directly
   const handleSelect = async (transfer: InventoryTransfer) => {
@@ -201,7 +254,18 @@ export function TransfersList({
     }
   }
 
-  // Define filter pills
+  // Handle location pill tap - always opens modal
+  const handleLocationPillSelect = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    setShowLocationModal(true)
+  }
+
+  // Single location pill for TitleSection - opens modal
+  const locationPill: FilterPill[] = useMemo(() => {
+    return [{ id: 'location', label: locationDisplayText }]
+  }, [locationDisplayText])
+
+  // Define status filter pills
   const filterPills: FilterPill[] = [
     { id: 'all', label: 'All' },
     { id: 'draft', label: 'Draft' },
@@ -213,7 +277,7 @@ export function TransfersList({
   const transferSections = useMemo(() => {
     const sections = new Map<string, InventoryTransfer[]>()
 
-    transfers.forEach(transfer => {
+    filteredTransfers.forEach(transfer => {
       const date = new Date(transfer.created_at).toLocaleDateString('en-US', {
         month: 'short',
         day: 'numeric',
@@ -228,7 +292,7 @@ export function TransfersList({
 
     // Convert to sorted array (newest first)
     return Array.from(sections.entries())
-  }, [transfers])
+  }, [filteredTransfers])
 
   // ========================================
   // RENDER
@@ -250,20 +314,47 @@ export function TransfersList({
         scrollIndicatorInsets={{ right: 2, bottom: layout.dockHeight }}
         contentContainerStyle={{ paddingBottom: layout.dockHeight, paddingRight: 0 }}
       >
-        {/* Title Section */}
+        {/* Title Section with Location Selector */}
         <TitleSection
           title="Transfers"
           logo={vendor?.logo_url}
           buttonText="+ New Transfer"
           onButtonPress={handleAddPress}
           buttonAccessibilityLabel="Add new transfer"
-          filterPills={filterPills}
-          activeFilterId={statusFilter}
-          onFilterSelect={handleFilterSelect}
+          filterPills={locationPill}
+          activeFilterId="location"
+          onFilterSelect={handleLocationPillSelect}
         />
 
+        {/* Status Filter Row */}
+        <View style={styles.statusFilterWrapper}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.statusFilterContainer}
+          >
+            {filterPills.map((pill) => (
+              <Pressable
+                key={pill.id}
+                style={[
+                  styles.statusFilterPill,
+                  statusFilter === pill.id && styles.statusFilterPillActive,
+                ]}
+                onPress={() => handleFilterSelect(pill.id)}
+              >
+                <Text style={[
+                  styles.statusFilterText,
+                  statusFilter === pill.id && styles.statusFilterTextActive,
+                ]}>
+                  {pill.label}
+                </Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+        </View>
+
         {/* Empty State */}
-        {transfers.length === 0 ? (
+        {filteredTransfers.length === 0 ? (
           <View style={styles.emptyState}>
             <Text style={styles.emptyStateTitle}>No Transfers</Text>
             <Text style={styles.emptyStateText}>{emptyMessage}</Text>
@@ -302,6 +393,12 @@ export function TransfersList({
           </>
         )}
       </ScrollView>
+
+      {/* Location Selector Modal */}
+      <LocationSelectorModal
+        visible={showLocationModal}
+        onClose={() => setShowLocationModal(false)}
+      />
     </>
   )
 }
@@ -314,6 +411,34 @@ const styles = StyleSheet.create({
   loadingContainer: {
     padding: 40,
     alignItems: 'center',
+  },
+  // Status Filter Row
+  statusFilterWrapper: {
+    paddingHorizontal: layout.containerMargin,
+    marginBottom: spacing.md,
+  },
+  statusFilterContainer: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  statusFilterPill: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  statusFilterPillActive: {
+    backgroundColor: 'rgba(255,255,255,0.2)',
+  },
+  statusFilterText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: 'rgba(235,235,245,0.7)',
+    letterSpacing: -0.2,
+  },
+  statusFilterTextActive: {
+    color: '#fff',
+    fontWeight: '600',
   },
   cardWrapper: {
     marginHorizontal: layout.containerMargin,

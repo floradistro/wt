@@ -12,13 +12,13 @@
  * Displays purchase orders in iPad Settings-style glass card layout
  */
 
-import React, { useMemo } from 'react'
+import React, { useMemo, useState } from 'react'
 import { View, Text, StyleSheet, Pressable, ScrollView, ActivityIndicator } from 'react-native'
 import * as Haptics from 'expo-haptics'
 import { colors, spacing, radius } from '@/theme/tokens'
 import { layout } from '@/theme/layout'
 import type { PurchaseOrder } from '@/services/purchase-orders.service'
-import { TitleSection } from '@/components/shared'
+import { TitleSection, LocationSelectorModal } from '@/components/shared'
 import type { FilterPill } from '@/components/shared'
 import { useAppAuth } from '@/contexts/AppAuthContext'
 import { useProductsScreenStore, productsScreenActions } from '@/stores/products-list.store'
@@ -112,9 +112,25 @@ export function PurchaseOrdersList({
   // ========================================
   // STORES - ZERO PROP DRILLING
   // ========================================
-  const { vendor } = useAppAuth()
-  const { selectedLocationIds } = useLocationFilter()
+  const { vendor, locations } = useAppAuth()
+  // Use selector pattern for Zustand to ensure proper subscription
+  const selectedLocationIds = useLocationFilter((state) => state.selectedLocationIds)
   const selectedPO = useProductsScreenStore((state) => state.selectedPurchaseOrder)
+
+  // Location selector modal state
+  const [showLocationModal, setShowLocationModal] = useState(false)
+
+  // Compute location display text
+  const locationDisplayText = useMemo(() => {
+    if (selectedLocationIds.length === 0) {
+      return 'All Locations'
+    }
+    if (selectedLocationIds.length === 1) {
+      const loc = locations.find(l => l.id === selectedLocationIds[0])
+      return loc?.name || '1 Location'
+    }
+    return `${selectedLocationIds.length} Locations`
+  }, [selectedLocationIds, locations])
 
   // Read from PO store
   const purchaseOrders = usePurchaseOrdersStore((state) => state.purchaseOrders)
@@ -164,7 +180,18 @@ export function PurchaseOrdersList({
     purchaseOrdersActions.setStatusFilter(filterId as PurchaseOrderStatus | 'all')
   }
 
-  // Define filter pills
+  // Handle location pill tap - always opens modal
+  const handleLocationPillSelect = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    setShowLocationModal(true)
+  }
+
+  // Single location pill for TitleSection - opens modal
+  const locationPill: FilterPill[] = useMemo(() => {
+    return [{ id: 'location', label: locationDisplayText }]
+  }, [locationDisplayText])
+
+  // Define status filter pills
   const filterPills: FilterPill[] = [
     { id: 'all', label: 'All' },
     { id: 'draft', label: 'Draft' },
@@ -208,17 +235,44 @@ export function PurchaseOrdersList({
         scrollIndicatorInsets={{ right: 2, bottom: layout.dockHeight }}
         contentContainerStyle={{ paddingBottom: layout.dockHeight, paddingRight: 0 }}
       >
-        {/* Title Section */}
+        {/* Title Section with Location Selector */}
         <TitleSection
           title="Purchase Orders"
           logo={vendor?.logo_url}
           buttonText="+ New Order"
           onButtonPress={handleAddPress}
           buttonAccessibilityLabel="Add new purchase order"
-          filterPills={filterPills}
-          activeFilterId={statusFilter}
-          onFilterSelect={handleFilterSelect}
+          filterPills={locationPill}
+          activeFilterId="location"
+          onFilterSelect={handleLocationPillSelect}
         />
+
+        {/* Status Filter Row */}
+        <View style={styles.statusFilterWrapper}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.statusFilterContainer}
+          >
+            {filterPills.map((pill) => (
+              <Pressable
+                key={pill.id}
+                style={[
+                  styles.statusFilterPill,
+                  statusFilter === pill.id && styles.statusFilterPillActive,
+                ]}
+                onPress={() => handleFilterSelect(pill.id)}
+              >
+                <Text style={[
+                  styles.statusFilterText,
+                  statusFilter === pill.id && styles.statusFilterTextActive,
+                ]}>
+                  {pill.label}
+                </Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+        </View>
 
         {/* Empty State */}
         {purchaseOrders.length === 0 ? (
@@ -259,6 +313,12 @@ export function PurchaseOrdersList({
           </>
         )}
       </ScrollView>
+
+      {/* Location Selector Modal */}
+      <LocationSelectorModal
+        visible={showLocationModal}
+        onClose={() => setShowLocationModal(false)}
+      />
     </>
   )
 }
@@ -305,7 +365,34 @@ const styles = StyleSheet.create({
     padding: 40,
     alignItems: 'center',
   },
-  // Legacy title section styles removed - now using shared TitleSection component
+  // Status Filter Row
+  statusFilterWrapper: {
+    paddingHorizontal: layout.containerMargin,
+    marginBottom: spacing.md,
+  },
+  statusFilterContainer: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  statusFilterPill: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  statusFilterPillActive: {
+    backgroundColor: 'rgba(255,255,255,0.2)',
+  },
+  statusFilterText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: 'rgba(235,235,245,0.7)',
+    letterSpacing: -0.2,
+  },
+  statusFilterTextActive: {
+    color: '#fff',
+    fontWeight: '600',
+  },
   cardWrapper: {
     marginHorizontal: layout.containerMargin,
     marginVertical: layout.containerMargin,

@@ -7,7 +7,7 @@
  */
 
 import { View, Text, StyleSheet, Pressable, ActivityIndicator, ScrollView, Linking, Alert } from 'react-native'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import * as Haptics from 'expo-haptics'
 import { Ionicons } from '@expo/vector-icons'
 import { colors, spacing, radius } from '@/theme/tokens'
@@ -17,6 +17,7 @@ import type { Order } from '@/services/orders.service'
 import { ordersService, type OrderItem } from '@/services/orders.service'
 import { useOrders, useOrdersStore, useOrdersActions } from '@/stores/orders.store'
 import { useSelectedOrderId, useOrdersUIActions } from '@/stores/orders-ui.store'
+import { useLocationFilter } from '@/stores/location-filter.store'
 import {
   ConfirmECommerceOrderModal,
   PackOrderModal,
@@ -24,22 +25,48 @@ import {
   MarkDeliveredModal,
 } from '../modals'
 
+// Group items by location
+interface LocationGroup {
+  locationId: string | null
+  locationName: string
+  items: OrderItem[]
+  allFulfilled: boolean
+  // Fulfillment type: pickup or shipping (Apple/Best Buy style)
+  fulfillmentType: 'pickup' | 'shipping' | 'unknown'
+  // Shipping info for this location (only for shipping items)
+  trackingNumber?: string
+  trackingUrl?: string
+  shippingCarrier?: string
+  shippedAt?: string
+}
+
 export function ECommerceDetail() {
   const selectedOrderId = useSelectedOrderId()
   const orders = useOrders()
   const order = orders.find(o => o.id === selectedOrderId)
   const { selectOrder } = useOrdersUIActions()
   const { refreshOrders } = useOrdersActions()
+  const { selectedLocationIds } = useLocationFilter()
 
   const [showConfirmModal, setShowConfirmModal] = useState(false)
   const [showPackModal, setShowPackModal] = useState(false)
   const [showShipModal, setShowShipModal] = useState(false)
   const [showDeliveredModal, setShowDeliveredModal] = useState(false)
   const [isUpdating, setIsUpdating] = useState(false)
+  const [isFulfilling, setIsFulfilling] = useState<string | null>(null) // locationId being fulfilled
   const [orderItems, setOrderItems] = useState<OrderItem[]>([])
   const [loadingItems, setLoadingItems] = useState(false)
+  const [shipFromLocationId, setShipFromLocationId] = useState<string | null>(null) // For per-location shipping
 
-  // Load order items
+  // Shipment info per location (from order_locations table)
+  const [locationShipments, setLocationShipments] = useState<Record<string, {
+    trackingNumber?: string
+    trackingUrl?: string
+    shippingCarrier?: string
+    shippedAt?: string
+  }>>({})
+
+  // Load order items (with location data) and shipment info
   useEffect(() => {
     if (!order) return
 
@@ -48,6 +75,19 @@ export function ECommerceDetail() {
         setLoadingItems(true)
         const fullOrder = await ordersService.getOrderById(order.id)
         setOrderItems(fullOrder.items || [])
+
+        // Load per-location shipment info
+        const shipments = await ordersService.getOrderShipments(order.id)
+        const shipmentMap: Record<string, { trackingNumber?: string; trackingUrl?: string; shippingCarrier?: string; shippedAt?: string }> = {}
+        shipments.forEach((s) => {
+          shipmentMap[s.location_id] = {
+            trackingNumber: s.tracking_number,
+            trackingUrl: s.tracking_url,
+            shippingCarrier: s.shipping_carrier,
+            shippedAt: s.shipped_at,
+          }
+        })
+        setLocationShipments(shipmentMap)
       } catch (error) {
         logger.error('Failed to load order items:', error)
       } finally {
@@ -57,6 +97,107 @@ export function ECommerceDetail() {
 
     loadItems()
   }, [order?.id])
+
+  // Group items by location for multi-location display
+  const itemsByLocation = useMemo((): LocationGroup[] => {
+    if (!orderItems.length) return []
+
+    const groups = new Map<string, LocationGroup>()
+
+    orderItems.forEach((item) => {
+      const locationId = item.location_id || 'unknown'
+      // Use pickup_location_name for pickup items, otherwise try location_name or fetch from somewhere
+      const locationName = item.pickup_location_name || item.location_name || 'Unassigned'
+      // Get fulfillment type from item's order_type (set by smart routing)
+      const itemFulfillmentType = item.order_type
+
+      if (!groups.has(locationId)) {
+        const shipment = item.location_id ? locationShipments[item.location_id] : undefined
+        groups.set(locationId, {
+          locationId: item.location_id || null,
+          locationName,
+          items: [],
+          allFulfilled: true,
+          // Set fulfillment type from the first item (all items at a location have same type)
+          fulfillmentType: itemFulfillmentType || 'unknown',
+          // Include shipment info
+          trackingNumber: shipment?.trackingNumber,
+          trackingUrl: shipment?.trackingUrl,
+          shippingCarrier: shipment?.shippingCarrier,
+          shippedAt: shipment?.shippedAt,
+        })
+      }
+
+      const group = groups.get(locationId)!
+      group.items.push(item)
+      if (item.fulfillment_status !== 'fulfilled') {
+        group.allFulfilled = false
+      }
+    })
+
+    // Sort: pickup locations first, then shipping
+    return Array.from(groups.values()).sort((a, b) => {
+      if (a.fulfillmentType === 'pickup' && b.fulfillmentType !== 'pickup') return -1
+      if (a.fulfillmentType !== 'pickup' && b.fulfillmentType === 'pickup') return 1
+      return 0
+    })
+  }, [orderItems, locationShipments])
+
+  // Check if this is a multi-location order
+  const isMultiLocation = itemsByLocation.length > 1
+
+  // Check if user's selected location has items to fulfill
+  const myLocationGroup = useMemo(() => {
+    if (!selectedLocationIds.length) return null
+    return itemsByLocation.find((g) => g.locationId && selectedLocationIds.includes(g.locationId))
+  }, [itemsByLocation, selectedLocationIds])
+
+  // Handle fulfilling items at a specific location
+  const handleFulfillAtLocation = async (locationId: string, locationName: string) => {
+    if (!order) return
+
+    Alert.alert(
+      'Fulfill Items',
+      `Mark all items at ${locationName} as fulfilled?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Fulfill',
+          style: 'default',
+          onPress: async () => {
+            try {
+              setIsFulfilling(locationId)
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+
+              const result = await ordersService.fulfillItemsAtLocation(order.id, locationId)
+
+              if (result.orderFullyFulfilled) {
+                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+                Alert.alert('Success', 'All items fulfilled! Order is ready to ship.')
+              } else {
+                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+                Alert.alert(
+                  'Items Fulfilled',
+                  `${result.itemsFulfilled} item(s) marked as fulfilled. Waiting on ${result.remainingLocations.length} other location(s).`
+                )
+              }
+
+              // Reload items to show updated status
+              const fullOrder = await ordersService.getOrderById(order.id)
+              setOrderItems(fullOrder.items || [])
+              refreshOrders()
+            } catch (error) {
+              logger.error('Failed to fulfill items:', error)
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
+              Alert.alert('Error', 'Failed to fulfill items')
+            } finally {
+              setIsFulfilling(null)
+            }
+          },
+        },
+      ]
+    )
+  }
 
   const handleBack = () => {
     selectOrder(null)
@@ -253,90 +394,259 @@ export function ECommerceDetail() {
           </View>
         </View>
 
-        {/* Shipping Information */}
-        {order.tracking_number && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Shipping Information</Text>
-            <View style={styles.cardGlass}>
-              <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Tracking</Text>
-                <Text style={styles.infoValue}>{order.tracking_number}</Text>
-              </View>
-              {order.shipping_cost && (
-                <View style={[styles.infoRow, styles.lastRow]}>
-                  <Text style={styles.infoLabel}>Shipping Cost</Text>
-                  <Text style={styles.infoValue}>${order.shipping_cost.toFixed(2)}</Text>
+        {/* Shipping Information - Per-location for multi-location orders */}
+        {isMultiLocation ? (
+          // Multi-location: Show shipments section
+          itemsByLocation.some((g) => g.trackingNumber) && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Shipments ({itemsByLocation.filter(g => g.trackingNumber).length}/{itemsByLocation.length})</Text>
+              {itemsByLocation.filter(g => g.trackingNumber).map((group, idx) => (
+                <View key={group.locationId || idx} style={[styles.cardGlass, { marginBottom: 8 }]}>
+                  <View style={styles.infoRow}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <Ionicons name="cube-outline" size={16} color="#bf5af2" />
+                      <Text style={styles.infoLabel}>{group.locationName}</Text>
+                    </View>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                      <Ionicons name="checkmark-circle" size={14} color="#34c759" />
+                      <Text style={{ color: '#34c759', fontSize: 12, fontWeight: '600' }}>Shipped</Text>
+                    </View>
+                  </View>
+                  <View style={[styles.infoRow, styles.lastRow]}>
+                    <Text style={styles.infoLabel}>Tracking</Text>
+                    <Pressable
+                      onPress={() => {
+                        if (group.trackingUrl) {
+                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                          Linking.openURL(group.trackingUrl)
+                        }
+                      }}
+                    >
+                      <Text style={[styles.infoValue, group.trackingUrl && { color: '#0a84ff' }]}>
+                        {group.shippingCarrier && `${group.shippingCarrier}: `}{group.trackingNumber}
+                      </Text>
+                    </Pressable>
+                  </View>
                 </View>
-              )}
+              ))}
             </View>
-          </View>
+          )
+        ) : (
+          // Single location: Show order-level tracking
+          order.tracking_number && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Shipping Information</Text>
+              <View style={styles.cardGlass}>
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Tracking</Text>
+                  <Pressable
+                    onPress={() => {
+                      if (order.tracking_url) {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                        Linking.openURL(order.tracking_url)
+                      }
+                    }}
+                  >
+                    <Text style={[styles.infoValue, order.tracking_url && { color: '#0a84ff' }]}>
+                      {order.tracking_number}
+                    </Text>
+                  </Pressable>
+                </View>
+                {order.shipping_cost && (
+                  <View style={[styles.infoRow, styles.lastRow]}>
+                    <Text style={styles.infoLabel}>Shipping Cost</Text>
+                    <Text style={styles.infoValue}>${order.shipping_cost.toFixed(2)}</Text>
+                  </View>
+                )}
+              </View>
+            </View>
+          )
         )}
 
-        {/* Shipping Address */}
-        {order.shipping_address_line1 && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Shipping Address</Text>
-            <View style={styles.cardGlass}>
-              {order.shipping_name && (
-                <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>Name</Text>
-                  <Text style={styles.infoValue}>{order.shipping_name}</Text>
-                </View>
-              )}
-              <View style={[styles.infoRow, !order.shipping_phone && styles.lastRow]}>
+        {/* Customer Information - ALWAYS SHOWN */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Customer Information</Text>
+          <View style={styles.cardGlass}>
+            <View style={styles.infoRow}>
+              <Text style={styles.infoLabel}>Name</Text>
+              <Text style={styles.infoValue}>{order.customer_name || order.shipping_name || 'Guest'}</Text>
+            </View>
+            {order.customer_email && (
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Email</Text>
+                <Pressable onPress={handleEmail}>
+                  <Text style={[styles.infoValue, { color: '#0a84ff' }]}>
+                    {order.customer_email}
+                  </Text>
+                </Pressable>
+              </View>
+            )}
+            {(order.customer_phone || order.shipping_phone) && (
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Phone</Text>
+                <Pressable onPress={handleCall}>
+                  <Text style={[styles.infoValue, { color: '#0a84ff' }]}>
+                    {order.customer_phone || order.shipping_phone}
+                  </Text>
+                </Pressable>
+              </View>
+            )}
+            {/* Shipping/Delivery Address */}
+            {order.shipping_address_line1 && (
+              <View style={[styles.infoRow, styles.lastRow]}>
                 <Text style={styles.infoLabel}>Address</Text>
-                <Text style={styles.infoValue}>
+                <Text style={[styles.infoValue, { textAlign: 'right', flex: 1, marginLeft: 16 }]}>
                   {order.shipping_address_line1}
                   {order.shipping_address_line2 && `\n${order.shipping_address_line2}`}
-                  {'\n'}
-                  {order.shipping_city}, {order.shipping_state} {order.shipping_zip}
+                  {'\n'}{order.shipping_city}, {order.shipping_state} {order.shipping_zip}
+                  {order.shipping_country && order.shipping_country !== 'US' && `\n${order.shipping_country}`}
                 </Text>
-              </View>
-              {order.shipping_phone && (
-                <View style={[styles.infoRow, styles.lastRow]}>
-                  <Text style={styles.infoLabel}>Phone</Text>
-                  <Text style={styles.infoValue}>{order.shipping_phone}</Text>
-                </View>
-              )}
-            </View>
-          </View>
-        )}
-
-        {/* Order Items */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Order Items</Text>
-          <View style={styles.cardGlass}>
-            {loadingItems ? (
-              <View style={{ padding: 20, alignItems: 'center' }}>
-                <ActivityIndicator size="small" color={colors.text.secondary} />
-              </View>
-            ) : orderItems.length > 0 ? (
-              orderItems.map((item, index) => (
-                <View
-                  key={item.id}
-                  style={[
-                    styles.infoRow,
-                    index === orderItems.length - 1 && styles.lastRow
-                  ]}
-                >
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.infoValue}>{item.product_name}</Text>
-                    <Text style={[styles.infoLabel, { marginTop: 4 }]}>
-                      Qty: {item.quantity} × ${item.unit_price.toFixed(2)}
-                    </Text>
-                  </View>
-                  <Text style={styles.infoValue}>
-                    ${item.line_total.toFixed(2)}
-                  </Text>
-                </View>
-              ))
-            ) : (
-              <View style={{ padding: 20, alignItems: 'center' }}>
-                <Text style={styles.infoLabel}>No items found</Text>
               </View>
             )}
           </View>
         </View>
+
+        {/* Order Items - Grouped by Location for Multi-Location Orders */}
+        <View style={styles.section}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <Text style={styles.sectionTitle}>Order Items</Text>
+            {isMultiLocation && (
+              <View style={styles.multiLocationBadge}>
+                <Ionicons name="location" size={12} color="#bf5af2" />
+                <Text style={styles.multiLocationText}>{itemsByLocation.length} Locations</Text>
+              </View>
+            )}
+          </View>
+
+          {loadingItems ? (
+            <View style={[styles.cardGlass, { padding: 20, alignItems: 'center' }]}>
+              <ActivityIndicator size="small" color={colors.text.secondary} />
+            </View>
+          ) : itemsByLocation.length > 0 ? (
+            itemsByLocation.map((group, groupIndex) => (
+              <View key={group.locationId || 'unassigned'} style={{ marginBottom: groupIndex < itemsByLocation.length - 1 ? 12 : 0 }}>
+                {/* Location Header (shown for multi-location orders) */}
+                {isMultiLocation && (
+                  <View style={styles.locationHeader}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                      {/* Icon based on fulfillment type */}
+                      <Ionicons
+                        name={group.fulfillmentType === 'pickup' ? 'storefront-outline' : 'cube-outline'}
+                        size={16}
+                        color={group.fulfillmentType === 'pickup' ? '#30d158' : '#bf5af2'}
+                      />
+                      <View>
+                        {/* Fulfillment type label */}
+                        <Text style={[
+                          styles.fulfillmentTypeLabel,
+                          { color: group.fulfillmentType === 'pickup' ? '#30d158' : '#bf5af2' }
+                        ]}>
+                          {group.fulfillmentType === 'pickup' ? 'PICKUP' : 'SHIPPING'}
+                        </Text>
+                        <Text style={styles.locationName}>{group.locationName}</Text>
+                      </View>
+                      {group.shippedAt ? (
+                        // Already shipped
+                        <View style={[styles.fulfilledBadge, { backgroundColor: 'rgba(191,90,242,0.15)' }]}>
+                          <Ionicons name="cube" size={14} color="#bf5af2" />
+                          <Text style={[styles.fulfilledText, { color: '#bf5af2' }]}>Shipped</Text>
+                        </View>
+                      ) : group.allFulfilled ? (
+                        <View style={styles.fulfilledBadge}>
+                          <Ionicons name="checkmark-circle" size={14} color="#34c759" />
+                          <Text style={styles.fulfilledText}>Fulfilled</Text>
+                        </View>
+                      ) : null}
+                    </View>
+                    {/* Action buttons based on status */}
+                    {group.locationId && !group.shippedAt && (
+                      group.allFulfilled ? (
+                        // Fulfilled but not shipped - show Ship button
+                        <Pressable
+                          style={[styles.fulfillButton, { backgroundColor: '#bf5af2' }]}
+                          onPress={() => {
+                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                            setShipFromLocationId(group.locationId)
+                            setShowShipModal(true)
+                          }}
+                        >
+                          <Text style={styles.fulfillButtonText}>Ship</Text>
+                        </Pressable>
+                      ) : (
+                        // Not fulfilled yet - show Fulfill button
+                        <Pressable
+                          style={styles.fulfillButton}
+                          onPress={() => handleFulfillAtLocation(group.locationId!, group.locationName)}
+                          disabled={isFulfilling === group.locationId}
+                        >
+                          {isFulfilling === group.locationId ? (
+                            <ActivityIndicator size="small" color="#fff" />
+                          ) : (
+                            <Text style={styles.fulfillButtonText}>Fulfill</Text>
+                          )}
+                        </Pressable>
+                      )
+                    )}
+                  </View>
+                )}
+
+                {/* Items for this location */}
+                <View style={styles.cardGlass}>
+                  {group.items.map((item, index) => (
+                    <View
+                      key={item.id}
+                      style={[
+                        styles.infoRow,
+                        index === group.items.length - 1 && styles.lastRow
+                      ]}
+                    >
+                      <View style={{ flex: 1 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                          <Text style={styles.infoValue}>{item.product_name}</Text>
+                          {item.fulfillment_status === 'fulfilled' && (
+                            <Ionicons name="checkmark-circle" size={14} color="#34c759" />
+                          )}
+                        </View>
+                        <Text style={[styles.infoLabel, { marginTop: 4 }]}>
+                          Qty: {item.quantity} × ${item.unit_price.toFixed(2)}
+                        </Text>
+                      </View>
+                      <Text style={styles.infoValue}>
+                        ${item.line_total.toFixed(2)}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            ))
+          ) : (
+            <View style={[styles.cardGlass, { padding: 20, alignItems: 'center' }]}>
+              <Text style={styles.infoLabel}>No items found</Text>
+            </View>
+          )}
+        </View>
+
+        {/* My Location Quick Action (if user has items at their location) */}
+        {myLocationGroup && !myLocationGroup.allFulfilled && (
+          <View style={styles.section}>
+            <Pressable
+              style={styles.myLocationButton}
+              onPress={() => handleFulfillAtLocation(myLocationGroup.locationId!, myLocationGroup.locationName)}
+              disabled={isFulfilling !== null}
+            >
+              {isFulfilling === myLocationGroup.locationId ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <>
+                  <Ionicons name="checkmark-done" size={20} color="#fff" />
+                  <Text style={styles.myLocationButtonText}>
+                    Fulfill My Items ({myLocationGroup.items.length})
+                  </Text>
+                </>
+              )}
+            </Pressable>
+          </View>
+        )}
 
         {/* Order Information */}
         <View style={styles.section}>
@@ -392,11 +702,29 @@ export function ECommerceDetail() {
 
       <ShipOrderModal
         visible={showShipModal}
-        onClose={() => {
+        onClose={async () => {
           setShowShipModal(false)
+          setShipFromLocationId(null)
           refreshOrders()
+          // Reload items to get updated shipment data
+          if (order) {
+            const fullOrder = await ordersService.getOrderById(order.id)
+            setOrderItems(fullOrder.items || [])
+            const shipments = await ordersService.getOrderShipments(order.id)
+            const shipmentMap: Record<string, { trackingNumber?: string; trackingUrl?: string; shippingCarrier?: string; shippedAt?: string }> = {}
+            shipments.forEach((s) => {
+              shipmentMap[s.location_id] = {
+                trackingNumber: s.tracking_number,
+                trackingUrl: s.tracking_url,
+                shippingCarrier: s.shipping_carrier,
+                shippedAt: s.shipped_at,
+              }
+            })
+            setLocationShipments(shipmentMap)
+          }
         }}
         orderId={order.id}
+        locationId={shipFromLocationId}
       />
 
       <MarkDeliveredModal
@@ -572,5 +900,83 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
     color: '#fff',
+  },
+  // Multi-location styles
+  multiLocationBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(191,90,242,0.15)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  multiLocationText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#bf5af2',
+    letterSpacing: 0.2,
+  },
+  locationHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+  },
+  locationName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: 'rgba(235,235,245,0.8)',
+    letterSpacing: -0.2,
+  },
+  fulfillmentTypeLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+    marginBottom: 2,
+  },
+  fulfilledBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(52,199,89,0.15)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+  },
+  fulfilledText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#34c759',
+  },
+  fulfillButton: {
+    backgroundColor: '#0a84ff',
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 14,
+    minWidth: 70,
+    alignItems: 'center',
+  },
+  fulfillButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  myLocationButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    backgroundColor: '#34c759',
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderRadius: radius.xl,
+  },
+  myLocationButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+    letterSpacing: -0.2,
   },
 })

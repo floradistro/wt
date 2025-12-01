@@ -4,6 +4,10 @@
  * STANDARD FULLSCREENMODAL PATTERN ✅
  * Apple-style: One action to ship order with tracking
  *
+ * Supports multi-location orders:
+ * - For single-location: Ships entire order
+ * - For multi-location: Ships from selected location only
+ *
  * Allows staff to:
  * - Select carrier
  * - Add tracking number (REQUIRED)
@@ -19,12 +23,15 @@ import {
   Alert,
   Switch,
 } from 'react-native'
-import { useState } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import * as Haptics from 'expo-haptics'
+import { Ionicons } from '@expo/vector-icons'
 import { FullScreenModal, modalStyles } from '@/components/shared'
-import { useOrdersStore } from '@/stores/orders.store'
+import { useOrdersStore, useOrders } from '@/stores/orders.store'
 import { supabase } from '@/lib/supabase/client'
 import { useAppAuth } from '@/contexts/AppAuthContext'
+import { useLocationFilter } from '@/stores/location-filter.store'
+import { ordersService, type OrderLocation } from '@/services/orders.service'
 import { logger } from '@/utils/logger'
 
 // Carrier tracking URL templates
@@ -40,16 +47,32 @@ interface ShipOrderModalProps {
   visible: boolean
   onClose: () => void
   orderId: string | null
+  /** Optional: Pre-select a specific location to ship from */
+  locationId?: string | null
 }
 
 const CARRIERS = ['USPS', 'UPS', 'FedEx', 'DHL', 'Other']
+
+// Location with shipping status
+interface LocationShipStatus {
+  locationId: string
+  locationName: string
+  itemCount: number
+  isShipped: boolean
+  trackingNumber?: string
+}
 
 export function ShipOrderModal({
   visible,
   onClose,
   orderId,
+  locationId: preselectedLocationId,
 }: ShipOrderModalProps) {
-  const { vendor } = useAppAuth()
+  const { vendor, user } = useAppAuth()
+  const { selectedLocationIds } = useLocationFilter()
+  const orders = useOrders()
+  const order = orders.find(o => o.id === orderId)
+
   const [carrier, setCarrier] = useState('USPS')
   const [trackingNumber, setTrackingNumber] = useState('')
   const [shippingCost, setShippingCost] = useState('')
@@ -57,11 +80,82 @@ export function ShipOrderModal({
   const [showCarrierPicker, setShowCarrierPicker] = useState(false)
   const [saving, setSaving] = useState(false)
 
+  // Multi-location state
+  const [orderLocations, setOrderLocations] = useState<LocationShipStatus[]>([])
+  const [selectedLocationId, setSelectedLocationId] = useState<string | null>(null)
+  const [loadingLocations, setLoadingLocations] = useState(false)
+  const [showLocationPicker, setShowLocationPicker] = useState(false)
+
+  // Load order locations when modal opens
+  useEffect(() => {
+    if (!visible || !orderId) {
+      setOrderLocations([])
+      setSelectedLocationId(null)
+      return
+    }
+
+    const loadLocations = async () => {
+      try {
+        setLoadingLocations(true)
+        const shipments = await ordersService.getOrderShipments(orderId)
+
+        const locations: LocationShipStatus[] = shipments.map((loc) => ({
+          locationId: loc.location_id,
+          locationName: loc.location_name || 'Unknown',
+          itemCount: loc.item_count,
+          isShipped: !!loc.shipped_at,
+          trackingNumber: loc.tracking_number,
+        }))
+
+        setOrderLocations(locations)
+
+        // Auto-select location
+        if (preselectedLocationId) {
+          setSelectedLocationId(preselectedLocationId)
+        } else if (locations.length === 1) {
+          // Single location - auto select
+          setSelectedLocationId(locations[0].locationId)
+        } else {
+          // Multi-location - try to select user's location if they have one
+          const myLocation = locations.find(
+            (l) => !l.isShipped && selectedLocationIds.includes(l.locationId)
+          )
+          if (myLocation) {
+            setSelectedLocationId(myLocation.locationId)
+          } else {
+            // Select first unshipped location
+            const firstUnshipped = locations.find((l) => !l.isShipped)
+            setSelectedLocationId(firstUnshipped?.locationId || null)
+          }
+        }
+      } catch (error) {
+        logger.error('Failed to load order locations:', error)
+        // Fall back to single-location mode
+        setOrderLocations([])
+      } finally {
+        setLoadingLocations(false)
+      }
+    }
+
+    loadLocations()
+  }, [visible, orderId, preselectedLocationId, selectedLocationIds])
+
+  // Check if this is a multi-location order
+  const isMultiLocation = orderLocations.length > 1
+  const unshippedLocations = orderLocations.filter((l) => !l.isShipped)
+  const selectedLocation = orderLocations.find((l) => l.locationId === selectedLocationId)
+
   const handleShip = async () => {
     if (!orderId) return
 
     if (!trackingNumber.trim()) {
       Alert.alert('Tracking Required', 'Please enter a tracking number before shipping')
+      return
+    }
+
+    // For multi-location orders, require a location to be selected
+    if (isMultiLocation && !selectedLocationId) {
+      Alert.alert('Select Location', 'Please select which location is shipping')
       return
     }
 
@@ -74,25 +168,55 @@ export function ShipOrderModal({
         ? `${CARRIER_URLS[carrier]}${trackingNumber.trim()}`
         : undefined
 
-      // Update order with tracking info and status in one call
-      const { error: updateError } = await supabase
-        .from('orders')
-        .update({
-          status: 'shipped',
-          tracking_number: trackingNumber.trim(),
-          shipping_carrier: carrier,
-          tracking_url: trackingUrl,
-          ...(shippingCost && { shipping_cost: parseFloat(shippingCost) }),
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', orderId)
+      let allLocationsShipped = false
 
-      if (updateError) {
-        throw updateError
+      if (isMultiLocation && selectedLocationId) {
+        // Multi-location order: Ship from specific location
+        const result = await ordersService.shipFromLocation(
+          orderId,
+          selectedLocationId,
+          trackingNumber.trim(),
+          carrier,
+          trackingUrl,
+          shippingCost ? parseFloat(shippingCost) : undefined,
+          user?.id
+        )
+
+        allLocationsShipped = result.allLocationsShipped
+
+        if (!allLocationsShipped) {
+          // More locations need to ship - show info
+          const remaining = result.remainingLocationsToShip.length
+          Alert.alert(
+            'Shipment Created',
+            `Tracking added for ${selectedLocation?.locationName}.\n\n${remaining} location(s) still need to ship.`
+          )
+        }
+      } else {
+        // Single location or legacy: Update order directly
+        const { error: updateError } = await supabase
+          .from('orders')
+          .update({
+            status: 'shipped',
+            tracking_number: trackingNumber.trim(),
+            shipping_carrier: carrier,
+            tracking_url: trackingUrl,
+            shipped_at: new Date().toISOString(),
+            shipped_by_user_id: user?.id,
+            ...(shippingCost && { shipping_cost: parseFloat(shippingCost) }),
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', orderId)
+
+        if (updateError) {
+          throw updateError
+        }
+
+        allLocationsShipped = true
       }
 
-      // Send "Order Shipped" email notification if enabled
-      if (notifyCustomer && vendor?.ecommerce_url) {
+      // Send "Order Shipped" email notification if enabled and all locations shipped
+      if (notifyCustomer && vendor?.ecommerce_url && allLocationsShipped) {
         try {
           const ecommerceUrl = vendor.ecommerce_url.replace(/\/$/, '') // Remove trailing slash
           const response = await fetch(`${ecommerceUrl}/api/orders/${orderId}/send-status-update`, {
@@ -148,6 +272,104 @@ export function ShipOrderModal({
       onSearchChange={setTrackingNumber}
       searchPlaceholder="Tracking number *"
     >
+      {/* Multi-location indicator */}
+      {isMultiLocation && (
+        <View style={modalStyles.section}>
+          <View style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 8,
+            backgroundColor: 'rgba(191,90,242,0.15)',
+            paddingHorizontal: 14,
+            paddingVertical: 10,
+            borderRadius: 12,
+            marginBottom: 8,
+          }}>
+            <Ionicons name="cube-outline" size={18} color="#bf5af2" />
+            <Text style={{ color: '#bf5af2', fontSize: 14, fontWeight: '600' }}>
+              Multi-Location Order • {unshippedLocations.length} shipment{unshippedLocations.length !== 1 ? 's' : ''} remaining
+            </Text>
+          </View>
+        </View>
+      )}
+
+      {/* Location Selection (for multi-location orders) */}
+      {isMultiLocation && (
+        <View style={modalStyles.section}>
+          <Text style={modalStyles.sectionLabel}>SHIPPING FROM</Text>
+          <Pressable
+            style={[modalStyles.card]}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+              setShowLocationPicker(!showLocationPicker)
+            }}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <Ionicons name="storefront-outline" size={18} color="rgba(235,235,245,0.6)" />
+              <Text style={[modalStyles.input, { fontWeight: '600' }]}>
+                {selectedLocation?.locationName || 'Select Location'}
+              </Text>
+              {selectedLocation && (
+                <Text style={{ color: 'rgba(235,235,245,0.5)', fontSize: 13 }}>
+                  ({selectedLocation.itemCount} item{selectedLocation.itemCount !== 1 ? 's' : ''})
+                </Text>
+              )}
+            </View>
+          </Pressable>
+
+          {/* Location Picker */}
+          {showLocationPicker && (
+            <View style={{ marginTop: 12, gap: 8 }}>
+              {orderLocations.map((loc) => (
+                <Pressable
+                  key={loc.locationId}
+                  style={[
+                    modalStyles.card,
+                    {
+                      backgroundColor: loc.isShipped
+                        ? 'rgba(52,199,89,0.1)'
+                        : selectedLocationId === loc.locationId
+                          ? 'rgba(10,132,255,0.2)'
+                          : 'rgba(118, 118, 128, 0.24)',
+                      opacity: loc.isShipped ? 0.7 : 1,
+                    },
+                  ]}
+                  onPress={() => {
+                    if (!loc.isShipped) {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                      setSelectedLocationId(loc.locationId)
+                      setShowLocationPicker(false)
+                    }
+                  }}
+                  disabled={loc.isShipped}
+                >
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                      <Ionicons
+                        name={loc.isShipped ? 'checkmark-circle' : 'storefront-outline'}
+                        size={18}
+                        color={loc.isShipped ? '#34c759' : selectedLocationId === loc.locationId ? '#0a84ff' : 'rgba(235,235,245,0.6)'}
+                      />
+                      <Text
+                        style={[
+                          modalStyles.input,
+                          { color: loc.isShipped ? '#34c759' : selectedLocationId === loc.locationId ? '#0a84ff' : '#fff' },
+                        ]}
+                      >
+                        {loc.locationName}
+                      </Text>
+                    </View>
+                    <Text style={{ color: 'rgba(235,235,245,0.5)', fontSize: 13 }}>
+                      {loc.isShipped ? `Shipped • ${loc.trackingNumber}` : `${loc.itemCount} item${loc.itemCount !== 1 ? 's' : ''}`}
+                    </Text>
+                  </View>
+                </Pressable>
+              ))}
+            </View>
+          )}
+        </View>
+      )}
+
       {/* Carrier Selection */}
       <View style={modalStyles.section}>
         <Text style={modalStyles.sectionLabel}>CARRIER</Text>

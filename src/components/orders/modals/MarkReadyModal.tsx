@@ -20,12 +20,15 @@ import {
   Alert,
   Switch,
 } from 'react-native'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import * as Haptics from 'expo-haptics'
 import { Ionicons } from '@expo/vector-icons'
 import { FullScreenModal, modalStyles } from '@/components/shared'
 import { useOrdersStore } from '@/stores/orders.store'
 import { logger } from '@/utils/logger'
+import { EmailService } from '@/services/email.service'
+import { ordersService, Order, OrderItem } from '@/services/orders.service'
+import { useAppAuth } from '@/contexts/AppAuthContext'
 
 interface MarkReadyModalProps {
   visible: boolean
@@ -42,6 +45,30 @@ export function MarkReadyModal({
   const [notifyCustomer, setNotifyCustomer] = useState(true)
   const [itemsVerified, setItemsVerified] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [orderData, setOrderData] = useState<(Order & { items: OrderItem[] }) | null>(null)
+  const [loadingOrder, setLoadingOrder] = useState(false)
+
+  const { vendor } = useAppAuth()
+  const vendorId = vendor?.id
+
+  // Fetch order data when modal opens
+  useEffect(() => {
+    if (visible && orderId) {
+      setLoadingOrder(true)
+      ordersService.getOrderById(orderId)
+        .then((order) => {
+          setOrderData(order)
+        })
+        .catch((error) => {
+          logger.error('Failed to fetch order for notification', { error, orderId })
+        })
+        .finally(() => {
+          setLoadingOrder(false)
+        })
+    } else {
+      setOrderData(null)
+    }
+  }, [visible, orderId])
 
   const handleMarkReady = async () => {
     if (!orderId) return
@@ -58,8 +85,35 @@ export function MarkReadyModal({
       // Update order status to ready
       await useOrdersStore.getState().updateOrderStatus(orderId, 'ready')
 
-      // TODO: Add pickup instructions to order
-      // TODO: Send customer notification if enabled
+      // Send customer notification if enabled and we have the required data
+      if (notifyCustomer && orderData && vendorId) {
+        const customerEmail = orderData.customer_email
+        if (customerEmail) {
+          try {
+            const result = await EmailService.sendOrderReady({
+              vendorId,
+              orderId,
+              customerEmail,
+              customerName: orderData.customer_name || undefined,
+              orderNumber: orderData.order_number,
+              pickupLocation: orderData.pickup_location_name || 'Store',
+              customerId: orderData.customer_id,
+            })
+
+            if (result.success) {
+              logger.info('Order ready notification sent', { orderId, customerEmail })
+            } else {
+              logger.warn('Failed to send order ready notification', { orderId, error: result.error })
+              // Don't show error alert - order is already marked ready, notification is secondary
+            }
+          } catch (emailError) {
+            logger.error('Error sending order ready notification', { emailError, orderId })
+            // Don't fail the whole operation if email fails
+          }
+        } else {
+          logger.warn('Cannot send notification - no customer email', { orderId })
+        }
+      }
 
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
 

@@ -26,10 +26,11 @@ import { colors, spacing, radius } from '@/theme/tokens'
 import { layout } from '@/theme/layout'
 import { useInventoryAdjustments } from '@/hooks/useInventoryAdjustments'
 import type { AdjustmentType, InventoryAdjustment } from '@/services/inventory-adjustments.service'
-import { TitleSection } from '@/components/shared'
+import { TitleSection, LocationSelectorModal } from '@/components/shared'
 import type { FilterPill } from '@/components/shared'
 import { useAppAuth } from '@/contexts/AppAuthContext'
 import { useProductsScreenStore, productsScreenActions } from '@/stores/products-list.store'
+import { useLocationFilter } from '@/stores/location-filter.store'
 
 type AuditBatch = {
   id: string
@@ -133,12 +134,28 @@ export function AuditsView({
   // ========================================
   // STORES - ZERO PROP DRILLING
   // ========================================
-  const { vendor } = useAppAuth()
-  const selectedLocationIds = useProductsScreenStore((state) => state.selectedLocationIds)
+  const { vendor, locations } = useAppAuth()
+  // Use selector pattern for Zustand to ensure proper subscription
+  const selectedLocationIds = useLocationFilter((state) => state.selectedLocationIds)
   const insets = useSafeAreaInsets()
 
   const [viewFilter, setViewFilter] = useState<'all' | 'batches' | 'single'>('all')
   const [selectedAuditBatch, setSelectedAuditBatch] = useState<AuditBatch | null>(null)
+
+  // Location selector modal state
+  const [showLocationModal, setShowLocationModal] = useState(false)
+
+  // Compute location display text
+  const locationDisplayText = useMemo(() => {
+    if (selectedLocationIds.length === 0) {
+      return 'All Locations'
+    }
+    if (selectedLocationIds.length === 1) {
+      const loc = locations.find(l => l.id === selectedLocationIds[0])
+      return loc?.name || '1 Location'
+    }
+    return `${selectedLocationIds.length} Locations`
+  }, [selectedLocationIds, locations])
 
   // Memoize filters to prevent unnecessary re-fetches
   const filters = useMemo(() => {
@@ -257,7 +274,18 @@ export function AuditsView({
     setViewFilter(filterId as 'all' | 'batches' | 'single')
   }
 
-  // Define filter pills
+  // Handle location pill tap - always opens modal
+  const handleLocationPillSelect = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    setShowLocationModal(true)
+  }
+
+  // Single location pill for TitleSection - opens modal
+  const locationPill: FilterPill[] = useMemo(() => {
+    return [{ id: 'location', label: locationDisplayText }]
+  }, [locationDisplayText])
+
+  // Define view filter pills
   const filterPills: FilterPill[] = [
     { id: 'all', label: 'All' },
     { id: 'batches', label: 'Batches' },
@@ -318,17 +346,44 @@ export function AuditsView({
         scrollIndicatorInsets={{ right: 2, bottom: layout.dockHeight }}
         contentContainerStyle={{ paddingBottom: layout.dockHeight, paddingRight: 0 }}
       >
-        {/* Title Section */}
+        {/* Title Section with Location Selector */}
         <TitleSection
           title="Audits"
           logo={vendor?.logo_url}
           buttonText="+ Create Audit"
           onButtonPress={handleAddPress}
           buttonAccessibilityLabel="Create new audit"
-          filterPills={filterPills}
-          activeFilterId={viewFilter}
-          onFilterSelect={handleFilterSelect}
+          filterPills={locationPill}
+          activeFilterId="location"
+          onFilterSelect={handleLocationPillSelect}
         />
+
+        {/* View Filter Row */}
+        <View style={styles.viewFilterWrapper}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.viewFilterContainer}
+          >
+            {filterPills.map((pill) => (
+              <Pressable
+                key={pill.id}
+                style={[
+                  styles.viewFilterPill,
+                  viewFilter === pill.id && styles.viewFilterPillActive,
+                ]}
+                onPress={() => handleFilterSelect(pill.id)}
+              >
+                <Text style={[
+                  styles.viewFilterText,
+                  viewFilter === pill.id && styles.viewFilterTextActive,
+                ]}>
+                  {pill.label}
+                </Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+        </View>
 
         {/* Empty State */}
         {filteredAdjustments.length === 0 ? (
@@ -478,6 +533,12 @@ export function AuditsView({
           </View>
         </Modal>
       )}
+
+      {/* Location Selector Modal */}
+      <LocationSelectorModal
+        visible={showLocationModal}
+        onClose={() => setShowLocationModal(false)}
+      />
     </>
   )
 }
@@ -490,6 +551,34 @@ const styles = StyleSheet.create({
   loadingContainer: {
     padding: 40,
     alignItems: 'center',
+  },
+  // View Filter Row
+  viewFilterWrapper: {
+    paddingHorizontal: layout.containerMargin,
+    marginBottom: spacing.md,
+  },
+  viewFilterContainer: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  viewFilterPill: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  viewFilterPillActive: {
+    backgroundColor: 'rgba(255,255,255,0.2)',
+  },
+  viewFilterText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: 'rgba(235,235,245,0.7)',
+    letterSpacing: -0.2,
+  },
+  viewFilterTextActive: {
+    color: '#fff',
+    fontWeight: '600',
   },
   cardWrapper: {
     marginHorizontal: layout.containerMargin,

@@ -1396,6 +1396,87 @@ serve(async (req) => {
     })
 
     // ========================================================================
+    // STEP 7.4: SMART ORDER ROUTING (Apple/Best Buy style)
+    // ========================================================================
+    // Routes ALL orders (pickup, shipping, walk_in) to fulfillment locations
+    // For pickup orders: Items in stock at pickup location → pickup
+    //                    Items NOT in stock → ship from another location
+    // For shipping orders: Route to locations with inventory
+    {
+      const routingSpan = transaction.startChild({
+        op: 'order.route',
+        description: 'Smart Order Routing',
+      })
+
+      try {
+        console.log(`[${requestId}] Running smart order routing (order_type: ${body.is_ecommerce ? 'shipping' : 'pickup'})`)
+
+        Sentry.addBreadcrumb({
+          category: 'routing',
+          message: 'Starting smart order routing',
+          level: 'info',
+          data: { orderId: order.id, itemCount: body.items.length, orderType: body.is_ecommerce ? 'shipping' : 'pickup' },
+        })
+
+        // Call the smart routing function - it will:
+        // 1. Check inventory at pickup location per-item (for pickup orders)
+        // 2. Route items not in stock to ship from other locations
+        // 3. Update order_items with location_id and order_type (pickup/shipping)
+        // 4. Create order_locations records for tracking
+        const routingResult = await dbClient.queryObject(
+          `SELECT * FROM route_order_to_locations($1)`,
+          [order.id]
+        )
+
+        const routedLocations = routingResult.rows as any[]
+        console.log(`[${requestId}] Order routed to ${routedLocations.length} location(s):`,
+          routedLocations.map(r => ({
+            location_id: r.location_id,
+            location_name: r.location_name,
+            item_count: r.item_count,
+            fulfillment_type: r.fulfillment_type
+          }))
+        )
+
+        // Log if order was split (mixed pickup + shipping)
+        const hasPickup = routedLocations.some(r => r.fulfillment_type === 'pickup')
+        const hasShipping = routedLocations.some(r => r.fulfillment_type === 'shipping')
+        if (hasPickup && hasShipping) {
+          console.log(`[${requestId}] 📦 MIXED ORDER: Some items pickup, some items shipping`)
+        }
+
+        Sentry.addBreadcrumb({
+          category: 'routing',
+          message: 'Smart order routing completed',
+          level: 'info',
+          data: {
+            locationCount: routedLocations.length,
+            locations: routedLocations.map(r => r.location_id),
+            isMixedOrder: hasPickup && hasShipping,
+          },
+        })
+
+        routingSpan.setStatus('ok')
+      } catch (routingError) {
+        console.warn(`[${requestId}] Smart order routing failed (non-critical):`, routingError)
+        routingSpan.setStatus('unknown_error')
+
+        // Log to Sentry but don't fail the order - items will have null location_id
+        // which can be manually assigned later by staff
+        Sentry.captureException(routingError, {
+          level: 'warning',
+          tags: {
+            operation: 'smart_order_routing',
+            requestId,
+            orderId: order.id,
+          },
+        })
+      } finally {
+        routingSpan.finish()
+      }
+    }
+
+    // ========================================================================
     // STEP 7.5: RESERVE INVENTORY (Before payment)
     // ========================================================================
     if (body.items.some(item => item.inventoryId)) {

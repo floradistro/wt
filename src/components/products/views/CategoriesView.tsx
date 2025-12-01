@@ -17,7 +17,9 @@ import { spacing, radius, colors } from '@/theme/tokens'
 import { useAppAuth } from '@/contexts/AppAuthContext'
 import { useCategories } from '@/hooks/useCategories'
 import { useProductsScreenStore, productsScreenActions } from '@/stores/products-list.store'
-import { TitleSection } from '@/components/shared'
+import { useLocationFilter } from '@/stores/location-filter.store'
+import { TitleSection, LocationSelectorModal } from '@/components/shared'
+import type { FilterPill } from '@/components/shared'
 import { getIconImage } from '@/utils/image-transforms'
 
 /**
@@ -28,10 +30,38 @@ export function CategoriesView() {
   // ========================================
   // STORES - TRUE ZERO PROPS
   // ========================================
-  const { vendor } = useAppAuth()
+  const { vendor, locations } = useAppAuth()
+  // Use selector pattern for Zustand to ensure proper subscription
+  const selectedLocationIds = useLocationFilter((state) => state.selectedLocationIds)
   const searchQuery = useProductsScreenStore((state) => state.searchQuery)
   const selectedCategoryId = useProductsScreenStore((state) => state.selectedCategoryId)
   const { categories, isLoading } = useCategories({ includeGlobal: true, parentId: null })
+
+  // Location selector modal state
+  const [showLocationModal, setShowLocationModal] = useState(false)
+
+  // Compute location display text
+  const locationDisplayText = useMemo(() => {
+    if (selectedLocationIds.length === 0) {
+      return 'All Locations'
+    }
+    if (selectedLocationIds.length === 1) {
+      const loc = locations.find(l => l.id === selectedLocationIds[0])
+      return loc?.name || '1 Location'
+    }
+    return `${selectedLocationIds.length} Locations`
+  }, [selectedLocationIds, locations])
+
+  // Single location pill for TitleSection - opens modal
+  const locationPill: FilterPill[] = useMemo(() => {
+    return [{ id: 'location', label: locationDisplayText }]
+  }, [locationDisplayText])
+
+  // Handle location pill tap - always opens modal
+  const handleLocationPillSelect = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    setShowLocationModal(true)
+  }
 
   // Filter categories by search
   const filteredCategories = useMemo(() => {
@@ -65,22 +95,26 @@ export function CategoriesView() {
 
   if (filteredCategories.length === 0) {
     return (
-      <ScrollView
-        showsVerticalScrollIndicator={true}
-        indicatorStyle="white"
-        scrollIndicatorInsets={{ right: 2, bottom: layout.dockHeight }}
-        contentContainerStyle={{
-          paddingBottom: layout.dockHeight,
-          paddingRight: 0,
-        }}
-      >
-          {/* Title Section */}
+      <>
+        <ScrollView
+          showsVerticalScrollIndicator={true}
+          indicatorStyle="white"
+          scrollIndicatorInsets={{ right: 2, bottom: layout.dockHeight }}
+          contentContainerStyle={{
+            paddingBottom: layout.dockHeight,
+            paddingRight: 0,
+          }}
+        >
+          {/* Title Section with Location Selector */}
           <TitleSection
             title="Categories"
             logo={vendor?.logo_url}
             buttonText="+ New Category"
             onButtonPress={handleAddCategory}
             buttonAccessibilityLabel="Create new category"
+            filterPills={locationPill}
+            activeFilterId="location"
+            onFilterSelect={handleLocationPillSelect}
           />
 
           {/* Empty State */}
@@ -91,10 +125,18 @@ export function CategoriesView() {
             </Text>
           </View>
         </ScrollView>
+
+        {/* Location Selector Modal */}
+        <LocationSelectorModal
+          visible={showLocationModal}
+          onClose={() => setShowLocationModal(false)}
+        />
+      </>
     )
   }
 
   return (
+    <>
       <ScrollView
         showsVerticalScrollIndicator={true}
         indicatorStyle="white"
@@ -104,13 +146,16 @@ export function CategoriesView() {
           paddingRight: 0,
         }}
       >
-        {/* Title Section */}
+        {/* Title Section with Location Selector */}
         <TitleSection
           title="Categories"
           logo={vendor?.logo_url}
           buttonText="+ New Category"
           onButtonPress={handleAddCategory}
           buttonAccessibilityLabel="Create new category"
+          filterPills={locationPill}
+          activeFilterId="location"
+          onFilterSelect={handleLocationPillSelect}
         />
 
         {/* Categories List */}
@@ -169,6 +214,13 @@ export function CategoriesView() {
           </View>
         </View>
       </ScrollView>
+
+      {/* Location Selector Modal */}
+      <LocationSelectorModal
+        visible={showLocationModal}
+        onClose={() => setShowLocationModal(false)}
+      />
+    </>
   )
 }
 

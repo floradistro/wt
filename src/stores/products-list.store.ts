@@ -33,6 +33,9 @@ interface ProductsScreenState {
   // Location filter (multi-select)
   selectedLocationIds: string[]
 
+  // Scroll position (to restore when returning from detail)
+  scrollPositionY: number
+
   // Selections (one per view type)
   selectedProduct: Product | null
   selectedCategoryId: string | null
@@ -55,6 +58,7 @@ interface ProductsScreenState {
   toggleLocation: (locationId: string) => void
   setSelectedLocations: (locationIds: string[]) => void
   clearLocationFilter: () => void
+  setScrollPosition: (y: number) => void
   selectProduct: (product: Product | null) => void
   refreshSelectedProduct: (updatedProducts: Product[]) => void
   selectCategory: (categoryId: string | null) => void
@@ -70,6 +74,7 @@ const initialState = {
   activeNav: 'all' as NavSection,
   searchQuery: '',
   selectedLocationIds: [],
+  scrollPositionY: 0,
   selectedProduct: null,
   selectedCategoryId: null,
   selectedPurchaseOrder: null,
@@ -139,6 +144,13 @@ export const useProductsScreenStore = create<ProductsScreenState>()(
        */
       clearLocationFilter: () => {
         set({ selectedLocationIds: [] }, false, 'productsList/clearLocationFilter')
+      },
+
+      /**
+       * Save scroll position (to restore when returning from detail)
+       */
+      setScrollPosition: (y: number) => {
+        set({ scrollPositionY: y }, false, 'productsList/setScrollPosition')
       },
 
       /**
@@ -344,6 +356,7 @@ export const productsScreenActions = {
   get toggleLocation() { return useProductsScreenStore.getState().toggleLocation },
   get setSelectedLocations() { return useProductsScreenStore.getState().setSelectedLocations },
   get clearLocationFilter() { return useProductsScreenStore.getState().clearLocationFilter },
+  get setScrollPosition() { return useProductsScreenStore.getState().setScrollPosition },
   get selectProduct() { return useProductsScreenStore.getState().selectProduct },
   get refreshSelectedProduct() { return useProductsScreenStore.getState().refreshSelectedProduct },
   get selectCategory() { return useProductsScreenStore.getState().selectCategory },

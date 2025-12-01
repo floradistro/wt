@@ -23,6 +23,7 @@ import { EditableDescriptionSection } from '@/components/products/EditableDescri
 import { EditablePricingSection } from '@/components/products/EditablePricingSection'
 import { EditableCustomFieldsSection } from '@/components/products/EditableCustomFieldsSection'
 import { EditableVariantConfigSection } from '@/components/products/EditableVariantConfigSection'
+import { COASection } from '@/components/products/COASection'
 import { AdjustInventoryModal } from '@/components/products/AdjustInventoryModal'
 import { SalesHistoryModal } from '@/components/products/SalesHistoryModal'
 import { MediaPickerModal, ImagePreviewModal, Breadcrumb } from '@/components/shared'
@@ -507,6 +508,9 @@ export function ProductDetail({ product, onBack, onProductUpdated }: ProductDeta
 
         {/* Description */}
         <EditableDescriptionSection product={product} />
+
+        {/* Lab Results / COA */}
+        <COASection product={product} />
 
         {/* Custom Fields */}
         <EditableCustomFieldsSection product={product} />

@@ -66,8 +66,10 @@ export function LocationSelectorModal({ visible, onClose }: LocationSelectorModa
   }
 
   const handleDone = () => {
+    console.log('[LocationSelectorModal] Done pressed, setting locations:', tempSelection)
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy)
     setSelectedLocationIds(tempSelection)
+    console.log('[LocationSelectorModal] Locations set, closing modal')
     onClose()
   }
 

@@ -4,10 +4,12 @@
  *
  * Workflow: Pending → Confirmed → Preparing → Ready → Completed
  * Uses modals: ConfirmPickupOrderModal, MarkReadyModal
+ *
+ * Multi-location support: Shows items grouped by location with fulfillment buttons
  */
 
 import { View, Text, StyleSheet, Pressable, ActivityIndicator, ScrollView, Linking, Alert } from 'react-native'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import * as Haptics from 'expo-haptics'
 import { Ionicons } from '@expo/vector-icons'
 import { colors, spacing, radius } from '@/theme/tokens'
@@ -16,6 +18,12 @@ import { logger } from '@/utils/logger'
 import type { Order } from '@/services/orders.service'
 import { useOrders, useOrdersStore, useOrdersActions } from '@/stores/orders.store'
 import { useSelectedOrderId, useOrdersUIActions } from '@/stores/orders-ui.store'
+import {
+  useOrderItems,
+  useItemsByLocation,
+  useOrderDetailLoading,
+  useOrderDetailActions,
+} from '@/stores/order-detail.store'
 import { ConfirmPickupOrderModal, MarkReadyModal } from '../modals'
 
 export function StorePickupDetail() {
@@ -25,9 +33,23 @@ export function StorePickupDetail() {
   const { selectOrder } = useOrdersUIActions()
   const { refreshOrders } = useOrdersActions()
 
+  // Order detail data from store
+  const orderItems = useOrderItems()
+  const itemsByLocation = useItemsByLocation()
+  const { loading, isUpdating: isDetailUpdating } = useOrderDetailLoading()
+  const { loadOrderDetails, fulfillItemsAtLocation, reset: resetDetail } = useOrderDetailActions()
+
   const [showConfirmModal, setShowConfirmModal] = useState(false)
   const [showReadyModal, setShowReadyModal] = useState(false)
   const [isUpdating, setIsUpdating] = useState(false)
+
+  // Load order details when order selected
+  useEffect(() => {
+    if (order?.id) {
+      loadOrderDetails(order.id)
+    }
+    return () => resetDetail()
+  }, [order?.id])
 
   const handleBack = () => {
     selectOrder(null)
@@ -234,6 +256,211 @@ export function StorePickupDetail() {
           </View>
         </View>
 
+        {/* Customer Information - ALWAYS SHOWN */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Customer Information</Text>
+          <View style={styles.cardGlass}>
+            <View style={styles.infoRow}>
+              <Text style={styles.infoLabel}>Name</Text>
+              <Text style={styles.infoValue}>{order.customer_name || order.shipping_name || 'Guest'}</Text>
+            </View>
+            {order.customer_email && (
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Email</Text>
+                <Pressable onPress={handleEmail}>
+                  <Text style={[styles.infoValue, { color: '#0a84ff' }]}>
+                    {order.customer_email}
+                  </Text>
+                </Pressable>
+              </View>
+            )}
+            {(order.customer_phone || order.shipping_phone) && (
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Phone</Text>
+                <Pressable onPress={handleCall}>
+                  <Text style={[styles.infoValue, { color: '#0a84ff' }]}>
+                    {order.customer_phone || order.shipping_phone}
+                  </Text>
+                </Pressable>
+              </View>
+            )}
+            {/* Shipping/Delivery Address */}
+            {order.shipping_address_line1 && (
+              <View style={[styles.infoRow, styles.lastRow]}>
+                <Text style={styles.infoLabel}>Address</Text>
+                <Text style={[styles.infoValue, { textAlign: 'right', flex: 1, marginLeft: 16 }]}>
+                  {order.shipping_address_line1}
+                  {order.shipping_address_line2 && `\n${order.shipping_address_line2}`}
+                  {'\n'}{order.shipping_city}, {order.shipping_state} {order.shipping_zip}
+                  {order.shipping_country && order.shipping_country !== 'US' && `\n${order.shipping_country}`}
+                </Text>
+              </View>
+            )}
+          </View>
+        </View>
+
+        {/* Order Items - Grouped by Location */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>
+            Order Items {itemsByLocation.length > 1 ? `(${itemsByLocation.length} locations)` : ''}
+          </Text>
+
+          {/* Show items grouped by location if multi-location */}
+          {itemsByLocation.length > 1 ? (
+            // Multi-location order: show groups with fulfillment type
+            itemsByLocation.map((group) => (
+              <View key={group.locationId || 'unassigned'} style={[styles.cardGlass, { marginBottom: spacing.md }]}>
+                {/* Location Header with Fulfillment Type */}
+                <View style={styles.locationHeader}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
+                    {/* Fulfillment Type Icon */}
+                    <Ionicons
+                      name={group.fulfillmentType === 'pickup' ? 'storefront' : 'cube'}
+                      size={24}
+                      color={group.fulfillmentType === 'pickup' ? '#30d158' : '#bf5af2'}
+                    />
+                    <View style={{ flex: 1 }}>
+                      {/* Fulfillment Type Label */}
+                      <Text style={[
+                        styles.fulfillmentTypeLabel,
+                        { color: group.fulfillmentType === 'pickup' ? '#30d158' : '#bf5af2' }
+                      ]}>
+                        {group.fulfillmentType === 'pickup' ? 'CUSTOMER PICKUP' : 'SHIP TO CUSTOMER'}
+                      </Text>
+                      <Text style={styles.locationName}>{group.locationName}</Text>
+                      <Text style={styles.locationSubtitle}>
+                        {group.fulfilledCount}/{group.totalCount} items {group.allFulfilled ? 'ready' : 'to prepare'}
+                      </Text>
+                    </View>
+                  </View>
+                  {!group.allFulfilled && group.locationId && (
+                    <Pressable
+                      style={[
+                        styles.fulfillButton,
+                        { backgroundColor: group.fulfillmentType === 'pickup' ? '#30d158' : '#bf5af2' },
+                        (isUpdating || isDetailUpdating) && styles.fulfillButtonDisabled
+                      ]}
+                      onPress={() => {
+                        if (order && group.locationId) {
+                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+                          fulfillItemsAtLocation(order.id, group.locationId)
+                            .then(() => refreshOrders())
+                            .catch((err) => {
+                              logger.error('Failed to fulfill items:', err)
+                              Alert.alert('Error', 'Failed to fulfill items')
+                            })
+                        }
+                      }}
+                      disabled={isUpdating || isDetailUpdating}
+                    >
+                      {isDetailUpdating ? (
+                        <ActivityIndicator size="small" color="#fff" />
+                      ) : (
+                        <Text style={styles.fulfillButtonText}>
+                          {group.fulfillmentType === 'pickup' ? 'Mark Ready' : 'Pack & Ship'}
+                        </Text>
+                      )}
+                    </Pressable>
+                  )}
+                  {group.allFulfilled && (
+                    <View style={[
+                      styles.fulfilledBadge,
+                      { backgroundColor: group.fulfillmentType === 'pickup' ? 'rgba(48,209,88,0.15)' : 'rgba(191,90,242,0.15)' }
+                    ]}>
+                      <Ionicons
+                        name="checkmark-circle"
+                        size={16}
+                        color={group.fulfillmentType === 'pickup' ? '#30d158' : '#bf5af2'}
+                      />
+                      <Text style={[
+                        styles.fulfilledText,
+                        { color: group.fulfillmentType === 'pickup' ? '#30d158' : '#bf5af2' }
+                      ]}>
+                        {group.fulfillmentType === 'pickup' ? 'Ready for Pickup' : 'Ready to Ship'}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+
+                {/* Items at this location */}
+                {group.items.map((item, index) => (
+                  <View key={item.id} style={[styles.infoRow, index === group.items.length - 1 && styles.lastRow]}>
+                    <View style={{ flex: 1 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                        <Text style={styles.infoLabel}>{item.product_name}</Text>
+                        {item.fulfillment_status === 'fulfilled' && (
+                          <Ionicons name="checkmark-circle" size={14} color="#34c759" />
+                        )}
+                      </View>
+                      <Text style={[styles.infoValue, { fontSize: 13, marginTop: 2 }]}>
+                        {item.quantity} × ${item.unit_price.toFixed(2)}
+                      </Text>
+                    </View>
+                    <Text style={styles.infoValue}>
+                      ${item.line_total.toFixed(2)}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            ))
+          ) : (
+            // Single location: show with fulfillment type header
+            itemsByLocation.length === 1 ? (
+              <View style={styles.cardGlass}>
+                {/* Show fulfillment type header even for single location */}
+                <View style={styles.locationHeader}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
+                    <Ionicons
+                      name={itemsByLocation[0].fulfillmentType === 'pickup' ? 'storefront' : 'cube'}
+                      size={24}
+                      color={itemsByLocation[0].fulfillmentType === 'pickup' ? '#30d158' : '#bf5af2'}
+                    />
+                    <View style={{ flex: 1 }}>
+                      <Text style={[
+                        styles.fulfillmentTypeLabel,
+                        { color: itemsByLocation[0].fulfillmentType === 'pickup' ? '#30d158' : '#bf5af2' }
+                      ]}>
+                        {itemsByLocation[0].fulfillmentType === 'pickup' ? 'CUSTOMER PICKUP' : 'SHIP TO CUSTOMER'}
+                      </Text>
+                      <Text style={styles.locationName}>{itemsByLocation[0].locationName}</Text>
+                    </View>
+                  </View>
+                </View>
+                {orderItems.map((item, index) => (
+                  <View key={item.id} style={[styles.infoRow, index === orderItems.length - 1 && styles.lastRow]}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.infoLabel}>{item.product_name}</Text>
+                      <Text style={[styles.infoValue, { fontSize: 13, marginTop: 2 }]}>
+                        {item.quantity} × ${item.unit_price.toFixed(2)}
+                      </Text>
+                    </View>
+                    <Text style={styles.infoValue}>
+                      ${item.line_total.toFixed(2)}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            ) : (
+              // Fallback: no location data yet
+              <View style={styles.cardGlass}>
+                {orderItems.map((item, index) => (
+                  <View key={item.id} style={[styles.infoRow, index === orderItems.length - 1 && styles.lastRow]}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.infoLabel}>{item.product_name}</Text>
+                      <Text style={[styles.infoValue, { fontSize: 13, marginTop: 2 }]}>
+                        {item.quantity} × ${item.unit_price.toFixed(2)}
+                      </Text>
+                    </View>
+                    <Text style={styles.infoValue}>
+                      ${item.line_total.toFixed(2)}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            )
+          )}
+        </View>
+
         {/* Order Summary */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Order Summary</Text>
@@ -429,5 +656,64 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
     color: '#fff',
+  },
+  // Multi-location styles
+  locationHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: spacing.md,
+    paddingHorizontal: layout.containerMargin,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: 'rgba(255,255,255,0.03)',
+  },
+  locationName: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#fff',
+    letterSpacing: -0.2,
+  },
+  locationSubtitle: {
+    fontSize: 12,
+    color: 'rgba(235,235,245,0.5)',
+    marginTop: 2,
+  },
+  fulfillmentTypeLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+    marginBottom: 2,
+  },
+  fulfillButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 100,
+    backgroundColor: '#0a84ff',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  fulfillButtonDisabled: {
+    opacity: 0.5,
+  },
+  fulfillButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#fff',
+    letterSpacing: -0.2,
+  },
+  fulfilledBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 100,
+    backgroundColor: 'rgba(52,199,89,0.15)',
+  },
+  fulfilledText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#34c759',
   },
 })

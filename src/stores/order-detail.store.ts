@@ -26,6 +26,26 @@ interface OrderItem {
   quantity: number
   unit_price: number
   line_total: number
+  // Multi-location support
+  location_id?: string | null
+  location_name?: string | null
+  // Per-item fulfillment type (Apple/Best Buy style)
+  order_type?: 'pickup' | 'shipping' | null
+  pickup_location_name?: string | null
+  fulfillment_status?: 'pending' | 'fulfilled' | 'cancelled'
+  fulfilled_quantity?: number
+}
+
+// Group items by fulfillment location
+interface LocationGroup {
+  locationId: string | null
+  locationName: string
+  items: OrderItem[]
+  allFulfilled: boolean
+  fulfilledCount: number
+  totalCount: number
+  // Fulfillment type for this group (pickup or shipping)
+  fulfillmentType: 'pickup' | 'shipping' | 'unknown'
 }
 
 interface TaxDetail {
@@ -38,6 +58,7 @@ interface OrderDetailState {
   // Current order detail data
   currentOrderId: string | null
   orderItems: OrderItem[]
+  itemsByLocation: LocationGroup[]  // Items grouped by fulfillment location
   loyaltyPointsEarned: number
   loyaltyPointsRedeemed: number
   taxDetails: TaxDetail[]
@@ -72,6 +93,7 @@ interface OrderDetailState {
   updateNotes: (orderId: string, notes: string) => Promise<void>
   updateShippingLabel: (orderId: string, tracking: string, cost?: number) => Promise<void>
   advanceStatus: (orderId: string, orderType: string, currentStatus: string) => Promise<void>
+  fulfillItemsAtLocation: (orderId: string, locationId: string) => Promise<void>
 
   // Actions - Modals
   openNotesModal: (notes: string) => void
@@ -99,6 +121,7 @@ interface OrderDetailState {
 const initialState = {
   currentOrderId: null,
   orderItems: [],
+  itemsByLocation: [],
   loyaltyPointsEarned: 0,
   loyaltyPointsRedeemed: 0,
   taxDetails: [],
@@ -162,19 +185,93 @@ export const useOrderDetailStore = create<OrderDetailState>()(
       },
 
       /**
-       * Load order items
+       * Load order items with location data and fulfillment type
        */
       loadOrderItems: async (orderId: string) => {
         try {
+          // Fetch items with location, fulfillment type, and fulfillment status
           const { data: items, error } = await supabase
             .from('order_items')
-            .select('id, product_name, quantity, unit_price, line_total')
+            .select('id, product_name, quantity, unit_price, line_total, location_id, order_type, pickup_location_name, fulfillment_status, fulfilled_quantity')
             .eq('order_id', orderId)
             .order('created_at', { ascending: true })
 
           if (error) throw error
 
-          set({ orderItems: items || [] }, false, 'orderDetail/loadOrderItems')
+          // Get unique location IDs
+          const locationIds = [...new Set(
+            (items || [])
+              .map((item: any) => item.location_id)
+              .filter(Boolean)
+          )]
+
+          // Fetch location names
+          let locationMap: Record<string, string> = {}
+          if (locationIds.length > 0) {
+            const { data: locations } = await supabase
+              .from('locations')
+              .select('id, name')
+              .in('id', locationIds)
+
+            if (locations) {
+              locationMap = locations.reduce((acc: Record<string, string>, loc: any) => {
+                acc[loc.id] = loc.name
+                return acc
+              }, {})
+            }
+          }
+
+          // Add location names to items
+          const itemsWithLocations = (items || []).map((item: any) => ({
+            ...item,
+            location_name: item.location_id ? locationMap[item.location_id] || null : null,
+          }))
+
+          // Group items by location
+          const locationGroupMap = new Map<string | null, LocationGroup>()
+
+          for (const item of itemsWithLocations) {
+            const locationId = item.location_id || null
+            // Use pickup_location_name for pickup items, otherwise location_name
+            const locationName = item.pickup_location_name || item.location_name || 'Unassigned'
+            // Get fulfillment type from item's order_type
+            const itemFulfillmentType = item.order_type as 'pickup' | 'shipping' | null
+
+            if (!locationGroupMap.has(locationId)) {
+              locationGroupMap.set(locationId, {
+                locationId,
+                locationName,
+                items: [],
+                allFulfilled: true,
+                fulfilledCount: 0,
+                totalCount: 0,
+                // Set fulfillment type from the first item (all items at a location have same type)
+                fulfillmentType: itemFulfillmentType || 'unknown',
+              })
+            }
+
+            const group = locationGroupMap.get(locationId)!
+            group.items.push(item)
+            group.totalCount++
+
+            if (item.fulfillment_status === 'fulfilled') {
+              group.fulfilledCount++
+            } else {
+              group.allFulfilled = false
+            }
+          }
+
+          // Sort: pickup locations first, then shipping
+          const itemsByLocation = Array.from(locationGroupMap.values()).sort((a, b) => {
+            if (a.fulfillmentType === 'pickup' && b.fulfillmentType !== 'pickup') return -1
+            if (a.fulfillmentType !== 'pickup' && b.fulfillmentType === 'pickup') return 1
+            return 0
+          })
+
+          set({
+            orderItems: itemsWithLocations,
+            itemsByLocation
+          }, false, 'orderDetail/loadOrderItems')
         } catch (err) {
           logger.error('[OrderDetailStore] Failed to load order items:', err)
         }
@@ -357,6 +454,43 @@ export const useOrderDetailStore = create<OrderDetailState>()(
       },
 
       /**
+       * Fulfill all items at a specific location
+       * Marks items as fulfilled and updates order fulfillment status
+       */
+      fulfillItemsAtLocation: async (orderId: string, locationId: string) => {
+        try {
+          set({ isUpdating: true }, false, 'orderDetail/fulfillItemsAtLocation')
+
+          // Call the stored procedure
+          const { data, error } = await supabase.rpc('fulfill_order_items_at_location', {
+            p_order_id: orderId,
+            p_location_id: locationId,
+          })
+
+          if (error) throw error
+
+          const result = Array.isArray(data) ? data[0] : data
+          const itemsFulfilled = result?.items_fulfilled || 0
+          const orderFullyFulfilled = result?.order_fully_fulfilled || false
+
+          // Reload order items to reflect changes
+          await get().loadOrderItems(orderId)
+
+          set({ isUpdating: false }, false, 'orderDetail/fulfillItemsAtLocation/success')
+
+          if (orderFullyFulfilled) {
+            get().showSuccessOverlay('Order fully fulfilled!')
+          } else {
+            get().showSuccessOverlay(`${itemsFulfilled} items fulfilled`)
+          }
+        } catch (err) {
+          logger.error('[OrderDetailStore] Failed to fulfill items at location:', err)
+          set({ isUpdating: false }, false, 'orderDetail/fulfillItemsAtLocation/error')
+          throw err
+        }
+      },
+
+      /**
        * Open notes modal
        */
       openNotesModal: (notes: string) => {
@@ -505,6 +639,9 @@ export const useCurrentOrderId = () => useOrderDetailStore((state) => state.curr
 // Get order items
 export const useOrderItems = () => useOrderDetailStore((state) => state.orderItems)
 
+// Get items grouped by location
+export const useItemsByLocation = () => useOrderDetailStore((state) => state.itemsByLocation)
+
 // Get loyalty data
 export const useLoyaltyData = () => useOrderDetailStore(
   useShallow((state) => ({
@@ -556,6 +693,7 @@ export const useOrderDetailActions = () => useOrderDetailStore(
     updateNotes: state.updateNotes,
     updateShippingLabel: state.updateShippingLabel,
     advanceStatus: state.advanceStatus,
+    fulfillItemsAtLocation: state.fulfillItemsAtLocation,
     openNotesModal: state.openNotesModal,
     closeNotesModal: state.closeNotesModal,
     openLabelModal: state.openLabelModal,
@@ -583,4 +721,4 @@ export const useOrderDetailState = () => useOrderDetailStore(
 )
 
 // Export types
-export type { OrderItem, TaxDetail }
+export type { OrderItem, TaxDetail, LocationGroup }

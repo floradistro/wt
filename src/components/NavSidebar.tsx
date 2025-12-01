@@ -205,21 +205,11 @@ export function NavSidebar({
               ]} />
             )}
 
-            {/* User Profile Section */}
+            {/* User Profile Section - Vendor Logo Only (no location selector) */}
             {vendorName && (
               <View style={styles.userProfileWrapper}>
                 <View style={styles.userProfileCard}>
-                    <Pressable
-                      style={styles.userProfile}
-                      onPress={() => {
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                        onUserProfilePress?.()
-                      }}
-                      accessible={true}
-                      accessibilityRole="button"
-                      accessibilityLabel={`${vendorName || 'Vendor'}${onUserProfilePress ? ', tap to change location' : ''}`}
-                      accessibilityHint={onUserProfilePress ? "Double tap to select locations" : undefined}
-                    >
+                    <View style={styles.userProfile}>
                       {vendorLogo && vendorLogo.trim() !== '' ? (
                         <Image
                           source={{ uri: getIconImage(vendorLogo) || vendorLogo }}
@@ -234,14 +224,8 @@ export function NavSidebar({
                       )}
                       <View style={styles.userInfo}>
                         <Text style={styles.vendorName}>{vendorName || 'Vendor Account'}</Text>
-                        {selectedLocationNames.length > 0 && (
-                          <Text style={styles.selectedLocations} numberOfLines={1}>
-                            {selectedLocationNames.join(', ')}
-                          </Text>
-                        )}
                       </View>
-                      <Text style={styles.userProfileChevron}>›</Text>
-                    </Pressable>
+                    </View>
                 </View>
               </View>
             )}

@@ -109,6 +109,13 @@ export interface OrderItem {
   // Multi-location support: which location fulfills this item
   location_id?: string
   location_name?: string
+  // Per-item fulfillment type (Apple/Best Buy style smart routing)
+  order_type?: 'pickup' | 'shipping'
+  pickup_location_id?: string
+  pickup_location_name?: string
+  // Fulfillment tracking per item
+  fulfillment_status?: 'pending' | 'fulfilled' | 'cancelled'
+  fulfilled_quantity?: number
 }
 
 // Multi-location order tracking
@@ -124,6 +131,14 @@ export interface OrderLocation {
   created_at: string
   updated_at: string
   fulfilled_at?: string
+  // Per-location shipping info
+  tracking_number?: string
+  tracking_url?: string
+  shipping_carrier?: string
+  shipping_service?: string
+  shipping_cost?: number
+  shipped_at?: string
+  shipped_by_user_id?: string
 }
 
 export interface CreateOrderParams {
@@ -227,9 +242,10 @@ export async function getOrders(params?: {
 }
 
 /**
- * Get single order by ID with items
+ * Get single order by ID with items (including location data)
  */
 export async function getOrderById(orderId: string): Promise<Order & { items: OrderItem[] }> {
+  // First fetch the order with items and pickup location
   const { data: order, error: orderError } = await supabase
     .from('orders')
     .select(`
@@ -240,6 +256,9 @@ export async function getOrderById(orderId: string): Promise<Order & { items: Or
         last_name,
         email,
         phone
+      ),
+      locations:pickup_location_id (
+        name
       )
     `)
     .eq('id', orderId)
@@ -249,18 +268,78 @@ export async function getOrderById(orderId: string): Promise<Order & { items: Or
     throw new Error(`Failed to fetch order: ${orderError.message}`)
   }
 
+  // Get pickup location name
+  const location = Array.isArray(order.locations) ? order.locations[0] : order.locations
+  const pickupLocationName = location?.name || null
+
+  // Get unique location IDs from order items
+  const locationIds = [...new Set(
+    (order.order_items || [])
+      .map((item: any) => item.location_id)
+      .filter(Boolean)
+  )]
+
+  // Fetch location names if there are any location IDs
+  let locationMap: Record<string, string> = {}
+  if (locationIds.length > 0) {
+    const { data: locations } = await supabase
+      .from('locations')
+      .select('id, name')
+      .in('id', locationIds)
+
+    if (locations) {
+      locationMap = locations.reduce((acc: Record<string, string>, loc: any) => {
+        acc[loc.id] = loc.name
+        return acc
+      }, {})
+    }
+  }
+
   const customer = Array.isArray(order.customers) ? order.customers[0] : order.customers
   const customerName = customer
     ? `${customer.first_name || ''} ${customer.last_name || ''}`.trim() || 'Guest'
     : 'Guest'
+
+  // Add location names to items
+  const items = (order.order_items || []).map((item: any) => ({
+    ...item,
+    location_name: item.location_id ? locationMap[item.location_id] || null : null,
+  }))
 
   return {
     ...order,
     customer_name: customerName,
     customer_email: customer?.email || '',
     customer_phone: customer?.phone || '',
-    items: order.order_items || [],
+    pickup_location_name: pickupLocationName,
+    items,
     customers: undefined, // Remove nested object
+    locations: undefined, // Remove nested object
+  }
+}
+
+/**
+ * Fulfill order items at a specific location
+ * Marks all items at the given location as fulfilled
+ */
+export async function fulfillItemsAtLocation(
+  orderId: string,
+  locationId: string
+): Promise<{ itemsFulfilled: number; orderFullyFulfilled: boolean; remainingLocations: string[] }> {
+  const { data, error } = await supabase.rpc('fulfill_order_items_at_location', {
+    p_order_id: orderId,
+    p_location_id: locationId,
+  })
+
+  if (error) {
+    throw new Error(`Failed to fulfill items: ${error.message}`)
+  }
+
+  const result = Array.isArray(data) ? data[0] : data
+  return {
+    itemsFulfilled: result?.items_fulfilled || 0,
+    orderFullyFulfilled: result?.order_fully_fulfilled || false,
+    remainingLocations: result?.remaining_locations || [],
   }
 }
 
@@ -447,6 +526,71 @@ export async function searchOrders(searchTerm: string): Promise<Order[]> {
 }
 
 /**
+ * Ship items from a specific location
+ * For multi-location orders, each location ships independently
+ */
+export async function shipFromLocation(
+  orderId: string,
+  locationId: string,
+  trackingNumber: string,
+  carrier: string = 'USPS',
+  trackingUrl?: string,
+  shippingCost?: number,
+  shippedByUserId?: string
+): Promise<{
+  success: boolean
+  locationShipped: boolean
+  allLocationsShipped: boolean
+  remainingLocationsToShip: string[]
+}> {
+  const { data, error } = await supabase.rpc('ship_order_from_location', {
+    p_order_id: orderId,
+    p_location_id: locationId,
+    p_tracking_number: trackingNumber,
+    p_shipping_carrier: carrier,
+    p_tracking_url: trackingUrl || null,
+    p_shipping_cost: shippingCost || null,
+    p_shipped_by_user_id: shippedByUserId || null,
+  })
+
+  if (error) {
+    throw new Error(`Failed to ship from location: ${error.message}`)
+  }
+
+  const result = Array.isArray(data) ? data[0] : data
+  return {
+    success: result?.success || false,
+    locationShipped: result?.location_shipped || false,
+    allLocationsShipped: result?.all_locations_shipped || false,
+    remainingLocationsToShip: result?.remaining_locations_to_ship || [],
+  }
+}
+
+/**
+ * Get shipments for an order (for multi-location tracking display)
+ */
+export async function getOrderShipments(orderId: string): Promise<OrderLocation[]> {
+  const { data, error } = await supabase
+    .from('order_locations')
+    .select(`
+      *,
+      locations:location_id (name)
+    `)
+    .eq('order_id', orderId)
+    .order('shipped_at', { ascending: true, nullsFirst: false })
+
+  if (error) {
+    throw new Error(`Failed to fetch order shipments: ${error.message}`)
+  }
+
+  return (data || []).map((loc: any) => ({
+    ...loc,
+    location_name: loc.locations?.name || 'Unknown',
+    locations: undefined,
+  }))
+}
+
+/**
  * Export service object
  */
 export const ordersService = {
@@ -457,4 +601,7 @@ export const ordersService = {
   updatePaymentStatus,
   getTodaysOrders,
   searchOrders,
+  fulfillItemsAtLocation,
+  shipFromLocation,
+  getOrderShipments,
 }

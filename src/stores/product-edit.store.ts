@@ -261,11 +261,15 @@ export const useProductEditStore = create<ProductEditState>()(
             updated_at: new Date().toISOString(),
           }
 
+          // Only include cost_price if it's a valid number (avoid null which breaks the cost history trigger)
+          const parsedCostPrice = parseFloat(state.editedCostPrice)
+          const costPriceUpdate = !isNaN(parsedCostPrice) ? { cost_price: parsedCostPrice } : {}
+
           const updatePayload = {
             name: state.editedName,
             sku: state.editedSKU,
             description: state.editedDescription,
-            cost_price: parseFloat(state.editedCostPrice) || null,
+            ...costPriceUpdate,
             pricing_data: pricingData,
             custom_fields: state.editedCustomFields,
             updated_at: new Date().toISOString(),

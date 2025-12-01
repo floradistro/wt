@@ -32,6 +32,7 @@ import { useOrders, useOrdersActions, useOrdersStore } from '@/stores/orders.sto
 import { useSelectedOrderId, useOrdersUIActions } from '@/stores/orders-ui.store'
 import {
   useOrderItems,
+  useItemsByLocation,
   useLoyaltyData,
   useTaxDetails,
   useOrderDetailLoading,
@@ -39,6 +40,7 @@ import {
   useOrderDetailForm,
   useOrderDetailSuccess,
   useOrderDetailActions,
+  type LocationGroup,
 } from '@/stores/order-detail.store'
 
 // NO PROPS! Component reads from stores
@@ -59,6 +61,7 @@ export function OrderDetail() {
   // BUSINESS LOGIC from Zustand (order data)
   // ========================================
   const orderItems = useOrderItems()
+  const itemsByLocation = useItemsByLocation()
   const { loyaltyPointsEarned, loyaltyPointsRedeemed } = useLoyaltyData()
   const taxDetails = useTaxDetails()
   const { loading, isUpdating } = useOrderDetailLoading()
@@ -78,6 +81,7 @@ export function OrderDetail() {
     updateNotes,
     updateShippingLabel,
     advanceStatus,
+    fulfillItemsAtLocation,
     openNotesModal,
     closeNotesModal,
     openLabelModal,
@@ -555,25 +559,101 @@ export function OrderDetail() {
           </View>
         </View>
 
+        {/* Order Items - Grouped by Location */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>
+            Order Items {itemsByLocation.length > 1 ? `(${itemsByLocation.length} locations)` : ''}
+          </Text>
+
+          {/* Show items grouped by location if multi-location */}
+          {itemsByLocation.length > 1 ? (
+            // Multi-location order: show groups
+            itemsByLocation.map((group, groupIndex) => (
+              <View key={group.locationId || 'unassigned'} style={[styles.cardGlass, { marginBottom: spacing.md }]}>
+                {/* Location Header */}
+                <View style={styles.locationHeader}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.locationName}>{group.locationName}</Text>
+                    <Text style={styles.locationSubtitle}>
+                      {group.fulfilledCount}/{group.totalCount} items fulfilled
+                    </Text>
+                  </View>
+                  {!group.allFulfilled && group.locationId && (
+                    <Pressable
+                      style={[styles.fulfillButton, isUpdating && styles.fulfillButtonDisabled]}
+                      onPress={() => {
+                        if (order && group.locationId) {
+                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+                          fulfillItemsAtLocation(order.id, group.locationId)
+                            .then(() => refreshOrders())
+                            .catch((err) => {
+                              logger.error('Failed to fulfill items:', err)
+                              Alert.alert('Error', 'Failed to fulfill items')
+                            })
+                        }
+                      }}
+                      disabled={isUpdating}
+                    >
+                      {isUpdating ? (
+                        <ActivityIndicator size="small" color="#fff" />
+                      ) : (
+                        <Text style={styles.fulfillButtonText}>Mark Fulfilled</Text>
+                      )}
+                    </Pressable>
+                  )}
+                  {group.allFulfilled && (
+                    <View style={styles.fulfilledBadge}>
+                      <Ionicons name="checkmark-circle" size={16} color="#34c759" />
+                      <Text style={styles.fulfilledText}>Fulfilled</Text>
+                    </View>
+                  )}
+                </View>
+
+                {/* Items at this location */}
+                {group.items.map((item, index) => (
+                  <View key={item.id} style={[styles.infoRow, index === group.items.length - 1 && styles.lastRow]}>
+                    <View style={{ flex: 1 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                        <Text style={styles.infoLabel}>{item.product_name}</Text>
+                        {item.fulfillment_status === 'fulfilled' && (
+                          <Ionicons name="checkmark-circle" size={14} color="#34c759" />
+                        )}
+                      </View>
+                      <Text style={[styles.infoValue, { fontSize: 13, marginTop: 2 }]}>
+                        {item.quantity} × ${item.unit_price.toFixed(2)}
+                      </Text>
+                    </View>
+                    <Text style={styles.infoValue}>
+                      ${item.line_total.toFixed(2)}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            ))
+          ) : (
+            // Single location or no location: show simple list
+            <View style={styles.cardGlass}>
+              {orderItems.map((item, index) => (
+                <View key={item.id} style={styles.infoRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.infoLabel}>{item.product_name}</Text>
+                    <Text style={[styles.infoValue, { fontSize: 13, marginTop: 2 }]}>
+                      {item.quantity} × ${item.unit_price.toFixed(2)}
+                    </Text>
+                  </View>
+                  <Text style={styles.infoValue}>
+                    ${item.line_total.toFixed(2)}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          )}
+        </View>
+
         {/* Payment Breakdown */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Order Summary</Text>
           <View style={styles.cardGlass}>
-            {/* Order Items */}
-            {orderItems.map((item, index) => (
-              <View key={item.id} style={styles.infoRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.infoLabel}>{item.product_name}</Text>
-                  <Text style={[styles.infoValue, { fontSize: 13, marginTop: 2 }]}>
-                    {item.quantity} × ${item.unit_price.toFixed(2)}
-                  </Text>
-                </View>
-                <Text style={styles.infoValue}>
-                  ${item.line_total.toFixed(2)}
-                </Text>
-              </View>
-            ))}
-
             {/* Subtotal */}
             <View style={styles.infoRow}>
               <Text style={styles.infoLabel}>Subtotal</Text>
@@ -962,5 +1042,58 @@ const styles = StyleSheet.create({
     color: colors.text.secondary,
     textAlign: 'center',
     marginTop: spacing.sm,
+  },
+  // Multi-location styles
+  locationHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: spacing.md,
+    paddingHorizontal: layout.containerMargin,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: 'rgba(255,255,255,0.03)',
+  },
+  locationName: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#fff',
+    letterSpacing: -0.2,
+  },
+  locationSubtitle: {
+    fontSize: 12,
+    color: 'rgba(235,235,245,0.5)',
+    marginTop: 2,
+  },
+  fulfillButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 100,
+    backgroundColor: '#0a84ff',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  fulfillButtonDisabled: {
+    opacity: 0.5,
+  },
+  fulfillButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#fff',
+    letterSpacing: -0.2,
+  },
+  fulfilledBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 100,
+    backgroundColor: 'rgba(52,199,89,0.15)',
+  },
+  fulfilledText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#34c759',
   },
 })

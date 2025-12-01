@@ -12,17 +12,21 @@
 import React, { useRef, useState, useMemo, useCallback } from 'react'
 import { View, Text, StyleSheet, Pressable, ScrollView, ActivityIndicator, Animated, PanResponder } from 'react-native'
 import * as Haptics from 'expo-haptics'
+import { Ionicons } from '@expo/vector-icons'
 import { ProductItem } from '@/components/products/list/ProductItem'
-import { TitleSection } from '@/components/shared'
+import { ComplianceModal } from '@/components/products/ComplianceModal'
+import { TitleSection, LocationSelectorModal } from '@/components/shared'
 import type { FilterPill } from '@/components/shared'
 import { layout } from '@/theme/layout'
 import { colors, spacing, radius } from '@/theme/tokens'
 import type { Product } from '@/types/products'
 import { useProductsScreenStore } from '@/stores/products-list.store'
 import { useLocationFilter } from '@/stores/location-filter.store'
+import { useAppAuth } from '@/contexts/AppAuthContext'
 import { useCategories } from '@/hooks/useCategories'
 
 type ProductFilter = 'all' | 'low-stock' | 'out-of-stock'
+type CategoryFilter = string | null // null means "All Categories"
 
 interface ProductsListViewProps {
   products: Product[]
@@ -30,20 +34,38 @@ interface ProductsListViewProps {
   isLoading: boolean
 }
 
-export function ProductsListView({
+function ProductsListViewComponent({
   products,
   vendorLogo,
   isLoading,
 }: ProductsListViewProps) {
-  // Read from stores
-  const selectedProduct = useProductsScreenStore(state => state.selectedProduct)
+  // Read from stores - only get the ID to avoid re-renders when product object changes
+  const selectedProductId = useProductsScreenStore(state => state.selectedProduct?.id)
   const selectProduct = useProductsScreenStore(state => state.selectProduct)
   const openModal = useProductsScreenStore(state => state.openModal)
   const { selectedLocationIds } = useLocationFilter()
-  const { categories } = useCategories({ includeGlobal: true, parentId: null })
+  const { locations } = useAppAuth()
+  const { categories } = useCategories({ includeGlobal: true }) // Get all categories including subcategories
+
+  // Location selector modal state
+  const [showLocationModal, setShowLocationModal] = useState(false)
+  const [showComplianceModal, setShowComplianceModal] = useState(false)
+
+  // Compute location display text
+  const locationDisplayText = useMemo(() => {
+    if (selectedLocationIds.length === 0) {
+      return 'All Locations'
+    }
+    if (selectedLocationIds.length === 1) {
+      const loc = locations.find(l => l.id === selectedLocationIds[0])
+      return loc?.name || '1 Location'
+    }
+    return `${selectedLocationIds.length} Locations`
+  }, [selectedLocationIds, locations])
 
   // Local filter state (replaces activeNav)
   const [activeFilter, setActiveFilter] = useState<ProductFilter>('all')
+  const [selectedCategory, setSelectedCategory] = useState<CategoryFilter>(null)
 
   // Compute category map
   const categoryMap = useMemo(() => {
@@ -52,16 +74,108 @@ export function ProductsListView({
     return map
   }, [categories])
 
-  // Filter products based on active filter
+  // Build hierarchical category structure with counts
+  const { parentCategories, subcategoryMap } = useMemo(() => {
+    // Count products per category
+    const categoryCounts = new Map<string, number>()
+    products.forEach(p => {
+      if (p.primary_category_id) {
+        const count = categoryCounts.get(p.primary_category_id) || 0
+        categoryCounts.set(p.primary_category_id, count + 1)
+      }
+    })
+
+    // Build category lookup
+    const categoryLookup = new Map(categories.map(c => [c.id, c]))
+
+    // Separate parents and children
+    const parents: Array<{ id: string; name: string; count: number; hasSubcategories: boolean }> = []
+    const subcatMap = new Map<string, Array<{ id: string; name: string; count: number }>>()
+
+    // First pass: identify all parent IDs that have products (directly or via subcategories)
+    const parentIdsWithProducts = new Set<string>()
+
+    categories.forEach(cat => {
+      const directCount = categoryCounts.get(cat.id) || 0
+      if (directCount > 0) {
+        if (cat.parent_id) {
+          parentIdsWithProducts.add(cat.parent_id)
+        } else {
+          parentIdsWithProducts.add(cat.id)
+        }
+      }
+    })
+
+    // Second pass: build structure
+    categories.forEach(cat => {
+      const count = categoryCounts.get(cat.id) || 0
+
+      if (cat.parent_id) {
+        // This is a subcategory
+        if (count > 0) {
+          const existing = subcatMap.get(cat.parent_id) || []
+          existing.push({ id: cat.id, name: cat.name, count })
+          subcatMap.set(cat.parent_id, existing)
+        }
+      } else {
+        // This is a parent category
+        // Include if it has products directly OR has subcategories with products
+        const hasSubsWithProducts = subcatMap.has(cat.id) ||
+          categories.some(c => c.parent_id === cat.id && (categoryCounts.get(c.id) || 0) > 0)
+
+        if (count > 0 || hasSubsWithProducts || parentIdsWithProducts.has(cat.id)) {
+          parents.push({
+            id: cat.id,
+            name: cat.name,
+            count,
+            hasSubcategories: false, // Will update below
+          })
+        }
+      }
+    })
+
+    // Update hasSubcategories flag
+    parents.forEach(p => {
+      p.hasSubcategories = subcatMap.has(p.id) && (subcatMap.get(p.id)?.length || 0) > 0
+    })
+
+    // Sort
+    parents.sort((a, b) => a.name.localeCompare(b.name))
+    subcatMap.forEach((subs) => subs.sort((a, b) => a.name.localeCompare(b.name)))
+
+    return { parentCategories: parents, subcategoryMap: subcatMap }
+  }, [categories, products])
+
+  // Track expanded parent category
+  const [expandedParent, setExpandedParent] = useState<string | null>(null)
+
+  // Filter products based on active filter AND category (including subcategories)
   const filteredProducts = useMemo(() => {
+    let filtered = products
+
+    // Apply category filter first
+    if (selectedCategory) {
+      // Check if selected category is a parent with subcategories
+      const subcats = subcategoryMap.get(selectedCategory)
+      if (subcats && subcats.length > 0) {
+        // Include products from parent AND all its subcategories
+        const validCategoryIds = new Set([selectedCategory, ...subcats.map(s => s.id)])
+        filtered = filtered.filter(p => p.primary_category_id && validCategoryIds.has(p.primary_category_id))
+      } else {
+        // Just filter by this specific category
+        filtered = filtered.filter(p => p.primary_category_id === selectedCategory)
+      }
+    }
+
+    // Then apply stock filter
     if (activeFilter === 'low-stock') {
-      return products.filter(p => (p.inventory_quantity || 0) > 0 && (p.inventory_quantity || 0) < 10)
+      filtered = filtered.filter(p => (p.inventory_quantity || 0) > 0 && (p.inventory_quantity || 0) < 10)
+    } else if (activeFilter === 'out-of-stock') {
+      filtered = filtered.filter(p => (p.inventory_quantity || 0) === 0)
     }
-    if (activeFilter === 'out-of-stock') {
-      return products.filter(p => (p.inventory_quantity || 0) === 0)
-    }
-    return products
-  }, [products, activeFilter])
+
+    return filtered
+  }, [products, activeFilter, selectedCategory, subcategoryMap])
 
   // Compute product sections (A-Z grouped)
   const productSections = useMemo((): [string, Product[]][] => {
@@ -80,7 +194,7 @@ export function ProductsListView({
     })
   }, [filteredProducts])
 
-  // Define filter pills
+  // Define stock filter pills
   const filterPills: FilterPill[] = useMemo(() => {
     const lowStockCount = products.filter(p => (p.inventory_quantity || 0) > 0 && (p.inventory_quantity || 0) < 10).length
     const outOfStockCount = products.filter(p => (p.inventory_quantity || 0) === 0).length
@@ -92,9 +206,54 @@ export function ProductsListView({
     ]
   }, [products])
 
-  // Handle filter selection
+  // Single location pill for TitleSection - opens modal
+  const locationPill: FilterPill[] = useMemo(() => {
+    return [{ id: 'location', label: locationDisplayText }]
+  }, [locationDisplayText])
+
+  // Handle stock filter selection
   const handleFilterSelect = (filterId: string) => {
     setActiveFilter(filterId as ProductFilter)
+  }
+
+  // Handle location pill tap - always opens modal
+  const handleLocationPillSelect = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    setShowLocationModal(true)
+  }
+
+  // Handle category filter selection
+  const handleCategorySelect = (categoryId: string | null, isParent: boolean = false) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+
+    if (categoryId === null) {
+      // "All" selected - clear everything
+      setSelectedCategory(null)
+      setExpandedParent(null)
+    } else if (isParent) {
+      // Parent category tapped
+      const hasSubcats = subcategoryMap.has(categoryId) && (subcategoryMap.get(categoryId)?.length || 0) > 0
+
+      if (hasSubcats) {
+        // Toggle expansion
+        if (expandedParent === categoryId) {
+          // Already expanded, select it and collapse
+          setSelectedCategory(categoryId)
+          setExpandedParent(null)
+        } else {
+          // Expand to show subcategories
+          setExpandedParent(categoryId)
+          setSelectedCategory(categoryId) // Also select parent to show all its products
+        }
+      } else {
+        // No subcategories, just select
+        setSelectedCategory(categoryId)
+        setExpandedParent(null)
+      }
+    } else {
+      // Subcategory selected
+      setSelectedCategory(categoryId)
+    }
   }
 
   // Handlers
@@ -105,6 +264,16 @@ export function ProductsListView({
   const onAddProduct = useCallback(() => {
     openModal('createProduct')
   }, [openModal])
+
+  const handleOpenLocationSelector = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    setShowLocationModal(true)
+  }, [])
+
+  const handleOpenCompliance = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    setShowComplianceModal(true)
+  }, [])
 
   // Location names (simplified - just show count for now)
   const selectedLocationNames = useMemo(() => {
@@ -258,18 +427,144 @@ export function ProductsListView({
             paddingRight: 0
           }}
         >
-          {/* Title Section with Filter Pills */}
+          {/* Title Section with Location Filter & Compliance Button */}
           <TitleSection
             title="Products"
             logo={vendorLogo}
-            subtitle={`${filteredProducts.length} ${activeFilter === 'all' ? 'products' : activeFilter === 'low-stock' ? 'low stock' : 'out of stock'}`}
+            subtitle={`${filteredProducts.length} ${activeFilter === 'all' ? 'products' : activeFilter === 'low-stock' ? 'low stock' : 'out of stock'}${selectedCategory ? ` in ${categoryMap.get(selectedCategory)}` : ''}`}
             buttonText="+ Add Product"
             onButtonPress={onAddProduct}
             buttonAccessibilityLabel="Add new product"
-            filterPills={filterPills}
-            activeFilterId={activeFilter}
-            onFilterSelect={handleFilterSelect}
+            filterPills={locationPill}
+            activeFilterId="location"
+            onFilterSelect={handleLocationPillSelect}
+            secondaryButtonText="Compliance"
+            secondaryButtonIcon="shield-checkmark"
+            secondaryButtonColor="#34c759"
+            onSecondaryButtonPress={handleOpenCompliance}
           />
+
+          {/* Stock Filter Row */}
+          <View style={styles.stockFilterWrapper}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.stockFilterContainer}
+            >
+              {filterPills.map((pill) => (
+                <Pressable
+                  key={pill.id}
+                  style={[
+                    styles.stockFilterPill,
+                    activeFilter === pill.id && styles.stockFilterPillActive,
+                  ]}
+                  onPress={() => handleFilterSelect(pill.id)}
+                >
+                  <Text style={[
+                    styles.stockFilterText,
+                    activeFilter === pill.id && styles.stockFilterTextActive,
+                  ]}>
+                    {pill.label}
+                  </Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+          </View>
+
+          {/* Category Filter Pills */}
+          {parentCategories.length > 0 && (
+            <View style={styles.categoryFilterWrapper}>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.categoryFilterContainer}
+              >
+                {/* All pill */}
+                <Pressable
+                  style={[
+                    styles.categoryPill,
+                    selectedCategory === null && styles.categoryPillActive,
+                  ]}
+                  onPress={() => handleCategorySelect(null)}
+                >
+                  <Text style={[
+                    styles.categoryPillText,
+                    selectedCategory === null && styles.categoryPillTextActive,
+                  ]}>
+                    All
+                  </Text>
+                </Pressable>
+
+                {/* Parent categories */}
+                {parentCategories.map((cat) => {
+                  const isExpanded = expandedParent === cat.id
+                  const isSelected = selectedCategory === cat.id
+                  const subcats = subcategoryMap.get(cat.id) || []
+                  const totalCount = cat.count + subcats.reduce((sum, s) => sum + s.count, 0)
+
+                  return (
+                    <React.Fragment key={cat.id}>
+                      <Pressable
+                        style={[
+                          styles.categoryPill,
+                          isSelected && styles.categoryPillActive,
+                        ]}
+                        onPress={() => handleCategorySelect(cat.id, true)}
+                      >
+                        {cat.hasSubcategories && (
+                          <Text style={[
+                            styles.categoryExpandIcon,
+                            isExpanded && styles.categoryExpandIconActive,
+                          ]}>
+                            {isExpanded ? '▼' : '▶'}
+                          </Text>
+                        )}
+                        <Text style={[
+                          styles.categoryPillText,
+                          isSelected && styles.categoryPillTextActive,
+                        ]}>
+                          {cat.name}
+                        </Text>
+                        <Text style={[
+                          styles.categoryPillCount,
+                          isSelected && styles.categoryPillCountActive,
+                        ]}>
+                          {totalCount}
+                        </Text>
+                      </Pressable>
+
+                      {/* Subcategories (shown when expanded) */}
+                      {isExpanded && subcats.map((subcat) => (
+                        <Pressable
+                          key={subcat.id}
+                          style={[
+                            styles.categoryPill,
+                            styles.subcategoryPill,
+                            selectedCategory === subcat.id && styles.categoryPillActive,
+                          ]}
+                          onPress={() => handleCategorySelect(subcat.id, false)}
+                        >
+                          <Text style={[
+                            styles.categoryPillText,
+                            styles.subcategoryPillText,
+                            selectedCategory === subcat.id && styles.categoryPillTextActive,
+                          ]}>
+                            {subcat.name}
+                          </Text>
+                          <Text style={[
+                            styles.categoryPillCount,
+                            selectedCategory === subcat.id && styles.categoryPillCountActive,
+                          ]}>
+                            {subcat.count}
+                          </Text>
+                        </Pressable>
+                      ))}
+                    </React.Fragment>
+                  )
+                })}
+              </ScrollView>
+            </View>
+          )}
 
           {/* Empty State */}
           {filteredProducts.length === 0 ? (
@@ -304,14 +599,14 @@ export function ProductsListView({
                       {items.map((item, index) => {
                         const isLast = index === items.length - 1
                         // Use item.category directly - it's already populated by transformer
-                        const categoryName = item.category
+                        const categoryName = item.category ?? null
 
                         return (
                           <ProductItem
                             key={item.id}
                             item={item}
                             isLast={isLast}
-                            isSelected={selectedProduct?.id === item.id}
+                            isSelected={selectedProductId === item.id}
                             categoryName={categoryName}
                             selectedLocationIds={selectedLocationIds}
                             locationNames={selectedLocationNames}
@@ -405,9 +700,25 @@ export function ProductsListView({
           </>
         )}
       </View>
+
+      {/* Location Selector Modal */}
+      <LocationSelectorModal
+        visible={showLocationModal}
+        onClose={() => setShowLocationModal(false)}
+      />
+
+      {/* Compliance Modal */}
+      <ComplianceModal
+        visible={showComplianceModal}
+        onClose={() => setShowComplianceModal(false)}
+        products={products}
+      />
     </View>
   )
 }
+
+// Memoize with custom equality check to prevent unnecessary re-renders
+export const ProductsListView = React.memo(ProductsListViewComponent)
 
 const styles = StyleSheet.create({
   container: {
@@ -423,6 +734,36 @@ const styles = StyleSheet.create({
     flex: 1,
     position: 'relative',
   },
+
+  // Stock Filter Row
+  stockFilterWrapper: {
+    paddingHorizontal: layout.containerMargin,
+    marginBottom: spacing.md,
+  },
+  stockFilterContainer: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  stockFilterPill: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  stockFilterPillActive: {
+    backgroundColor: 'rgba(255,255,255,0.2)',
+  },
+  stockFilterText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: 'rgba(235,235,245,0.7)',
+    letterSpacing: -0.2,
+  },
+  stockFilterTextActive: {
+    color: '#fff',
+    fontWeight: '600',
+  },
+
   cardWrapper: {
     paddingHorizontal: layout.containerMargin,
     marginBottom: layout.containerMargin,
@@ -472,6 +813,63 @@ const styles = StyleSheet.create({
     borderCurve: 'continuous',
     overflow: 'hidden',
     backgroundColor: 'rgba(255,255,255,0.05)',
+  },
+
+  // Category Filter
+  categoryFilterWrapper: {
+    paddingHorizontal: layout.containerMargin,
+    marginBottom: spacing.md,
+  },
+  categoryFilterContainer: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingRight: layout.containerMargin,
+  },
+  categoryPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  categoryPillActive: {
+    backgroundColor: 'rgba(255,255,255,0.2)',
+  },
+  categoryPillText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: 'rgba(235,235,245,0.7)',
+    letterSpacing: -0.2,
+  },
+  categoryPillTextActive: {
+    color: '#fff',
+    fontWeight: '600',
+  },
+  categoryPillCount: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: 'rgba(235,235,245,0.4)',
+  },
+  categoryPillCountActive: {
+    color: 'rgba(255,255,255,0.7)',
+  },
+  categoryExpandIcon: {
+    fontSize: 8,
+    color: 'rgba(235,235,245,0.5)',
+    marginRight: 2,
+  },
+  categoryExpandIconActive: {
+    color: 'rgba(235,235,245,0.8)',
+  },
+  subcategoryPill: {
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  subcategoryPillText: {
+    fontSize: 13,
   },
 
   // iOS Section Index

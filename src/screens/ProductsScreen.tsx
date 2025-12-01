@@ -469,12 +469,12 @@ function ProductsScreenComponent() {
       .map(ul => ul.name)
   }, [selectedLocationIds, locations])
 
-  // Render active view
+  // Render active view - ProductsListView is always mounted to preserve scroll
   const renderContent = () => {
-    switch (activeNav) {
-      case 'all':
-        return <ProductsListView products={allProducts} vendorLogo={vendor?.logo_url} isLoading={productsLoading} />
+    // For 'all' nav, we render ProductsListView outside this function to keep it mounted
+    if (activeNav === 'all') return null
 
+    switch (activeNav) {
       case 'categories':
         return <CategoriesView />
 
@@ -512,29 +512,57 @@ function ProductsScreenComponent() {
 
         {/* CONTENT AREA - Stack Navigation (iOS Settings Style) */}
         <View style={styles.contentArea}>
-          {/* List View - Slides out to the left */}
-          <Animated.View
-            style={[
-              styles.stackView,
-              {
-                transform: [
-                  {
-                    translateX: slideAnim.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [0, -contentWidth * 0.3], // Slide left 30%
-                    }),
-                  },
-                ],
-                opacity: slideAnim.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: [1, 0], // Fade out
-                }),
-              },
-            ]}
-            pointerEvents={selectedProduct || selectedCategory ? 'none' : 'auto'}
-          >
-            {renderContent()}
-          </Animated.View>
+          {/* Products List View - ALWAYS MOUNTED to preserve scroll position */}
+          {activeNav === 'all' && (
+            <Animated.View
+              style={[
+                styles.stackView,
+                {
+                  transform: [
+                    {
+                      translateX: slideAnim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [0, -contentWidth * 0.3], // Slide left 30%
+                      }),
+                    },
+                  ],
+                  opacity: slideAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [1, 0], // Fade out
+                  }),
+                },
+              ]}
+              pointerEvents={selectedProduct || selectedCategory ? 'none' : 'auto'}
+            >
+              <ProductsListView products={allProducts} vendorLogo={vendor?.logo_url} isLoading={productsLoading} />
+            </Animated.View>
+          )}
+
+          {/* Other Views - rendered via renderContent */}
+          {activeNav !== 'all' && (
+            <Animated.View
+              style={[
+                styles.stackView,
+                {
+                  transform: [
+                    {
+                      translateX: slideAnim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [0, -contentWidth * 0.3],
+                      }),
+                    },
+                  ],
+                  opacity: slideAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [1, 0],
+                  }),
+                },
+              ]}
+              pointerEvents={selectedProduct || selectedCategory ? 'none' : 'auto'}
+            >
+              {renderContent()}
+            </Animated.View>
+          )}
 
           {/* Detail View - Slides in from the right */}
           {(selectedProduct || selectedCategory || selectedPO) && (

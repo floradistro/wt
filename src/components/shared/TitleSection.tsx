@@ -72,6 +72,18 @@ export interface TitleSectionProps {
 
   /** Back button press handler */
   onBackPress?: () => void
+
+  /** Secondary action button (e.g., Compliance) */
+  secondaryButtonText?: string
+
+  /** Secondary button icon name (Ionicons) */
+  secondaryButtonIcon?: keyof typeof Ionicons.glyphMap
+
+  /** Secondary button color */
+  secondaryButtonColor?: string
+
+  /** Secondary button press handler */
+  onSecondaryButtonPress?: () => void
 }
 
 /**
@@ -92,6 +104,10 @@ export function TitleSection({
   onFilterSelect,
   showBackButton = false,
   onBackPress,
+  secondaryButtonText,
+  secondaryButtonIcon,
+  secondaryButtonColor,
+  onSecondaryButtonPress,
 }: TitleSectionProps) {
   const handleButtonPress = () => {
     if (onButtonPress) {
@@ -111,6 +127,13 @@ export function TitleSection({
     if (onBackPress) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
       onBackPress()
+    }
+  }
+
+  const handleSecondaryButtonPress = () => {
+    if (onSecondaryButtonPress) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+      onSecondaryButtonPress()
     }
   }
 
@@ -173,6 +196,35 @@ export function TitleSection({
                   </Pressable>
                 ))}
               </View>
+            )}
+
+            {secondaryButtonText && (
+              <Pressable
+                style={[
+                  styles.secondaryButton,
+                  secondaryButtonColor && { backgroundColor: `${secondaryButtonColor}20` },
+                ]}
+                onPress={handleSecondaryButtonPress}
+                accessible={true}
+                accessibilityRole="button"
+                accessibilityLabel={secondaryButtonText}
+              >
+                {secondaryButtonIcon && (
+                  <Ionicons
+                    name={secondaryButtonIcon}
+                    size={16}
+                    color={secondaryButtonColor || colors.text.primary}
+                  />
+                )}
+                <Text
+                  style={[
+                    styles.secondaryButtonText,
+                    secondaryButtonColor && { color: secondaryButtonColor },
+                  ]}
+                >
+                  {secondaryButtonText}
+                </Text>
+              </Pressable>
             )}
 
             {!hideButton && buttonText && (
@@ -265,5 +317,20 @@ const styles = StyleSheet.create({
   },
   filterPillTextActive: {
     fontWeight: '600',
+  },
+  secondaryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 20,
+  },
+  secondaryButtonText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: colors.text.primary,
+    letterSpacing: -0.2,
   },
 })
