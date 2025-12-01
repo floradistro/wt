@@ -24,7 +24,9 @@ import {
   useOrderDetailLoading,
   useOrderDetailActions,
 } from '@/stores/order-detail.store'
-import { ConfirmPickupOrderModal, MarkReadyModal } from '../modals'
+import { ConfirmPickupOrderModal, MarkReadyModal, ShipOrderModal } from '../modals'
+import { useAppAuth } from '@/contexts/AppAuthContext'
+import { EmailService } from '@/services/email.service'
 
 export function StorePickupDetail() {
   const selectedOrderId = useSelectedOrderId()
@@ -41,7 +43,15 @@ export function StorePickupDetail() {
 
   const [showConfirmModal, setShowConfirmModal] = useState(false)
   const [showReadyModal, setShowReadyModal] = useState(false)
+  const [showShipModal, setShowShipModal] = useState(false)
+  const [selectedShipLocationId, setSelectedShipLocationId] = useState<string | null>(null)
   const [isUpdating, setIsUpdating] = useState(false)
+
+  const { vendor } = useAppAuth()
+  const vendorId = vendor?.id
+
+  // Determine if this is a split/multi-location order
+  const isSplitOrder = itemsByLocation.length > 1
 
   // Load order details when order selected
   useEffect(() => {
@@ -120,10 +130,66 @@ export function StorePickupDetail() {
     }
   }
 
+  // Handle marking pickup items ready at a specific location (with email notification)
+  const handleMarkLocationReady = async (locationId: string, locationName: string) => {
+    if (!order || !vendorId) return
+
+    try {
+      setIsUpdating(true)
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy)
+
+      // Fulfill items at this location
+      await fulfillItemsAtLocation(order.id, locationId)
+
+      // Send customer notification email for pickup items ready
+      if (order.customer_email) {
+        try {
+          const result = await EmailService.sendOrderReady({
+            vendorId,
+            orderId: order.id,
+            customerEmail: order.customer_email,
+            customerName: order.customer_name || undefined,
+            orderNumber: order.order_number,
+            pickupLocation: locationName,
+            customerId: order.customer_id,
+          })
+
+          if (result.success) {
+            logger.info('Pickup ready notification sent', { orderId: order.id, locationName })
+          } else {
+            logger.warn('Failed to send pickup ready notification', { error: result.error })
+          }
+        } catch (emailError) {
+          logger.error('Error sending pickup ready notification:', emailError)
+        }
+      }
+
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+      refreshOrders()
+    } catch (error) {
+      logger.error('Failed to mark location ready:', error)
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
+      Alert.alert('Error', 'Failed to mark items as ready')
+    } finally {
+      setIsUpdating(false)
+    }
+  }
+
+  // Handle opening ship modal for a specific location
+  const handleShipFromLocation = (locationId: string) => {
+    setSelectedShipLocationId(locationId)
+    setShowShipModal(true)
+  }
+
   // Get button text and handler based on status
   const getActionButton = () => {
     if (!order) {
       return { text: undefined, handler: undefined, disabled: true }
+    }
+
+    // For split orders, hide the header action button - actions are per-location
+    if (isSplitOrder) {
+      return { text: 'Split Order', handler: undefined, disabled: true }
     }
 
     if (order.status === 'completed' || order.status === 'cancelled') {
@@ -343,21 +409,22 @@ export function StorePickupDetail() {
                       onPress={() => {
                         if (order && group.locationId) {
                           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
-                          fulfillItemsAtLocation(order.id, group.locationId)
-                            .then(() => refreshOrders())
-                            .catch((err) => {
-                              logger.error('Failed to fulfill items:', err)
-                              Alert.alert('Error', 'Failed to fulfill items')
-                            })
+                          if (group.fulfillmentType === 'pickup') {
+                            // Pickup: Mark ready + send email
+                            handleMarkLocationReady(group.locationId, group.locationName)
+                          } else {
+                            // Shipping: Open ship modal with tracking
+                            handleShipFromLocation(group.locationId)
+                          }
                         }
                       }}
                       disabled={isUpdating || isDetailUpdating}
                     >
-                      {isDetailUpdating ? (
+                      {(isUpdating || isDetailUpdating) ? (
                         <ActivityIndicator size="small" color="#fff" />
                       ) : (
                         <Text style={styles.fulfillButtonText}>
-                          {group.fulfillmentType === 'pickup' ? 'Mark Ready' : 'Pack & Ship'}
+                          {group.fulfillmentType === 'pickup' ? 'Mark Ready' : 'Ship Items'}
                         </Text>
                       )}
                     </Pressable>
@@ -490,6 +557,17 @@ export function StorePickupDetail() {
           refreshOrders()
         }}
         orderId={order.id}
+      />
+
+      <ShipOrderModal
+        visible={showShipModal}
+        onClose={() => {
+          setShowShipModal(false)
+          setSelectedShipLocationId(null)
+          refreshOrders()
+        }}
+        orderId={order.id}
+        locationId={selectedShipLocationId}
       />
     </View>
   )
