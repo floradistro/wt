@@ -1548,6 +1548,12 @@ serve(async (req) => {
     let paymentResult: SPINSaleResponse | null = null
     let paymentError: Error | null = null
 
+    // CRITICAL: E-commerce orders MUST process card payment - no cash allowed
+    if (body.is_ecommerce && (body.paymentMethod === 'cash' || !body.paymentMethod)) {
+      console.error(`[${requestId}] SECURITY: E-commerce order attempted with invalid payment method: ${body.paymentMethod}`)
+      return await errorResponse('E-commerce orders require card payment', 400, requestId, allowedOrigin)
+    }
+
     if (body.paymentMethod === 'cash' || body.paymentMethod === 'split') {
       // Cash or Split payment
       const isSplit = body.paymentMethod === 'split'
@@ -1629,8 +1635,8 @@ serve(async (req) => {
     }
 
     // Process card payment (either full card or split payment card portion)
-    // Accept all card types: credit, debit, card, split, ebt_food, ebt_cash, gift
-    const isCardPayment = ['card', 'credit', 'debit', 'ebt_food', 'ebt_cash', 'gift', 'split'].includes(body.paymentMethod)
+    // Accept all card types: credit, debit, card, split, ebt_food, ebt_cash, gift, authorizenet (e-commerce)
+    const isCardPayment = ['card', 'credit', 'debit', 'ebt_food', 'ebt_cash', 'gift', 'split', 'authorizenet'].includes(body.paymentMethod)
     if (isCardPayment && body.paymentMethod !== 'cash') {
       const isSplit = body.paymentMethod === 'split'
       const cardAmount = isSplit ? (body.cardAmount || 0) : body.total

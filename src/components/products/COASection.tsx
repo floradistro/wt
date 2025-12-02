@@ -6,9 +6,10 @@
  * - List of attached COAs with status indicators
  * - Full-screen picker modal for uploading/attaching COAs
  * - Tap to open COA, tap X to remove/unattach
+ * - AI-powered field extraction from COA PDFs
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { View, Text, StyleSheet, Pressable, ActivityIndicator, Alert } from 'react-native'
 import * as Haptics from 'expo-haptics'
 import { Ionicons } from '@expo/vector-icons'
@@ -24,13 +25,16 @@ import {
   getCOAStatus,
   type COA,
 } from '@/services/coa.service'
+import { useAppAuth } from '@/contexts/AppAuthContext'
 import { logger } from '@/utils/logger'
 
 interface COASectionProps {
   product: Product
+  onProductUpdated?: () => void
 }
 
-export function COASection({ product }: COASectionProps) {
+export function COASection({ product, onProductUpdated }: COASectionProps) {
+  const { vendor } = useAppAuth()
   const [productCOAs, setProductCOAs] = useState<COA[]>([])
   const [loading, setLoading] = useState(false)
   const [showPicker, setShowPicker] = useState(false)
@@ -207,8 +211,14 @@ export function COASection({ product }: COASectionProps) {
       <COADetailModal
         visible={!!selectedCOA}
         coa={selectedCOA}
+        productId={product.id}
+        vendorId={vendor?.id}
         onClose={handleCloseDetail}
         onRemove={handleRemoveFromDetail}
+        onFieldsUpdated={(fieldsUpdated) => {
+          logger.info('[COASection] Fields updated from COA parse:', fieldsUpdated)
+          onProductUpdated?.()
+        }}
       />
     </>
   )

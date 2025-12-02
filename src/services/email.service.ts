@@ -501,7 +501,7 @@ export class EmailService {
   }
 
   /**
-   * Send test email
+   * Send test email using database templates (single source of truth)
    */
   static async sendTestEmail(params: {
     vendorId: string
@@ -513,113 +513,145 @@ export class EmailService {
     emailHeaderImage?: string
     emailType?: 'receipt' | 'order_confirmation' | 'order_update' | 'loyalty' | 'welcome' | 'marketing'
   }): Promise<SendEmailResponse> {
-    const vendorName = params.vendorName || 'Your Store'
-
-    // Generate appropriate HTML based on email type
-    let html: string
-    let subject: string
-    let text: string
+    // Map email type to template slug and test variables
+    let templateSlug: string
+    let variables: Record<string, any>
+    let subject: string | undefined
     const category = params.emailType || 'test'
+
+    // Sample test data
+    const testItems = [
+      { name: 'Sample Product 1', quantity: 2, price: '$39.99' },
+      { name: 'Sample Product 2', quantity: 1, price: '$20.01' },
+    ]
 
     switch (params.emailType) {
       case 'receipt':
-        html = this.generateReceiptHTML({
-          orderNumber: 'TEST-001',
-          total: 99.99,
-          items: [
-            { name: 'Sample Product 1', quantity: 2, price: 39.99 },
-            { name: 'Sample Product 2', quantity: 1, price: 20.01 },
-          ],
-          vendorName,
-          vendorLogo: params.vendorLogo,
-          emailHeaderImage: params.emailHeaderImage,
-        })
-        subject = `Test Receipt #TEST-001`
-        text = 'This is a test receipt email.'
+        templateSlug = 'receipt'
+        variables = {
+          order_number: 'TEST-001',
+          items: testItems,
+          subtotal: '$59.99',
+          tax_amount: '$5.00',
+          total: '$64.99',
+        }
+        subject = 'Test Receipt #TEST-001'
         break
 
       case 'order_confirmation':
-        html = this.generateOrderConfirmationTestHTML({
-          orderNumber: 'TEST-001',
-          orderType: 'pickup',
-          total: 99.99,
-          items: [
-            { name: 'Sample Product 1', quantity: 2, price: 39.99 },
-            { name: 'Sample Product 2', quantity: 1, price: 20.01 },
-          ],
-          pickupLocation: 'Main Store - 123 Test Street',
-          estimatedTime: '30 minutes',
-          vendorName,
-          vendorLogo: params.vendorLogo,
-          emailHeaderImage: params.emailHeaderImage,
-        })
-        subject = `Test Order Confirmation #TEST-001`
-        text = 'This is a test order confirmation email.'
+        templateSlug = 'order_confirmation'
+        variables = {
+          order_number: 'TEST-001',
+          customer_name: 'Test Customer',
+          items: testItems,
+          subtotal: '$59.99',
+          shipping_cost: '$5.00',
+          tax_amount: '$5.00',
+          total: '$69.99',
+          is_pickup: true,
+          pickup_location: 'Main Store - 123 Test Street',
+          estimated_time: '30 minutes',
+          shop_url: 'https://example.com/shop',
+        }
+        subject = 'Test Order Confirmation #TEST-001'
         break
 
       case 'order_update':
-        html = this.generateOrderUpdateTestHTML({
-          orderNumber: 'TEST-001',
-          pickupLocation: 'Main Store - 123 Test Street',
-          vendorName,
-          vendorLogo: params.vendorLogo,
-          emailHeaderImage: params.emailHeaderImage,
-        })
-        subject = `Test: Your order #TEST-001 is ready!`
-        text = 'This is a test order ready email.'
+        templateSlug = 'order_ready'
+        variables = {
+          order_number: 'TEST-001',
+          pickup_location: 'Main Store',
+          pickup_address: '123 Test Street, City, ST 12345',
+        }
+        subject = 'Test: Your order #TEST-001 is ready!'
         break
 
       case 'loyalty':
-        html = this.generateLoyaltyTestHTML({
-          vendorName,
-          vendorLogo: params.vendorLogo,
-          emailHeaderImage: params.emailHeaderImage,
-        })
-        subject = `Test Loyalty Update - ${vendorName}`
-        text = 'This is a test loyalty update email.'
+        templateSlug = 'loyalty_update'
+        variables = {
+          customer_name: 'Test Customer',
+          action: 'earned',
+          points: '150',
+          total_points: '1,500',
+          order_number: 'TEST-001',
+          rewards_url: 'https://example.com/rewards',
+        }
+        subject = 'Test Loyalty Update - You earned 150 points!'
         break
 
       case 'welcome':
-        html = this.generateWelcomeTestHTML({
-          vendorName,
-          vendorLogo: params.vendorLogo,
-          emailHeaderImage: params.emailHeaderImage,
-        })
-        subject = `Test Welcome Email - ${vendorName}`
-        text = 'This is a test welcome email.'
+        templateSlug = 'welcome'
+        variables = {
+          customer_name: 'Test Customer',
+          shop_url: 'https://example.com/shop',
+        }
+        subject = 'Test Welcome Email'
         break
 
       case 'marketing':
-        html = this.generateMarketingTestHTML({
-          vendorName,
-          vendorLogo: params.vendorLogo,
-          emailHeaderImage: params.emailHeaderImage,
-        })
-        subject = `Test Marketing Email - ${vendorName}`
-        text = 'This is a test marketing email.'
+        // For marketing, use a simple test - fall back to welcome template
+        templateSlug = 'welcome'
+        variables = {
+          customer_name: 'Test Customer',
+          shop_url: 'https://example.com/shop',
+        }
+        subject = 'Test Marketing Email'
         break
 
       default:
-        html = this.generateTestEmailHTML({
-          vendorName,
-          vendorLogo: params.vendorLogo,
-          emailHeaderImage: params.emailHeaderImage,
-        })
+        // Default test uses welcome template
+        templateSlug = 'welcome'
+        variables = {
+          customer_name: 'Test Customer',
+          shop_url: 'https://example.com/shop',
+        }
         subject = 'Test Email - Email System Configured'
-        text = 'This is a test email. If you received this, your email settings are configured correctly!'
     }
 
-    return this.sendEmail({
-      to: params.to,
-      subject,
-      html,
-      text,
-      emailType: params.emailType === 'marketing' ? 'marketing' : 'transactional',
-      category,
-      vendorId: params.vendorId,
-      fromName: params.fromName,
-      fromEmail: params.fromEmail,
-    })
+    // Send via edge function using templateSlug (same as production emails)
+    try {
+      const { data, error } = await supabase.functions.invoke('send-email', {
+        body: {
+          to: params.to,
+          templateSlug,
+          variables,
+          subject, // Override subject with "Test" prefix
+          emailType: params.emailType === 'marketing' ? 'marketing' : 'transactional',
+          category,
+          vendorId: params.vendorId,
+          fromName: params.fromName,
+          fromEmail: params.fromEmail,
+        },
+      })
+
+      if (error) {
+        logger.error('Test email send error', { error })
+        return {
+          success: false,
+          error: error.message || 'Failed to send test email',
+        }
+      }
+
+      if (!data?.success) {
+        logger.error('Test email send failed', { data })
+        return {
+          success: false,
+          error: data?.error || 'Unknown error',
+        }
+      }
+
+      logger.info('Test email sent successfully', { resendId: data.resendId, templateSlug })
+      return {
+        success: true,
+        resendId: data.resendId,
+      }
+    } catch (error) {
+      logger.error('Test email service error', { error })
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      }
+    }
   }
 
   // ============================================

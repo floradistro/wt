@@ -14,17 +14,15 @@
  * - Real-time in store (not component)
  */
 
-import { View, Text, Pressable, ActivityIndicator, Animated, useWindowDimensions, FlatList, RefreshControl, Image } from 'react-native'
-import React, { useRef, useEffect, useMemo, useCallback, memo } from 'react'
+import { View, Text, Animated, useWindowDimensions } from 'react-native'
+import React, { useRef, useEffect, useMemo, memo } from 'react'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import { LinearGradient } from 'expo-linear-gradient'
 import { colors } from '@/theme/tokens'
 import { layout } from '@/theme/layout'
 import { NavSidebar, type NavItem } from '@/components/NavSidebar'
-import { LocationSelectorModal, TitleSection } from '@/components/shared'
-import type { FilterPill } from '@/components/shared'
-import { OrderItem, SectionHeader, OrderDetail } from '@/components/orders'
-import { StorePickupView, ECommerceView, InStoreSalesView } from '@/components/orders/views'
+import { LocationSelectorModal } from '@/components/shared'
+import { OrderDetail } from '@/components/orders'
+import { FulfillmentBoard, InStoreSalesView } from '@/components/orders/views'
 import { StorePickupDetail, ECommerceDetail } from '@/components/orders/detail'
 import {
   ConfirmPickupOrderModal,
@@ -36,7 +34,6 @@ import {
   CustomDateRangeModal,
 } from '@/components/orders/modals'
 import { ordersStyles as styles } from '@/components/orders/orders.styles'
-import { type Order } from '@/services/orders.service'
 import { logger } from '@/utils/logger'
 
 // ✅ NEW: Import from Context
@@ -48,13 +45,13 @@ import {
   useActiveNav,
   useSelectedOrderId,
   useSearchQuery,
-  useDateRange,
   useShowLocationSelector,
+  useShowShipModal,
+  useShipModalOrderId,
+  useShipModalLocationId,
   useOrdersUIActions,
   type NavSection,
-  type DateRange
 } from '@/stores/orders-ui.store'
-import { useFilteredOrders, useGroupedOrders, useBadgeCounts } from '@/stores/order-filter.store'
 import { useLocationFilter } from '@/stores/location-filter.store'
 
 function OrdersScreenComponent() {
@@ -76,29 +73,26 @@ function OrdersScreenComponent() {
   const activeNav = useActiveNav()
   const selectedOrderId = useSelectedOrderId()
   const searchQuery = useSearchQuery()
-  const dateRange = useDateRange()
   const showLocationSelector = useShowLocationSelector()
+
+  // Ship modal state from Zustand (persists across re-renders)
+  const showShipModal = useShowShipModal()
+  const shipModalOrderId = useShipModalOrderId()
+  const shipModalLocationId = useShipModalLocationId()
 
   const {
     setActiveNav,
     selectOrder,
     setSearchQuery,
-    setDateRange,
     openLocationSelector,
-    closeLocationSelector
+    closeLocationSelector,
+    closeShipModal
   } = useOrdersUIActions()
 
   // ========================================
   // LOCATION FILTERING from Zustand (shared store)
   // ========================================
-  const { selectedLocationIds, setSelectedLocationIds, initializeFromUserLocations } = useLocationFilter()
-
-  // ========================================
-  // COMPUTED STATE from Zustand (filtering, grouping, badges)
-  // ========================================
-  const filteredOrders = useFilteredOrders()
-  const groupedOrders = useGroupedOrders()
-  const badgeCounts = useBadgeCounts()
+  const { selectedLocationIds, initializeFromUserLocations } = useLocationFilter()
 
   // ========================================
   // LOCAL UI STATE (animations, dimensions)
@@ -122,19 +116,6 @@ function OrdersScreenComponent() {
       .map(loc => loc.name)
   }, [selectedLocationIds, locations])
 
-  // Show location column when viewing multiple/all locations
-  const showLocationColumn = selectedLocationIds.length === 0 || selectedLocationIds.length > 1
-
-  // Date range label
-  const dateRangeLabel = useMemo(() => {
-    switch (dateRange) {
-      case 'today': return 'Today'
-      case 'week': return 'This Week'
-      case 'month': return 'This Month'
-      case 'custom': return 'Custom Range'
-      case 'all': return 'All Time'
-    }
-  }, [dateRange])
 
   // ========================================
   // INITIALIZATION & CLEANUP
@@ -173,39 +154,34 @@ function OrdersScreenComponent() {
 
   // Calculate order type counts
   const orderTypeCounts = useMemo(() => {
-    return {
-      inStore: orders.filter(o => o.order_type === 'walk_in').length,
-      pickup: orders.filter(o => o.order_type === 'pickup').length,
-      ecommerce: orders.filter(o => o.order_type === 'shipping').length,
-    }
+    const inStore = orders.filter(o => o.order_type === 'walk_in').length
+    const fulfillment = orders.filter(o =>
+      o.order_type === 'pickup' || o.order_type === 'shipping'
+    ).length
+    // Count active (not done) fulfillment orders
+    const activeFulfillment = orders.filter(o =>
+      (o.order_type === 'pickup' || o.order_type === 'shipping') &&
+      !['completed', 'delivered', 'shipped', 'in_transit', 'cancelled'].includes(o.status)
+    ).length
+
+    return { inStore, fulfillment, activeFulfillment }
   }, [orders])
 
+  // Simplified nav: Just TWO options - Fulfillment (unified) and In-Store Sales
   const navItems: NavItem[] = useMemo(() => [
     {
+      id: 'fulfillment',
+      icon: 'cube',
+      label: 'Fulfillment',
+      count: orderTypeCounts.activeFulfillment,
+    },
+    {
       id: 'in-store',
-      icon: 'box',
+      icon: 'storefront',
       label: 'In-Store Sales',
       count: orderTypeCounts.inStore,
     },
-    {
-      id: 'pickup',
-      icon: 'box',
-      label: 'Store Pickup',
-      count: orderTypeCounts.pickup,
-    },
-    {
-      id: 'ecommerce',
-      icon: 'move',
-      label: 'E-Commerce',
-      count: orderTypeCounts.ecommerce,
-    },
-    {
-      id: 'all',
-      icon: 'grid',
-      label: 'All Orders',
-      count: orders.length,
-    },
-  ], [orderTypeCounts, orders.length])
+  ], [orderTypeCounts])
 
   // ========================================
   // EVENT HANDLERS
@@ -237,112 +213,19 @@ function OrdersScreenComponent() {
   })
 
   // ========================================
-  // VIEW RENDERING (Products Screen Pattern)
+  // VIEW RENDERING
   // ========================================
 
   const renderContent = () => {
     switch (activeNav) {
+      case 'fulfillment':
+        return <FulfillmentBoard />
+
       case 'in-store':
         return <InStoreSalesView isLoading={loading} />
 
-      case 'pickup':
-        return <StorePickupView isLoading={loading} />
-
-      case 'ecommerce':
-        return <ECommerceView isLoading={loading} />
-
-      case 'all':
       default:
-        // Fallback to original FlatList for "All Orders"
-        const flatListData = groupedOrders.map((group, index) => ({
-          type: 'section' as const,
-          group,
-          isFirst: index === 0,
-        }))
-
-        if (loading) {
-          return (
-            <View style={styles.loadingContainer}>
-              <ActivityIndicator color={colors.text.secondary} />
-            </View>
-          )
-        }
-
-        if (flatListData.length === 0) {
-          return (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyStateTitle}>No Orders Found</Text>
-              <Text style={styles.emptyStateText}>
-                {searchQuery
-                  ? `No results for "${searchQuery}"`
-                  : `No orders for ${dateRangeLabel.toLowerCase()}`}
-              </Text>
-            </View>
-          )
-        }
-
-        // Date range filter pills
-        const dateFilterPills: FilterPill[] = [
-          { id: 'today', label: '1 Day' },
-          { id: 'week', label: '7 Days' },
-          { id: 'month', label: '30 Days' },
-          { id: 'all', label: 'All' },
-          { id: 'custom', label: 'Custom' },
-        ]
-
-        return (
-          <FlatList
-            data={flatListData}
-            renderItem={({ item }) => {
-              const { group, isFirst } = item
-              return (
-                <>
-                  <SectionHeader title={group.title} isFirst={isFirst} />
-                  <View style={styles.cardWrapper}>
-                    <View style={styles.ordersCardGlass}>
-                      {group.data.map((order, index) => (
-                        <OrderItem
-                          key={order.id}
-                          order={order}
-                          showLocation={showLocationColumn}
-                          isLast={index === group.data.length - 1}
-                        />
-                      ))}
-                    </View>
-                  </View>
-                </>
-              )
-            }}
-            keyExtractor={(item, index) => `section-${item.group.title}-${index}`}
-            ListHeaderComponent={() => (
-              <TitleSection
-                title="All Orders"
-                logo={vendor?.logo_url}
-                subtitle={`${orders.length} total ${orders.length === 1 ? 'order' : 'orders'}`}
-                hideButton
-                filterPills={dateFilterPills}
-                activeFilterId={dateRange}
-                onFilterSelect={(id) => setDateRange(id as DateRange)}
-              />
-            )}
-            contentContainerStyle={styles.flatListContent}
-            showsVerticalScrollIndicator={true}
-            indicatorStyle="white"
-            scrollIndicatorInsets={{ right: 2, top: 0, bottom: layout.dockHeight }}
-            refreshControl={
-              <RefreshControl
-                refreshing={loading}
-                onRefresh={refreshOrders}
-                tintColor={colors.text.secondary}
-              />
-            }
-            maxToRenderPerBatch={2}
-            updateCellsBatchingPeriod={100}
-            initialNumToRender={2}
-            windowSize={3}
-            removeClippedSubviews={true}
-          />
-        )
+        return <FulfillmentBoard />
     }
   }
 
@@ -453,9 +336,10 @@ function OrdersScreenComponent() {
         orderId={null}
       />
       <ShipOrderModal
-        visible={false}
-        onClose={() => {}}
-        orderId={null}
+        visible={showShipModal}
+        onClose={closeShipModal}
+        orderId={shipModalOrderId}
+        locationId={shipModalLocationId}
       />
       <MarkDeliveredModal
         visible={false}

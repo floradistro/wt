@@ -12,9 +12,9 @@
 
 CREATE OR REPLACE FUNCTION update_customer_loyalty_points_atomic(
   p_customer_id UUID,
-  p_order_id UUID,
   p_points_earned INTEGER,
   p_points_redeemed INTEGER,
+  p_order_id UUID,
   p_order_total NUMERIC
 )
 RETURNS BOOLEAN AS $$

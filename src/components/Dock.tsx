@@ -4,7 +4,7 @@
  * With working touch handling and smooth position animations
  */
 
-import { View, Pressable, StyleSheet } from 'react-native'
+import { View, Pressable, StyleSheet, Text } from 'react-native'
 import { memo } from 'react'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { LiquidGlassView, LiquidGlassContainerView, isLiquidGlassSupported } from '@callstack/liquid-glass'
@@ -15,6 +15,7 @@ interface DockProps {
   activeTab: number
   onTabChange: (index: number) => void
   centerX: number // X position for the center of the dock
+  ordersBadgeCount?: number // Badge count for Orders tab
 }
 
 // Exact iOS dock icons
@@ -79,43 +80,55 @@ function DockButton({
   name,
   isActive,
   isCenter,
-  onPress
+  onPress,
+  badgeCount
 }: {
   icon: IconComponent
   name: string
   isActive: boolean
   isCenter: boolean
   onPress: () => void
+  badgeCount?: number
 }) {
   const color = isActive ? colors.text.primary : colors.text.quaternary
+  const showBadge = badgeCount !== undefined && badgeCount > 0
 
   return (
-    <LiquidGlassView
-      effect="regular"
-      colorScheme="dark"
-      interactive
-      style={[
-        styles.iconButton,
-        isCenter && styles.centerIcon,
-        isActive && styles.activeIcon,
-        !isLiquidGlassSupported && (isActive ? styles.activeIconFallback : styles.iconButtonFallback)
-      ]}
-    >
-      <Pressable
-        onPress={onPress}
-        style={styles.iconButtonInner}
-        accessibilityRole="tab"
-        accessibilityLabel={name}
-        accessibilityState={{ selected: isActive }}
-        accessibilityHint={`Navigate to ${name} screen`}
+    <View style={styles.buttonContainer}>
+      <LiquidGlassView
+        effect="regular"
+        colorScheme="dark"
+        interactive
+        style={[
+          styles.iconButton,
+          isCenter && styles.centerIcon,
+          isActive && styles.activeIcon,
+          !isLiquidGlassSupported && (isActive ? styles.activeIconFallback : styles.iconButtonFallback)
+        ]}
       >
-        <Icon color={color} />
-      </Pressable>
-    </LiquidGlassView>
+        <Pressable
+          onPress={onPress}
+          style={styles.iconButtonInner}
+          accessibilityRole="tab"
+          accessibilityLabel={name}
+          accessibilityState={{ selected: isActive }}
+          accessibilityHint={`Navigate to ${name} screen`}
+        >
+          <Icon color={color} />
+        </Pressable>
+      </LiquidGlassView>
+      {showBadge && (
+        <View style={styles.badge}>
+          <Text style={styles.badgeText}>
+            {badgeCount > 99 ? '99+' : badgeCount}
+          </Text>
+        </View>
+      )}
+    </View>
   )
 }
 
-function Dock({ activeTab, onTabChange, centerX }: DockProps) {
+function Dock({ activeTab, onTabChange, centerX, ordersBadgeCount }: DockProps) {
   const insets = useSafeAreaInsets()
 
   // Dynamic dock width calculation based on actual number of icons
@@ -143,6 +156,8 @@ function Dock({ activeTab, onTabChange, centerX }: DockProps) {
           {tabs.map((tab, index) => {
             const isActive = activeTab === index
             const isCenter = false // No center icon with 4 items
+            // Orders tab is index 2
+            const badgeCount = index === 2 ? ordersBadgeCount : undefined
 
             return (
               <DockButton
@@ -151,6 +166,7 @@ function Dock({ activeTab, onTabChange, centerX }: DockProps) {
                 name={tab.name}
                 isActive={isActive}
                 isCenter={isCenter}
+                badgeCount={badgeCount}
                 onPress={() => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
                   onTabChange(index)
@@ -281,5 +297,33 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 16,
     position: 'absolute',
     bottom: 2,
+  },
+
+  // Apple-style notification badge
+  buttonContainer: {
+    position: 'relative',
+  },
+  badge: {
+    position: 'absolute',
+    top: -2,
+    right: -2,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: '#FF3B30', // Apple red
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 5,
+    // Subtle shadow for depth
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.3,
+    shadowRadius: 2,
+  },
+  badgeText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '600',
+    textAlign: 'center',
   },
 })

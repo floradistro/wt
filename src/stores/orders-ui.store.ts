@@ -15,7 +15,7 @@ import { create } from 'zustand'
 import { devtools } from 'zustand/middleware'
 import { useShallow } from 'zustand/react/shallow'
 
-type NavSection = 'in-store' | 'pickup' | 'ecommerce' | 'all'
+type NavSection = 'fulfillment' | 'in-store'
 type DateRange = 'today' | 'week' | 'month' | 'all' | 'custom'
 
 interface OrdersUIState {
@@ -35,6 +35,14 @@ interface OrdersUIState {
   showLocationSelector: boolean
   showCustomDatePicker: boolean
 
+  // Ship Modal State (persisted to survive order refreshes)
+  showShipModal: boolean
+  shipModalOrderId: string | null
+  shipModalLocationId: string | null
+
+  // Signal for detail views to reload after shipping
+  lastShipmentAt: number | null
+
   // Actions
   setActiveNav: (nav: NavSection) => void
   setActiveNavWithOrder: (nav: NavSection, orderId: string) => void
@@ -48,12 +56,17 @@ interface OrdersUIState {
   openCustomDatePicker: () => void
   closeCustomDatePicker: () => void
 
+  // Ship Modal Actions
+  openShipModal: (orderId: string, locationId: string | null) => void
+  closeShipModal: () => void
+  markShipmentComplete: () => void
+
   // Reset
   reset: () => void
 }
 
 const initialState = {
-  activeNav: 'pickup' as NavSection, // Default to pickup view
+  activeNav: 'fulfillment' as NavSection, // Default to unified fulfillment board
   selectedOrderId: null,
   searchQuery: '',
   dateRange: 'all' as DateRange,
@@ -61,6 +74,10 @@ const initialState = {
   customEndDate: null,
   showLocationSelector: false,
   showCustomDatePicker: false,
+  showShipModal: false,
+  shipModalOrderId: null,
+  shipModalLocationId: null,
+  lastShipmentAt: null,
 }
 
 export const useOrdersUIStore = create<OrdersUIState>()(
@@ -160,6 +177,36 @@ export const useOrdersUIStore = create<OrdersUIState>()(
       },
 
       /**
+       * Open ship modal with order and location
+       */
+      openShipModal: (orderId: string, locationId: string | null) => {
+        set({
+          showShipModal: true,
+          shipModalOrderId: orderId,
+          shipModalLocationId: locationId
+        }, false, 'ordersUI/openShipModal')
+      },
+
+      /**
+       * Close ship modal
+       */
+      closeShipModal: () => {
+        set({
+          showShipModal: false,
+          shipModalOrderId: null,
+          shipModalLocationId: null
+        }, false, 'ordersUI/closeShipModal')
+      },
+
+      /**
+       * Mark that a shipment was just completed
+       * Detail views watch this to know when to reload
+       */
+      markShipmentComplete: () => {
+        set({ lastShipmentAt: Date.now() }, false, 'ordersUI/markShipmentComplete')
+      },
+
+      /**
        * Reset entire UI state (for cleanup or navigation away)
        */
       reset: () => {
@@ -200,6 +247,12 @@ export const useShowLocationSelector = () => useOrdersUIStore((state) => state.s
 // Get custom date picker visibility
 export const useShowCustomDatePicker = () => useOrdersUIStore((state) => state.showCustomDatePicker)
 
+// Get ship modal state
+export const useShowShipModal = () => useOrdersUIStore((state) => state.showShipModal)
+export const useShipModalOrderId = () => useOrdersUIStore((state) => state.shipModalOrderId)
+export const useShipModalLocationId = () => useOrdersUIStore((state) => state.shipModalLocationId)
+export const useLastShipmentAt = () => useOrdersUIStore((state) => state.lastShipmentAt)
+
 // Get all UI actions (with useShallow to prevent infinite loops)
 export const useOrdersUIActions = () => useOrdersUIStore(
   useShallow((state) => ({
@@ -214,6 +267,9 @@ export const useOrdersUIActions = () => useOrdersUIStore(
     closeLocationSelector: state.closeLocationSelector,
     openCustomDatePicker: state.openCustomDatePicker,
     closeCustomDatePicker: state.closeCustomDatePicker,
+    openShipModal: state.openShipModal,
+    closeShipModal: state.closeShipModal,
+    markShipmentComplete: state.markShipmentComplete,
     reset: state.reset,
   }))
 )

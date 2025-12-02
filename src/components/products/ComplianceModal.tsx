@@ -1,15 +1,13 @@
 /**
- * ComplianceModal
- * Bulk COA management - match products to COAs quickly
+ * ComplianceModal - COA Management & Compliance Audit
  *
- * Features:
- * - Shows all products with COA status
- * - Smart matches COAs to products by filename
- * - Filter by: All, Missing COA, Has COA, Expired
- * - One-tap linking of suggested COAs
+ * Three modes:
+ * 1. Browse - View all products and their COA status
+ * 2. Preview - See what audit will do before running
+ * 3. Running - Execute with live progress
  */
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react'
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import {
   View,
   Text,
@@ -18,69 +16,123 @@ import {
   FlatList,
   ActivityIndicator,
   Modal,
-  Alert,
-  TextInput,
+  Animated,
+  ScrollView,
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import * as Haptics from 'expo-haptics'
 import { Ionicons } from '@expo/vector-icons'
 import { useAppAuth } from '@/contexts/AppAuthContext'
+import { supabase } from '@/lib/supabase/client'
 import { logger } from '@/utils/logger'
-import { colors, spacing, radius } from '@/theme/tokens'
 import type { Product } from '@/types/products'
 import {
   getCOAsForVendor,
-  getCOAsForProduct,
   linkCOAToProduct,
-  getCOAStatus,
+  parseCOAAndFillProduct,
   type COA,
+  type FieldComparison,
 } from '@/services/coa.service'
+
+interface CategoryField {
+  field_id: string
+  label: string
+  type: string
+}
 
 interface ComplianceModalProps {
   visible: boolean
   onClose: () => void
   products: Product[]
+  onProductsUpdated?: () => void
 }
 
-type ComplianceFilter = 'all' | 'missing' | 'has-coa' | 'expired' | 'expiring'
+type ViewMode = 'browse' | 'preview' | 'running' | 'complete'
+type FilterTab = 'all' | 'linked' | 'unlinked' | 'matched' | 'incomplete'
 
-interface ProductWithCOA {
+interface ProductFieldInfo {
+  field_id: string
+  label: string
+  value: string | null
+  isEmpty: boolean
+}
+
+interface ProductCOAInfo {
   product: Product
-  coas: COA[]
-  suggestedCOA: COA | null
-  matchScore: number
-  status: 'compliant' | 'missing' | 'expired' | 'expiring'
+  linkedCOAs: COA[]
+  matchedCOA: COA | null
+  hasLinkedPDF: boolean
+  canParse: boolean
+  status: 'compliant' | 'missing' | 'matched'
+  fields: ProductFieldInfo[]
+  emptyFieldCount: number
+  filledFieldCount: number
 }
 
-export function ComplianceModal({ visible, onClose, products }: ComplianceModalProps) {
+interface AuditAction {
+  type: 'link' | 'parse'
+  product: Product
+  coa: COA
+}
+
+interface ProductResult {
+  success: boolean
+  fieldsUpdated: number
+  action: string
+  fieldComparisons: FieldComparison[]
+}
+
+interface AuditProgress {
+  current: number
+  total: number
+  currentProduct?: string
+  results: Map<string, ProductResult>
+}
+
+const CONCURRENT_LIMIT = 5
+
+export function ComplianceModal({ visible, onClose, products, onProductsUpdated }: ComplianceModalProps) {
   const insets = useSafeAreaInsets()
   const { vendor } = useAppAuth()
+  const progressAnim = useRef(new Animated.Value(0)).current
 
-  const [activeFilter, setActiveFilter] = useState<ComplianceFilter>('missing')
   const [loading, setLoading] = useState(false)
-  const [linking, setLinking] = useState<string | null>(null) // productId being linked
-  const [searchQuery, setSearchQuery] = useState('')
   const [vendorCOAs, setVendorCOAs] = useState<COA[]>([])
   const [productCOAMap, setProductCOAMap] = useState<Map<string, COA[]>>(new Map())
+  const [categoryFieldsMap, setCategoryFieldsMap] = useState<Map<string, CategoryField[]>>(new Map())
+  const [viewMode, setViewMode] = useState<ViewMode>('browse')
+  const [filterTab, setFilterTab] = useState<FilterTab>('all')
+  const [auditProgress, setAuditProgress] = useState<AuditProgress>({
+    current: 0,
+    total: 0,
+    results: new Map(),
+  })
+  const [processingIds, setProcessingIds] = useState<Set<string>>(new Set())
   const [refreshKey, setRefreshKey] = useState(0)
+  const [expandedProductId, setExpandedProductId] = useState<string | null>(null)
+  const [expandedResultId, setExpandedResultId] = useState<string | null>(null)
 
-  // Load all vendor COAs and product COAs when modal opens
+  // Check if COA is a PDF
+  const isPDFCOA = useCallback((coa: COA): boolean => {
+    const fileUrlPath = coa.file_url?.split('?')[0] || ''
+    return fileUrlPath.toLowerCase().endsWith('.pdf')
+  }, [])
+
+  // Load COAs
   useEffect(() => {
     if (visible && vendor?.id) {
-      loadAllCOAs()
+      loadCOAs()
     }
   }, [visible, vendor?.id, refreshKey])
 
-  const loadAllCOAs = async () => {
+  const loadCOAs = async () => {
     if (!vendor?.id) return
     setLoading(true)
-
     try {
-      // Load all vendor COAs (library)
+      // Load COAs
       const allCOAs = await getCOAsForVendor(vendor.id)
       setVendorCOAs(allCOAs)
 
-      // Build map of product -> COAs
       const coaMap = new Map<string, COA[]>()
       allCOAs.forEach((coa) => {
         if (coa.product_id) {
@@ -90,10 +142,28 @@ export function ComplianceModal({ visible, onClose, products }: ComplianceModalP
       })
       setProductCOAMap(coaMap)
 
-      logger.info('[ComplianceModal] Loaded COAs', {
-        totalCOAs: allCOAs.length,
-        productsWithCOAs: coaMap.size,
-      })
+      // Load category field definitions for all unique categories
+      const categoryIds = [...new Set(products.map(p => p.primary_category_id).filter(Boolean))]
+      if (categoryIds.length > 0) {
+        const { data: fieldDefs } = await supabase
+          .from('vendor_product_fields')
+          .select('category_id, field_id, field_definition')
+          .eq('vendor_id', vendor.id)
+          .in('category_id', categoryIds)
+          .order('sort_order', { ascending: true })
+
+        const fieldsMap = new Map<string, CategoryField[]>()
+        fieldDefs?.forEach((f: any) => {
+          const catId = f.category_id
+          if (!fieldsMap.has(catId)) fieldsMap.set(catId, [])
+          fieldsMap.get(catId)!.push({
+            field_id: f.field_id,
+            label: f.field_definition?.label || f.field_id,
+            type: f.field_definition?.type || 'text',
+          })
+        })
+        setCategoryFieldsMap(fieldsMap)
+      }
     } catch (error) {
       logger.error('[ComplianceModal] Failed to load COAs:', error)
     } finally {
@@ -101,282 +171,357 @@ export function ComplianceModal({ visible, onClose, products }: ComplianceModalP
     }
   }
 
-  // Smart match: calculate similarity score between product name and COA
+  // Smart match
   const getMatchScore = useCallback((productName: string, coa: COA): number => {
     if (!productName) return 0
-
-    // Normalize string for comparison
-    const normalize = (str: string) =>
-      str.toLowerCase().replace(/[^a-z0-9]/g, '')
-
-    // Extract just the filename (after last /) and remove extension
-    const fullPath = coa.file_name || ''
-    const fileName = fullPath.split('/').pop() || fullPath
+    const normalize = (str: string) => str.toLowerCase().replace(/[^a-z0-9]/g, '')
+    const fileName = (coa.file_name || '').split('/').pop() || ''
     const baseName = fileName.replace(/\.(pdf|jpg|jpeg|png|webp)$/i, '')
-
     const normalizedProduct = normalize(productName)
     const normalizedCOA = normalize(baseName)
-
-    // Exact match (ignoring case/special chars)
     if (normalizedProduct === normalizedCOA) return 100
-
-    // Check if COA name starts with or contains the exact product name
-    if (normalizedCOA.startsWith(normalizedProduct) || normalizedCOA.includes(normalizedProduct)) {
-      return 90
-    }
-
-    // Check if product name starts with or contains the COA name
-    if (normalizedProduct.startsWith(normalizedCOA) || normalizedProduct.includes(normalizedCOA)) {
-      return 85
-    }
-
+    if (normalizedCOA.includes(normalizedProduct) || normalizedProduct.includes(normalizedCOA)) return 85
     return 0
   }, [])
 
-  // Find best matching unlinked COA for a product
-  const findBestMatch = useCallback((productName: string): { coa: COA | null; score: number } => {
+  const findBestMatch = useCallback((productName: string): COA | null => {
     let bestMatch: COA | null = null
     let bestScore = 0
-
-    // Only consider unlinked COAs
     const unlinkedCOAs = vendorCOAs.filter((coa) => !coa.product_id)
-
     unlinkedCOAs.forEach((coa) => {
       const score = getMatchScore(productName, coa)
-      if (score > bestScore) {
+      if (score >= 50 && score > bestScore) {
         bestScore = score
         bestMatch = coa
       }
     })
-
-    return { coa: bestMatch, score: bestScore }
+    return bestMatch
   }, [vendorCOAs, getMatchScore])
 
-  // Build products with COA info
-  const productsWithCOAs: ProductWithCOA[] = useMemo(() => {
+  // Build product info list with field values
+  const productInfoList: ProductCOAInfo[] = useMemo(() => {
     return products.map((product) => {
-      const coas = productCOAMap.get(product.id) || []
-      const { coa: suggestedCOA, score: matchScore } = findBestMatch(product.name)
+      const linkedCOAs = productCOAMap.get(product.id) || []
+      const matchedCOA = linkedCOAs.length === 0 ? findBestMatch(product.name) : null
+      const hasLinkedPDF = linkedCOAs.some(isPDFCOA)
+      const canParse = hasLinkedPDF || (matchedCOA && isPDFCOA(matchedCOA))
 
-      // Determine status
-      let status: ProductWithCOA['status'] = 'missing'
-      if (coas.length > 0) {
-        const coaStatuses = coas.map(getCOAStatus)
-        if (coaStatuses.some((s) => s === 'expired')) {
-          status = 'expired'
-        } else if (coaStatuses.some((s) => s === 'expiring')) {
-          status = 'expiring'
-        } else {
-          status = 'compliant'
+      let status: ProductCOAInfo['status'] = 'missing'
+      if (linkedCOAs.length > 0) status = 'compliant'
+      else if (matchedCOA) status = 'matched'
+
+      // Get field values for this product
+      const categoryFields = categoryFieldsMap.get(product.primary_category_id || '') || []
+      const customFields = (product.custom_fields as Record<string, any>) || {}
+
+      const fields: ProductFieldInfo[] = categoryFields.map(cf => {
+        const value = customFields[cf.field_id]
+        const isEmpty = value === undefined || value === null || value === ''
+        return {
+          field_id: cf.field_id,
+          label: cf.label,
+          value: isEmpty ? null : String(value),
+          isEmpty,
         }
-      }
+      })
+
+      const emptyFieldCount = fields.filter(f => f.isEmpty).length
+      const filledFieldCount = fields.filter(f => !f.isEmpty).length
 
       return {
         product,
-        coas,
-        suggestedCOA: matchScore >= 50 ? suggestedCOA : null,
-        matchScore,
+        linkedCOAs,
+        matchedCOA,
+        hasLinkedPDF,
+        canParse: !!canParse,
         status,
+        fields,
+        emptyFieldCount,
+        filledFieldCount,
       }
     })
-  }, [products, productCOAMap, findBestMatch])
+  }, [products, productCOAMap, findBestMatch, isPDFCOA, categoryFieldsMap])
 
-  // Filter products
-  const filteredProducts = useMemo(() => {
-    let filtered = productsWithCOAs
-
-    // Apply status filter
-    switch (activeFilter) {
-      case 'missing':
-        filtered = filtered.filter((p) => p.status === 'missing')
-        break
-      case 'has-coa':
-        filtered = filtered.filter((p) => p.status === 'compliant' || p.status === 'expiring')
-        break
-      case 'expired':
-        filtered = filtered.filter((p) => p.status === 'expired')
-        break
-      case 'expiring':
-        filtered = filtered.filter((p) => p.status === 'expiring')
-        break
+  // Filtered list
+  const filteredList = useMemo(() => {
+    switch (filterTab) {
+      case 'linked': return productInfoList.filter(p => p.linkedCOAs.length > 0)
+      case 'unlinked': return productInfoList.filter(p => p.linkedCOAs.length === 0 && !p.matchedCOA)
+      case 'matched': return productInfoList.filter(p => p.matchedCOA !== null)
+      case 'incomplete': return productInfoList.filter(p => p.emptyFieldCount > 0)
+      default: return productInfoList
     }
-
-    // Apply search filter
-    if (searchQuery.trim()) {
-      const query = searchQuery.toLowerCase()
-      filtered = filtered.filter((p) =>
-        p.product.name.toLowerCase().includes(query) ||
-        p.suggestedCOA?.file_name?.toLowerCase().includes(query)
-      )
-    }
-
-    // Sort: products with suggested matches first
-    return filtered.sort((a, b) => b.matchScore - a.matchScore)
-  }, [productsWithCOAs, activeFilter, searchQuery])
+  }, [productInfoList, filterTab])
 
   // Stats
   const stats = useMemo(() => {
-    const missing = productsWithCOAs.filter((p) => p.status === 'missing').length
-    const compliant = productsWithCOAs.filter((p) => p.status === 'compliant').length
-    const expired = productsWithCOAs.filter((p) => p.status === 'expired').length
-    const expiring = productsWithCOAs.filter((p) => p.status === 'expiring').length
-    const withSuggestions = productsWithCOAs.filter((p) => p.suggestedCOA && p.status === 'missing').length
+    const linked = productInfoList.filter(p => p.linkedCOAs.length > 0).length
+    const unlinked = productInfoList.filter(p => p.linkedCOAs.length === 0 && !p.matchedCOA).length
+    const matched = productInfoList.filter(p => p.matchedCOA !== null).length
+    const parseable = productInfoList.filter(p => p.canParse).length
+    const incomplete = productInfoList.filter(p => p.emptyFieldCount > 0).length
+    return { total: products.length, linked, unlinked, matched, parseable, incomplete }
+  }, [productInfoList, products.length])
 
-    return { missing, compliant, expired, expiring, withSuggestions, total: products.length }
-  }, [productsWithCOAs, products.length])
+  // Audit actions preview
+  const auditActions: AuditAction[] = useMemo(() => {
+    const actions: AuditAction[] = []
+    productInfoList.forEach((info) => {
+      if (info.matchedCOA && isPDFCOA(info.matchedCOA)) {
+        // Will link and parse
+        actions.push({ type: 'link', product: info.product, coa: info.matchedCOA })
+        actions.push({ type: 'parse', product: info.product, coa: info.matchedCOA })
+      } else if (info.hasLinkedPDF) {
+        // Will parse existing
+        const pdfCOA = info.linkedCOAs.find(isPDFCOA)!
+        actions.push({ type: 'parse', product: info.product, coa: pdfCOA })
+      }
+    })
+    return actions
+  }, [productInfoList, isPDFCOA])
 
-  // Handle linking a COA to a product
-  const handleLinkCOA = async (productId: string, coa: COA) => {
+  // Individual link
+  const handleLink = async (productId: string, coa: COA) => {
+    setProcessingIds(prev => new Set(prev).add(productId))
     try {
-      setLinking(productId)
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
-
       await linkCOAToProduct(coa.id, productId)
-
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
-
-      // Refresh data
-      setRefreshKey((k) => k + 1)
+      setRefreshKey(k => k + 1)
+      onProductsUpdated?.()
     } catch (error) {
-      logger.error('[ComplianceModal] Failed to link COA:', error)
+      logger.error('[ComplianceModal] Link failed:', error)
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
-      Alert.alert('Error', 'Failed to link COA. Please try again.')
     } finally {
-      setLinking(null)
+      setProcessingIds(prev => { const n = new Set(prev); n.delete(productId); return n })
     }
   }
 
-  // Bulk link all suggested matches
-  const handleBulkLink = async () => {
-    const toLink = filteredProducts.filter((p) => p.suggestedCOA && p.status === 'missing')
-
-    if (toLink.length === 0) {
-      Alert.alert('No Matches', 'No suggested matches found for products missing COAs.')
-      return
-    }
-
-    Alert.alert(
-      'Link All Matches',
-      `Link ${toLink.length} suggested COAs to their matching products?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Link All',
-          onPress: async () => {
-            setLoading(true)
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy)
-
-            let linked = 0
-            for (const item of toLink) {
-              if (item.suggestedCOA) {
-                try {
-                  await linkCOAToProduct(item.suggestedCOA.id, item.product.id)
-                  linked++
-                } catch (error) {
-                  logger.error('[ComplianceModal] Failed to link:', error)
-                }
-              }
-            }
-
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
-            Alert.alert('Done', `Successfully linked ${linked} COAs to products.`)
-            setRefreshKey((k) => k + 1)
-            setLoading(false)
-          },
-        },
-      ]
-    )
-  }
-
-  const getStatusColor = (status: ProductWithCOA['status']) => {
-    switch (status) {
-      case 'compliant': return '#34c759'
-      case 'expiring': return '#ff9500'
-      case 'expired': return '#ff3b30'
-      case 'missing': return 'rgba(235,235,245,0.3)'
+  // Individual parse
+  const handleParse = async (productId: string, coa: COA) => {
+    if (!vendor?.id) return
+    setProcessingIds(prev => new Set(prev).add(productId))
+    try {
+      const result = await parseCOAAndFillProduct(coa.id, productId, vendor.id)
+      if (result.success) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+      }
+      setRefreshKey(k => k + 1)
+      onProductsUpdated?.()
+    } catch (error) {
+      logger.error('[ComplianceModal] Parse failed:', error)
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
+    } finally {
+      setProcessingIds(prev => { const n = new Set(prev); n.delete(productId); return n })
     }
   }
 
-  const getStatusIcon = (status: ProductWithCOA['status']) => {
-    switch (status) {
-      case 'compliant': return 'checkmark-circle'
-      case 'expiring': return 'warning'
-      case 'expired': return 'close-circle'
-      case 'missing': return 'document-outline'
+  // Run audit
+  const runAudit = async () => {
+    if (!vendor?.id) return
+    setViewMode('running')
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy)
+
+    const toProcess = productInfoList.filter(p => p.canParse)
+    setAuditProgress({ current: 0, total: toProcess.length, results: new Map() })
+
+    // Process in parallel with limit
+    let currentIndex = 0
+    const processNext = async (): Promise<void> => {
+      const index = currentIndex++
+      if (index >= toProcess.length) return
+
+      const info = toProcess[index]
+      setAuditProgress(prev => ({ ...prev, currentProduct: info.product.name }))
+
+      try {
+        let coaToUse: COA
+        let action = 'parsed'
+
+        if (info.matchedCOA && isPDFCOA(info.matchedCOA)) {
+          await linkCOAToProduct(info.matchedCOA.id, info.product.id)
+          coaToUse = info.matchedCOA
+          action = 'linked & parsed'
+        } else {
+          coaToUse = info.linkedCOAs.find(isPDFCOA)!
+        }
+
+        const result = await parseCOAAndFillProduct(coaToUse.id, info.product.id, vendor.id)
+
+        logger.info('[ComplianceModal] Parse result for product', {
+          product: info.product.name,
+          success: result.success,
+          fieldsUpdated: result.fieldsUpdated?.length || 0,
+          comparisons: result.fieldComparisons?.length || 0,
+          parseFields: result.parseResult?.parsed_fields?.length || 0,
+          error: result.error,
+        })
+
+        setAuditProgress(prev => {
+          const newResults = new Map(prev.results)
+          newResults.set(info.product.id, {
+            success: result.success,
+            fieldsUpdated: result.fieldsUpdated?.length || 0,
+            action,
+            fieldComparisons: result.fieldComparisons || [],
+          })
+          return { ...prev, current: prev.current + 1, results: newResults }
+        })
+      } catch (error) {
+        setAuditProgress(prev => {
+          const newResults = new Map(prev.results)
+          newResults.set(info.product.id, { success: false, fieldsUpdated: 0, action: 'failed', fieldComparisons: [] })
+          return { ...prev, current: prev.current + 1, results: newResults }
+        })
+      }
+
+      await processNext()
     }
+
+    const workers = Array(Math.min(CONCURRENT_LIMIT, toProcess.length)).fill(null).map(() => processNext())
+    await Promise.all(workers)
+
+    setViewMode('complete')
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+    setRefreshKey(k => k + 1)
+    onProductsUpdated?.()
   }
 
-  const renderProductItem = ({ item }: { item: ProductWithCOA }) => {
-    const isLinking = linking === item.product.id
-    const hasSuggestion = item.suggestedCOA && item.status === 'missing'
+  // Progress animation
+  useEffect(() => {
+    if (auditProgress.total > 0) {
+      Animated.spring(progressAnim, {
+        toValue: auditProgress.current / auditProgress.total,
+        useNativeDriver: false,
+        tension: 40,
+        friction: 10,
+      }).start()
+    }
+  }, [auditProgress.current, auditProgress.total])
+
+  const handleClose = () => {
+    setViewMode('browse')
+    setAuditProgress({ current: 0, total: 0, results: new Map() })
+    progressAnim.setValue(0)
+    onClose()
+  }
+
+  const renderProductRow = ({ item }: { item: ProductCOAInfo }) => {
+    const isProcessing = processingIds.has(item.product.id)
+    const pdfCOA = item.linkedCOAs.find(isPDFCOA)
+    const isExpanded = expandedProductId === item.product.id
+    const hasFields = item.fields.length > 0
 
     return (
-      <View style={[styles.productItem, hasSuggestion && styles.productItemWithMatch]}>
-        {/* Product Info */}
-        <View style={styles.productInfo}>
-          <View style={styles.productHeader}>
-            <Ionicons
-              name={getStatusIcon(item.status)}
-              size={20}
-              color={getStatusColor(item.status)}
-            />
-            <Text style={styles.productName} numberOfLines={1}>
-              {item.product.name}
-            </Text>
+      <View style={styles.productCard}>
+        <Pressable
+          style={styles.productRow}
+          onPress={() => hasFields && setExpandedProductId(isExpanded ? null : item.product.id)}
+        >
+          <View style={[styles.statusDot,
+            item.status === 'compliant' && styles.statusCompliant,
+            item.status === 'matched' && styles.statusMatched,
+            item.status === 'missing' && styles.statusMissing,
+          ]} />
+
+          <View style={styles.productInfo}>
+            <Text style={styles.productName} numberOfLines={1}>{item.product.name}</Text>
+            <View style={styles.productMetaRow}>
+              <Text style={styles.productMeta}>
+                {item.linkedCOAs.length > 0
+                  ? `${item.linkedCOAs.length} COA`
+                  : item.matchedCOA
+                    ? 'Match found'
+                    : 'No COA'}
+              </Text>
+              {hasFields && (
+                <View style={styles.fieldCountBadges}>
+                  {item.filledFieldCount > 0 && (
+                    <View style={styles.badgeFilledSmall}>
+                      <Text style={styles.badgeTextSmall}>{item.filledFieldCount}</Text>
+                    </View>
+                  )}
+                  {item.emptyFieldCount > 0 && (
+                    <View style={styles.badgeEmptySmall}>
+                      <Text style={styles.badgeTextSmall}>{item.emptyFieldCount}</Text>
+                    </View>
+                  )}
+                </View>
+              )}
+            </View>
           </View>
 
-          {item.coas.length > 0 && (
-            <Text style={styles.coaCount}>
-              {item.coas.length} COA{item.coas.length > 1 ? 's' : ''} attached
-            </Text>
-          )}
-
-          {/* Suggested Match */}
-          {hasSuggestion && (
-            <View style={styles.suggestionContainer}>
-              <View style={styles.suggestionInfo}>
-                <View style={styles.matchBadge}>
-                  <Ionicons name="sparkles" size={12} color="#34c759" />
-                  <Text style={styles.matchBadgeText}>
-                    {item.matchScore >= 90 ? 'Exact' : 'Close'} Match
-                  </Text>
-                </View>
-                <Text style={styles.suggestionName} numberOfLines={1}>
-                  {item.suggestedCOA!.file_name?.split('/').pop()}
-                </Text>
-              </View>
-              <Pressable
-                style={[styles.linkButton, isLinking && styles.linkButtonDisabled]}
-                onPress={() => handleLinkCOA(item.product.id, item.suggestedCOA!)}
-                disabled={isLinking}
-              >
-                {isLinking ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <>
-                    <Ionicons name="link" size={16} color="#fff" />
-                    <Text style={styles.linkButtonText}>Link</Text>
-                  </>
-                )}
-              </Pressable>
+          {isProcessing ? (
+            <ActivityIndicator size="small" color="#fff" />
+          ) : (
+            <View style={styles.actions}>
+              {item.matchedCOA && (
+                <Pressable
+                  style={styles.actionBtn}
+                  onPress={(e) => {
+                    e.stopPropagation()
+                    handleLink(item.product.id, item.matchedCOA!)
+                  }}
+                >
+                  <Ionicons name="link" size={16} color="#888" />
+                </Pressable>
+              )}
+              {(pdfCOA || (item.matchedCOA && isPDFCOA(item.matchedCOA))) && (
+                <Pressable
+                  style={styles.actionBtn}
+                  onPress={(e) => {
+                    e.stopPropagation()
+                    const coa = pdfCOA || item.matchedCOA!
+                    if (!pdfCOA && item.matchedCOA) {
+                      handleLink(item.product.id, item.matchedCOA).then(() => {
+                        handleParse(item.product.id, item.matchedCOA!)
+                      })
+                    } else {
+                      handleParse(item.product.id, coa)
+                    }
+                  }}
+                >
+                  <Ionicons name="sparkles" size={16} color="#888" />
+                </Pressable>
+              )}
+              {hasFields && (
+                <Ionicons
+                  name={isExpanded ? 'chevron-up' : 'chevron-down'}
+                  size={16}
+                  color="#555"
+                  style={{ marginLeft: 4 }}
+                />
+              )}
             </View>
           )}
+        </Pressable>
 
-          {/* No COA, no suggestion */}
-          {item.status === 'missing' && !hasSuggestion && (
-            <Text style={styles.noMatch}>No matching COA found</Text>
-          )}
-        </View>
+        {/* Expanded field values */}
+        {isExpanded && hasFields && (
+          <View style={styles.productFields}>
+            {item.fields.map((field, idx) => (
+              <View key={field.field_id} style={[
+                styles.productFieldRow,
+                idx === item.fields.length - 1 && { borderBottomWidth: 0 }
+              ]}>
+                <Text style={styles.productFieldLabel}>{field.label}</Text>
+                <Text style={[
+                  styles.productFieldValue,
+                  field.isEmpty && styles.productFieldEmpty
+                ]}>
+                  {field.value || '—'}
+                </Text>
+              </View>
+            ))}
+          </View>
+        )}
       </View>
     )
   }
 
-  const filterPills = [
-    { id: 'missing', label: `Missing (${stats.missing})`, color: 'rgba(235,235,245,0.3)' },
-    { id: 'has-coa', label: `Has COA (${stats.compliant + stats.expiring})`, color: '#34c759' },
-    { id: 'expired', label: `Expired (${stats.expired})`, color: '#ff3b30' },
-    { id: 'all', label: `All (${stats.total})`, color: '#fff' },
-  ]
+  const progressWidth = progressAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0%', '100%'],
+  })
 
   if (!visible) return null
 
@@ -385,377 +530,797 @@ export function ComplianceModal({ visible, onClose, products }: ComplianceModalP
       visible={visible}
       animationType="slide"
       presentationStyle="fullScreen"
-      supportedOrientations={['portrait', 'landscape']}
-      onRequestClose={onClose}
+      onRequestClose={handleClose}
       statusBarTranslucent
     >
-      <View style={[styles.container, { paddingTop: insets.top }]}>
+      <View style={[styles.modal, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
         {/* Header */}
         <View style={styles.header}>
-          <View style={styles.headerLeft}>
-            <Text style={styles.headerTitle}>Compliance Check</Text>
-            <Text style={styles.headerSubtitle}>
-              {stats.withSuggestions} products have matching COAs ready to link
-            </Text>
-          </View>
-          <Pressable onPress={onClose} style={styles.doneButton}>
-            <Text style={styles.doneButtonText}>Done</Text>
+          <Text style={styles.title}>Compliance</Text>
+          <Pressable onPress={handleClose} style={styles.closeBtn}>
+            <Ionicons name="close" size={24} color="#888" />
           </Pressable>
         </View>
 
-        {/* Stats Bar */}
-        <View style={styles.statsBar}>
-          <View style={styles.statItem}>
-            <Ionicons name="checkmark-circle" size={18} color="#34c759" />
-            <Text style={styles.statValue}>{stats.compliant}</Text>
-            <Text style={styles.statLabel}>Compliant</Text>
+        {loading ? (
+          <View style={styles.loading}>
+            <ActivityIndicator size="large" color="#fff" />
           </View>
-          <View style={styles.statItem}>
-            <Ionicons name="document-outline" size={18} color="rgba(235,235,245,0.5)" />
-            <Text style={styles.statValue}>{stats.missing}</Text>
-            <Text style={styles.statLabel}>Missing</Text>
-          </View>
-          <View style={styles.statItem}>
-            <Ionicons name="warning" size={18} color="#ff9500" />
-            <Text style={styles.statValue}>{stats.expiring}</Text>
-            <Text style={styles.statLabel}>Expiring</Text>
-          </View>
-          <View style={styles.statItem}>
-            <Ionicons name="close-circle" size={18} color="#ff3b30" />
-            <Text style={styles.statValue}>{stats.expired}</Text>
-            <Text style={styles.statLabel}>Expired</Text>
-          </View>
-        </View>
-
-        {/* Filter Pills */}
-        <View style={styles.filterContainer}>
-          {filterPills.map((pill) => (
-            <Pressable
-              key={pill.id}
-              style={[
-                styles.filterPill,
-                activeFilter === pill.id && styles.filterPillActive,
-              ]}
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                setActiveFilter(pill.id as ComplianceFilter)
-              }}
+        ) : viewMode === 'browse' ? (
+          /* BROWSE MODE */
+          <>
+            {/* Stats Row - Scrollable for more tabs */}
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.statsScroll}
+              contentContainerStyle={styles.statsRow}
             >
-              <Text
-                style={[
-                  styles.filterPillText,
-                  activeFilter === pill.id && styles.filterPillTextActive,
-                ]}
+              <Pressable
+                style={[styles.statTab, filterTab === 'all' && styles.statTabActive]}
+                onPress={() => setFilterTab('all')}
               >
-                {pill.label}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
+                <Text style={styles.statValue}>{stats.total}</Text>
+                <Text style={styles.statLabel}>All</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.statTab, filterTab === 'incomplete' && styles.statTabActive]}
+                onPress={() => setFilterTab('incomplete')}
+              >
+                <Text style={[styles.statValue, stats.incomplete > 0 && styles.statValueWarning]}>
+                  {stats.incomplete}
+                </Text>
+                <Text style={styles.statLabel}>Incomplete</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.statTab, filterTab === 'linked' && styles.statTabActive]}
+                onPress={() => setFilterTab('linked')}
+              >
+                <Text style={styles.statValue}>{stats.linked}</Text>
+                <Text style={styles.statLabel}>Linked</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.statTab, filterTab === 'matched' && styles.statTabActive]}
+                onPress={() => setFilterTab('matched')}
+              >
+                <Text style={styles.statValue}>{stats.matched}</Text>
+                <Text style={styles.statLabel}>Matched</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.statTab, filterTab === 'unlinked' && styles.statTabActive]}
+                onPress={() => setFilterTab('unlinked')}
+              >
+                <Text style={styles.statValue}>{stats.unlinked}</Text>
+                <Text style={styles.statLabel}>No COA</Text>
+              </Pressable>
+            </ScrollView>
 
-        {/* Search Bar */}
-        <View style={styles.searchContainer}>
-          <View style={styles.searchBar}>
-            <Ionicons name="search" size={18} color="rgba(235,235,245,0.4)" />
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Search products..."
-              placeholderTextColor="rgba(235,235,245,0.4)"
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-              autoCapitalize="none"
-              autoCorrect={false}
+            {/* Product List */}
+            <FlatList
+              data={filteredList}
+              renderItem={renderProductRow}
+              keyExtractor={(item) => item.product.id}
+              style={styles.list}
+              contentContainerStyle={styles.listContent}
+              showsVerticalScrollIndicator={false}
             />
-            {searchQuery.length > 0 && (
-              <Pressable onPress={() => setSearchQuery('')}>
-                <Ionicons name="close-circle" size={18} color="rgba(235,235,245,0.4)" />
+
+            {/* Audit Button */}
+            {stats.parseable > 0 && (
+              <Pressable
+                style={styles.auditBtn}
+                onPress={() => setViewMode('preview')}
+              >
+                <Ionicons name="shield-checkmark" size={20} color="#000" />
+                <Text style={styles.auditBtnText}>Run Audit ({stats.parseable})</Text>
               </Pressable>
             )}
-          </View>
+          </>
+        ) : viewMode === 'preview' ? (
+            /* PREVIEW MODE - Show what will happen */
+            <>
+              <View style={styles.previewHeader}>
+                <Pressable onPress={() => setViewMode('browse')} style={styles.backBtn}>
+                  <Ionicons name="arrow-back" size={20} color="#888" />
+                </Pressable>
+                <Text style={styles.previewTitle}>Audit Preview</Text>
+              </View>
 
-          {/* Bulk Link Button */}
-          {stats.withSuggestions > 0 && activeFilter === 'missing' && (
-            <Pressable style={styles.bulkLinkButton} onPress={handleBulkLink}>
-              <Ionicons name="flash" size={18} color="#fff" />
-              <Text style={styles.bulkLinkText}>Link All ({stats.withSuggestions})</Text>
-            </Pressable>
-          )}
-        </View>
+              <View style={styles.previewSummary}>
+                <Text style={styles.previewText}>This audit will:</Text>
+                <View style={styles.previewItem}>
+                  <Ionicons name="link" size={16} color="#888" />
+                  <Text style={styles.previewItemText}>
+                    Link {productInfoList.filter(p => p.matchedCOA).length} COAs by filename match
+                  </Text>
+                </View>
+                <View style={styles.previewItem}>
+                  <Ionicons name="sparkles" size={16} color="#888" />
+                  <Text style={styles.previewItemText}>
+                    Parse {stats.parseable} PDF COAs and fill product fields
+                  </Text>
+                </View>
+              </View>
 
-        {/* Product List */}
-        {loading ? (
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color="#fff" />
-            <Text style={styles.loadingText}>Loading compliance data...</Text>
-          </View>
-        ) : filteredProducts.length === 0 ? (
-          <View style={styles.emptyContainer}>
-            <Ionicons
-              name={activeFilter === 'missing' ? 'checkmark-circle' : 'document-outline'}
-              size={60}
-              color="rgba(235,235,245,0.2)"
-            />
-            <Text style={styles.emptyTitle}>
-              {activeFilter === 'missing' ? 'All Products Compliant!' : 'No Products Found'}
-            </Text>
-            <Text style={styles.emptySubtitle}>
-              {activeFilter === 'missing'
-                ? 'All products have COAs attached'
-                : 'Try a different filter'}
-            </Text>
-          </View>
-        ) : (
-          <FlatList
-            data={filteredProducts}
-            renderItem={renderProductItem}
-            keyExtractor={(item) => item.product.id}
-            contentContainerStyle={[styles.listContent, { paddingBottom: insets.bottom + 20 }]}
-            showsVerticalScrollIndicator={false}
-          />
-        )}
+              <ScrollView style={styles.previewList}>
+                <Text style={styles.previewListTitle}>Products to process:</Text>
+                {productInfoList.filter(p => p.canParse).map((info) => (
+                  <View key={info.product.id} style={styles.previewRow}>
+                    <Text style={styles.previewRowName} numberOfLines={1}>
+                      {info.product.name}
+                    </Text>
+                    <Text style={styles.previewRowAction}>
+                      {info.matchedCOA ? 'link + parse' : 'parse'}
+                    </Text>
+                  </View>
+                ))}
+              </ScrollView>
+
+              <View style={styles.previewActions}>
+                <Pressable style={styles.cancelBtn} onPress={() => setViewMode('browse')}>
+                  <Text style={styles.cancelBtnText}>Cancel</Text>
+                </Pressable>
+                <Pressable style={styles.confirmBtn} onPress={runAudit}>
+                  <Text style={styles.confirmBtnText}>Run Audit</Text>
+                </Pressable>
+              </View>
+            </>
+          ) : viewMode === 'running' || viewMode === 'complete' ? (
+            /* RUNNING / COMPLETE MODE */
+            <>
+              <View style={styles.runningHeader}>
+                <Text style={styles.runningTitle}>
+                  {viewMode === 'complete' ? '✓ Audit Complete' : '🤖 Running Audit...'}
+                </Text>
+              </View>
+
+              <View style={styles.progressSection}>
+                <View style={styles.progressStats}>
+                  <Text style={styles.progressNumber}>{auditProgress.current}</Text>
+                  <Text style={styles.progressOf}>of</Text>
+                  <Text style={styles.progressNumber}>{auditProgress.total}</Text>
+                </View>
+                <View style={styles.progressBarBg}>
+                  <Animated.View style={[styles.progressBarFill, { width: progressWidth }]} />
+                </View>
+                {viewMode === 'running' && auditProgress.currentProduct && (
+                  <View style={styles.currentItem}>
+                    <ActivityIndicator size="small" color="#fff" />
+                    <Text style={styles.currentItemText} numberOfLines={1}>
+                      {auditProgress.currentProduct}
+                    </Text>
+                  </View>
+                )}
+              </View>
+
+              <ScrollView style={styles.resultsList} contentContainerStyle={styles.resultsListContent}>
+                {Array.from(auditProgress.results.entries()).reverse().map(([id, result], index) => {
+                  const product = products.find(p => p.id === id)
+                  // Auto-expand first result, or if manually expanded
+                  const isExpanded = expandedResultId === id || (expandedResultId === null && index === 0)
+                  const hasComparisons = result.fieldComparisons.length > 0
+
+                  // Count by status
+                  const filled = result.fieldComparisons.filter(f => f.status === 'filled').length
+                  const matched = result.fieldComparisons.filter(f => f.status === 'matched').length
+                  const conflicts = result.fieldComparisons.filter(f => f.status === 'conflict').length
+                  const skipped = result.fieldComparisons.filter(f => f.status === 'skipped').length
+
+                  return (
+                    <View key={id} style={styles.resultCard}>
+                      <Pressable
+                        style={[styles.resultRow, !result.success && styles.resultRowError]}
+                        onPress={() => hasComparisons && setExpandedResultId(isExpanded ? '__none__' : id)}
+                      >
+                        <Ionicons
+                          name={result.success ? 'checkmark-circle' : 'close-circle'}
+                          size={18}
+                          color={result.success ? '#4ade80' : '#f87171'}
+                        />
+                        <View style={styles.resultInfo}>
+                          <Text style={styles.resultName} numberOfLines={1}>
+                            {product?.name || id}
+                          </Text>
+                          <Text style={styles.resultAction}>{result.action}</Text>
+                        </View>
+                        {hasComparisons ? (
+                          <View style={styles.resultBadges}>
+                            {filled > 0 && <View style={styles.badgeFilled}><Text style={styles.badgeText}>+{filled}</Text></View>}
+                            {matched > 0 && <View style={styles.badgeMatched}><Text style={styles.badgeText}>✓{matched}</Text></View>}
+                            {conflicts > 0 && <View style={styles.badgeConflict}><Text style={styles.badgeText}>⚠{conflicts}</Text></View>}
+                            <Ionicons
+                              name={isExpanded ? 'chevron-up' : 'chevron-down'}
+                              size={16}
+                              color="#666"
+                            />
+                          </View>
+                        ) : (
+                          <Text style={styles.noFields}>{result.success ? 'No fields' : result.action}</Text>
+                        )}
+                      </Pressable>
+
+                      {/* Expanded field details - always show the values */}
+                      {isExpanded && hasComparisons && (
+                        <View style={styles.fieldDetails}>
+                          {result.fieldComparisons
+                            .filter(f => f.status !== 'skipped') // Hide skipped by default
+                            .map((field, idx) => (
+                            <View key={idx} style={styles.fieldRow}>
+                              <View style={styles.fieldHeader}>
+                                <Text style={styles.fieldLabel}>{field.label}</Text>
+                                <View style={[
+                                  styles.fieldStatus,
+                                  field.status === 'filled' && styles.fieldStatusFilled,
+                                  field.status === 'matched' && styles.fieldStatusMatched,
+                                  field.status === 'conflict' && styles.fieldStatusConflict,
+                                ]}>
+                                  <Text style={[
+                                    styles.fieldStatusText,
+                                    field.status === 'filled' && styles.fieldStatusTextFilled,
+                                    field.status === 'matched' && styles.fieldStatusTextMatched,
+                                    field.status === 'conflict' && styles.fieldStatusTextConflict,
+                                  ]}>
+                                    {field.status === 'filled' && 'FILLED'}
+                                    {field.status === 'matched' && 'MATCH'}
+                                    {field.status === 'conflict' && 'CONFLICT'}
+                                  </Text>
+                                </View>
+                              </View>
+                              <View style={styles.fieldValues}>
+                                <View style={styles.fieldValueRow}>
+                                  <Text style={styles.fieldValueLabel}>COA:</Text>
+                                  <Text style={styles.fieldValueCOA}>{field.coaValue || '—'}</Text>
+                                </View>
+                                {field.productValue !== null && field.status !== 'filled' && (
+                                  <View style={styles.fieldValueRow}>
+                                    <Text style={styles.fieldValueLabel}>Product:</Text>
+                                    <Text style={[
+                                      styles.fieldValue,
+                                      field.status === 'conflict' && styles.fieldValueConflict
+                                    ]}>{field.productValue}</Text>
+                                  </View>
+                                )}
+                              </View>
+                            </View>
+                          ))}
+                          {skipped > 0 && (
+                            <Text style={styles.skippedNote}>{skipped} field{skipped > 1 ? 's' : ''} skipped (not in category)</Text>
+                          )}
+                        </View>
+                      )}
+                    </View>
+                  )
+                })}
+              </ScrollView>
+
+              {viewMode === 'complete' && (
+                <Pressable style={styles.doneBtn} onPress={handleClose}>
+                  <Text style={styles.doneBtnText}>Done</Text>
+                </Pressable>
+              )}
+            </>
+          ) : null}
       </View>
     </Modal>
   )
 }
 
 const styles = StyleSheet.create({
-  container: {
+  modal: {
     flex: 1,
-    backgroundColor: '#1c1c1e',
+    backgroundColor: '#0a0a0a',
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 20,
-    paddingVertical: 16,
+    paddingBottom: 16,
   },
-  headerLeft: {
-    flex: 1,
-  },
-  headerTitle: {
+  title: {
     fontSize: 22,
-    fontWeight: '700',
-    color: '#fff',
-    letterSpacing: -0.4,
-  },
-  headerSubtitle: {
-    fontSize: 13,
-    color: 'rgba(235,235,245,0.6)',
-    marginTop: 2,
-  },
-  doneButton: {
-    backgroundColor: 'rgba(118, 118, 128, 0.24)',
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 24,
-  },
-  doneButtonText: {
-    fontSize: 17,
     fontWeight: '600',
     color: '#fff',
   },
-
-  // Stats Bar
-  statsBar: {
-    flexDirection: 'row',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    backgroundColor: 'rgba(255,255,255,0.03)',
-    borderBottomWidth: 0.5,
-    borderBottomColor: 'rgba(255,255,255,0.1)',
+  closeBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  statItem: {
+  loading: {
     flex: 1,
     alignItems: 'center',
-    gap: 4,
+    justifyContent: 'center',
+  },
+
+  // Stats
+  statsScroll: {
+    flexGrow: 0,
+    marginBottom: 12,
+  },
+  statsRow: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    gap: 8,
+  },
+  statTab: {
+    minWidth: 70,
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+  },
+  statTabActive: {
+    backgroundColor: 'rgba(255,255,255,0.12)',
   },
   statValue: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '700',
     color: '#fff',
   },
+  statValueWarning: {
+    color: '#fbbf24',
+  },
   statLabel: {
-    fontSize: 11,
-    color: 'rgba(235,235,245,0.5)',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-
-  // Filters
-  filterContainer: {
-    flexDirection: 'row',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    gap: 8,
-  },
-  filterPill: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-  },
-  filterPillActive: {
-    backgroundColor: 'rgba(255,255,255,0.2)',
-  },
-  filterPillText: {
-    fontSize: 13,
-    fontWeight: '500',
-    color: 'rgba(235,235,245,0.6)',
-  },
-  filterPillTextActive: {
-    color: '#fff',
-    fontWeight: '600',
-  },
-
-  // Search
-  searchContainer: {
-    flexDirection: 'row',
-    paddingHorizontal: 20,
-    paddingBottom: 12,
-    gap: 12,
-  },
-  searchBar: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(118, 118, 128, 0.24)',
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    height: 40,
-    gap: 8,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 16,
-    color: '#fff',
-  },
-  bulkLinkButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: '#34c759',
-    paddingHorizontal: 16,
-    borderRadius: 12,
-  },
-  bulkLinkText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#fff',
+    fontSize: 10,
+    color: '#666',
+    marginTop: 2,
   },
 
   // List
-  listContent: {
-    paddingHorizontal: 20,
-    paddingTop: 8,
+  list: { flex: 1 },
+  listContent: { paddingHorizontal: 16, paddingBottom: 16 },
+  productCard: {
+    marginBottom: 6,
+    borderRadius: 10,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(255,255,255,0.03)',
   },
-  productItem: {
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 8,
-  },
-  productItemWithMatch: {
-    backgroundColor: 'rgba(52,199,89,0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(52,199,89,0.2)',
-  },
-  productInfo: {
-    gap: 8,
-  },
-  productHeader: {
+  productRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
   },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 12,
+  },
+  statusCompliant: { backgroundColor: '#4ade80' },
+  statusMatched: { backgroundColor: '#fbbf24' },
+  statusMissing: { backgroundColor: '#666' },
+  productInfo: { flex: 1 },
   productName: {
-    flex: 1,
-    fontSize: 16,
-    fontWeight: '600',
+    fontSize: 14,
+    fontWeight: '500',
     color: '#fff',
   },
-  coaCount: {
-    fontSize: 13,
-    color: 'rgba(235,235,245,0.5)',
-    marginLeft: 30,
-  },
-  suggestionContainer: {
+  productMetaRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: 'rgba(52,199,89,0.1)',
-    borderRadius: 12,
-    padding: 12,
-    marginTop: 4,
+    marginTop: 3,
   },
-  suggestionInfo: {
-    flex: 1,
-    gap: 4,
-  },
-  matchBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  matchBadgeText: {
+  productMeta: {
     fontSize: 12,
+    color: '#666',
+  },
+  fieldCountBadges: {
+    flexDirection: 'row',
+    marginLeft: 8,
+    gap: 4,
+  },
+  badgeFilledSmall: {
+    backgroundColor: 'rgba(74,222,128,0.25)',
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 3,
+  },
+  badgeEmptySmall: {
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 3,
+  },
+  badgeTextSmall: {
+    fontSize: 10,
     fontWeight: '600',
-    color: '#34c759',
+    color: '#888',
   },
-  suggestionName: {
-    fontSize: 13,
-    color: 'rgba(235,235,245,0.7)',
-  },
-  linkButton: {
+  actions: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: '#34c759',
+  },
+  actionBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  // Product expanded fields
+  productFields: {
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.05)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  productFieldRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.05)',
+  },
+  productFieldLabel: {
+    fontSize: 12,
+    color: '#888',
+    flex: 1,
+  },
+  productFieldValue: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#fff',
+    textAlign: 'right',
+    flex: 1,
+  },
+  productFieldEmpty: {
+    color: '#555',
+    fontWeight: '400',
+  },
+
+  // Audit Button
+  auditBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#fff',
+    marginHorizontal: 16,
+    marginTop: 12,
+    paddingVertical: 14,
+    borderRadius: 12,
+  },
+  auditBtnText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#000',
+  },
+
+  // Preview
+  previewHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: 16,
+    marginBottom: 20,
+  },
+  backBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  previewTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  previewSummary: {
+    marginHorizontal: 16,
+    padding: 16,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 12,
+    marginBottom: 16,
+  },
+  previewText: {
+    fontSize: 14,
+    color: '#888',
+    marginBottom: 12,
+  },
+  previewItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 8,
+  },
+  previewItemText: {
+    fontSize: 14,
+    color: '#fff',
+  },
+  previewList: {
+    flex: 1,
+    paddingHorizontal: 16,
+  },
+  previewListTitle: {
+    fontSize: 12,
+    color: '#666',
+    marginBottom: 8,
+  },
+  previewRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.05)',
+  },
+  previewRowName: {
+    flex: 1,
+    fontSize: 13,
+    color: '#ccc',
+  },
+  previewRowAction: {
+    fontSize: 12,
+    color: '#666',
+  },
+  previewActions: {
+    flexDirection: 'row',
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingTop: 16,
+  },
+  cancelBtn: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  cancelBtnText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#888',
+  },
+  confirmBtn: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: '#fff',
+  },
+  confirmBtnText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#000',
+  },
+
+  // Running
+  runningHeader: {
+    alignItems: 'center',
+    paddingVertical: 20,
+  },
+  runningTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  progressSection: {
+    paddingHorizontal: 20,
+    marginBottom: 20,
+  },
+  progressStats: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'center',
+    gap: 8,
+    marginBottom: 16,
+  },
+  progressNumber: {
+    fontSize: 32,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  progressOf: {
+    fontSize: 14,
+    color: '#666',
+  },
+  progressBarBg: {
+    height: 6,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 3,
+    overflow: 'hidden',
+  },
+  progressBarFill: {
+    height: '100%',
+    backgroundColor: '#fff',
+    borderRadius: 3,
+  },
+  currentItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 16,
     paddingVertical: 10,
-    borderRadius: 20,
+    paddingHorizontal: 14,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 8,
   },
-  linkButtonDisabled: {
-    opacity: 0.6,
+  currentItemText: {
+    flex: 1,
+    fontSize: 14,
+    color: '#fff',
   },
-  linkButtonText: {
+  resultsList: {
+    flex: 1,
+    paddingHorizontal: 16,
+  },
+  resultsListContent: {
+    paddingBottom: 16,
+  },
+  resultCard: {
+    marginBottom: 8,
+    borderRadius: 10,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(255,255,255,0.03)',
+  },
+  resultRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+  },
+  resultRowError: {
+    backgroundColor: 'rgba(248,113,113,0.1)',
+  },
+  resultInfo: {
+    flex: 1,
+  },
+  resultName: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#fff',
+  },
+  resultBadges: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  badgeFilled: {
+    backgroundColor: 'rgba(74,222,128,0.2)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  badgeMatched: {
+    backgroundColor: 'rgba(96,165,250,0.2)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  badgeConflict: {
+    backgroundColor: 'rgba(251,191,36,0.2)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  badgeText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  noFields: {
+    fontSize: 12,
+    color: '#666',
+  },
+  resultAction: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 2,
+  },
+
+  // Field details (expanded)
+  fieldDetails: {
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.05)',
+    padding: 12,
+  },
+  fieldRow: {
+    marginBottom: 14,
+    paddingBottom: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.05)',
+  },
+  fieldHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  fieldLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  fieldStatus: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 4,
+  },
+  fieldStatusFilled: {
+    backgroundColor: 'rgba(74,222,128,0.25)',
+  },
+  fieldStatusMatched: {
+    backgroundColor: 'rgba(96,165,250,0.25)',
+  },
+  fieldStatusConflict: {
+    backgroundColor: 'rgba(251,191,36,0.25)',
+  },
+  fieldStatusSkipped: {
+    backgroundColor: 'rgba(255,255,255,0.05)',
+  },
+  fieldStatusText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#888',
+    letterSpacing: 0.5,
+  },
+  fieldStatusTextFilled: {
+    color: '#4ade80',
+  },
+  fieldStatusTextMatched: {
+    color: '#60a5fa',
+  },
+  fieldStatusTextConflict: {
+    color: '#fbbf24',
+  },
+  fieldValues: {
+    gap: 6,
+  },
+  fieldValueRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  fieldValueLabel: {
+    fontSize: 12,
+    color: '#666',
+    width: 60,
+  },
+  fieldValueCOA: {
+    flex: 1,
     fontSize: 14,
     fontWeight: '600',
     color: '#fff',
   },
-  noMatch: {
+  fieldValue: {
+    flex: 1,
     fontSize: 13,
-    color: 'rgba(235,235,245,0.4)',
-    marginLeft: 30,
+    color: '#888',
+  },
+  fieldValueConflict: {
+    color: '#fbbf24',
+  },
+  skippedNote: {
+    fontSize: 11,
+    color: '#555',
     fontStyle: 'italic',
+    marginTop: 4,
   },
-
-  // Loading/Empty
-  loadingContainer: {
-    flex: 1,
+  doneBtn: {
     alignItems: 'center',
-    justifyContent: 'center',
+    marginHorizontal: 16,
+    marginTop: 12,
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: '#fff',
   },
-  loadingText: {
-    marginTop: 16,
-    fontSize: 15,
-    color: 'rgba(235,235,245,0.6)',
-  },
-  emptyContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 40,
-    gap: 12,
-  },
-  emptyTitle: {
-    fontSize: 20,
+  doneBtnText: {
+    fontSize: 16,
     fontWeight: '600',
-    color: '#fff',
-  },
-  emptySubtitle: {
-    fontSize: 15,
-    color: 'rgba(235,235,245,0.6)',
-    textAlign: 'center',
+    color: '#000',
   },
 })

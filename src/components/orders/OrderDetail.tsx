@@ -21,7 +21,7 @@ import { Ionicons } from '@expo/vector-icons'
 import { colors, spacing, radius } from '@/theme/tokens'
 import { layout } from '@/theme/layout'
 import { logger } from '@/utils/logger'
-import type { Order } from '@/services/orders.service'
+import { deleteOrder, type Order } from '@/services/orders.service'
 import { FullScreenModal, modalStyles } from '@/components/shared'
 
 // ✅ NEW: Import from Context
@@ -236,6 +236,34 @@ export function OrderDetail() {
             } catch (error) {
               logger.error('Failed to cancel order:', error)
               Alert.alert('Error', 'Failed to cancel order')
+            }
+          },
+        },
+      ]
+    )
+  }
+
+  const handleDeleteOrder = () => {
+    if (!order) return
+
+    Alert.alert(
+      'Delete Order',
+      `Are you sure you want to permanently delete order ${order.order_number}?\n\nThis will remove the order and all related data. This action cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete Permanently',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteOrder(order.id)
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+              selectOrder(null) // Deselect the order
+              refreshOrders()
+            } catch (error) {
+              logger.error('Failed to delete order:', error)
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
+              Alert.alert('Error', 'Failed to delete order')
             }
           },
         },
@@ -752,6 +780,23 @@ export function OrderDetail() {
             </View>
           </View>
         )}
+
+        {/* Danger Zone - Delete Order */}
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { color: '#ff3b30' }]}>Danger Zone</Text>
+          <View style={styles.cardGlass}>
+            <Pressable
+              style={[styles.infoRow, styles.lastRow]}
+              onPress={handleDeleteOrder}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <Ionicons name="trash-outline" size={20} color="#ff3b30" />
+                <Text style={[styles.infoLabel, { color: '#ff3b30' }]}>Delete Order</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={17} color="#ff3b30" />
+            </Pressable>
+          </View>
+        </View>
 
       </ScrollView>
 

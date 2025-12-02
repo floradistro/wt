@@ -13,11 +13,14 @@ import { devtools } from 'zustand/middleware'
 interface LocationFilterState {
   selectedLocationIds: string[]
   isInitialized: boolean
+  isPOSSessionActive: boolean // Track if filter is locked to POS session
 
   // Actions
   setSelectedLocationIds: (ids: string[]) => void
   clearLocationFilter: () => void
   initializeFromUserLocations: (userLocationIds: string[], isAdmin: boolean) => void
+  setFromPOSSession: (locationId: string, locationName?: string) => void
+  clearPOSSession: () => void
   reset: () => void
 }
 
@@ -26,6 +29,7 @@ export const useLocationFilter = create<LocationFilterState>()(
     (set, get) => ({
   selectedLocationIds: [],
   isInitialized: false,
+  isPOSSessionActive: false,
 
   /**
    * Set selected location IDs
@@ -42,7 +46,7 @@ export const useLocationFilter = create<LocationFilterState>()(
   clearLocationFilter: () => {
     // eslint-disable-next-line no-console
     console.log('[LocationFilter] Clearing location filter')
-    set({ selectedLocationIds: [] })
+    set({ selectedLocationIds: [], isPOSSessionActive: false })
   },
 
   /**
@@ -56,7 +60,13 @@ export const useLocationFilter = create<LocationFilterState>()(
    * IMPORTANT: Only initializes ONCE per app session
    */
   initializeFromUserLocations: (userLocationIds: string[], isAdmin: boolean) => {
-    const { isInitialized } = get()
+    const { isInitialized, isPOSSessionActive } = get()
+
+    // If POS session is active, don't override
+    if (isPOSSessionActive) {
+      console.log('[LocationFilter] POS session active, skipping user initialization')
+      return
+    }
 
     // Only initialize once per app session
     if (isInitialized) {
@@ -85,6 +95,36 @@ export const useLocationFilter = create<LocationFilterState>()(
   },
 
   /**
+   * Set location filter from POS session
+   * Auto-filters the entire app to the session's location
+   */
+  setFromPOSSession: (locationId: string, locationName?: string) => {
+    console.log('[LocationFilter] 🎯 Auto-filtering to POS session location:', {
+      locationId,
+      locationName,
+    })
+
+    set({
+      selectedLocationIds: [locationId],
+      isInitialized: true,
+      isPOSSessionActive: true,
+    })
+  },
+
+  /**
+   * Clear POS session filter (when session ends)
+   * Returns to showing all locations
+   */
+  clearPOSSession: () => {
+    console.log('[LocationFilter] 🔓 POS session ended, clearing location lock')
+
+    set({
+      selectedLocationIds: [],
+      isPOSSessionActive: false,
+    })
+  },
+
+  /**
    * Reset the store (for logout, etc.)
    */
   reset: () => {
@@ -93,6 +133,7 @@ export const useLocationFilter = create<LocationFilterState>()(
     set({
       selectedLocationIds: [],
       isInitialized: false,
+      isPOSSessionActive: false,
     })
   },
     }),

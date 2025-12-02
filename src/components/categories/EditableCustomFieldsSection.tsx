@@ -170,11 +170,11 @@ export function EditableCustomFieldsSection({
             throw error
           }
         } else {
-          // Insert new field for this category
+          // Insert new field for this category (or update if field_id already exists)
           const fieldId = field.name.toLowerCase().replace(/[^a-z0-9]+/g, '_')
           const { error } = await supabase
             .from('vendor_product_fields')
-            .insert({
+            .upsert({
               vendor_id: userData.vendor_id,
               category_id: categoryId,
               field_id: fieldId,
@@ -183,10 +183,13 @@ export function EditableCustomFieldsSection({
               sort_order: editedFields.length + 1,
               created_by_user_id: user.id, // Required by RLS policy
               updated_by_user_id: user.id, // Required by RLS policy
+            }, {
+              onConflict: 'vendor_id,category_id,field_id',
+              ignoreDuplicates: false, // Update existing record if conflict
             })
 
           if (error) {
-            logger.error('[EditableCustomFieldsSection] Failed to insert field', { fieldId, error })
+            logger.error('[EditableCustomFieldsSection] Failed to upsert field', { fieldId, error })
             throw error
           }
         }

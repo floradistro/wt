@@ -1,18 +1,21 @@
 /**
  * Editable Custom Fields Section
- * Allows adding, editing, and removing product-specific custom fields
+ * Shows category-defined custom fields for products
  *
  * State Management:
- * - Reads custom fields from product-edit.store
- * - Supports dynamic field creation and removal
- * - Shows/hides based on edit mode and field existence
+ * - Fetches category field definitions from vendor_product_fields
+ * - Merges with product.custom_fields values
+ * - Only allows editing values for category-defined fields
+ * - New category fields appear immediately when added to category template
  */
 
-import { View, Text, StyleSheet, Pressable, TextInput } from 'react-native'
-import * as Haptics from 'expo-haptics'
+import { View, Text, StyleSheet, TextInput } from 'react-native'
+import { useState, useEffect, useCallback } from 'react'
 import { radius } from '@/theme/tokens'
 import { layout } from '@/theme/layout'
 import { logger } from '@/utils/logger'
+import { supabase } from '@/lib/supabase/client'
+import { useAppAuth } from '@/contexts/AppAuthContext'
 import type { Product } from '@/types/products'
 import {
   useIsEditing,
@@ -24,53 +27,110 @@ interface EditableCustomFieldsSectionProps {
   product: Product
 }
 
+interface CategoryField {
+  field_id: string
+  label: string
+  type: string
+  description?: string
+}
+
 export function EditableCustomFieldsSection({ product }: EditableCustomFieldsSectionProps) {
+  const { vendor } = useAppAuth()
+
   // Read from store
   const isEditing = useIsEditing()
   const editedCustomFields = useEditedCustomFields()
 
-  const customFields = product?.custom_fields || null
+  // Category field definitions
+  const [categoryFields, setCategoryFields] = useState<CategoryField[]>([])
+  const [isLoading, setIsLoading] = useState(true)
 
-  // Don't render if no custom fields and not editing
-  if (!customFields && !isEditing) return null
-  if (Object.keys(customFields || {}).length === 0 && !isEditing) return null
+  const customFields = product?.custom_fields || {}
 
-  const handleAddField = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-    const newKey = `field_${Date.now()}`
-    productEditActions.updateField('editedCustomFields', {
-      ...editedCustomFields,
-      [newKey]: '',
-    })
-  }
+  // Load category field definitions
+  const loadCategoryFields = useCallback(async () => {
+    if (!product?.primary_category_id || !vendor?.id) {
+      setIsLoading(false)
+      return
+    }
 
-  const handleRemoveField = (key: string) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-    const updated = { ...editedCustomFields }
-    delete updated[key]
-    productEditActions.updateField('editedCustomFields', updated)
-  }
+    try {
+      const { data, error } = await supabase
+        .from('vendor_product_fields')
+        .select('field_id, field_definition, is_active')
+        .eq('vendor_id', vendor.id)
+        .eq('category_id', product.primary_category_id)
+        .order('sort_order', { ascending: true })
 
-  const handleUpdateFieldKey = (oldKey: string, newKey: string) => {
-    if (oldKey === newKey) return
-    const updated = { ...editedCustomFields }
-    const value = updated[oldKey]
-    delete updated[oldKey]
-    updated[newKey] = value
-    productEditActions.updateField('editedCustomFields', updated)
-  }
+      if (error) throw error
+
+      // Extract field definitions
+      const fields: CategoryField[] = (data || []).map((f: any) => ({
+        field_id: f.field_id,
+        label: f.field_definition?.label || f.field_id,
+        type: f.field_definition?.type || 'text',
+        description: f.field_definition?.description,
+      }))
+
+      setCategoryFields(fields)
+      logger.info('[EditableCustomFieldsSection] Loaded category fields', {
+        categoryId: product.primary_category_id,
+        fieldCount: fields.length,
+        fieldIds: fields.map(f => f.field_id),
+        customFieldKeys: Object.keys(customFields),
+      })
+    } catch (error) {
+      logger.error('[EditableCustomFieldsSection] Failed to load category fields:', error)
+    } finally {
+      setIsLoading(false)
+    }
+  }, [product?.primary_category_id, vendor?.id, customFields])
+
+  useEffect(() => {
+    loadCategoryFields()
+  }, [loadCategoryFields])
+
+  // Merge category fields with product custom fields
+  // Only shows category-defined fields (product-specific extras are filtered on save)
+  const mergedFields = useCallback(() => {
+    const result: { key: string; label: string; value: any; isCategory: boolean }[] = []
+
+    // Only show category-defined fields with their values
+    // This ensures we don't display orphaned/duplicate fields
+    for (const field of categoryFields) {
+      const value = customFields[field.field_id] ?? ''
+      result.push({
+        key: field.field_id,
+        label: field.label,
+        value,
+        isCategory: true,
+      })
+    }
+
+    return result
+  }, [categoryFields, customFields])
+
+  // Initialize edited fields when entering edit mode
+  useEffect(() => {
+    if (isEditing && categoryFields.length > 0) {
+      // Merge category fields into editedCustomFields
+      const merged = { ...editedCustomFields }
+      for (const field of categoryFields) {
+        if (!(field.field_id in merged)) {
+          merged[field.field_id] = customFields[field.field_id] ?? ''
+        }
+      }
+      if (Object.keys(merged).length !== Object.keys(editedCustomFields).length) {
+        productEditActions.updateField('editedCustomFields', merged)
+      }
+    }
+  }, [isEditing, categoryFields])
 
   const handleUpdateFieldValue = (key: string, value: string) => {
-    logger.info('[EditableCustomFieldsSection] Updating field value', {
-      key,
-      value,
-      currentFields: editedCustomFields,
-    })
     const updatedFields = {
       ...editedCustomFields,
       [key]: value,
     }
-    logger.info('[EditableCustomFieldsSection] New fields state:', updatedFields)
     productEditActions.updateField('editedCustomFields', updatedFields)
   }
 
@@ -79,8 +139,14 @@ export function EditableCustomFieldsSection({ product }: EditableCustomFieldsSec
   }
 
   const formatValue = (value: any) => {
+    if (value === null || value === undefined || value === '') return '—'
     return typeof value === 'object' ? JSON.stringify(value) : String(value)
   }
+
+  const allFields = mergedFields()
+
+  // Don't render if no fields at all and not editing
+  if (!isLoading && allFields.length === 0 && !isEditing) return null
 
   return (
     <View style={styles.section}>
@@ -88,62 +154,48 @@ export function EditableCustomFieldsSection({ product }: EditableCustomFieldsSec
       <View style={styles.cardGlass}>
         {isEditing ? (
           <>
-            {Object.entries(editedCustomFields).length === 0 ? (
-              <Pressable onPress={handleAddField} style={styles.emptyRow}>
-                <Text style={styles.emptyText}>+ Add Custom Field</Text>
-              </Pressable>
+            {categoryFields.length === 0 ? (
+              <View style={styles.emptyRow}>
+                <Text style={styles.emptyText}>No custom fields defined for this category</Text>
+              </View>
             ) : (
               <>
-                {Object.entries(editedCustomFields).map(([key, value], index, array) => {
-                  const isLast = index === array.length - 1
-                  // Use index as stable key to prevent re-mounting on field name change
+                {/* Category fields (locked key, editable value) */}
+                {categoryFields.map((field, index) => {
+                  const value = editedCustomFields[field.field_id] ?? ''
+                  const isLast = index === categoryFields.length - 1
                   return (
-                    <View key={`field-${index}`} style={[styles.fieldEditRow, isLast && styles.fieldEditRowLast]}>
+                    <View key={field.field_id} style={[styles.fieldEditRow, isLast && styles.fieldEditRowLast]}>
                       <View style={styles.fieldEditHeader}>
-                        <TextInput
-                          style={styles.fieldKeyInput}
-                          value={key}
-                          onChangeText={(newKey) => handleUpdateFieldKey(key, newKey)}
-                          placeholder="Field name"
-                          placeholderTextColor="rgba(235,235,245,0.3)"
-                        />
-                        <Pressable
-                          onPress={() => {
-                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
-                            handleRemoveField(key)
-                          }}
-                          style={styles.removeButton}
-                        >
-                          <Text style={styles.removeButtonText}>✕</Text>
-                        </Pressable>
+                        <View style={styles.fieldKeyLocked}>
+                          <Text style={styles.fieldKeyLockedText}>{field.label}</Text>
+                        </View>
                       </View>
                       <TextInput
                         style={styles.fieldValueInput}
                         value={String(value)}
-                        onChangeText={(text) => handleUpdateFieldValue(key, text)}
-                        placeholder="Value"
+                        onChangeText={(text) => handleUpdateFieldValue(field.field_id, text)}
+                        placeholder={field.description || `Enter ${field.label.toLowerCase()}`}
                         placeholderTextColor="rgba(235,235,245,0.3)"
-                        multiline
+                        multiline={field.type === 'text'}
+                        keyboardType={field.type === 'number' ? 'decimal-pad' : 'default'}
                       />
                     </View>
                   )
                 })}
-                <Pressable onPress={handleAddField} style={styles.addFieldRow}>
-                  <Text style={styles.addFieldText}>+ Add Field</Text>
-                </Pressable>
               </>
             )}
           </>
         ) : (
           <>
-            {Object.entries(customFields || {}).map(([key, value], index, array) => {
-              if (!value) return null
-              const isLast = index === array.length - 1
+            {allFields.map((field, index) => {
+              const isLast = index === allFields.length - 1
+              const isEmpty = field.value === null || field.value === undefined || field.value === ''
               return (
-                <View key={key} style={[styles.customFieldRow, isLast && styles.customFieldRowLast]}>
-                  <Text style={styles.customFieldLabel}>{formatKey(key)}</Text>
-                  <Text style={styles.customFieldValue} numberOfLines={2}>
-                    {formatValue(value)}
+                <View key={field.key} style={[styles.customFieldRow, isLast && styles.customFieldRowLast]}>
+                  <Text style={styles.customFieldLabel}>{field.label}</Text>
+                  <Text style={[styles.customFieldValue, isEmpty && styles.customFieldEmpty]} numberOfLines={2}>
+                    {formatValue(field.value)}
                   </Text>
                 </View>
               )
@@ -157,7 +209,7 @@ export function EditableCustomFieldsSection({ product }: EditableCustomFieldsSec
 
 const styles = StyleSheet.create({
   section: {
-    marginHorizontal: layout.containerMargin, // Handles own horizontal spacing
+    marginHorizontal: layout.containerMargin,
     marginBottom: layout.sectionSpacing,
   },
   sectionTitle: {
@@ -167,15 +219,12 @@ const styles = StyleSheet.create({
     letterSpacing: 0.6,
     textTransform: 'uppercase',
     marginBottom: 8,
-    paddingHorizontal: 0, // No padding - inherits parent margin
+    paddingHorizontal: 0,
   },
   cardGlass: {
     borderRadius: radius.xxl,
     borderCurve: 'continuous',
     overflow: 'hidden',
-    backgroundColor: 'rgba(255,255,255,0.05)',
-  },
-  cardGlassFallback: {
     backgroundColor: 'rgba(255,255,255,0.05)',
   },
 
@@ -207,30 +256,19 @@ const styles = StyleSheet.create({
     gap: 10,
     marginBottom: 10,
   },
-  fieldKeyInput: {
+  fieldKeyLocked: {
     flex: 1,
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#fff',
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: 'rgba(255,255,255,0.03)',
     borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.1)',
+    borderColor: 'rgba(255,255,255,0.08)',
     paddingHorizontal: 14,
     paddingVertical: 10,
     borderRadius: 8,
   },
-  removeButton: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255,69,58,0.12)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  removeButtonText: {
+  fieldKeyLockedText: {
     fontSize: 15,
-    color: '#ff453a',
     fontWeight: '600',
+    color: 'rgba(235,235,245,0.7)',
   },
   fieldValueInput: {
     fontSize: 15,
@@ -241,20 +279,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 10,
     borderRadius: 8,
-    minHeight: 70,
+    minHeight: 44,
     textAlignVertical: 'top',
-  },
-
-  // Add field button
-  addFieldRow: {
-    paddingVertical: 14,
-    paddingHorizontal: layout.rowPaddingHorizontal,
-    alignItems: 'center',
-  },
-  addFieldText: {
-    fontSize: 15,
-    color: 'rgba(235,235,245,0.6)',
-    fontWeight: '500',
   },
 
   // View mode
@@ -281,5 +307,9 @@ const styles = StyleSheet.create({
     color: 'rgba(235,235,245,0.6)',
     flex: 1,
     textAlign: 'right',
+  },
+  customFieldEmpty: {
+    color: 'rgba(235,235,245,0.3)',
+    fontStyle: 'italic',
   },
 })

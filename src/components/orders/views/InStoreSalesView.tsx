@@ -5,8 +5,9 @@
  */
 
 import React, { useMemo } from 'react'
-import { View, Text, FlatList, ActivityIndicator, StyleSheet } from 'react-native'
-import { colors } from '@/theme/tokens'
+import { View, Text, FlatList, ActivityIndicator, StyleSheet, ScrollView, Pressable } from 'react-native'
+import * as Haptics from 'expo-haptics'
+import { colors, spacing } from '@/theme/tokens'
 import { layout } from '@/theme/layout'
 import { useFilteredOrders } from '@/stores/order-filter.store'
 import { OrderItem, SectionHeader } from '@/components/orders'
@@ -15,16 +16,25 @@ import type { Order } from '@/services/orders.service'
 import { useAppAuth } from '@/contexts/AppAuthContext'
 import { TitleSection, type FilterPill } from '@/components/shared'
 import { useDateRange, useOrdersUIActions, type DateRange } from '@/stores/orders-ui.store'
+import { useLocationFilter } from '@/stores/location-filter.store'
 
 interface InStoreSalesViewProps {
   isLoading?: boolean
 }
 
 export function InStoreSalesView({ isLoading = false }: InStoreSalesViewProps) {
-  const { vendor } = useAppAuth()
+  const { vendor, locations } = useAppAuth()
   const filteredOrders = useFilteredOrders()
   const dateRange = useDateRange()
-  const { setDateRange } = useOrdersUIActions()
+  const { setDateRange, openLocationSelector } = useOrdersUIActions()
+  const { selectedLocationIds } = useLocationFilter()
+
+  // Location button label
+  const locationButtonLabel = selectedLocationIds.length === 0
+    ? 'All Locations'
+    : selectedLocationIds.length === 1
+      ? locations.find(l => l.id === selectedLocationIds[0])?.name || '1 Location'
+      : `${selectedLocationIds.length} Locations`
 
   // Date filter pills
   const dateFilterPills: FilterPill[] = [
@@ -34,6 +44,53 @@ export function InStoreSalesView({ isLoading = false }: InStoreSalesViewProps) {
     { id: 'all', label: 'All' },
     { id: 'custom', label: 'Custom' },
   ]
+
+  // Handle date filter selection
+  const handleDateFilterSelect = (id: string) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    setDateRange(id as DateRange)
+  }
+
+  // Render the header with title and filters
+  const renderHeader = () => (
+    <>
+      <TitleSection
+        title="In-Store Sales"
+        logo={vendor?.logo_url}
+        subtitle={`Today's sales: $${todayTotal.toFixed(2)}`}
+        hideButton
+        secondaryButtonText={locationButtonLabel}
+        secondaryButtonIcon="location-outline"
+        onSecondaryButtonPress={openLocationSelector}
+      />
+      {/* Date Filter Row - Below Title */}
+      <View style={styles.dateFilterWrapper}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.dateFilterContainer}
+        >
+          {dateFilterPills.map((pill) => (
+            <Pressable
+              key={pill.id}
+              style={[
+                styles.dateFilterPill,
+                dateRange === pill.id && styles.dateFilterPillActive,
+              ]}
+              onPress={() => handleDateFilterSelect(pill.id)}
+            >
+              <Text style={[
+                styles.dateFilterText,
+                dateRange === pill.id && styles.dateFilterTextActive,
+              ]}>
+                {pill.label}
+              </Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+      </View>
+    </>
+  )
 
   // Filter for only walk-in orders
   const walkInOrders = useMemo(() => {
@@ -123,15 +180,7 @@ export function InStoreSalesView({ isLoading = false }: InStoreSalesViewProps) {
   if (isLoading) {
     return (
       <>
-        <TitleSection
-          title="In-Store Sales"
-          logo={vendor?.logo_url}
-          subtitle={`Today's sales: $${todayTotal.toFixed(2)}`}
-          hideButton
-          filterPills={dateFilterPills}
-          activeFilterId={dateRange}
-          onFilterSelect={(id) => setDateRange(id as DateRange)}
-        />
+        {renderHeader()}
         <View style={styles.loadingContainer}>
           <ActivityIndicator color={colors.text.secondary} />
         </View>
@@ -142,15 +191,7 @@ export function InStoreSalesView({ isLoading = false }: InStoreSalesViewProps) {
   if (flatListData.length === 0) {
     return (
       <>
-        <TitleSection
-          title="In-Store Sales"
-          logo={vendor?.logo_url}
-          subtitle={`Today's sales: $${todayTotal.toFixed(2)}`}
-          hideButton
-          filterPills={dateFilterPills}
-          activeFilterId={dateRange}
-          onFilterSelect={(id) => setDateRange(id as DateRange)}
-        />
+        {renderHeader()}
         <View style={styles.emptyState}>
           <Text style={styles.emptyStateTitle}>No In-Store Sales</Text>
           <Text style={styles.emptyStateText}>
@@ -166,17 +207,7 @@ export function InStoreSalesView({ isLoading = false }: InStoreSalesViewProps) {
       data={flatListData}
       renderItem={renderItem}
       keyExtractor={(item, index) => `section-${item.group.title}-${index}`}
-      ListHeaderComponent={() => (
-        <TitleSection
-          title="In-Store Sales"
-          logo={vendor?.logo_url}
-          subtitle={`Today's sales: $${todayTotal.toFixed(2)}`}
-          hideButton
-          filterPills={dateFilterPills}
-          activeFilterId={dateRange}
-          onFilterSelect={(id) => setDateRange(id as DateRange)}
-        />
-      )}
+      ListHeaderComponent={renderHeader}
       contentContainerStyle={ordersStyles.flatListContent}
       showsVerticalScrollIndicator={true}
       indicatorStyle="white"
@@ -212,5 +243,33 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: colors.text.secondary,
     textAlign: 'center',
+  },
+  // Date Filter Row - Below Title (Apple Style)
+  dateFilterWrapper: {
+    paddingHorizontal: layout.contentHorizontal,
+    marginBottom: spacing.md,
+  },
+  dateFilterContainer: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  dateFilterPill: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  dateFilterPillActive: {
+    backgroundColor: 'rgba(255,255,255,0.2)',
+  },
+  dateFilterText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: 'rgba(235,235,245,0.7)',
+    letterSpacing: -0.2,
+  },
+  dateFilterTextActive: {
+    color: '#fff',
+    fontWeight: '600',
   },
 })

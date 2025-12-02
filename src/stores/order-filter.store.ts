@@ -64,29 +64,84 @@ export const useOrderFilterStore = create<OrderFilterState>()(
         // Apply all filters
         return allOrders.filter((order) => {
           // Location filter (FIRST - most important for staff users)
-          // IMPORTANT: E-commerce orders have null pickup_location_id, show them regardless of location filter
+          // IMPORTANT: For split orders, check fulfillment_locations FIRST since items
+          // can be fulfilled at different locations regardless of order_type
           if (selectedLocationIds.length > 0) {
-            const isEcommerceOrder = order.order_type === 'shipping'
-            if (!isEcommerceOrder && (!order.pickup_location_id || !selectedLocationIds.includes(order.pickup_location_id))) {
-              return false
+            // Check fulfillment_locations FIRST - this handles split orders AND single-location shipping
+            if (order.fulfillment_locations && order.fulfillment_locations.length > 0) {
+              const hasMatchingLocation = order.fulfillment_locations.some(
+                (loc) => selectedLocationIds.includes(loc.location_id)
+              )
+
+              if (!hasMatchingLocation) {
+                // Order has NO items at user's location - ALWAYS exclude
+                // This applies to ALL order types including shipping
+                return false
+              }
+              // Order has items at user's location - continue to other filters
+            } else {
+              // No fulfillment_locations - fall back to other location checks
+              // This handles legacy orders that don't have fulfillment_locations populated
+
+              if (order.order_type === 'shipping') {
+                // For shipping orders without fulfillment_locations,
+                // check if there's any location indicator we can use
+                // If none, exclude (we can't determine which location ships it)
+                return false
+              } else if (order.order_type === 'pickup') {
+                // Check pickup_location_id
+                if (order.pickup_location_id) {
+                  if (!selectedLocationIds.includes(order.pickup_location_id)) {
+                    return false
+                  }
+                } else {
+                  return false // No location data, can't filter
+                }
+              } else if (order.order_type === 'walk_in') {
+                // Walk-in orders without location data - show them
+                // (legacy POS orders may not have location tracking)
+              } else {
+                // Unknown order type without location data - exclude
+                return false
+              }
             }
           }
 
           // Order Type filter - Order type-based navigation (The Apple Way)
+          // SPLIT ORDER SUPPORT: Check fulfillment_locations for multi-location orders
           if (activeNav !== 'all') {
+            const fulfillmentLocs = order.fulfillment_locations || []
+            const isSplitOrder = fulfillmentLocs.length > 1
+            const pickupLocationId = order.pickup_location_id
+
             if (activeNav === 'in-store') {
-              // "In-Store Sales" = POS walk-in transactions
+              // "In-Store Sales" = POS walk-in transactions (never split)
               if (order.order_type !== 'walk_in') {
                 return false
               }
             } else if (activeNav === 'pickup') {
-              // "Store Pickup" = Online orders for pickup
+              // "Store Pickup" = Orders with pickup items
+              // Include: pure pickup orders OR split orders (they have pickup portion)
               if (order.order_type !== 'pickup') {
                 return false
               }
+              // View component will further filter split orders by user's location
             } else if (activeNav === 'ecommerce') {
-              // "E-Commerce" = Shipping orders
-              if (order.order_type !== 'shipping') {
+              // "E-Commerce" = Orders with shipping items
+              // Include: pure shipping orders OR split orders with shipping portions
+              if (order.order_type === 'shipping') {
+                // Pure shipping order - include
+              } else if (isSplitOrder) {
+                // Split order - include if it has any shipping locations (non-pickup locations)
+                const hasShippingItems = fulfillmentLocs.some(
+                  (loc) => loc.location_id !== pickupLocationId
+                )
+                if (!hasShippingItems) {
+                  return false
+                }
+                // Has shipping items - include, view component will filter by user's location
+              } else {
+                // Not shipping and not split - exclude
                 return false
               }
             }
@@ -142,7 +197,7 @@ export const useOrderFilterStore = create<OrderFilterState>()(
       /**
        * Get location-filtered orders (for badge counts)
        * Only filters by location, not by status/date/search
-       * IMPORTANT: E-commerce orders (order_type: 'shipping') are always included
+       * Orders are ONLY included if they have items at the selected location(s)
        */
       getLocationFilteredOrders: () => {
         const allOrders = useOrdersStore.getState().orders
@@ -153,8 +208,38 @@ export const useOrderFilterStore = create<OrderFilterState>()(
         }
 
         return allOrders.filter(order => {
-          const isEcommerceOrder = order.order_type === 'shipping'
-          return isEcommerceOrder || (order.pickup_location_id && selectedLocationIds.includes(order.pickup_location_id))
+          // Check fulfillment_locations FIRST - handles all order types with location data
+          if (order.fulfillment_locations && order.fulfillment_locations.length > 0) {
+            const hasMatchingLocation = order.fulfillment_locations.some(
+              (loc) => selectedLocationIds.includes(loc.location_id)
+            )
+            // Only include if this location has items in this order
+            return hasMatchingLocation
+          }
+
+          // No fulfillment_locations - fall back to other location checks
+          if (order.order_type === 'shipping') {
+            // Shipping orders without fulfillment_locations - exclude
+            // (we can't determine which location ships it)
+            return false
+          }
+
+          if (order.order_type === 'pickup') {
+            // Check pickup_location_id
+            if (order.pickup_location_id) {
+              return selectedLocationIds.includes(order.pickup_location_id)
+            }
+            return false
+          }
+
+          if (order.order_type === 'walk_in') {
+            // Walk-in orders without location data - include them
+            // (legacy POS orders may not have location tracking)
+            return true
+          }
+
+          // Unknown order type - exclude
+          return false
         })
       },
 

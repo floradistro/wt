@@ -1,12 +1,13 @@
 /**
  * ECommerceView Component
  * Lists all e-commerce shipping orders with status filtering
- * Follows ProductsListView pattern
+ * Apple-style: Segmented control for Active/Completed
  */
 
-import React, { useMemo } from 'react'
-import { View, Text, FlatList, ActivityIndicator, StyleSheet } from 'react-native'
-import { colors } from '@/theme/tokens'
+import React, { useMemo, useState } from 'react'
+import { View, Text, FlatList, ActivityIndicator, StyleSheet, ScrollView, Pressable } from 'react-native'
+import * as Haptics from 'expo-haptics'
+import { colors, spacing } from '@/theme/tokens'
 import { layout } from '@/theme/layout'
 import { useFilteredOrders } from '@/stores/order-filter.store'
 import { OrderItem, SectionHeader } from '@/components/orders'
@@ -16,17 +17,28 @@ import { useAppAuth } from '@/contexts/AppAuthContext'
 import { TitleSection } from '@/components/shared'
 import type { FilterPill } from '@/components/shared'
 import { useDateRange, useOrdersUIActions, type DateRange } from '@/stores/orders-ui.store'
+import { useLocationFilter } from '@/stores/location-filter.store'
 
 interface ECommerceViewProps {
   isLoading?: boolean
 }
 
 export function ECommerceView({ isLoading = false }: ECommerceViewProps) {
-  const { vendor } = useAppAuth()
+  const { vendor, locations } = useAppAuth()
   const filteredOrders = useFilteredOrders()
   const dateRange = useDateRange()
-  const { setDateRange } = useOrdersUIActions()
-  const [statusFilter, setStatusFilter] = React.useState<'all' | 'active' | 'shipped' | 'delivered'>('all')
+  const { setDateRange, openLocationSelector } = useOrdersUIActions()
+  const { selectedLocationIds } = useLocationFilter()
+
+  // Apple-style: Simple binary toggle - Active or Completed
+  const [viewSegment, setViewSegment] = useState<'active' | 'completed'>('active')
+
+  // Location button label
+  const locationButtonLabel = selectedLocationIds.length === 0
+    ? 'All Locations'
+    : selectedLocationIds.length === 1
+      ? locations.find(l => l.id === selectedLocationIds[0])?.name || '1 Location'
+      : `${selectedLocationIds.length} Locations`
 
   // Date filter pills
   const dateFilterPills: FilterPill[] = [
@@ -37,57 +49,88 @@ export function ECommerceView({ isLoading = false }: ECommerceViewProps) {
     { id: 'custom', label: 'Custom' },
   ]
 
-  // Filter for only shipping orders
-  const shippingOrders = useMemo(() => {
-    return filteredOrders.filter((order) => order.order_type === 'shipping')
-  }, [filteredOrders])
+  // Handle date filter selection
+  const handleDateFilterSelect = (id: string) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    setDateRange(id as DateRange)
+  }
 
-  // Group shipping orders by status - Apple-style (3 groups max)
+  // Filter for orders with shipping items at user's location
+  // SPLIT ORDER SUPPORT: Shows orders where user's location needs to ship items
+  const shippingOrders = useMemo(() => {
+    return filteredOrders.filter((order) => {
+      const fulfillmentLocs = order.fulfillment_locations || []
+      const isSplitOrder = fulfillmentLocs.length > 1
+      const pickupLocationId = order.pickup_location_id
+
+      // Pure shipping order - always show in E-Commerce
+      if (order.order_type === 'shipping') return true
+
+      // Not a split order and not shipping type - don't show
+      if (!isSplitOrder) return false
+
+      // Split order - show if user's location needs to ship items
+      // (i.e., user's location is NOT the pickup location)
+      if (selectedLocationIds.length > 0) {
+        // Check if any of user's selected locations need to ship items
+        return fulfillmentLocs.some(loc => {
+          const isUserLocation = selectedLocationIds.includes(loc.location_id)
+          const isShippingPortion = loc.location_id !== pickupLocationId
+          return isUserLocation && isShippingPortion
+        })
+      }
+
+      // No location filter - show all split orders in E-Commerce
+      // (they have at least some items that need shipping from non-pickup locations)
+      return fulfillmentLocs.some(loc => loc.location_id !== pickupLocationId)
+    })
+  }, [filteredOrders, selectedLocationIds])
+
+  // Separate active vs completed orders
+  const { activeOrders, completedOrders, activeCount, completedCount } = useMemo(() => {
+    // Active = needs action (pending, confirmed, preparing, packing, packed, ready_to_ship)
+    const active = shippingOrders.filter(
+      (o) => ['pending', 'confirmed', 'preparing', 'packing', 'packed', 'ready_to_ship'].includes(o.status)
+    )
+
+    // Completed = shipped, in transit, or delivered
+    const completed = shippingOrders.filter(
+      (o) => ['shipped', 'in_transit', 'delivered'].includes(o.status)
+    )
+
+    return {
+      activeOrders: active,
+      completedOrders: completed,
+      activeCount: active.length,
+      completedCount: completed.length,
+    }
+  }, [shippingOrders])
+
+  // Group based on current segment
+  // SIMPLIFIED: Just two groups for active - Ready to Ship and To Fulfill
   const shippingGrouped = useMemo(() => {
     const groups: Array<{ title: string; data: Order[] }> = []
 
-    // NEW - Orders waiting to be shipped (confirmed, pending, preparing, packing, packed)
-    const newOrders = shippingOrders.filter(
-      (o) => ['confirmed', 'pending', 'preparing', 'packing', 'packed', 'ready_to_ship'].includes(o.status)
-    )
+    if (viewSegment === 'active') {
+      if (activeOrders.length > 0) {
+        // Simple two-group approach:
+        // 1. Ready to Ship = packed/ready, waiting to ship
+        // 2. To Fulfill = everything else (pending, confirmed, preparing)
+        const readyToShip = activeOrders.filter(o => ['packed', 'ready_to_ship'].includes(o.status))
+        const toFulfill = activeOrders.filter(o => !['packed', 'ready_to_ship'].includes(o.status))
 
-    // SHIPPED - Orders in transit
-    const shipped = shippingOrders.filter(
-      (o) => ['shipped', 'in_transit'].includes(o.status)
-    )
-
-    // DELIVERED - Completed orders (show recent)
-    const delivered = shippingOrders.filter(
-      (o) => o.status === 'delivered'
-    )
-
-    // Apply filter - Apple style: simple groups
-    if (statusFilter === 'all') {
-      if (newOrders.length > 0) {
-        groups.push({ title: 'New', data: newOrders })
+        if (readyToShip.length > 0) groups.push({ title: 'Ready to Ship', data: readyToShip })
+        if (toFulfill.length > 0) groups.push({ title: 'To Fulfill', data: toFulfill })
       }
-      if (shipped.length > 0) {
-        groups.push({ title: 'Shipped', data: shipped })
-      }
-      if (delivered.length > 0) {
-        groups.push({ title: 'Delivered', data: delivered.slice(0, 10) }) // Show last 10
-      }
-    } else if (statusFilter === 'active') {
-      if (newOrders.length > 0) {
-        groups.push({ title: 'New', data: newOrders })
-      }
-    } else if (statusFilter === 'shipped') {
-      if (shipped.length > 0) {
-        groups.push({ title: 'Shipped', data: shipped })
-      }
-    } else if (statusFilter === 'delivered') {
-      if (delivered.length > 0) {
-        groups.push({ title: 'Delivered', data: delivered })
+    } else {
+      if (completedOrders.length > 0) {
+        // All shipped/delivered together
+        groups.push({ title: 'Shipped', data: completedOrders.slice(0, 50) })
       }
     }
 
     return groups
-  }, [shippingOrders, statusFilter])
+  }, [viewSegment, activeOrders, completedOrders])
 
   // Flatten for FlatList
   const flatListData = useMemo(() => {
@@ -119,26 +162,92 @@ export function ECommerceView({ isLoading = false }: ECommerceViewProps) {
     )
   }
 
-  // Filter pills for status filtering - Apple simple
-  const filterPills: FilterPill[] = [
-    { id: 'all', label: 'All' },
-    { id: 'active', label: 'New' },
-    { id: 'shipped', label: 'Shipped' },
-    { id: 'delivered', label: 'Delivered' },
-  ]
+  // Handle segment change with haptic
+  const handleSegmentChange = (segment: 'active' | 'completed') => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    setViewSegment(segment)
+  }
+
+  // Render the header with title and segmented control
+  const renderHeader = () => (
+    <>
+      <TitleSection
+        title="E-Commerce"
+        logo={vendor?.logo_url}
+        subtitle={`${shippingOrders.length} shipping ${shippingOrders.length === 1 ? 'order' : 'orders'}`}
+        hideButton
+        secondaryButtonText={locationButtonLabel}
+        secondaryButtonIcon="location-outline"
+        onSecondaryButtonPress={openLocationSelector}
+      />
+
+      {/* Apple-style Segmented Control */}
+      <View style={styles.segmentWrapper}>
+        <View style={styles.segmentContainer}>
+          <Pressable
+            style={[
+              styles.segmentButton,
+              viewSegment === 'active' && styles.segmentButtonActive,
+            ]}
+            onPress={() => handleSegmentChange('active')}
+          >
+            <Text style={[
+              styles.segmentText,
+              viewSegment === 'active' && styles.segmentTextActive,
+            ]}>
+              Active{activeCount > 0 ? ` (${activeCount})` : ''}
+            </Text>
+          </Pressable>
+          <Pressable
+            style={[
+              styles.segmentButton,
+              viewSegment === 'completed' && styles.segmentButtonActive,
+            ]}
+            onPress={() => handleSegmentChange('completed')}
+          >
+            <Text style={[
+              styles.segmentText,
+              viewSegment === 'completed' && styles.segmentTextActive,
+            ]}>
+              Completed{completedCount > 0 ? ` (${completedCount})` : ''}
+            </Text>
+          </Pressable>
+        </View>
+      </View>
+
+      {/* Date Filter Row - Below Segment */}
+      <View style={styles.dateFilterWrapper}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.dateFilterContainer}
+        >
+          {dateFilterPills.map((pill) => (
+            <Pressable
+              key={pill.id}
+              style={[
+                styles.dateFilterPill,
+                dateRange === pill.id && styles.dateFilterPillActive,
+              ]}
+              onPress={() => handleDateFilterSelect(pill.id)}
+            >
+              <Text style={[
+                styles.dateFilterText,
+                dateRange === pill.id && styles.dateFilterTextActive,
+              ]}>
+                {pill.label}
+              </Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+      </View>
+    </>
+  )
 
   if (isLoading) {
     return (
       <>
-        <TitleSection
-          title="E-Commerce"
-          logo={vendor?.logo_url}
-          subtitle={`${shippingOrders.length} shipping ${shippingOrders.length === 1 ? 'order' : 'orders'}`}
-          hideButton
-          filterPills={dateFilterPills}
-          activeFilterId={dateRange}
-          onFilterSelect={(id) => setDateRange(id as DateRange)}
-        />
+        {renderHeader()}
         <View style={styles.loadingContainer}>
           <ActivityIndicator color={colors.text.secondary} />
         </View>
@@ -149,15 +258,7 @@ export function ECommerceView({ isLoading = false }: ECommerceViewProps) {
   if (flatListData.length === 0) {
     return (
       <>
-        <TitleSection
-          title="E-Commerce"
-          logo={vendor?.logo_url}
-          subtitle={`${shippingOrders.length} shipping ${shippingOrders.length === 1 ? 'order' : 'orders'}`}
-          hideButton
-          filterPills={dateFilterPills}
-          activeFilterId={dateRange}
-          onFilterSelect={(id) => setDateRange(id as DateRange)}
-        />
+        {renderHeader()}
         <View style={styles.emptyState}>
           <Text style={styles.emptyStateTitle}>No Shipping Orders</Text>
           <Text style={styles.emptyStateText}>
@@ -173,17 +274,7 @@ export function ECommerceView({ isLoading = false }: ECommerceViewProps) {
       data={flatListData}
       renderItem={renderItem}
       keyExtractor={(item, index) => `section-${item.group.title}-${index}`}
-      ListHeaderComponent={() => (
-        <TitleSection
-          title="E-Commerce"
-          logo={vendor?.logo_url}
-          subtitle={`${shippingOrders.length} shipping ${shippingOrders.length === 1 ? 'order' : 'orders'}`}
-          hideButton
-          filterPills={dateFilterPills}
-          activeFilterId={dateRange}
-          onFilterSelect={(id) => setDateRange(id as DateRange)}
-        />
-      )}
+      ListHeaderComponent={renderHeader}
       contentContainerStyle={ordersStyles.flatListContent}
       showsVerticalScrollIndicator={true}
       indicatorStyle="white"
@@ -219,5 +310,64 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: colors.text.secondary,
     textAlign: 'center',
+  },
+  // Apple-style Segmented Control
+  segmentWrapper: {
+    paddingHorizontal: layout.contentHorizontal,
+    marginBottom: spacing.md,
+  },
+  segmentContainer: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(118,118,128,0.24)',
+    borderRadius: 9,
+    padding: 2,
+  },
+  segmentButton: {
+    flex: 1,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 7,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  segmentButtonActive: {
+    backgroundColor: 'rgba(255,255,255,0.2)',
+  },
+  segmentText: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: 'rgba(235,235,245,0.6)',
+  },
+  segmentTextActive: {
+    color: '#fff',
+    fontWeight: '600',
+  },
+  // Date Filter Row - Below Segment (Apple Style)
+  dateFilterWrapper: {
+    paddingHorizontal: layout.contentHorizontal,
+    marginBottom: spacing.md,
+  },
+  dateFilterContainer: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  dateFilterPill: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  dateFilterPillActive: {
+    backgroundColor: 'rgba(255,255,255,0.2)',
+  },
+  dateFilterText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: 'rgba(235,235,245,0.7)',
+    letterSpacing: -0.2,
+  },
+  dateFilterTextActive: {
+    color: '#fff',
+    fontWeight: '600',
   },
 })

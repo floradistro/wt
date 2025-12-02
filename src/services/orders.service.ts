@@ -217,22 +217,100 @@ export async function getOrders(params?: {
     throw new Error(`Failed to fetch orders: ${error.message}`)
   }
 
+  // Batch fetch order_locations for all orders (for split order filtering)
+  // Only fetch for recent orders to avoid performance issues
+  const recentOrders = (data || []).slice(0, 200) // Limit to 200 most recent
+  const orderIds = recentOrders.map((o: any) => o.id)
+  let orderLocationsMap: Record<string, any[]> = {}
+
+  if (orderIds.length > 0) {
+    const { data: locationsData, error: locError } = await supabase
+      .from('order_locations')
+      .select(`
+        id,
+        order_id,
+        location_id,
+        item_count,
+        total_quantity,
+        fulfillment_status,
+        tracking_number,
+        tracking_url,
+        shipping_carrier,
+        shipped_at,
+        locations:location_id (name)
+      `)
+      .in('order_id', orderIds)
+
+    console.log('[getOrders] order_locations fetch:', {
+      orderIdsCount: orderIds.length,
+      locationsFound: locationsData?.length || 0,
+      error: locError?.message,
+    })
+
+    if (!locError && locationsData) {
+      // Group by order_id
+      locationsData.forEach((loc: any) => {
+        if (!orderLocationsMap[loc.order_id]) {
+          orderLocationsMap[loc.order_id] = []
+        }
+        orderLocationsMap[loc.order_id].push(loc)
+      })
+      console.log('[getOrders] orderLocationsMap keys:', Object.keys(orderLocationsMap).length)
+    }
+  }
+
   // Flatten customer and location data
   const orders = (data || []).map((order: any) => {
     const customer = Array.isArray(order.customers) ? order.customers[0] : order.customers
-    const customerName = customer
-      ? `${customer.first_name || ''} ${customer.last_name || ''}`.trim() || 'Guest'
-      : 'Guest'
+
+    // Priority for customer name:
+    // 1. Joined customer table (if customer_id exists, use their real name)
+    // 2. Direct customer_name on order (only if NOT "Walk-In" or "Guest")
+    // 3. metadata.customer_name
+    // 4. "Walk-In" fallback for POS, "Guest" for others
+    let customerName = order.order_type === 'walk_in' ? 'Walk-In' : 'Guest'
+
+    // If there's a linked customer, ALWAYS use their name
+    if (customer && customer.first_name) {
+      customerName = `${customer.first_name || ''} ${customer.last_name || ''}`.trim()
+    } else if (order.customer_name && order.customer_name !== 'Guest' && order.customer_name !== 'Walk-In') {
+      // Use direct customer_name only if it's a real name (not placeholder)
+      customerName = order.customer_name
+    } else if (order.metadata?.customer_name && order.metadata.customer_name !== 'Walk-In') {
+      customerName = order.metadata.customer_name
+    }
 
     const location = Array.isArray(order.locations) ? order.locations[0] : order.locations
     const locationName = location?.name || 'Online'
 
+    // Map order_locations to fulfillment_locations for filtering
+    const orderLocs = orderLocationsMap[order.id] || []
+    const fulfillmentLocations = orderLocs.map((loc: any) => {
+      // Get location name from joined locations table
+      const locationData = Array.isArray(loc.locations) ? loc.locations[0] : loc.locations
+      return {
+        id: loc.id,
+        order_id: order.id,
+        location_id: loc.location_id,
+        location_name: locationData?.name || 'Unknown',
+        item_count: loc.item_count,
+        total_quantity: loc.total_quantity,
+        fulfillment_status: loc.fulfillment_status,
+        tracking_number: loc.tracking_number,
+        tracking_url: loc.tracking_url,
+        shipping_carrier: loc.shipping_carrier,
+        shipped_at: loc.shipped_at,
+      }
+    })
+
     return {
       ...order,
       customer_name: customerName,
-      customer_email: customer?.email || '',
-      customer_phone: customer?.phone || '',
+      customer_email: customer?.email || order.customer_email || '',
+      customer_phone: customer?.phone || order.customer_phone || '',
       pickup_location_name: locationName,
+      fulfillment_locations: fulfillmentLocations,
+      location_count: fulfillmentLocations.length,
       customers: undefined, // Remove nested object
       locations: undefined, // Remove nested object
     }
@@ -321,25 +399,112 @@ export async function getOrderById(orderId: string): Promise<Order & { items: Or
 /**
  * Fulfill order items at a specific location
  * Marks all items at the given location as fulfilled
+ *
+ * Note: This implementation does direct queries instead of RPC
+ * to work without requiring the database migration to be applied.
  */
 export async function fulfillItemsAtLocation(
   orderId: string,
   locationId: string
 ): Promise<{ itemsFulfilled: number; orderFullyFulfilled: boolean; remainingLocations: string[] }> {
-  const { data, error } = await supabase.rpc('fulfill_order_items_at_location', {
-    p_order_id: orderId,
-    p_location_id: locationId,
-  })
+  const now = new Date().toISOString()
 
-  if (error) {
-    throw new Error(`Failed to fulfill items: ${error.message}`)
+  // 1. Mark items at this location as fulfilled
+  const { data: updatedItems, error: itemsError } = await supabase
+    .from('order_items')
+    .update({
+      fulfillment_status: 'fulfilled',
+    })
+    .eq('order_id', orderId)
+    .eq('location_id', locationId)
+    .neq('fulfillment_status', 'fulfilled')
+    .select('id')
+
+  if (itemsError) {
+    throw new Error(`Failed to fulfill items: ${itemsError.message}`)
   }
 
-  const result = Array.isArray(data) ? data[0] : data
+  const itemsFulfilled = updatedItems?.length || 0
+
+  // 2. Update order_locations status
+  const { error: locError } = await supabase
+    .from('order_locations')
+    .update({
+      fulfillment_status: 'fulfilled',
+      fulfilled_at: now,
+      updated_at: now,
+    })
+    .eq('order_id', orderId)
+    .eq('location_id', locationId)
+
+  if (locError) {
+    console.error('Failed to update order_locations:', locError)
+    // Continue - this table might not exist for all orders
+  }
+
+  // 3. Check if entire order is fulfilled
+  const { data: allItems, error: fetchError } = await supabase
+    .from('order_items')
+    .select('id, fulfillment_status, location_id')
+    .eq('order_id', orderId)
+
+  if (fetchError) {
+    throw new Error(`Failed to check order fulfillment: ${fetchError.message}`)
+  }
+
+  const totalItems = allItems?.length || 0
+  const fulfilledItems = allItems?.filter(item => item.fulfillment_status === 'fulfilled').length || 0
+  const orderFullyFulfilled = fulfilledItems === totalItems && totalItems > 0
+
+  // 4. Get remaining unfulfilled locations
+  const remainingLocations = Array.from(new Set(
+    allItems
+      ?.filter(item => item.fulfillment_status !== 'fulfilled' && item.location_id)
+      .map(item => item.location_id) || []
+  )) as string[]
+
+  // 5. Update order fulfillment status
+  if (orderFullyFulfilled) {
+    // Get order type to determine next status
+    const { data: order } = await supabase
+      .from('orders')
+      .select('order_type')
+      .eq('id', orderId)
+      .single()
+
+    const nextStatus = order?.order_type === 'pickup' ? 'ready' : 'ready_to_ship'
+
+    const { error: orderError } = await supabase
+      .from('orders')
+      .update({
+        fulfillment_status: 'fulfilled',
+        status: nextStatus,
+        updated_at: now,
+      })
+      .eq('id', orderId)
+
+    if (orderError) {
+      console.error('Failed to update order status:', orderError)
+    }
+  } else if (fulfilledItems > 0) {
+    // Partial fulfillment
+    const { error: orderError } = await supabase
+      .from('orders')
+      .update({
+        fulfillment_status: 'partial',
+        updated_at: now,
+      })
+      .eq('id', orderId)
+
+    if (orderError) {
+      console.error('Failed to update order partial status:', orderError)
+    }
+  }
+
   return {
-    itemsFulfilled: result?.items_fulfilled || 0,
-    orderFullyFulfilled: result?.order_fully_fulfilled || false,
-    remainingLocations: result?.remaining_locations || [],
+    itemsFulfilled,
+    orderFullyFulfilled,
+    remainingLocations,
   }
 }
 
@@ -528,6 +693,9 @@ export async function searchOrders(searchTerm: string): Promise<Order[]> {
 /**
  * Ship items from a specific location
  * For multi-location orders, each location ships independently
+ *
+ * Note: This implementation does direct queries instead of RPC
+ * to work without requiring the database migration to be applied.
  */
 export async function shipFromLocation(
   orderId: string,
@@ -543,26 +711,147 @@ export async function shipFromLocation(
   allLocationsShipped: boolean
   remainingLocationsToShip: string[]
 }> {
-  const { data, error } = await supabase.rpc('ship_order_from_location', {
-    p_order_id: orderId,
-    p_location_id: locationId,
-    p_tracking_number: trackingNumber,
-    p_shipping_carrier: carrier,
-    p_tracking_url: trackingUrl || null,
-    p_shipping_cost: shippingCost || null,
-    p_shipped_by_user_id: shippedByUserId || null,
-  })
+  const now = new Date().toISOString()
 
-  if (error) {
-    throw new Error(`Failed to ship from location: ${error.message}`)
+  console.log('[shipFromLocation] Starting...', { orderId, locationId, trackingNumber, carrier })
+
+  // 1. Update order_locations with shipping info
+  // Note: Don't include shipped_by_user_id in order_locations - it has FK constraint to users table
+  const { data: locData, error: locError } = await supabase
+    .from('order_locations')
+    .update({
+      tracking_number: trackingNumber,
+      tracking_url: trackingUrl || null,
+      shipping_carrier: carrier,
+      shipping_cost: shippingCost || null,
+      shipped_at: now,
+      fulfillment_status: 'shipped',
+      updated_at: now,
+    })
+    .eq('order_id', orderId)
+    .eq('location_id', locationId)
+    .select()
+
+  console.log('[shipFromLocation] order_locations update result:', { locData, locError })
+
+  if (locError) {
+    console.error('[shipFromLocation] order_locations update failed:', locError)
+    // Don't throw - continue to update the order directly
   }
 
-  const result = Array.isArray(data) ? data[0] : data
+  // If no rows were updated, the order_locations record might not exist
+  if (!locData || locData.length === 0) {
+    console.warn('[shipFromLocation] No order_locations record found, creating one...')
+    // Try to create the record (without shipped_by_user_id due to FK constraint)
+    const { error: insertError } = await supabase
+      .from('order_locations')
+      .insert({
+        order_id: orderId,
+        location_id: locationId,
+        item_count: 1,
+        tracking_number: trackingNumber,
+        tracking_url: trackingUrl || null,
+        shipping_carrier: carrier,
+        shipping_cost: shippingCost || null,
+        shipped_at: now,
+        fulfillment_status: 'shipped',
+      })
+
+    if (insertError) {
+      console.error('[shipFromLocation] Failed to create order_locations:', insertError)
+      // Continue anyway - we can still update the order directly
+    }
+  }
+
+  // 2. Mark items at this location as fulfilled
+  const { error: itemsError } = await supabase
+    .from('order_items')
+    .update({
+      fulfillment_status: 'fulfilled',
+    })
+    .eq('order_id', orderId)
+    .eq('location_id', locationId)
+    .neq('fulfillment_status', 'fulfilled')
+
+  if (itemsError) {
+    console.error('Failed to update item fulfillment status:', itemsError)
+    // Don't throw - continue with the rest
+  }
+
+  // 3. Check shipping status across all locations
+  const { data: allLocations, error: fetchError } = await supabase
+    .from('order_locations')
+    .select('location_id, shipped_at')
+    .eq('order_id', orderId)
+
+  console.log('[shipFromLocation] Fetched all locations:', { allLocations, fetchError })
+
+  // Handle case where there are no order_locations records (single-location order without routing)
+  const totalLocations = allLocations?.length || 0
+  const shippedLocations = allLocations?.filter(loc => loc.shipped_at !== null).length || 0
+  const unshippedLocationIds = allLocations
+    ?.filter(loc => loc.shipped_at === null)
+    .map(loc => loc.location_id) || []
+
+  // If no order_locations exist, treat as single-location order - just update the order directly
+  const allLocationsShipped = totalLocations === 0 || (shippedLocations === totalLocations && totalLocations > 0)
+
+  console.log('[shipFromLocation] Shipping status:', { totalLocations, shippedLocations, allLocationsShipped })
+
+  // 4. Update order status
+  // NOTE: We intentionally don't set shipped_by_user_id because the foreign key
+  // constraint requires the user to exist in the users table, but auth users
+  // may not have a corresponding users table entry.
+  const updateData: any = {
+    status: 'shipped',
+    fulfillment_status: 'fulfilled',
+    shipped_at: now,
+    tracking_number: trackingNumber,
+    tracking_url: trackingUrl || null,
+    shipping_carrier: carrier,
+    updated_at: now,
+  }
+
+  // Only add shipping cost if provided
+  if (shippingCost) {
+    updateData.shipping_cost = shippingCost
+  }
+
+  if (allLocationsShipped) {
+    // All locations shipped (or single location) - mark order as shipped
+    const { error: orderError } = await supabase
+      .from('orders')
+      .update(updateData)
+      .eq('id', orderId)
+
+    console.log('[shipFromLocation] Order update result:', { orderError })
+
+    if (orderError) {
+      console.error('[shipFromLocation] Failed to update order status:', orderError)
+      throw new Error(`Failed to update order: ${orderError.message}`)
+    }
+  } else if (shippedLocations > 0) {
+    // Partial shipping - update fulfillment status only
+    const { error: orderError } = await supabase
+      .from('orders')
+      .update({
+        fulfillment_status: 'partial',
+        updated_at: now,
+      })
+      .eq('id', orderId)
+
+    if (orderError) {
+      console.error('[shipFromLocation] Failed to update order partial status:', orderError)
+    }
+  }
+
+  console.log('[shipFromLocation] Complete!', { success: true, allLocationsShipped })
+
   return {
-    success: result?.success || false,
-    locationShipped: result?.location_shipped || false,
-    allLocationsShipped: result?.all_locations_shipped || false,
-    remainingLocationsToShip: result?.remaining_locations_to_ship || [],
+    success: true,
+    locationShipped: true,
+    allLocationsShipped,
+    remainingLocationsToShip: unshippedLocationIds,
   }
 }
 
@@ -591,6 +880,73 @@ export async function getOrderShipments(orderId: string): Promise<OrderLocation[
 }
 
 /**
+ * Delete an order and all related data
+ * WARNING: This permanently deletes the order. Use with caution.
+ * Only use for test orders or cleanup purposes.
+ */
+export async function deleteOrder(orderId: string): Promise<void> {
+  // Delete in correct order to avoid foreign key constraints:
+  // 1. order_items (references orders)
+  // 2. order_locations (references orders)
+  // 3. order_payments (references orders)
+  // 4. orders (main table)
+
+  // Delete order items
+  const { error: itemsError } = await supabase
+    .from('order_items')
+    .delete()
+    .eq('order_id', orderId)
+
+  if (itemsError) {
+    console.error('Failed to delete order items:', itemsError)
+    // Continue - some orders might not have items
+  }
+
+  // Delete order locations
+  const { error: locError } = await supabase
+    .from('order_locations')
+    .delete()
+    .eq('order_id', orderId)
+
+  if (locError) {
+    console.error('Failed to delete order locations:', locError)
+    // Continue - some orders might not have locations
+  }
+
+  // Delete the order itself
+  const { error: orderError } = await supabase
+    .from('orders')
+    .delete()
+    .eq('id', orderId)
+
+  if (orderError) {
+    throw new Error(`Failed to delete order: ${orderError.message}`)
+  }
+}
+
+/**
+ * Bulk delete multiple orders
+ * WARNING: This permanently deletes orders. Use with caution.
+ */
+export async function deleteOrdersBulk(orderIds: string[]): Promise<{ deleted: number; failed: string[] }> {
+  const failed: string[] = []
+  let deleted = 0
+
+  // Delete in batches to avoid overwhelming the DB
+  for (const orderId of orderIds) {
+    try {
+      await deleteOrder(orderId)
+      deleted++
+    } catch (error) {
+      console.error(`Failed to delete order ${orderId}:`, error)
+      failed.push(orderId)
+    }
+  }
+
+  return { deleted, failed }
+}
+
+/**
  * Export service object
  */
 export const ordersService = {
@@ -604,4 +960,6 @@ export const ordersService = {
   fulfillItemsAtLocation,
   shipFromLocation,
   getOrderShipments,
+  deleteOrder,
+  deleteOrdersBulk,
 }

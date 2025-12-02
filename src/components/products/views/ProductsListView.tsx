@@ -14,7 +14,7 @@ import { View, Text, StyleSheet, Pressable, ScrollView, ActivityIndicator, Anima
 import * as Haptics from 'expo-haptics'
 import { Ionicons } from '@expo/vector-icons'
 import { ProductItem } from '@/components/products/list/ProductItem'
-import { ComplianceModal } from '@/components/products/ComplianceModal'
+import { InventoryHealthModal } from '@/components/products/InventoryHealthModal'
 import { TitleSection, LocationSelectorModal } from '@/components/shared'
 import type { FilterPill } from '@/components/shared'
 import { layout } from '@/theme/layout'
@@ -49,7 +49,7 @@ function ProductsListViewComponent({
 
   // Location selector modal state
   const [showLocationModal, setShowLocationModal] = useState(false)
-  const [showComplianceModal, setShowComplianceModal] = useState(false)
+  const [showHealthModal, setShowHealthModal] = useState(false)
 
   // Compute location display text
   const locationDisplayText = useMemo(() => {
@@ -270,9 +270,9 @@ function ProductsListViewComponent({
     setShowLocationModal(true)
   }, [])
 
-  const handleOpenCompliance = useCallback(() => {
+  const handleOpenHealth = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-    setShowComplianceModal(true)
+    setShowHealthModal(true)
   }, [])
 
   // Location names (simplified - just show count for now)
@@ -438,10 +438,10 @@ function ProductsListViewComponent({
             filterPills={locationPill}
             activeFilterId="location"
             onFilterSelect={handleLocationPillSelect}
-            secondaryButtonText="Compliance"
-            secondaryButtonIcon="shield-checkmark"
-            secondaryButtonColor="#34c759"
-            onSecondaryButtonPress={handleOpenCompliance}
+            secondaryButtonText="Health"
+            secondaryButtonIcon="pulse"
+            secondaryButtonColor="#60a5fa"
+            onSecondaryButtonPress={handleOpenHealth}
           />
 
           {/* Stock Filter Row */}
@@ -707,10 +707,10 @@ function ProductsListViewComponent({
         onClose={() => setShowLocationModal(false)}
       />
 
-      {/* Compliance Modal */}
-      <ComplianceModal
-        visible={showComplianceModal}
-        onClose={() => setShowComplianceModal(false)}
+      {/* Inventory Health Modal */}
+      <InventoryHealthModal
+        visible={showHealthModal}
+        onClose={() => setShowHealthModal(false)}
         products={products}
       />
     </View>

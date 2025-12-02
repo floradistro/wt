@@ -78,7 +78,7 @@ export function AppAuthProvider({ children }: AppAuthProviderProps) {
         // Get user's vendor
         const { data: userData, error: userError } = await supabase
           .from('users')
-          .select('id, role, vendor_id, vendors(id, store_name, logo_url)')
+          .select('id, role, vendor_id, vendors(id, store_name, logo_url, ecommerce_url)')
           .eq('auth_user_id', authUser.id)
           .maybeSingle()
 
@@ -154,7 +154,7 @@ export function AppAuthProvider({ children }: AppAuthProviderProps) {
 
       const { data: userData, error: userError } = await supabase
         .from('users')
-        .select('id, role, vendor_id, vendors(id, store_name, logo_url)')
+        .select('id, role, vendor_id, vendors(id, store_name, logo_url, ecommerce_url)')
         .eq('auth_user_id', authUser.id)
         .maybeSingle()
 

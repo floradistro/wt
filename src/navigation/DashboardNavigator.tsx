@@ -12,12 +12,16 @@ import { DockOffsetContext } from './DockOffsetContext'
 import { layout } from '@/theme/layout'
 import { device } from '@/theme'
 import { useOrderNotifications, setNotificationNavigator, clearNotificationNavigator } from '@/hooks/useOrderNotifications'
+import { useBadgeCounts } from '@/stores/order-filter.store'
 
 const screens = [POSScreen, ProductsScreen, OrdersScreen, CustomersScreen, SettingsScreen]
 
 export function DashboardNavigator() {
   // Enable location-aware order notifications globally
   useOrderNotifications()
+
+  // Get badge counts for orders needing action
+  const badgeCounts = useBadgeCounts()
 
   const [activeTab, setActiveTab] = useState(0)
   const [isFullWidth, setIsFullWidth] = useState(false)
@@ -67,7 +71,12 @@ export function DashboardNavigator() {
               </ErrorBoundary>
             </View>
           ))}
-          <Dock activeTab={activeTab} onTabChange={setActiveTab} centerX={dockCenterX} />
+          <Dock
+            activeTab={activeTab}
+            onTabChange={setActiveTab}
+            centerX={dockCenterX}
+            ordersBadgeCount={badgeCounts.needsAction}
+          />
         </View>
       </DockOffsetContext.Provider>
     </SafeAreaProvider>

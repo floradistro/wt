@@ -137,6 +137,8 @@ function ProductsScreenComponent() {
           .select(`
             id,
             name,
+            description,
+            short_description,
             sku,
             regular_price,
             sale_price,
@@ -256,6 +258,8 @@ function ProductsScreenComponent() {
           .select(`
             id,
             name,
+            description,
+            short_description,
             sku,
             regular_price,
             sale_price,

@@ -28,6 +28,7 @@ import * as Haptics from 'expo-haptics'
 import { Ionicons } from '@expo/vector-icons'
 import { FullScreenModal, modalStyles } from '@/components/shared'
 import { useOrdersStore, useOrders } from '@/stores/orders.store'
+import { useOrdersUIActions } from '@/stores/orders-ui.store'
 import { supabase } from '@/lib/supabase/client'
 import { useAppAuth } from '@/contexts/AppAuthContext'
 import { useLocationFilter } from '@/stores/location-filter.store'
@@ -70,6 +71,7 @@ export function ShipOrderModal({
 }: ShipOrderModalProps) {
   const { vendor, user } = useAppAuth()
   const { selectedLocationIds } = useLocationFilter()
+  const { markShipmentComplete } = useOrdersUIActions()
   const orders = useOrders()
   const order = orders.find(o => o.id === orderId)
 
@@ -194,18 +196,25 @@ export function ShipOrderModal({
         }
       } else {
         // Single location or legacy: Update order directly
+        // NOTE: We intentionally don't set shipped_by_user_id here because the
+        // foreign key constraint requires the user to exist in the users table,
+        // but auth users may not have a corresponding users table entry.
+        const updateData: Record<string, any> = {
+          status: 'shipped',
+          tracking_number: trackingNumber.trim(),
+          shipping_carrier: carrier,
+          tracking_url: trackingUrl,
+          shipped_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }
+
+        if (shippingCost) {
+          updateData.shipping_cost = parseFloat(shippingCost)
+        }
+
         const { error: updateError } = await supabase
           .from('orders')
-          .update({
-            status: 'shipped',
-            tracking_number: trackingNumber.trim(),
-            shipping_carrier: carrier,
-            tracking_url: trackingUrl,
-            shipped_at: new Date().toISOString(),
-            shipped_by_user_id: user?.id,
-            ...(shippingCost && { shipping_cost: parseFloat(shippingCost) }),
-            updated_at: new Date().toISOString(),
-          })
+          .update(updateData)
           .eq('id', orderId)
 
         if (updateError) {
@@ -216,9 +225,18 @@ export function ShipOrderModal({
       }
 
       // Send "Order Shipped" email notification if enabled and all locations shipped
+      console.log('[ShipOrderModal] Email check:', {
+        notifyCustomer,
+        ecommerceUrl: vendor?.ecommerce_url,
+        allLocationsShipped,
+        willSendEmail: notifyCustomer && vendor?.ecommerce_url && allLocationsShipped,
+      })
+
       if (notifyCustomer && vendor?.ecommerce_url && allLocationsShipped) {
         try {
           const ecommerceUrl = vendor.ecommerce_url.replace(/\/$/, '') // Remove trailing slash
+          logger.info('Sending shipped email', { ecommerceUrl, orderId, carrier, trackingNumber: trackingNumber.trim() })
+
           const response = await fetch(`${ecommerceUrl}/api/orders/${orderId}/send-status-update`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -226,25 +244,38 @@ export function ShipOrderModal({
               status: 'shipped',
               trackingNumber: trackingNumber.trim(),
               trackingUrl,
+              carrier, // Include carrier for email template
               updateStatus: false, // Already updated above
             }),
           })
 
           if (!response.ok) {
+            const errorText = await response.text()
             logger.warn('Failed to send shipped email, but order was updated', {
               status: response.status,
+              error: errorText,
+              url: `${ecommerceUrl}/api/orders/${orderId}/send-status-update`,
             })
           } else {
-            logger.info('Shipped email sent successfully')
+            const result = await response.json()
+            logger.info('Shipped email sent successfully', { resendId: result.resendId })
           }
         } catch (emailError) {
           // Don't fail the ship action if email fails
           logger.warn('Email notification failed', { error: emailError })
         }
+      } else if (notifyCustomer && !vendor?.ecommerce_url) {
+        logger.warn('Cannot send shipped email: vendor.ecommerce_url not configured')
       }
 
       // Refresh orders in store
+      console.log('[ShipOrderModal] Refreshing orders...')
       await useOrdersStore.getState().refreshOrders()
+      console.log('[ShipOrderModal] Orders refreshed, signaling detail views...')
+
+      // Signal detail views to reload their local shipment data
+      markShipmentComplete()
+      console.log('[ShipOrderModal] Done!')
 
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
 
@@ -255,10 +286,12 @@ export function ShipOrderModal({
       setNotifyCustomer(true)
 
       onClose()
-    } catch (error) {
-      logger.error('Failed to ship order', { error })
+    } catch (error: any) {
+      const errorMessage = error?.message || error?.toString?.() || JSON.stringify(error)
+      console.error('[ShipOrderModal] Ship failed:', error)
+      logger.error('Failed to ship order', { error, message: errorMessage })
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
-      Alert.alert('Error', 'Failed to mark order as shipped')
+      Alert.alert('Error', `Failed to mark order as shipped: ${errorMessage}`)
     } finally {
       setSaving(false)
     }

@@ -4,6 +4,14 @@
  * Principle: Global state for orders eliminates prop drilling and enables real-time updates
  * Replaces: useOrders hook (local state)
  *
+ * BULLETPROOF REAL-TIME ARCHITECTURE:
+ * 1. Supabase real-time subscription (primary) - instant updates
+ * 2. Granular insert/update/delete handling (no full refresh)
+ * 3. Auto-reconnection on channel errors
+ * 4. AppState listener - reconnect when app foregrounds
+ * 5. Heartbeat polling fallback (every 30s) - catches missed events
+ * 6. Connection state tracking for UI feedback
+ *
  * Benefits:
  * - Zero prop drilling
  * - Orders accessible anywhere in app
@@ -15,10 +23,14 @@
 import { create } from 'zustand'
 import { devtools } from 'zustand/middleware'
 import { useShallow } from 'zustand/react/shallow'
+import { AppState, type AppStateStatus } from 'react-native'
 import type { RealtimeChannel } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase/client'
 import { ordersService, type Order } from '@/services/orders.service'
 import { logger } from '@/utils/logger'
+
+// Connection states for UI feedback
+type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'reconnecting'
 
 interface OrdersState {
   // Data
@@ -31,18 +43,33 @@ interface OrdersState {
 
   // Real-time subscription
   realtimeChannel: RealtimeChannel | null
+  connectionState: ConnectionState
+  lastSyncAt: number | null
+
+  // Heartbeat fallback
+  heartbeatInterval: ReturnType<typeof setInterval> | null
+  appStateSubscription: { remove: () => void } | null
 
   // Actions
   loadOrders: (options?: LoadOrdersOptions) => Promise<void>
   refreshOrders: () => Promise<void>
+  silentRefresh: () => Promise<void>  // For heartbeat - no loading state
   getOrderById: (id: string) => Order | undefined
   updateOrderStatus: (orderId: string, status: Order['status']) => Promise<void>
   updatePaymentStatus: (orderId: string, status: Order['payment_status']) => Promise<void>
   cancelLoadOrders: () => void
 
-  // Real-time subscriptions
+  // Real-time subscriptions (bulletproof)
   subscribeToOrders: () => void
   unsubscribe: () => void
+
+  // Internal: granular updates
+  _handleInsert: (order: Order) => void
+  _handleUpdate: (order: Order) => void
+  _handleDelete: (orderId: string) => void
+  _startHeartbeat: () => void
+  _stopHeartbeat: () => void
+  _handleAppStateChange: (state: AppStateStatus) => void
 
   // Reset
   reset: () => void
@@ -55,12 +82,19 @@ interface LoadOrdersOptions {
   locationIds?: string[]
 }
 
+// Heartbeat interval (30 seconds) - catches any missed real-time events
+const HEARTBEAT_INTERVAL = 30000
+
 const initialState = {
   orders: [],
   loading: false,
   error: null,
   currentController: null,
   realtimeChannel: null,
+  connectionState: 'disconnected' as ConnectionState,
+  lastSyncAt: null,
+  heartbeatInterval: null,
+  appStateSubscription: null,
 }
 
 export const useOrdersStore = create<OrdersState>()(
@@ -129,18 +163,44 @@ export const useOrdersStore = create<OrdersState>()(
 
       /**
        * Refresh orders (reload with current filters)
-       * Used by real-time subscriptions
+       * Shows loading state - used by pull-to-refresh
        */
       refreshOrders: async () => {
         try {
-          logger.info('[OrdersStore] Refreshing orders')
+          set({ loading: true }, false, 'orders/refreshOrders/start')
+          logger.info('[OrdersStore] Refreshing orders (with loading)')
 
           const orders = await ordersService.getOrders({ limit: 500 })
 
-          set({ orders }, false, 'orders/refreshOrders')
+          set({
+            orders,
+            loading: false,
+            lastSyncAt: Date.now(),
+            error: null,
+          }, false, 'orders/refreshOrders')
         } catch (err) {
           logger.error('[OrdersStore] Failed to refresh orders:', err)
-          set({ error: err as Error }, false, 'orders/refreshOrders/error')
+          set({ error: err as Error, loading: false }, false, 'orders/refreshOrders/error')
+        }
+      },
+
+      /**
+       * Silent refresh - no loading state
+       * Used by heartbeat polling to avoid UI flicker
+       */
+      silentRefresh: async () => {
+        try {
+          logger.debug('[OrdersStore] Silent refresh (heartbeat)')
+
+          const orders = await ordersService.getOrders({ limit: 500 })
+
+          set({
+            orders,
+            lastSyncAt: Date.now(),
+          }, false, 'orders/silentRefresh')
+        } catch (err) {
+          logger.error('[OrdersStore] Silent refresh failed:', err)
+          // Don't set error state for silent refresh - just log it
         }
       },
 
@@ -213,49 +273,221 @@ export const useOrdersStore = create<OrdersState>()(
         }
       },
 
+      // ============================================
+      // GRANULAR REAL-TIME HANDLERS
+      // ============================================
+
+      /**
+       * Handle INSERT - add new order to top of list
+       */
+      _handleInsert: (order: Order) => {
+        logger.info('[OrdersStore] Real-time INSERT:', order.id)
+        set(
+          (state) => ({
+            orders: [order, ...state.orders.filter(o => o.id !== order.id)],
+            lastSyncAt: Date.now(),
+          }),
+          false,
+          'orders/realtime/insert'
+        )
+      },
+
+      /**
+       * Handle UPDATE - update existing order in place
+       */
+      _handleUpdate: (order: Order) => {
+        logger.info('[OrdersStore] Real-time UPDATE:', order.id)
+        set(
+          (state) => ({
+            orders: state.orders.map(o => o.id === order.id ? order : o),
+            lastSyncAt: Date.now(),
+          }),
+          false,
+          'orders/realtime/update'
+        )
+      },
+
+      /**
+       * Handle DELETE - remove order from list
+       */
+      _handleDelete: (orderId: string) => {
+        logger.info('[OrdersStore] Real-time DELETE:', orderId)
+        set(
+          (state) => ({
+            orders: state.orders.filter(o => o.id !== orderId),
+            lastSyncAt: Date.now(),
+          }),
+          false,
+          'orders/realtime/delete'
+        )
+      },
+
+      // ============================================
+      // HEARTBEAT FALLBACK (catches missed events)
+      // ============================================
+
+      /**
+       * Start heartbeat polling as fallback
+       * Runs every 30s to catch any missed real-time events
+       */
+      _startHeartbeat: () => {
+        // Stop existing heartbeat first
+        get()._stopHeartbeat()
+
+        logger.info('[OrdersStore] Starting heartbeat polling (30s)')
+
+        const interval = setInterval(() => {
+          logger.debug('[OrdersStore] Heartbeat tick')
+          get().silentRefresh()
+        }, HEARTBEAT_INTERVAL)
+
+        set({ heartbeatInterval: interval }, false, 'orders/startHeartbeat')
+      },
+
+      /**
+       * Stop heartbeat polling
+       */
+      _stopHeartbeat: () => {
+        const { heartbeatInterval } = get()
+        if (heartbeatInterval) {
+          logger.debug('[OrdersStore] Stopping heartbeat')
+          clearInterval(heartbeatInterval)
+          set({ heartbeatInterval: null }, false, 'orders/stopHeartbeat')
+        }
+      },
+
+      /**
+       * Handle app state changes (foreground/background)
+       * Reconnect when app comes to foreground
+       */
+      _handleAppStateChange: (nextAppState: AppStateStatus) => {
+        if (nextAppState === 'active') {
+          logger.info('[OrdersStore] App foregrounded - refreshing and reconnecting')
+
+          // Immediate refresh when foregrounding
+          get().silentRefresh()
+
+          // Reconnect real-time if disconnected
+          const { connectionState } = get()
+          if (connectionState !== 'connected') {
+            logger.info('[OrdersStore] Reconnecting real-time after foreground')
+            get().subscribeToOrders()
+          }
+        }
+      },
+
+      // ============================================
+      // BULLETPROOF REAL-TIME SUBSCRIPTION
+      // ============================================
+
       /**
        * Subscribe to real-time order updates
-       * Auto-refreshes when any order changes
+       * BULLETPROOF: granular updates, auto-reconnect, heartbeat fallback
        */
       subscribeToOrders: () => {
         // Unsubscribe from existing channel first
-        const { realtimeChannel } = get()
+        const { realtimeChannel, appStateSubscription } = get()
         if (realtimeChannel) {
           supabase.removeChannel(realtimeChannel)
         }
 
-        logger.info('[OrdersStore] Subscribing to real-time order updates')
+        set({ connectionState: 'connecting' }, false, 'orders/connecting')
+        logger.info('[OrdersStore] Subscribing to real-time order updates (bulletproof)')
 
         const channel = supabase
-          .channel('orders-changes')
+          .channel('orders-changes', {
+            config: {
+              presence: { key: 'orders' },
+            },
+          })
           .on(
             'postgres_changes',
             {
-              event: '*', // INSERT, UPDATE, DELETE
+              event: 'INSERT',
               schema: 'public',
               table: 'orders',
             },
             (payload) => {
-              logger.info('[OrdersStore] Real-time order change:', payload.eventType)
-
-              // Refresh orders on any change
-              get().refreshOrders()
+              get()._handleInsert(payload.new as Order)
             }
           )
-          .subscribe()
+          .on(
+            'postgres_changes',
+            {
+              event: 'UPDATE',
+              schema: 'public',
+              table: 'orders',
+            },
+            (payload) => {
+              get()._handleUpdate(payload.new as Order)
+            }
+          )
+          .on(
+            'postgres_changes',
+            {
+              event: 'DELETE',
+              schema: 'public',
+              table: 'orders',
+            },
+            (payload) => {
+              get()._handleDelete((payload.old as { id: string }).id)
+            }
+          )
+          .subscribe((status, err) => {
+            logger.info('[OrdersStore] Subscription status:', status)
+
+            if (status === 'SUBSCRIBED') {
+              set({ connectionState: 'connected' }, false, 'orders/connected')
+              logger.info('[OrdersStore] ✅ Real-time connected')
+            } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+              logger.error('[OrdersStore] ❌ Real-time error:', err)
+              set({ connectionState: 'reconnecting' }, false, 'orders/reconnecting')
+
+              // Auto-retry after 5 seconds
+              setTimeout(() => {
+                logger.info('[OrdersStore] Attempting reconnection...')
+                get().subscribeToOrders()
+              }, 5000)
+            } else if (status === 'CLOSED') {
+              set({ connectionState: 'disconnected' }, false, 'orders/disconnected')
+            }
+          })
+
+        // Start heartbeat fallback
+        get()._startHeartbeat()
+
+        // Listen for app foreground/background
+        if (!appStateSubscription) {
+          const subscription = AppState.addEventListener('change', get()._handleAppStateChange)
+          set({ appStateSubscription: subscription }, false, 'orders/appStateListener')
+        }
 
         set({ realtimeChannel: channel }, false, 'orders/subscribeToOrders')
       },
 
       /**
-       * Unsubscribe from real-time updates
+       * Unsubscribe from real-time updates (cleanup)
        */
       unsubscribe: () => {
-        const { realtimeChannel } = get()
+        const { realtimeChannel, appStateSubscription } = get()
+
+        // Stop heartbeat
+        get()._stopHeartbeat()
+
+        // Remove app state listener
+        if (appStateSubscription) {
+          appStateSubscription.remove()
+          set({ appStateSubscription: null }, false, 'orders/removeAppStateListener')
+        }
+
+        // Remove channel
         if (realtimeChannel) {
           logger.info('[OrdersStore] Unsubscribing from real-time updates')
           supabase.removeChannel(realtimeChannel)
-          set({ realtimeChannel: null }, false, 'orders/unsubscribe')
+          set({
+            realtimeChannel: null,
+            connectionState: 'disconnected',
+          }, false, 'orders/unsubscribe')
         }
       },
 
@@ -290,11 +522,18 @@ export const useOrdersLoading = () => useOrdersStore((state) => state.loading)
 // Get error state
 export const useOrdersError = () => useOrdersStore((state) => state.error)
 
+// Get connection state (for UI indicators)
+export const useConnectionState = () => useOrdersStore((state) => state.connectionState)
+
+// Get last sync timestamp
+export const useLastSyncAt = () => useOrdersStore((state) => state.lastSyncAt)
+
 // Get orders actions (with useShallow to prevent infinite loops)
 export const useOrdersActions = () => useOrdersStore(
   useShallow((state) => ({
     loadOrders: state.loadOrders,
     refreshOrders: state.refreshOrders,
+    silentRefresh: state.silentRefresh,
     getOrderById: state.getOrderById,
     updateOrderStatus: state.updateOrderStatus,
     updatePaymentStatus: state.updatePaymentStatus,
@@ -310,5 +549,7 @@ export const useOrdersState = () => useOrdersStore(
     orders: state.orders,
     loading: state.loading,
     error: state.error,
+    connectionState: state.connectionState,
+    lastSyncAt: state.lastSyncAt,
   }))
 )

@@ -87,6 +87,7 @@ export function AuthorizeNetModal({
             authorizenet_transaction_key: transactionKey.trim(),
             authorizenet_public_client_key: publicClientKey.trim(),
             authorizenet_signature_key: signatureKey.trim() || null,
+            environment,  // Now environment is included in updates
             is_ecommerce_processor: true,
           },
         })

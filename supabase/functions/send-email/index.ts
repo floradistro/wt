@@ -7,6 +7,7 @@
  * - Marketing emails (campaigns, promotions)
  * - Email tracking (sends, opens, clicks)
  * - Vendor settings (from name/email, enable/disable)
+ * - Template rendering from database (single source of truth)
  */
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
@@ -19,12 +20,16 @@ const corsHeaders = {
 }
 
 interface SendEmailRequest {
-  // Email content
+  // Email content - EITHER html OR templateSlug is required
   to: string
   toName?: string
-  subject: string
-  html: string
+  subject?: string // Optional if using template (template has default subject)
+  html?: string // Pre-rendered HTML (legacy support)
   text?: string
+
+  // Template-based rendering (preferred - single source of truth)
+  templateSlug?: string // e.g., 'order_confirmation', 'welcome', 'password_reset'
+  variables?: Record<string, any> // Template variables for rendering
 
   // Email type and tracking
   emailType: 'transactional' | 'marketing'
@@ -66,6 +71,62 @@ interface EmailSendRecord {
   metadata?: Record<string, any>
 }
 
+/**
+ * Render Handlebars-style template with variables
+ * Supports: {{var}}, {{#if var}}...{{/if}}, {{#each arr}}...{{/each}}, {{#unless var}}...{{/unless}}
+ */
+function renderTemplate(template: string, variables: Record<string, any>): string {
+  let rendered = template
+
+  // Handle {{#each array}}...{{/each}} blocks
+  const eachRegex = /\{\{#each\s+(\w+)\}\}([\s\S]*?)\{\{\/each\}\}/g
+  rendered = rendered.replace(eachRegex, (match, arrayName, content) => {
+    const arr = variables[arrayName]
+    if (!Array.isArray(arr)) return ''
+    return arr.map((item) => {
+      let itemRendered = content
+      // Replace item-level variables
+      if (typeof item === 'object' && item !== null) {
+        Object.entries(item).forEach(([key, value]) => {
+          const itemVarRegex = new RegExp(`\\{\\{${key}\\}\\}`, 'g')
+          itemRendered = itemRendered.replace(itemVarRegex, String(value ?? ''))
+        })
+      }
+      return itemRendered
+    }).join('')
+  })
+
+  // Handle {{#if var}}...{{else}}...{{/if}} blocks (with else)
+  const ifElseRegex = /\{\{#if\s+(\w+)\}\}([\s\S]*?)\{\{else\}\}([\s\S]*?)\{\{\/if\}\}/g
+  rendered = rendered.replace(ifElseRegex, (match, varName, ifContent, elseContent) => {
+    const value = variables[varName]
+    return value ? ifContent : elseContent
+  })
+
+  // Handle {{#if var}}...{{/if}} blocks (without else)
+  const ifRegex = /\{\{#if\s+(\w+)\}\}([\s\S]*?)\{\{\/if\}\}/g
+  rendered = rendered.replace(ifRegex, (match, varName, content) => {
+    const value = variables[varName]
+    return value ? content : ''
+  })
+
+  // Handle {{#unless var}}...{{/unless}} blocks
+  const unlessRegex = /\{\{#unless\s+(\w+)\}\}([\s\S]*?)\{\{\/unless\}\}/g
+  rendered = rendered.replace(unlessRegex, (match, varName, content) => {
+    const value = variables[varName]
+    return !value ? content : ''
+  })
+
+  // Handle simple {{variable}} substitutions
+  const varRegex = /\{\{(\w+)\}\}/g
+  rendered = rendered.replace(varRegex, (match, varName) => {
+    const value = variables[varName]
+    return value !== undefined && value !== null ? String(value) : ''
+  })
+
+  return rendered
+}
+
 serve(async (req) => {
   console.log('📧 send-email function invoked')
   console.log('📧 Request method:', req.method)
@@ -94,9 +155,11 @@ serve(async (req) => {
     const {
       to,
       toName,
-      subject,
-      html,
+      subject: providedSubject,
+      html: providedHtml,
       text,
+      templateSlug,
+      variables = {},
       emailType,
       category,
       vendorId,
@@ -113,7 +176,8 @@ serve(async (req) => {
     console.log(`📧 Sending ${emailType} email to ${to}`, {
       category,
       vendorId,
-      subject,
+      templateSlug,
+      hasProvidedHtml: !!providedHtml,
     })
 
     // 1. Load vendor email settings
@@ -198,7 +262,53 @@ serve(async (req) => {
     const fromEmail = overrideFromEmail || vendorSettings?.from_email || 'noreply@whaletools.io'
     const replyTo = overrideReplyTo || vendorSettings?.reply_to
 
-    // 5. Send email via Resend
+    // 5. Get HTML content - either from template or provided directly
+    let html: string
+    let subject: string
+    let resolvedTemplateId: string | undefined = templateId
+
+    if (templateSlug) {
+      // Fetch template from database
+      console.log(`📄 Fetching template: ${templateSlug} for vendor ${vendorId}`)
+
+      const { data: template, error: templateError } = await supabase
+        .from('email_templates')
+        .select('*')
+        .eq('vendor_id', vendorId)
+        .eq('slug', templateSlug)
+        .eq('is_active', true)
+        .single()
+
+      if (templateError || !template) {
+        console.error('❌ Template not found:', templateError)
+        throw new Error(`Template '${templateSlug}' not found for vendor`)
+      }
+
+      resolvedTemplateId = template.id
+
+      // Build template variables with vendor info
+      const templateVariables = {
+        ...variables,
+        vendor_name: vendorSettings?.from_name || 'Store',
+        vendor_logo: vendorSettings?.vendor_logo || '',
+        email_header_image: vendorSettings?.email_header_image_url || '',
+        year: new Date().getFullYear().toString(),
+      }
+
+      // Render template
+      html = renderTemplate(template.html_content, templateVariables)
+      subject = providedSubject || renderTemplate(template.subject, templateVariables)
+
+      console.log(`✅ Template rendered: ${template.name}`)
+    } else if (providedHtml) {
+      // Use provided HTML (legacy support)
+      html = providedHtml
+      subject = providedSubject || 'Message'
+    } else {
+      throw new Error('Either templateSlug or html must be provided')
+    }
+
+    // 6. Send email via Resend
     console.log(`📤 Sending via Resend from ${fromName} <${fromEmail}>`)
 
     const resendResponse = await resend.emails.send({
@@ -212,6 +322,7 @@ serve(async (req) => {
         { name: 'vendor_id', value: vendorId },
         { name: 'email_type', value: emailType },
         ...(category ? [{ name: 'category', value: category }] : []),
+        ...(templateSlug ? [{ name: 'template', value: templateSlug }] : []),
       ],
     })
 
@@ -222,13 +333,13 @@ serve(async (req) => {
 
     console.log(`✅ Email sent successfully. Resend ID: ${resendResponse.data.id}`)
 
-    // 6. Log email send to database
+    // 7. Log email send to database
     const emailSendRecord: EmailSendRecord = {
       vendor_id: vendorId,
       customer_id: customerId,
       order_id: orderId,
       campaign_id: campaignId,
-      template_id: templateId,
+      template_id: resolvedTemplateId,
       email_type: emailType,
       to_email: to,
       to_name: toName,
@@ -239,7 +350,10 @@ serve(async (req) => {
       resend_email_id: resendResponse.data.id,
       status: 'sent',
       sent_at: new Date().toISOString(),
-      metadata,
+      metadata: {
+        ...metadata,
+        templateSlug,
+      },
     }
 
     const { error: insertError } = await supabase
@@ -253,13 +367,14 @@ serve(async (req) => {
       console.log('✅ Email send logged to database')
     }
 
-    // 7. Return success response
+    // 8. Return success response
     return new Response(
       JSON.stringify({
         success: true,
         resendId: resendResponse.data.id,
         emailType,
         category,
+        templateSlug,
       }),
       {
         status: 200,

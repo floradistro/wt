@@ -510,7 +510,7 @@ export function ProductDetail({ product, onBack, onProductUpdated }: ProductDeta
         <EditableDescriptionSection product={product} />
 
         {/* Lab Results / COA */}
-        <COASection product={product} />
+        <COASection product={product} onProductUpdated={onProductUpdated} />
 
         {/* Custom Fields */}
         <EditableCustomFieldsSection product={product} />

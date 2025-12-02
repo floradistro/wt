@@ -265,13 +265,42 @@ export const useProductEditStore = create<ProductEditState>()(
           const parsedCostPrice = parseFloat(state.editedCostPrice)
           const costPriceUpdate = !isNaN(parsedCostPrice) ? { cost_price: parsedCostPrice } : {}
 
+          // Fetch valid category field IDs to filter custom_fields
+          // This prevents orphaned/duplicate fields from being saved
+          let validCustomFields = state.editedCustomFields
+          if (state.originalProduct.primary_category_id) {
+            const { data: categoryFields } = await supabase
+              .from('vendor_product_fields')
+              .select('field_id')
+              .eq('vendor_id', vendorId)
+              .eq('category_id', state.originalProduct.primary_category_id)
+
+            if (categoryFields && categoryFields.length > 0) {
+              const validFieldIds = new Set(categoryFields.map(f => f.field_id))
+              // Only keep fields that are defined in the category template
+              // Remove empty values to keep the JSONB clean
+              validCustomFields = Object.fromEntries(
+                Object.entries(state.editedCustomFields).filter(([key, value]) => {
+                  const isValidKey = validFieldIds.has(key)
+                  const hasValue = value !== null && value !== undefined && value !== ''
+                  return isValidKey && hasValue
+                })
+              )
+              logger.info('[ProductEdit] Filtered custom fields to category template', {
+                original: Object.keys(state.editedCustomFields),
+                filtered: Object.keys(validCustomFields),
+                validFieldIds: Array.from(validFieldIds),
+              })
+            }
+          }
+
           const updatePayload = {
             name: state.editedName,
             sku: state.editedSKU,
             description: state.editedDescription,
             ...costPriceUpdate,
             pricing_data: pricingData,
-            custom_fields: state.editedCustomFields,
+            custom_fields: validCustomFields,
             updated_at: new Date().toISOString(),
           }
 

@@ -79,22 +79,38 @@ async function requestNotificationPermissions(): Promise<boolean> {
 
 /**
  * Show notification for new order
+ * For split orders, only shows items relevant to the specified location
  */
-async function showOrderNotification(order: Order) {
+async function showOrderNotification(
+  order: Order,
+  locationId: string,
+  fulfillmentType: 'pickup' | 'shipping' | 'mixed'
+) {
   try {
-    const orderTypeLabel = order.order_type === 'pickup' ? 'Store Pickup' : 'E-Commerce'
+    // Determine notification title based on what this location needs to do
+    let orderTypeLabel: string
+    if (fulfillmentType === 'pickup') {
+      orderTypeLabel = 'Store Pickup'
+    } else if (fulfillmentType === 'shipping') {
+      orderTypeLabel = 'Ship From Store'
+    } else {
+      orderTypeLabel = 'Split Order' // Both pickup and shipping at this location
+    }
+
     const customerName = (order.metadata as any)?.customer_name || order.customer_name || 'Guest'
 
-    // Fetch order items to show products
+    // Fetch order items ONLY for this location
     const { data: orderItems, error } = await supabase
       .from('order_items')
       .select(`
         quantity,
+        order_type,
         products (
           name
         )
       `)
       .eq('order_id', order.id)
+      .eq('location_id', locationId)
       .limit(3) // Only show first 3 items
 
     let bodyText = customerName
@@ -107,12 +123,13 @@ async function showOrderNotification(order: Order) {
 
       bodyText = `${customerName} • ${itemsList}`
 
-      // If there are more items, add indicator
+      // If there are more items at this location, add indicator
       if (orderItems.length === 3) {
         const { count } = await supabase
           .from('order_items')
           .select('*', { count: 'exact', head: true })
           .eq('order_id', order.id)
+          .eq('location_id', locationId)
 
         if (count && count > 3) {
           bodyText += ` +${count - 3} more`
@@ -123,12 +140,13 @@ async function showOrderNotification(order: Order) {
     console.log('🔔 [OrderNotifications] Scheduling notification...')
     console.log('🔔 Title:', `New ${orderTypeLabel} Order`)
     console.log('🔔 Body:', bodyText)
+    console.log('🔔 Fulfillment Type:', fulfillmentType)
 
     const result = await Notifications.scheduleNotificationAsync({
       content: {
         title: `New ${orderTypeLabel} Order`,
         body: bodyText,
-        data: { orderId: order.id, orderType: order.order_type },
+        data: { orderId: order.id, orderType: order.order_type, fulfillmentType },
         sound: true,
         priority: Notifications.AndroidNotificationPriority.HIGH,
       },
@@ -140,6 +158,7 @@ async function showOrderNotification(order: Order) {
     logger.info('[OrderNotifications] Notification shown:', {
       orderId: order.id,
       orderType: order.order_type,
+      fulfillmentType,
       customer: customerName,
       notificationId: result,
     })
@@ -225,7 +244,7 @@ export function useOrderNotifications() {
           console.log('🔔 [OrderNotifications] ===== NEW ORDER DETECTED =====')
           console.log('🔔 Order ID:', newOrder.id)
           console.log('🔔 Order Type:', newOrder.order_type)
-          console.log('🔔 Order Location:', newOrder.pickup_location_id)
+          console.log('🔔 Primary Location:', newOrder.pickup_location_id)
           console.log('🔔 Session Location:', locationId)
           console.log('🔔 Customer:', (newOrder.metadata as any)?.customer_name || newOrder.customer_name || 'Guest')
 
@@ -236,17 +255,59 @@ export function useOrderNotifications() {
             return
           }
 
-          // Filter: Only orders for current location
-          if (newOrder.pickup_location_id !== locationId) {
-            logger.info('[OrderNotifications] Skipping - different location')
-            console.log('🔔 [OrderNotifications] ❌ Skipping - different location')
+          // ========================================================================
+          // MULTI-LOCATION CHECK: Does THIS location have items to fulfill?
+          // For split orders, items may be routed to different locations
+          // ========================================================================
+
+          // Small delay to ensure order_items have been created by smart routing
+          await new Promise(resolve => setTimeout(resolve, 500))
+
+          // Check if this location has any items to fulfill
+          const { data: locationItems, error: itemsError } = await supabase
+            .from('order_items')
+            .select('id, order_type')
+            .eq('order_id', newOrder.id)
+            .eq('location_id', locationId)
+
+          if (itemsError) {
+            console.error('🔔 [OrderNotifications] ❌ Error checking location items:', itemsError)
             return
           }
 
-          console.log('🔔 [OrderNotifications] ✅ Showing notification!')
+          if (!locationItems || locationItems.length === 0) {
+            // No items at this location - check if maybe it's the primary pickup location
+            // (for backwards compatibility with orders that don't have location_id on items)
+            if (newOrder.pickup_location_id === locationId) {
+              console.log('🔔 [OrderNotifications] ✅ Primary pickup location match (legacy)')
+              const fulfillmentType = newOrder.order_type === 'pickup' ? 'pickup' : 'shipping'
+              await showOrderNotification(newOrder, locationId, fulfillmentType)
+              return
+            }
 
-          // Show notification
-          await showOrderNotification(newOrder)
+            logger.info('[OrderNotifications] Skipping - no items at this location')
+            console.log('🔔 [OrderNotifications] ❌ Skipping - no items at this location')
+            return
+          }
+
+          // Determine what type of fulfillment this location needs to do
+          const hasPickup = locationItems.some(item => item.order_type === 'pickup')
+          const hasShipping = locationItems.some(item => item.order_type === 'shipping')
+
+          let fulfillmentType: 'pickup' | 'shipping' | 'mixed'
+          if (hasPickup && hasShipping) {
+            fulfillmentType = 'mixed'
+          } else if (hasPickup) {
+            fulfillmentType = 'pickup'
+          } else {
+            fulfillmentType = 'shipping'
+          }
+
+          console.log('🔔 [OrderNotifications] ✅ Location has', locationItems.length, 'items to fulfill')
+          console.log('🔔 [OrderNotifications] Fulfillment type:', fulfillmentType)
+
+          // Show notification with location-specific info
+          await showOrderNotification(newOrder, locationId, fulfillmentType)
         }
       )
       .subscribe()

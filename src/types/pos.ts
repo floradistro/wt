@@ -7,6 +7,7 @@ export interface Vendor {
   id: string
   store_name: string
   logo_url: string | null
+  ecommerce_url?: string | null
 }
 
 export interface User {

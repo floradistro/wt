@@ -4,30 +4,56 @@
  * Matches the web prototype's quick view style
  */
 
-import { View, Text, StyleSheet, Modal, Pressable, ScrollView, Image, Linking, Alert } from 'react-native'
+import { useState } from 'react'
+import { View, Text, StyleSheet, Modal, Pressable, ScrollView, Image, Linking, Alert, ActivityIndicator } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import * as Haptics from 'expo-haptics'
 import { Ionicons } from '@expo/vector-icons'
 import { WebView } from 'react-native-webview'
 import { radius } from '@/theme/tokens'
 import type { COA } from '@/services/coa.service'
-import { getCOAStatus } from '@/services/coa.service'
+import { getCOAStatus, parseCOAAndFillProduct } from '@/services/coa.service'
 import { logger } from '@/utils/logger'
 
 interface COADetailModalProps {
   visible: boolean
   coa: COA | null
+  productId?: string
+  vendorId?: string
   onClose: () => void
   onRemove?: () => void
+  onFieldsUpdated?: (fieldsUpdated: string[]) => void
 }
 
-export function COADetailModal({ visible, coa, onClose, onRemove }: COADetailModalProps) {
+export function COADetailModal({
+  visible,
+  coa,
+  productId,
+  vendorId,
+  onClose,
+  onRemove,
+  onFieldsUpdated,
+}: COADetailModalProps) {
   const insets = useSafeAreaInsets()
+  const [isParsing, setIsParsing] = useState(false)
+  const [parseResult, setParseResult] = useState<{ success: boolean; fieldsUpdated: string[] } | null>(null)
 
   if (!coa) return null
 
   const status = getCOAStatus(coa)
-  const isPDF = coa.file_url?.toLowerCase().endsWith('.pdf')
+  // Check if file is PDF - handle URLs with query params (e.g., ?t=123 for cache busting)
+  const fileUrlPath = coa.file_url?.split('?')[0] || ''
+  const isPDF = fileUrlPath.toLowerCase().endsWith('.pdf')
+  const canParse = !!(productId && vendorId && isPDF)
+
+  // Debug logging
+  console.log('[COADetailModal] Parse check:', {
+    productId,
+    vendorId,
+    fileUrl: coa.file_url?.substring(0, 50),
+    isPDF,
+    canParse,
+  })
 
   const handleOpenExternal = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
@@ -61,6 +87,54 @@ export function COADetailModal({ visible, coa, onClose, onRemove }: COADetailMod
         },
       ]
     )
+  }
+
+  const handleParseWithAI = async () => {
+    if (!canParse || isParsing) return
+
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+    setIsParsing(true)
+    setParseResult(null)
+
+    try {
+      logger.info('[COADetailModal] Starting AI parse', { coaId: coa.id, productId })
+      const result = await parseCOAAndFillProduct(coa.id, productId!, vendorId!)
+
+      setParseResult({
+        success: result.success,
+        fieldsUpdated: result.fieldsUpdated,
+      })
+
+      if (result.success && result.fieldsUpdated.length > 0) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+        onFieldsUpdated?.(result.fieldsUpdated)
+        Alert.alert(
+          'Fields Updated',
+          `Successfully extracted and filled ${result.fieldsUpdated.length} field(s):\n\n${result.fieldsUpdated.join(', ')}`,
+          [{ text: 'OK' }]
+        )
+      } else if (result.success && result.fieldsUpdated.length === 0) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning)
+        Alert.alert(
+          'No New Fields',
+          'COA was parsed but no empty fields were found to fill. Existing values are preserved.',
+          [{ text: 'OK' }]
+        )
+      } else {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
+        Alert.alert(
+          'Parse Failed',
+          result.error || 'Could not extract data from this COA. Try a clearer PDF.',
+          [{ text: 'OK' }]
+        )
+      }
+    } catch (error) {
+      logger.error('[COADetailModal] Parse failed:', error)
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
+      Alert.alert('Error', 'Failed to parse COA. Please try again.')
+    } finally {
+      setIsParsing(false)
+    }
   }
 
   const formatDate = (dateString: string | null) => {
@@ -351,12 +425,29 @@ export function COADetailModal({ visible, coa, onClose, onRemove }: COADetailMod
 
         {/* Footer Actions */}
         <View style={[styles.footer, { paddingBottom: insets.bottom + 16 }]}>
+          {/* AI Parse Button */}
+          {canParse && (
+            <Pressable
+              onPress={handleParseWithAI}
+              style={[styles.parseButton, isParsing && styles.parseButtonDisabled]}
+              disabled={isParsing}
+            >
+              {isParsing ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Ionicons name="sparkles" size={18} color="#fff" />
+              )}
+              <Text style={styles.parseButtonText}>
+                {isParsing ? 'Parsing...' : 'Fill Fields with AI'}
+              </Text>
+            </Pressable>
+          )}
           <Pressable onPress={handleDownload} style={styles.downloadButton}>
             <Ionicons name="download-outline" size={18} color="#fff" />
             <Text style={styles.downloadButtonText}>Download</Text>
           </Pressable>
           {onRemove && (
-            <Pressable onPress={handleRemove} style={styles.removeButton}>
+            <Pressable onPress={handleRemove} style={styles.removeButtonFooter}>
               <Ionicons name="trash-outline" size={18} color="#ff3b30" />
             </Pressable>
           )}
@@ -683,7 +774,25 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#fff',
   },
-  removeButton: {
+  parseButton: {
+    flex: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#5856D6',
+    borderRadius: 24,
+    paddingVertical: 14,
+  },
+  parseButtonDisabled: {
+    opacity: 0.6,
+  },
+  parseButtonText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  removeButtonFooter: {
     width: 50,
     alignItems: 'center',
     justifyContent: 'center',
