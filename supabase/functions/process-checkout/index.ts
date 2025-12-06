@@ -146,6 +146,7 @@ interface CheckoutRequest {
 
   // E-commerce specific
   is_ecommerce?: boolean
+  customer_email?: string  // Customer email for Auth.net billing info
   shipping_address?: {
     name?: string
     address: string
@@ -402,6 +403,29 @@ interface AuthorizeNetSaleRequest {
   description?: string
   customerId?: string
   customerIp?: string
+  // Billing and shipping info for Auth.net portal visibility
+  billTo?: {
+    firstName?: string
+    lastName?: string
+    company?: string
+    address?: string
+    city?: string
+    state?: string
+    zip?: string
+    country?: string
+    phoneNumber?: string
+    email?: string
+  }
+  shipTo?: {
+    firstName?: string
+    lastName?: string
+    company?: string
+    address?: string
+    city?: string
+    state?: string
+    zip?: string
+    country?: string
+  }
 }
 
 interface AuthorizeNetSaleResponse {
@@ -487,6 +511,34 @@ class AuthorizeNetClient {
           // NOTE: Removed customerId - UUID exceeds Authorize.Net's 20-char limit
           // Customer is already tracked in our orders table
           customerIP: request.customerIp,
+          // Billing info - shows in Auth.net portal for customer identification
+          ...(request.billTo && {
+            billTo: {
+              firstName: request.billTo.firstName,
+              lastName: request.billTo.lastName,
+              company: request.billTo.company,
+              address: request.billTo.address,
+              city: request.billTo.city,
+              state: request.billTo.state,
+              zip: request.billTo.zip,
+              country: request.billTo.country || 'US',
+              phoneNumber: request.billTo.phoneNumber,
+              email: request.billTo.email,
+            },
+          }),
+          // Shipping info - shows in Auth.net portal for order fulfillment
+          ...(request.shipTo && {
+            shipTo: {
+              firstName: request.shipTo.firstName,
+              lastName: request.shipTo.lastName,
+              company: request.shipTo.company,
+              address: request.shipTo.address,
+              city: request.shipTo.city,
+              state: request.shipTo.state,
+              zip: request.shipTo.zip,
+              country: request.shipTo.country || 'US',
+            },
+          }),
         },
       },
     }
@@ -1854,11 +1906,80 @@ serve(async (req) => {
           paymentProcessor.environment
         )
 
+        // Parse customer name for Auth.net (split "First Last" into firstName/lastName)
+        const shippingName = rawBody.shipping_address?.name || ''
+        const nameParts = shippingName.trim().split(/\s+/)
+        const firstName = nameParts[0] || ''
+        const lastName = nameParts.slice(1).join(' ') || nameParts[0] || '' // Use first name as last if only one name
+
         const anetRequest: AuthorizeNetSaleRequest = {
           amount: cardAmount, // Use cardAmount for split payments, body.total for card-only
           invoiceNumber: orderNumber,
-          description: `POS Sale - ${orderNumber}`,
+          description: body.is_ecommerce ? `E-Commerce Order - ${orderNumber}` : `POS Sale - ${orderNumber}`,
           customerId: body.customerId,
+          // Include billing info - visible in Auth.net Merchant Portal
+          billTo: {
+            firstName,
+            lastName,
+            address: rawBody.billing_address?.address || rawBody.shipping_address?.address,
+            city: rawBody.billing_address?.city || rawBody.shipping_address?.city,
+            state: rawBody.billing_address?.state || rawBody.shipping_address?.state,
+            zip: rawBody.billing_address?.zip || rawBody.shipping_address?.zip,
+            country: 'US',
+            phoneNumber: rawBody.shipping_address?.phone,
+            email: rawBody.customer_email,
+          },
+          // Include shipping info - visible in Auth.net Merchant Portal
+          shipTo: rawBody.shipping_address ? {
+            firstName,
+            lastName,
+            address: rawBody.shipping_address.address,
+            city: rawBody.shipping_address.city,
+            state: rawBody.shipping_address.state,
+            zip: rawBody.shipping_address.zip,
+            country: 'US',
+          } : undefined,
+        }
+
+        // ============================================================
+        // LOG CHECKOUT ATTEMPT BEFORE PAYMENT (Apple Engineering Standard)
+        // This ensures ALL payment attempts are tracked, even if they fail
+        // ============================================================
+        let checkoutAttemptId: string | null = null
+        try {
+          const { data: attempt, error: attemptError } = await supabaseAdmin
+            .from('checkout_attempts')
+            .insert({
+              vendor_id: body.vendorId,
+              customer_id: body.customerId || null,
+              customer_email: rawBody.customer_email,
+              customer_name: rawBody.shipping_address?.name,
+              customer_phone: rawBody.shipping_address?.phone,
+              shipping_address: rawBody.shipping_address,
+              billing_address: rawBody.billing_address,
+              items: body.items,
+              subtotal: body.subtotal,
+              tax_amount: body.taxAmount || 0,
+              shipping_cost: body.shipping || 0,
+              discount_amount: (body.loyaltyDiscountAmount || 0) + (body.campaignDiscountAmount || 0),
+              total_amount: body.total,
+              payment_method: rawBody.payment?.digital_wallet ? rawBody.payment.digital_wallet.type + '_pay' : 'card',
+              payment_processor: 'authorizenet',
+              status: 'processing',
+              source: body.is_ecommerce ? 'web' : 'pos',
+            })
+            .select('id')
+            .single()
+
+          if (!attemptError && attempt) {
+            checkoutAttemptId = attempt.id
+            console.log(`[${requestId}] Checkout attempt logged: ${checkoutAttemptId}`)
+          } else {
+            console.warn(`[${requestId}] Failed to log checkout attempt:`, attemptError)
+          }
+        } catch (logError) {
+          console.warn(`[${requestId}] Error logging checkout attempt:`, logError)
+          // Don't fail the payment - this is just tracking
         }
 
         try {
@@ -1870,6 +1991,7 @@ serve(async (req) => {
               amount: cardAmount,
               environment: paymentProcessor.environment,
               isSplit,
+              checkoutAttemptId,
             },
           })
 
@@ -1946,7 +2068,57 @@ serve(async (req) => {
             idempotency_key: idempotencyKey,
           })
 
-          // Check if approved
+          // ============================================================
+          // UPDATE CHECKOUT ATTEMPT WITH PAYMENT RESULT
+          // ============================================================
+          if (checkoutAttemptId) {
+            const attemptStatus = responseCode === '1' ? 'approved'
+              : responseCode === '2' ? 'declined'
+              : responseCode === '4' ? 'held_for_review'
+              : 'error'
+
+            const processorError = paymentResult.transactionResponse.errors?.[0]?.errorText
+              || paymentResult.transactionResponse.messages?.[0]?.description
+
+            // Build error context for declined/held payments (for staff to see)
+            const errorContext = (responseCode !== '1') ? {
+              response_code: responseCode,
+              response_reason: responseCode === '2' ? 'declined' : responseCode === '4' ? 'fraud_review' : 'error',
+              processor_message: processorError,
+              avs_result: paymentResult.transactionResponse.avsResultCode,
+              cvv_result: paymentResult.transactionResponse.cvvResultCode,
+              customer_name: rawBody.shipping_address?.name,
+              customer_email: rawBody.customer_email,
+              customer_phone: rawBody.shipping_address?.phone,
+              attempted_amount: cardAmount,
+              cart_summary: body.items?.map((i: any) => ({
+                name: i.productName,
+                qty: i.quantity,
+                price: i.unitPrice,
+              })),
+              timestamp: new Date().toISOString(),
+            } : null
+
+            await supabaseAdmin
+              .from('checkout_attempts')
+              .update({
+                status: attemptStatus,
+                processor_response_code: responseCode,
+                processor_transaction_id: paymentResult.transactionResponse.transId,
+                processor_auth_code: paymentResult.transactionResponse.authCode,
+                processor_error_message: processorError,
+                customer_error_message: responseCode === '2' ? 'Your card was declined.' : null,
+                error_context: errorContext,
+                processed_at: new Date().toISOString(),
+              })
+              .eq('id', checkoutAttemptId)
+          }
+
+          // Check response codes:
+          // 1 = Approved
+          // 2 = Declined
+          // 3 = Error
+          // 4 = Held for Review (fraud)
           if (responseCode === '1') {
             // Payment approved!
             console.log(`[${requestId}] Payment approved:`, {
@@ -1974,8 +2146,67 @@ serve(async (req) => {
               return await errorResponse(`Failed to finalize order: ${cardUpdateError.message}`, 500, requestId, allowedOrigin)
             }
 
+            // Link checkout attempt to order
+            if (checkoutAttemptId) {
+              await supabaseAdmin
+                .from('checkout_attempts')
+                .update({
+                  status: 'completed',
+                  order_id: order.id,
+                  order_number: orderNumber,
+                })
+                .eq('id', checkoutAttemptId)
+            }
+
+          } else if (responseCode === '4') {
+            // ============================================================
+            // HELD FOR FRAUD REVIEW - Payment captured but needs approval
+            // Staff MUST see this - customer was charged but order needs review
+            // ============================================================
+            console.warn(`[${requestId}] PAYMENT HELD FOR FRAUD REVIEW:`, {
+              transactionId: paymentResult.transactionResponse.transId,
+              customer: rawBody.shipping_address?.name,
+              email: rawBody.customer_email,
+              amount: cardAmount,
+            })
+
+            // Update order to 'pending_review' status so staff can see it
+            await supabaseAdmin
+              .from('orders')
+              .update({
+                status: 'pending_review', // Special status for fraud review
+                payment_status: 'held', // Payment captured but held
+                processor_transaction_id: paymentResult.transactionResponse.transId,
+                payment_authorization_code: paymentResult.transactionResponse.authCode,
+                card_type: paymentResult.transactionResponse.accountType,
+                card_last_four: paymentResult.transactionResponse.accountNumber?.replace('XXXX', ''),
+                payment_data: paymentResult,
+                metadata: {
+                  ...((order as any).metadata || {}),
+                  fraud_review: true,
+                  fraud_review_at: new Date().toISOString(),
+                },
+              })
+              .eq('id', order.id)
+
+            // Link checkout attempt to order
+            if (checkoutAttemptId) {
+              await supabaseAdmin
+                .from('checkout_attempts')
+                .update({
+                  order_id: order.id,
+                  order_number: orderNumber,
+                })
+                .eq('id', checkoutAttemptId)
+            }
+
+            // Return success to customer - they don't know it's under review
+            // Staff will handle the review in their dashboard
+            // Note: We return the order so customer gets confirmation
+            // but the order won't ship until staff approves in Auth.net
+
           } else {
-            // Payment declined or error
+            // Payment declined or error (responseCode 2 or 3)
             const errorMessage = paymentResult.transactionResponse.errors?.[0]?.errorText
               || paymentResult.transactionResponse.messages?.[0]?.description
               || 'Payment declined'
@@ -1985,6 +2216,44 @@ serve(async (req) => {
         } catch (error) {
           paymentError = error as Error
           console.error(`[${requestId}] Payment failed:`, error)
+
+          // Update checkout attempt with FULL error snapshot for staff
+          if (checkoutAttemptId) {
+            // Determine customer-facing error message
+            const customerMessage = paymentError.message.includes('declined')
+              ? 'Your card was declined. Please try a different payment method.'
+              : paymentError.message.includes('Invalid')
+              ? 'There was an issue with your card details. Please check and try again.'
+              : 'We couldn\'t process your payment. Please try again or contact support.'
+
+            await supabaseAdmin
+              .from('checkout_attempts')
+              .update({
+                status: 'error',
+                processor_error_message: paymentError.message,
+                customer_error_message: customerMessage,
+                error_context: {
+                  // Full error snapshot for staff debugging
+                  technical_error: paymentError.message,
+                  error_stack: paymentError.stack,
+                  payment_method: rawBody.payment?.digital_wallet ? rawBody.payment.digital_wallet.type + '_pay' : 'card',
+                  attempted_amount: cardAmount,
+                  customer_name: rawBody.shipping_address?.name,
+                  customer_email: rawBody.customer_email,
+                  customer_phone: rawBody.shipping_address?.phone,
+                  shipping_address: rawBody.shipping_address,
+                  cart_summary: body.items?.map((i: any) => ({
+                    name: i.productName,
+                    qty: i.quantity,
+                    price: i.unitPrice,
+                  })),
+                  timestamp: new Date().toISOString(),
+                  request_id: requestId,
+                },
+                processed_at: new Date().toISOString(),
+              })
+              .eq('id', checkoutAttemptId)
+          }
 
           // Log failed transaction
           await supabaseAdmin.from('payment_transactions').insert({
