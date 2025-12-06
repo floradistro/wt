@@ -1215,7 +1215,7 @@ serve(async (req) => {
       const productIds = body.items.map((item: any) => item.productId || item.product_id)
       const { data: currentProducts, error: priceCheckError } = await supabaseAdmin
         .from('products')
-        .select('id, retail_price, on_sale, sale_price, status')
+        .select('id, regular_price, price, on_sale, sale_price, status')
         .in('id', productIds)
 
       if (priceCheckError) {
@@ -1225,7 +1225,8 @@ serve(async (req) => {
         const productPriceMap = new Map<string, { price: number; status: string }>(
           currentProducts.map((p: any) => [
             p.id,
-            { price: p.on_sale && p.sale_price ? p.sale_price : p.retail_price, status: p.status }
+            // Use sale_price if on_sale, otherwise regular_price or price field
+            { price: p.on_sale && p.sale_price ? p.sale_price : (p.regular_price || p.price), status: p.status }
           ])
         )
 
@@ -1238,10 +1239,12 @@ serve(async (req) => {
 
           if (!productInfo) {
             unavailableProducts.push(item.productName || productId)
-          } else if (productInfo.status !== 'active') {
+          } else if (productInfo.status !== 'active' && productInfo.status !== 'published') {
+            // Products can be 'active' or 'published' depending on vendor setup
             unavailableProducts.push(item.productName || productId)
-          } else if (Math.abs(productInfo.price - item.unitPrice) > 0.01) {
-            // Price has changed since cart was built
+          } else if (productInfo.price !== null && productInfo.price !== undefined && Math.abs(productInfo.price - item.unitPrice) > 0.01) {
+            // Price has changed since cart was built (only check if product has a price set)
+            // Some products use pricing tiers/bulk pricing without a base price
             priceDiscrepancies.push(
               `${item.productName}: cart price $${item.unitPrice}, current price $${productInfo.price}`
             )
