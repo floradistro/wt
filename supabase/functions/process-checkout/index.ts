@@ -2152,28 +2152,30 @@ serve(async (req) => {
           invoiceNumber: orderNumber,
           description: body.is_ecommerce ? `E-Commerce Order - ${orderNumber}` : `POS Sale - ${orderNumber}`,
           customerId: body.customerId,
-          // Include billing info - visible in Auth.net Merchant Portal
-          billTo: {
-            firstName,
-            lastName,
-            address: rawBody.billing_address?.address || rawBody.shipping_address?.address,
-            city: rawBody.billing_address?.city || rawBody.shipping_address?.city,
-            state: rawBody.billing_address?.state || rawBody.shipping_address?.state,
-            zip: rawBody.billing_address?.zip || rawBody.shipping_address?.zip,
-            country: 'US',
-            phoneNumber: rawBody.shipping_address?.phone,
-            email: rawBody.customer_email,
-          },
-          // Include shipping info - visible in Auth.net Merchant Portal
-          shipTo: rawBody.shipping_address ? {
-            firstName,
-            lastName,
-            address: rawBody.shipping_address.address,
-            city: rawBody.shipping_address.city,
-            state: rawBody.shipping_address.state,
-            zip: rawBody.shipping_address.zip,
-            country: 'US',
-          } : undefined,
+          // Only include billTo/shipTo for e-commerce (POS doesn't have address data)
+          // This makes customer info visible in Auth.net Merchant Portal
+          ...(body.is_ecommerce && rawBody.shipping_address && {
+            billTo: {
+              firstName: firstName || undefined,
+              lastName: lastName || undefined,
+              address: rawBody.billing_address?.address || rawBody.shipping_address?.address || undefined,
+              city: rawBody.billing_address?.city || rawBody.shipping_address?.city || undefined,
+              state: rawBody.billing_address?.state || rawBody.shipping_address?.state || undefined,
+              zip: rawBody.billing_address?.zip || rawBody.shipping_address?.zip || undefined,
+              country: 'US',
+              phoneNumber: rawBody.shipping_address?.phone || undefined,
+              email: rawBody.customer_email || undefined,
+            },
+            shipTo: {
+              firstName: firstName || undefined,
+              lastName: lastName || undefined,
+              address: rawBody.shipping_address?.address || undefined,
+              city: rawBody.shipping_address?.city || undefined,
+              state: rawBody.shipping_address?.state || undefined,
+              zip: rawBody.shipping_address?.zip || undefined,
+              country: 'US',
+            },
+          }),
         }
 
         // ============================================================
