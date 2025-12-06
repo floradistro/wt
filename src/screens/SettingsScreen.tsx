@@ -163,7 +163,9 @@ function SettingsScreen() {
         startLoyaltyCampaignsRealtimeMonitoring(user.id)
         break
       case 'locations':
-        usePaymentProcessorsSettingsStore.getState().loadProcessors(user.id)
+        if (vendor?.id) {
+          usePaymentProcessorsSettingsStore.getState().loadProcessors(vendor.id)
+        }
         break
       // account and devtools don't need to load data
     }
@@ -174,7 +176,7 @@ function SettingsScreen() {
         stopLoyaltyCampaignsRealtimeMonitoring()
       }
     }
-  }, [user?.id, selectedCategoryId])
+  }, [user?.id, vendor?.id, selectedCategoryId])
 
   // iOS-style collapsing headers - instant transitions
   const accountHeaderOpacity = useRef(new Animated.Value(0)).current

@@ -20,6 +20,7 @@ import * as Haptics from 'expo-haptics'
 import type { Location } from '@/types/pos'
 import { useLoyaltyCampaignsStore, startLoyaltyCampaignsRealtimeMonitoring, stopLoyaltyCampaignsRealtimeMonitoring } from '@/stores/loyalty-campaigns.store'
 import { useLocationFilter } from '@/stores/location-filter.store'
+import { useTaxStore } from '@/stores/tax.store'
 import { useAppAuth } from './AppAuthContext'
 
 // ========================================
@@ -241,7 +242,7 @@ export function POSSessionProvider({ children, authUserId }: POSSessionProviderP
 
       const taxConfig = location?.settings?.tax_config || {}
       const taxRate = taxConfig.sales_tax_rate || 0.08
-      const taxName = taxConfig.tax_name
+      const taxName = taxConfig.tax_name || 'Sales Tax'
 
       const newSession: POSSession = {
         locationId,
@@ -258,6 +259,17 @@ export function POSSessionProvider({ children, authUserId }: POSSessionProviderP
 
       setSession(newSession)
       setApiConfig(newApiConfig)
+
+      // CRITICAL: Populate tax store cache so useCheckoutTotals uses correct rate
+      useTaxStore.setState((state) => ({
+        taxConfigs: {
+          ...state.taxConfigs,
+          [locationId]: {
+            salesTaxRate: taxRate,
+            taxName: taxName,
+          },
+        },
+      }))
 
       logger.info('[POSSessionContext] Location selected:', { locationId, locationName, taxRate })
     } catch (err) {

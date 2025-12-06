@@ -15,6 +15,7 @@ export type ApplyTo = 'all' | 'categories' | 'products'
 export type LocationScope = 'all' | 'specific'
 export type ScheduleType = 'always' | 'date_range' | 'recurring'
 export type ApplicationMethod = 'auto' | 'manual' | 'code'
+export type SalesChannel = 'both' | 'in_store' | 'online'
 
 export interface RecurringPattern {
   days?: number[] // 0-6 (Sun-Sat)
@@ -48,6 +49,7 @@ export interface Campaign {
   // Application method
   application_method: ApplicationMethod
   coupon_code?: string | null
+  sales_channel?: SalesChannel // 'both', 'in_store', 'online'
 
   // Visual
   badge_text?: string | null
@@ -316,6 +318,40 @@ export async function getManualCampaigns(
 }
 
 /**
+ * Get auto-apply campaigns for POS (in_store or both channels)
+ * Returns the best available automatic discount for in-store sales
+ */
+export async function getPOSAutoApplyCampaigns(
+  vendorId: string,
+  locationId?: string
+): Promise<Campaign[]> {
+  const { data, error } = await supabase
+    .from('deals')
+    .select('*')
+    .eq('vendor_id', vendorId)
+    .eq('is_active', true)
+    .eq('application_method', 'auto')
+    .in('sales_channel', ['in_store', 'both']) // Only POS-applicable deals
+    .order('discount_value', { ascending: false }) // Best discount first
+
+  if (error) {
+    throw new Error(`Failed to load POS auto-apply campaigns: ${error.message}`)
+  }
+
+  // Filter by location and schedule
+  return (data || []).filter((campaign) => {
+    if (!isCampaignActive(campaign)) return false
+
+    // Check location scope
+    if (campaign.location_scope === 'specific' && locationId) {
+      return campaign.location_ids.includes(locationId)
+    }
+
+    return true
+  })
+}
+
+/**
  * Record campaign usage after order completion
  */
 export async function recordCampaignUsage(params: {
@@ -389,6 +425,7 @@ export const campaignsService = {
   calculateCampaignDiscount,
   getApplicableCampaigns,
   getManualCampaigns,
+  getPOSAutoApplyCampaigns,
   recordCampaignUsage,
   getCampaignStats,
 }

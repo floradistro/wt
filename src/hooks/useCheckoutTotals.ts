@@ -18,10 +18,10 @@
  * - Display matches what customer pays
  */
 
-import { useMemo } from 'react'
+import { useMemo, useEffect } from 'react'
 import { useCartTotals } from '@/stores/cart.store'
 import { useLoyaltyState, loyaltyActions } from '@/stores/loyalty.store'
-import { useSelectedDiscountId } from '@/stores/checkout-ui.store'
+import { useSelectedDiscountId, checkoutUIActions } from '@/stores/checkout-ui.store'
 import { useCampaigns } from '@/stores/loyalty-campaigns.store'
 import { taxActions } from '@/stores/tax.store'
 import { usePOSSession } from '@/contexts/POSSessionContext'
@@ -69,6 +69,29 @@ export function useCheckoutTotals(): CheckoutTotals {
   const { loyaltyProgram, pointsToRedeem } = useLoyaltyState()
   const selectedDiscountId = useSelectedDiscountId()
   const campaigns = useCampaigns()
+
+  // Get POS-applicable auto-apply discounts (sales_channel: 'in_store' or 'both', application_method: 'auto')
+  const posAutoApplyDiscounts = useMemo(() => {
+    return campaigns.filter(d => {
+      if (!d.is_active) return false
+      if (d.application_method !== 'auto') return false
+      const salesChannel = (d as any).sales_channel || 'both'
+      return salesChannel === 'in_store' || salesChannel === 'both'
+    }).sort((a, b) => {
+      // Sort by discount value descending (best discount first)
+      // For percentage, higher % is better
+      // For fixed, higher $ is better
+      return b.discount_value - a.discount_value
+    })
+  }, [campaigns])
+
+  // Auto-apply the best POS discount if none selected and cart has items
+  useEffect(() => {
+    if (!selectedDiscountId && subtotal > 0 && posAutoApplyDiscounts.length > 0) {
+      const bestDiscount = posAutoApplyDiscounts[0]
+      checkoutUIActions.setSelectedDiscountId(bestDiscount.id)
+    }
+  }, [selectedDiscountId, subtotal, posAutoApplyDiscounts])
 
   // STEP 1: Get selected campaign discount
   const selectedDiscount = useMemo(() =>

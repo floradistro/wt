@@ -25,7 +25,7 @@ import { POSCheckoutModals } from './POSCheckoutModals'
 
 // Hooks
 import { useCustomerSelection } from '@/hooks/pos/useCustomerSelection'
-import { useCampaigns } from '@/hooks/useCampaigns'
+import { useCampaigns } from '@/stores/loyalty-campaigns.store'
 import { useCheckoutTotals } from '@/hooks/useCheckoutTotals'
 import { usePaymentProcessor } from '@/stores/payment-processor.store'
 import { useAuthStore } from '@/stores/auth.store'
@@ -145,8 +145,8 @@ export function POSCheckout({
     return Math.min(selectedCustomer.loyalty_points, maxPointsFromSubtotal)
   }
 
-  // Get active discounts
-  const { campaigns: discounts } = useCampaigns()
+  // Get active discounts from store
+  const discounts = useCampaigns()
   const activeDiscounts = useMemo(() =>
     discounts.filter(d => d.is_active),
     [discounts]

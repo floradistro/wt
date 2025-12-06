@@ -9,7 +9,7 @@
  */
 
 import React, { useState, useEffect, memo } from 'react'
-import { View, Text, ScrollView, Pressable, TextInput, Alert, ActivityIndicator } from 'react-native'
+import { View, Text, ScrollView, Pressable, TextInput, Alert, ActivityIndicator, Platform } from 'react-native'
 import * as Haptics from 'expo-haptics'
 import { Ionicons } from '@expo/vector-icons'
 import type { Customer, CustomerWithOrders } from '@/services/customers.service'
@@ -27,6 +27,8 @@ import {
 import {
   customersListActions,
 } from '@/stores/customers-list.store'
+import { useAppAuth } from '@/contexts/AppAuthContext'
+import { AddToWalletButton } from '../wallet'
 
 // ✅ ZERO PROPS!
 export const CustomerDetail = memo(() => {
@@ -34,6 +36,7 @@ export const CustomerDetail = memo(() => {
   const customer = useSelectedCustomerUI()
   const isEditing = useIsEditMode()
   const showLoyaltyModal = useActiveModal() === 'loyalty'
+  const { vendorId } = useAppAuth()
 
   // Local edit state (temporary form data)
   const [editedCustomer, setEditedCustomer] = useState<Partial<Customer>>(customer || {})
@@ -453,6 +456,19 @@ export const CustomerDetail = memo(() => {
             </View>
           </View>
         </View>
+
+        {/* Apple Wallet Section - iOS only */}
+        {Platform.OS === 'ios' && vendorId && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Loyalty Card</Text>
+            <AddToWalletButton
+              customerId={customer.id}
+              vendorId={vendorId}
+              customerName={customer.full_name || `${customer.first_name || ''} ${customer.last_name || ''}`.trim()}
+              loyaltyPoints={customer.loyalty_points || 0}
+            />
+          </View>
+        )}
 
         {/* Recent Orders Section */}
         <View style={styles.section}>

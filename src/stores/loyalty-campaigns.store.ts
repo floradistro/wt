@@ -267,6 +267,7 @@ export const useLoyaltyCampaignsStore = create<LoyaltyCampaignsState>()(
             recurring_pattern: data.recurring_pattern || null,
             application_method: data.application_method,
             coupon_code: data.coupon_code || null,
+            sales_channel: data.sales_channel || 'both', // 'both', 'in_store', 'online'
             badge_text: data.badge_text || null,
             badge_color: data.badge_color || null,
             max_uses_per_customer: data.max_uses_per_customer || null,

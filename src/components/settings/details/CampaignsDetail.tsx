@@ -11,6 +11,7 @@ import * as Haptics from "expo-haptics"
 import { colors, typography, spacing, radius } from "@/theme/tokens"
 import type { Campaign } from "@/types/campaigns"
 import { campaignsStyles as styles } from "./campaigns.styles"
+import { CampaignDetail } from "./CampaignDetail"
 
 function CampaignsDetail({
   campaigns,
@@ -30,15 +31,32 @@ function CampaignsDetail({
   onToggleStatus: any
 }) {
   const [editingId, setEditingId] = useState<string | 'new' | null>(null)
+  const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null)
   const [discountName, setDiscountName] = useState('')
   const [discountType, setDiscountType] = useState<'percentage' | 'fixed'>('percentage')
   const [discountValue, setDiscountValue] = useState(20)
+  const [applicationMethod, setApplicationMethod] = useState<'auto' | 'code'>('auto')
+  const [couponCode, setCouponCode] = useState('')
+  const [salesChannel, setSalesChannel] = useState<'both' | 'in_store' | 'online'>('both')
   const [isSaving, setIsSaving] = useState(false)
 
   const handleSaveDiscount = async () => {
     if (!discountName.trim()) {
       Alert.alert('Error', 'Please enter a discount name')
       return
+    }
+
+    // Validate coupon code if code method selected
+    if (applicationMethod === 'code') {
+      if (!couponCode.trim()) {
+        Alert.alert('Error', 'Please enter a coupon code')
+        return
+      }
+      // Check for valid coupon code format (alphanumeric, no spaces)
+      if (!/^[A-Z0-9]+$/i.test(couponCode.trim())) {
+        Alert.alert('Error', 'Coupon code can only contain letters and numbers')
+        return
+      }
     }
 
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
@@ -55,7 +73,9 @@ function CampaignsDetail({
       location_scope: 'all',
       location_ids: [],
       schedule_type: 'always',
-      application_method: 'auto',
+      application_method: applicationMethod,
+      coupon_code: applicationMethod === 'code' ? couponCode.trim().toUpperCase() : null,
+      sales_channel: salesChannel, // 'both', 'in_store', or 'online'
       badge_text: badgeText,
       badge_color: 'rgba(255,255,255,0.15)', // Match product list - borderless
     })
@@ -67,6 +87,9 @@ function CampaignsDetail({
       setDiscountName('')
       setDiscountValue(20)
       setDiscountType('percentage')
+      setApplicationMethod('auto')
+      setCouponCode('')
+      setSalesChannel('both')
     } else {
       Alert.alert('Error', result.error || 'Failed to create discount')
     }
@@ -77,13 +100,31 @@ function CampaignsDetail({
     setDiscountName('')
     setDiscountValue(20)
     setDiscountType('percentage')
+    setApplicationMethod('auto')
+    setCouponCode('')
+    setSalesChannel('both')
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
   }
 
   const onEditCampaign = (campaign: Campaign) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-    // TODO: Implement edit modal/flow
-    Alert.alert('Edit Campaign', `Edit "${campaign.name}"`)
+    setSelectedCampaign(campaign)
+  }
+
+  // If a campaign is selected, show the detail view
+  if (selectedCampaign) {
+    // Find the latest version of the campaign from the list (in case it was updated)
+    const latestCampaign = campaigns.find(c => c.id === selectedCampaign.id) || selectedCampaign
+
+    return (
+      <CampaignDetail
+        campaign={latestCampaign as any}
+        onBack={() => setSelectedCampaign(null)}
+        onUpdate={onUpdate}
+        onDelete={onDelete}
+        onToggleStatus={onToggleStatus}
+      />
+    )
   }
 
   if (isLoading) {
@@ -166,6 +207,84 @@ function CampaignsDetail({
                 />
               </View>
 
+              {/* Application Method - Auto (sitewide) or Code (coupon) */}
+              <View style={{ marginTop: spacing.md }}>
+                <Text style={styles.formLabel}>How to Apply</Text>
+                <View style={styles.tabSwitcher}>
+                  <Pressable
+                    onPress={() => setApplicationMethod('auto')}
+                    style={[styles.tab, applicationMethod === 'auto' && styles.tabActive]}
+                  >
+                    <Text style={[styles.tabText, applicationMethod === 'auto' && styles.tabTextActive]}>Automatic</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => setApplicationMethod('code')}
+                    style={[styles.tab, applicationMethod === 'code' && styles.tabActive]}
+                  >
+                    <Text style={[styles.tabText, applicationMethod === 'code' && styles.tabTextActive]}>Coupon Code</Text>
+                  </Pressable>
+                </View>
+                <Text style={{ ...typography.caption, color: colors.text.tertiary, marginTop: spacing.xs }}>
+                  {applicationMethod === 'auto'
+                    ? 'Applies automatically to all online orders'
+                    : 'Customer enters code at checkout'}
+                </Text>
+              </View>
+
+              {/* Coupon Code Input - only shown when code method selected */}
+              {applicationMethod === 'code' && (
+                <View style={{ marginTop: spacing.md }}>
+                  <Text style={styles.formLabel}>Coupon Code</Text>
+                  <View style={styles.formInputWrapper}>
+                    <TextInput
+                      value={couponCode}
+                      onChangeText={(text) => setCouponCode(text.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
+                      placeholder="e.g., SAVE20"
+                      placeholderTextColor={colors.text.quaternary}
+                      style={styles.formInput}
+                      autoCapitalize="characters"
+                      autoCorrect={false}
+                      maxLength={20}
+                    />
+                  </View>
+                  <Text style={{ ...typography.caption, color: colors.text.tertiary, marginTop: spacing.xs }}>
+                    Letters and numbers only, no spaces
+                  </Text>
+                </View>
+              )}
+
+              {/* Sales Channel - Where discount applies */}
+              <View style={{ marginTop: spacing.md }}>
+                <Text style={styles.formLabel}>Where to Apply</Text>
+                <View style={styles.tabSwitcher}>
+                  <Pressable
+                    onPress={() => setSalesChannel('both')}
+                    style={[styles.tab, salesChannel === 'both' && styles.tabActive]}
+                  >
+                    <Text style={[styles.tabText, salesChannel === 'both' && styles.tabTextActive]}>Both</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => setSalesChannel('in_store')}
+                    style={[styles.tab, salesChannel === 'in_store' && styles.tabActive]}
+                  >
+                    <Text style={[styles.tabText, salesChannel === 'in_store' && styles.tabTextActive]}>In-Store</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => setSalesChannel('online')}
+                    style={[styles.tab, salesChannel === 'online' && styles.tabActive]}
+                  >
+                    <Text style={[styles.tabText, salesChannel === 'online' && styles.tabTextActive]}>Online</Text>
+                  </Pressable>
+                </View>
+                <Text style={{ ...typography.caption, color: colors.text.tertiary, marginTop: spacing.xs }}>
+                  {salesChannel === 'both'
+                    ? 'Applies to POS and online orders'
+                    : salesChannel === 'in_store'
+                    ? 'Only applies to POS sales'
+                    : 'Only applies to online orders'}
+                </Text>
+              </View>
+
               <View style={{ flexDirection: 'row', gap: spacing.sm, marginTop: spacing.xl }}>
                 <Pressable
                   onPress={handleCancelEdit}
@@ -228,7 +347,17 @@ function CampaignsDetail({
                 <View style={styles.campaignInfo}>
                   <Text style={styles.campaignName} numberOfLines={1}>{campaign.name}</Text>
                   <Text style={styles.campaignType} numberOfLines={1}>
-                    {campaign.campaign_type || 'Campaign'}
+                    {(campaign as any).application_method === 'code' && (campaign as any).coupon_code
+                      ? `Code: ${(campaign as any).coupon_code}`
+                      : (campaign as any).application_method === 'auto'
+                      ? 'Auto-applies'
+                      : campaign.campaign_type || 'Campaign'}
+                    {' • '}
+                    {(campaign as any).sales_channel === 'in_store'
+                      ? 'In-Store'
+                      : (campaign as any).sales_channel === 'online'
+                      ? 'Online'
+                      : 'Both'}
                   </Text>
                 </View>
 

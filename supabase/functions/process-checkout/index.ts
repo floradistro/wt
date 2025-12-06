@@ -258,6 +258,134 @@ const PAYMENT_TIMEOUT = 120 // seconds (2 minutes)
 const MAX_RETRIES = 3
 const RETRY_DELAY_MS = 2000
 
+// ============================================================================
+// RETRY HELPER (Critical for reliability)
+// ============================================================================
+
+/**
+ * Checks if an error is retryable (transient network/connection issues)
+ * Non-retryable: validation, auth, constraint violations, duplicates
+ */
+function isRetryableError(error: any): boolean {
+  const message = (error?.message || error?.code || '').toLowerCase()
+  const code = error?.code || ''
+
+  // Supabase/Postgres error codes that are retryable
+  const retryableCodes = [
+    '08000', // Connection error
+    '08003', // Connection does not exist
+    '08006', // Connection failure
+    '57P01', // Admin shutdown
+    '57P02', // Crash shutdown
+    '57P03', // Cannot connect now
+    '40001', // Serialization failure
+    '40P01', // Deadlock
+  ]
+
+  if (retryableCodes.includes(code)) return true
+
+  // Network/timeout errors
+  if (message.includes('timeout') ||
+      message.includes('connection') ||
+      message.includes('network') ||
+      message.includes('econnrefused') ||
+      message.includes('econnreset')) {
+    return true
+  }
+
+  // Non-retryable errors
+  if (message.includes('validation') ||
+      message.includes('unauthorized') ||
+      message.includes('forbidden') ||
+      message.includes('constraint') ||
+      message.includes('duplicate') ||
+      message.includes('unique')) {
+    return false
+  }
+
+  // Default to retryable for unknown errors
+  return true
+}
+
+/**
+ * Executes a Supabase operation with exponential backoff retry
+ * Handles Supabase's {data, error} return format
+ */
+async function withRetry<T>(
+  operation: () => Promise<{ data: T | null; error: any }>,
+  operationName: string,
+  requestId: string,
+  maxRetries: number = MAX_RETRIES,
+  baseDelayMs: number = RETRY_DELAY_MS
+): Promise<{ data: T; error: null }> {
+  let lastError: any = null
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    const result = await operation()
+
+    if (!result.error) {
+      if (attempt > 1) {
+        console.log(`[${requestId}] ${operationName} succeeded on attempt ${attempt}`)
+      }
+      return { data: result.data as T, error: null }
+    }
+
+    lastError = result.error
+
+    if (!isRetryableError(lastError) || attempt === maxRetries) {
+      console.error(`[${requestId}] ${operationName} failed after ${attempt} attempt(s):`, lastError)
+      return { data: null as any, error: lastError }
+    }
+
+    // Exponential backoff with jitter
+    const delay = baseDelayMs * Math.pow(2, attempt - 1) + Math.random() * 500
+    console.warn(`[${requestId}] ${operationName} failed (attempt ${attempt}/${maxRetries}), retrying in ${Math.round(delay)}ms:`, lastError.message || lastError.code)
+
+    await new Promise(resolve => setTimeout(resolve, delay))
+  }
+
+  return { data: null as any, error: lastError }
+}
+
+/**
+ * Executes a direct SQL operation (throws on error) with retry
+ * Used for direct postgres client calls like inventory release
+ */
+async function withDirectSqlRetry<T>(
+  operation: () => Promise<T>,
+  operationName: string,
+  requestId: string,
+  maxRetries: number = MAX_RETRIES,
+  baseDelayMs: number = RETRY_DELAY_MS
+): Promise<T> {
+  let lastError: Error | null = null
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const result = await operation()
+      if (attempt > 1) {
+        console.log(`[${requestId}] ${operationName} succeeded on attempt ${attempt}`)
+      }
+      return result
+    } catch (error) {
+      lastError = error as Error
+
+      if (!isRetryableError(lastError) || attempt === maxRetries) {
+        console.error(`[${requestId}] ${operationName} failed after ${attempt} attempt(s):`, lastError)
+        throw lastError
+      }
+
+      // Exponential backoff with jitter
+      const delay = baseDelayMs * Math.pow(2, attempt - 1) + Math.random() * 500
+      console.warn(`[${requestId}] ${operationName} failed (attempt ${attempt}/${maxRetries}), retrying in ${Math.round(delay)}ms:`, lastError.message)
+
+      await new Promise(resolve => setTimeout(resolve, delay))
+    }
+  }
+
+  throw lastError
+}
+
 // CORS: Whitelist of allowed origins (Apple security standard)
 const ALLOWED_ORIGINS = [
   'capacitor://localhost', // iOS app
@@ -1079,6 +1207,79 @@ serve(async (req) => {
       },
     })
 
+    // ========================================================================
+    // STEP 3.6: CART SNAPSHOT VALIDATION (Verify prices haven't changed)
+    // ========================================================================
+    // This prevents charging wrong amounts if prices changed during checkout
+    if (body.is_ecommerce) {
+      const productIds = body.items.map((item: any) => item.productId || item.product_id)
+      const { data: currentProducts, error: priceCheckError } = await supabaseAdmin
+        .from('products')
+        .select('id, retail_price, on_sale, sale_price, status')
+        .in('id', productIds)
+
+      if (priceCheckError) {
+        console.error(`[${requestId}] Price verification failed:`, priceCheckError)
+        // Allow checkout to proceed - don't fail on database read errors
+      } else if (currentProducts) {
+        const productPriceMap = new Map<string, { price: number; status: string }>(
+          currentProducts.map((p: any) => [
+            p.id,
+            { price: p.on_sale && p.sale_price ? p.sale_price : p.retail_price, status: p.status }
+          ])
+        )
+
+        const priceDiscrepancies: string[] = []
+        const unavailableProducts: string[] = []
+
+        for (const item of body.items) {
+          const productId = item.productId || item.product_id
+          const productInfo = productPriceMap.get(productId)
+
+          if (!productInfo) {
+            unavailableProducts.push(item.productName || productId)
+          } else if (productInfo.status !== 'active') {
+            unavailableProducts.push(item.productName || productId)
+          } else if (Math.abs(productInfo.price - item.unitPrice) > 0.01) {
+            // Price has changed since cart was built
+            priceDiscrepancies.push(
+              `${item.productName}: cart price $${item.unitPrice}, current price $${productInfo.price}`
+            )
+          }
+        }
+
+        if (unavailableProducts.length > 0) {
+          Sentry.captureMessage('Cart contains unavailable products', {
+            level: 'warning',
+            tags: { requestId, security: 'cart_validation' },
+            contexts: { cart: { unavailableProducts } },
+          })
+          return await errorResponse(
+            `The following items are no longer available: ${unavailableProducts.join(', ')}. Please refresh your cart and try again.`,
+            400,
+            requestId,
+            allowedOrigin
+          )
+        }
+
+        if (priceDiscrepancies.length > 0) {
+          Sentry.captureMessage('Cart price discrepancy detected', {
+            level: 'warning',
+            tags: { requestId, security: 'cart_validation' },
+            contexts: { cart: { priceDiscrepancies } },
+          })
+          return await errorResponse(
+            `Prices have changed since you added items to your cart. Please refresh your cart and try again.`,
+            400,
+            requestId,
+            allowedOrigin
+          )
+        }
+
+        console.log(`[${requestId}] Cart snapshot validation passed - all prices verified`)
+      }
+    }
+
     // Generate idempotency key if not provided
     const idempotencyKey = body.idempotencyKey || `${body.vendorId}-${Date.now()}-${requestId}`
 
@@ -1230,50 +1431,58 @@ serve(async (req) => {
     const orderType = body.order_type || (body.is_ecommerce ? 'shipping' : 'walk_in')
     const isPickupOrder = orderType === 'pickup'
 
-    const { data: order, error: orderError } = await supabaseAdmin
-      .from('orders')
-      .insert({
-        vendor_id: body.vendorId,
-        pickup_location_id: isPickupOrder ? body.pickup_location_id : (body.is_ecommerce ? null : body.locationId),
-        customer_id: body.customerId || null,
-        order_number: orderNumber,
-        order_type: orderType, // Respect frontend's order_type
-        delivery_type: isPickupOrder ? 'pickup' : (body.is_ecommerce ? 'shipping' : 'pickup'),
-        status: OrderStatus.PENDING,
-        payment_status: PaymentStatus.PENDING,
-        subtotal: body.subtotal,
-        tax_amount: body.taxAmount,
-        total_amount: body.total,
-        payment_method: body.paymentMethod,
-        idempotency_key: idempotencyKey,
-        created_by_user_id: createdByUserId, // ✅ APPLE WAY: Validated FK before insert
-        // E-commerce shipping address and cost (only for shipping orders, not pickup)
-        ...(body.is_ecommerce && !isPickupOrder && body.shipping_address ? {
-          shipping_name: body.shipping_address.name,
-          shipping_address_line1: body.shipping_address.address,
-          shipping_city: body.shipping_address.city,
-          shipping_state: body.shipping_address.state,
-          shipping_zip: body.shipping_address.zip,
-          shipping_phone: body.shipping_address.phone,
-          shipping_country: 'US',
-          shipping_cost: body.shipping || 0,
-        } : {}),
-        metadata: {
-          ...body.metadata,
-          customer_name: body.customerName || (body.is_ecommerce ? 'Online Customer' : 'Walk-In'),
-          loyalty_points_redeemed: body.loyaltyPointsRedeemed || 0,
-          loyalty_discount_amount: body.loyaltyDiscountAmount || 0,
-          campaign_discount_amount: body.campaignDiscountAmount || 0,
-          campaign_id: body.campaignId || null,
-          session_id: body.sessionId,
-          register_id: body.registerId,
-          request_id: requestId,
-          is_ecommerce: body.is_ecommerce || false,
-          billing_address: body.billing_address || null,
-        },
-      })
-      .select()
-      .single()
+    // Build order data object (for retry logic and error reporting)
+    const orderData = {
+      vendor_id: body.vendorId,
+      pickup_location_id: isPickupOrder ? body.pickup_location_id : (body.is_ecommerce ? null : body.locationId),
+      customer_id: body.customerId || null,
+      order_number: orderNumber,
+      order_type: orderType, // Respect frontend's order_type
+      delivery_type: isPickupOrder ? 'pickup' : (body.is_ecommerce ? 'shipping' : 'pickup'),
+      status: OrderStatus.PENDING,
+      payment_status: PaymentStatus.PENDING,
+      subtotal: body.subtotal,
+      tax_amount: body.taxAmount,
+      total_amount: body.total,
+      payment_method: body.paymentMethod,
+      idempotency_key: idempotencyKey,
+      created_by_user_id: createdByUserId, // ✅ APPLE WAY: Validated FK before insert
+      // E-commerce shipping address and cost (only for shipping orders, not pickup)
+      ...(body.is_ecommerce && !isPickupOrder && body.shipping_address ? {
+        shipping_name: body.shipping_address.name,
+        shipping_address_line1: body.shipping_address.address,
+        shipping_city: body.shipping_address.city,
+        shipping_state: body.shipping_address.state,
+        shipping_zip: body.shipping_address.zip,
+        shipping_phone: body.shipping_address.phone,
+        shipping_country: 'US',
+        shipping_cost: body.shipping || 0,
+      } : {}),
+      metadata: {
+        ...body.metadata,
+        customer_name: body.customerName || (body.is_ecommerce ? 'Online Customer' : 'Walk-In'),
+        loyalty_points_redeemed: body.loyaltyPointsRedeemed || 0,
+        loyalty_discount_amount: body.loyaltyDiscountAmount || 0,
+        campaign_discount_amount: body.campaignDiscountAmount || 0,
+        campaign_id: body.campaignId || null,
+        session_id: body.sessionId,
+        register_id: body.registerId,
+        request_id: requestId,
+        is_ecommerce: body.is_ecommerce || false,
+        billing_address: body.billing_address || null,
+      },
+    }
+
+    // CRITICAL: Order creation with retry for transient failures
+    const { data: order, error: orderError } = await withRetry(
+      () => supabaseAdmin
+        .from('orders')
+        .insert(orderData)
+        .select()
+        .single(),
+      'Order creation',
+      requestId
+    )
 
     if (orderError || !order) {
       console.error(`[${requestId}] Failed to create order:`, orderError)
@@ -1425,9 +1634,14 @@ serve(async (req) => {
 
     console.log(`[${requestId}] Inserting order items:`, JSON.stringify(orderItems, null, 2))
 
-    const { error: itemsError } = await supabaseAdmin
-      .from('order_items')
-      .insert(orderItems)
+    // CRITICAL: Order items creation with retry for transient failures
+    const { error: itemsError } = await withRetry(
+      () => supabaseAdmin
+        .from('order_items')
+        .insert(orderItems),
+      'Order items creation',
+      requestId
+    )
 
     if (itemsError) {
       // Rollback order
@@ -1828,23 +2042,33 @@ serve(async (req) => {
             transactionId: paymentResult.GeneralResponse.ReferenceId,
           })
 
-          const { error: cardUpdateError } = await supabaseAdmin
-            .from('orders')
-            .update({
-              status: OrderStatus.COMPLETED,
-              payment_status: PaymentStatus.PAID,
-              processor_transaction_id: paymentResult.GeneralResponse.ReferenceId,
-              payment_authorization_code: paymentResult.GeneralResponse.AuthCode,
-              card_type: paymentResult.CardData?.CardType,
-              card_last_four: paymentResult.CardData?.Last4,
-              payment_data: paymentResult,
-            })
-            .eq('id', order.id)
+          // CRITICAL: Update order status with retry (payment already processed!)
+          const { error: cardUpdateError } = await withRetry(
+            () => supabaseAdmin
+              .from('orders')
+              .update({
+                status: OrderStatus.COMPLETED,
+                payment_status: PaymentStatus.PAID,
+                processor_transaction_id: paymentResult.GeneralResponse.ReferenceId,
+                payment_authorization_code: paymentResult.GeneralResponse.AuthCode,
+                card_type: paymentResult.CardData?.CardType,
+                card_last_four: paymentResult.CardData?.Last4,
+                payment_data: paymentResult,
+              })
+              .eq('id', order.id),
+            'Order status update (SPIN payment success)',
+            requestId
+          )
 
           if (cardUpdateError) {
-            console.error(`[${requestId}] Failed to update order after successful card payment:`, cardUpdateError)
+            // CRITICAL: Payment succeeded but order update failed
+            console.error(`[${requestId}] CRITICAL: Payment approved but order update failed:`, cardUpdateError)
+            Sentry.captureException(new Error('Payment succeeded but order update failed'), {
+              level: 'fatal',
+              tags: { requestId, orderId: order.id, transactionId: paymentResult.GeneralResponse.ReferenceId },
+            })
             // Connection will be closed by finally block
-            return await errorResponse(`Failed to finalize order: ${cardUpdateError.message}`, 500, requestId, allowedOrigin)
+            return await errorResponse(`Payment was processed but failed to finalize order. Please contact support with reference: ${paymentResult.GeneralResponse.ReferenceId}`, 500, requestId, allowedOrigin)
           }
 
         } else {
@@ -1882,16 +2106,25 @@ serve(async (req) => {
           })
           .eq('id', order.id)
 
-        // Release inventory holds (payment failed)
+        // Release inventory holds (payment failed) - CRITICAL: Retry to ensure inventory is released
         try {
-          await dbClient.queryObject(
-            `SELECT release_inventory_holds($1, $2)`,
-            [order.id, 'payment_failed']
+          await withDirectSqlRetry(
+            () => dbClient.queryObject(
+              `SELECT release_inventory_holds($1, $2)`,
+              [order.id, 'payment_failed']
+            ),
+            'Inventory release (payment failed)',
+            requestId
           )
           console.log(`[${requestId}] Inventory holds released after payment failure`)
         } catch (releaseError) {
-          console.error(`[${requestId}] Failed to release inventory holds:`, releaseError)
-          // Don't fail the whole operation - holds will expire automatically
+          console.error(`[${requestId}] Failed to release inventory holds after retries:`, releaseError)
+          // Log to Sentry for manual follow-up - inventory stuck
+          Sentry.captureException(releaseError, {
+            level: 'error',
+            tags: { requestId, orderId: order.id, operation: 'inventory_release_failed' },
+          })
+          // Don't fail the whole operation - holds will expire automatically but need manual review
         }
 
         // Connection will be closed by finally block
@@ -2126,24 +2359,34 @@ serve(async (req) => {
               transactionId: paymentResult.transactionResponse.transId,
             })
 
-            const { error: cardUpdateError } = await supabaseAdmin
-              .from('orders')
-              .update({
-                // E-commerce orders start as 'pending' for staff fulfillment workflow
-                // POS orders go straight to 'completed'
-                status: body.is_ecommerce ? 'pending' : OrderStatus.COMPLETED,
-                payment_status: PaymentStatus.PAID,
-                processor_transaction_id: paymentResult.transactionResponse.transId,
-                payment_authorization_code: paymentResult.transactionResponse.authCode,
-                card_type: paymentResult.transactionResponse.accountType,
-                card_last_four: paymentResult.transactionResponse.accountNumber?.replace('XXXX', ''),
-                payment_data: paymentResult,
-              })
-              .eq('id', order.id)
+            // CRITICAL: Update order status with retry (payment already processed!)
+            const { error: cardUpdateError } = await withRetry(
+              () => supabaseAdmin
+                .from('orders')
+                .update({
+                  // E-commerce orders start as 'pending' for staff fulfillment workflow
+                  // POS orders go straight to 'completed'
+                  status: body.is_ecommerce ? 'pending' : OrderStatus.COMPLETED,
+                  payment_status: PaymentStatus.PAID,
+                  processor_transaction_id: paymentResult.transactionResponse.transId,
+                  payment_authorization_code: paymentResult.transactionResponse.authCode,
+                  card_type: paymentResult.transactionResponse.accountType,
+                  card_last_four: paymentResult.transactionResponse.accountNumber?.replace('XXXX', ''),
+                  payment_data: paymentResult,
+                })
+                .eq('id', order.id),
+              'Order status update (Auth.net payment success)',
+              requestId
+            )
 
             if (cardUpdateError) {
-              console.error(`[${requestId}] Failed to update order after successful card payment:`, cardUpdateError)
-              return await errorResponse(`Failed to finalize order: ${cardUpdateError.message}`, 500, requestId, allowedOrigin)
+              // CRITICAL: Payment succeeded but order update failed
+              console.error(`[${requestId}] CRITICAL: Payment approved but order update failed:`, cardUpdateError)
+              Sentry.captureException(new Error('Payment succeeded but order update failed'), {
+                level: 'fatal',
+                tags: { requestId, orderId: order.id, transactionId: paymentResult.transactionResponse.transId },
+              })
+              return await errorResponse(`Payment was processed but failed to finalize order. Please contact support with reference: ${paymentResult.transactionResponse.transId}`, 500, requestId, allowedOrigin)
             }
 
             // Link checkout attempt to order

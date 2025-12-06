@@ -18,6 +18,7 @@ import { locationConfigurationStyles as styles } from "./locationConfiguration.s
 import { usePaymentProcessors, usePaymentProcessorsLoading, usePaymentProcessorsError, usePaymentProcessorsActions } from "@/stores/payment-processors-settings.store"
 import { updateLocation } from "@/services/locations.service"
 import { useAppAuth } from "@/contexts/AppAuthContext"
+import { AddProcessorModal } from "@/components/settings/modals/AddProcessorModal"
 
 function PaymentIcon({ color }: { color: string }) {
   return (
@@ -51,12 +52,16 @@ function LocationConfigurationDetail({
   const processorsLoading = usePaymentProcessorsLoading()
   const processorsError = usePaymentProcessorsError()
   const { createProcessor, updateProcessor, deleteProcessor, testConnection, setAsDefault, toggleProcessorStatus } = usePaymentProcessorsActions()
-  const { refreshVendorData } = useAppAuth()
+  const { vendor, refreshVendorData } = useAppAuth()
 
   // Filter processors for this location
   const processors = allProcessors.filter(p => p.location_id === location.id)
 
   const [testingProcessorId, setTestingProcessorId] = useState<string | null>(null)
+
+  // Add Processor Modal state
+  const [showAddProcessorModal, setShowAddProcessorModal] = useState(false)
+  const [editingProcessor, setEditingProcessor] = useState<PaymentProcessor | null>(null)
 
   // Edit mode state
   const [isEditMode, setIsEditMode] = useState(false)
@@ -161,12 +166,14 @@ function LocationConfigurationDetail({
 
   const handleAddProcessor = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-    Alert.alert('Payment Processors', 'Payment processor configuration coming soon. Contact support to add processors.')
+    setEditingProcessor(null)
+    setShowAddProcessorModal(true)
   }
 
   const handleEditProcessor = (processor: PaymentProcessor) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-    Alert.alert('Payment Processors', 'Payment processor editing coming soon. Contact support to edit processors.')
+    setEditingProcessor(processor)
+    setShowAddProcessorModal(true)
   }
 
   const handleTestConnection = async (processor: PaymentProcessor) => {
@@ -556,7 +563,7 @@ function LocationConfigurationDetail({
               const testStatus = processor.last_test_status
 
               return (
-                <View style={styles.cardWrapper}>
+                <View key={processor.id} style={styles.cardWrapper}>
                   <View style={styles.detailCard}>
                     <View style={{ padding: spacing.md }}>
                       {/* Header with name and badges */}
@@ -668,7 +675,7 @@ function LocationConfigurationDetail({
               <>
                 <Text style={[styles.cardSectionTitle, { marginTop: spacing.xl }]}>INACTIVE</Text>
                 {inactiveProcessors.map((processor) => (
-                  <View style={styles.cardWrapper}>
+                  <View key={processor.id} style={styles.cardWrapper}>
                     <View style={styles.detailCard}>
                       <View style={styles.supplierCard}>
                         <View style={styles.supplierCardHeader}>
@@ -704,6 +711,24 @@ function LocationConfigurationDetail({
         )}
       </ScrollView>
 
+      {/* Add/Edit Processor Modal */}
+      {vendor && (
+        <AddProcessorModal
+          visible={showAddProcessorModal}
+          vendorId={vendor.id}
+          locationId={location.id}
+          locationName={location.name}
+          existingProcessor={editingProcessor}
+          onClose={() => {
+            setShowAddProcessorModal(false)
+            setEditingProcessor(null)
+          }}
+          onSave={() => {
+            // Processor was saved, modal will close itself
+            // Store will automatically reload via createProcessor/updateProcessor
+          }}
+        />
+      )}
     </View>
   )
 }
