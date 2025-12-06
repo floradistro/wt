@@ -1291,33 +1291,32 @@ serve(async (req) => {
     })
 
     // ========================================================================
-    // STEP 4: CHECK IDEMPOTENCY (Direct SQL - bypasses PostgREST)
+    // STEP 4: CHECK IDEMPOTENCY (Using Supabase for reliability)
     // ========================================================================
-    dbClient = await getDbClient()
+    // Check if order with this idempotency key already exists
+    const { data: existingOrder, error: idempotencyError } = await supabaseAdmin
+      .from('orders')
+      .select('id, status, payment_status, total_amount, order_number')
+      .eq('idempotency_key', idempotencyKey)
+      .maybeSingle()
 
-    try {
-      const existingOrderResult = await dbClient.queryObject(
-        `SELECT * FROM check_idempotent_order($1)`,
-        [idempotencyKey]
-      )
-
-      const existingOrder = existingOrderResult.rows as any[]
-
-      if (existingOrder && existingOrder[0]?.order_exists) {
-        console.log(`[${requestId}] Idempotent request - returning existing order`)
-        // Connection will be closed by finally block
-        return await successResponse({
-          orderId: existingOrder[0].order_id,
-          orderStatus: existingOrder[0].order_status,
-          paymentStatus: existingOrder[0].payment_status,
-          total: existingOrder[0].total_amount,
-          message: 'Order already processed (idempotent)',
-        }, requestId, Date.now() - startTime, allowedOrigin)
-      }
-    } catch (error) {
-      console.warn(`[${requestId}] Idempotency check failed (function may not exist):`, error)
-      // Continue anyway - idempotency is optional
+    if (idempotencyError) {
+      console.warn(`[${requestId}] Idempotency check error:`, idempotencyError)
+      // Continue - better to risk duplicate than block all checkouts
+    } else if (existingOrder) {
+      console.log(`[${requestId}] Idempotent request - returning existing order:`, existingOrder.id)
+      return await successResponse({
+        orderId: existingOrder.id,
+        orderNumber: existingOrder.order_number,
+        orderStatus: existingOrder.status,
+        paymentStatus: existingOrder.payment_status,
+        total: existingOrder.total_amount,
+        message: 'Order already processed (idempotent)',
+      }, requestId, Date.now() - startTime, allowedOrigin)
     }
+
+    // Get DB client for later operations
+    dbClient = await getDbClient()
 
     // ========================================================================
     // STEP 5: GET PAYMENT PROCESSOR (Direct SQL - bypasses PostgREST)
