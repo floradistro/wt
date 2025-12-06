@@ -451,7 +451,7 @@ class AuthorizeNetClient {
    * For POS use, we assume card data is collected via terminal/card reader
    * For e-commerce, Accept.js should be used to tokenize cards client-side
    */
-  async processSale(request: AuthorizeNetSaleRequest, opaqueData?: { dataDescriptor: string; dataValue: string } | string): Promise<AuthorizeNetSaleResponse> {
+  async processSale(request: AuthorizeNetSaleRequest, opaqueData?: { dataDescriptor: string; dataValue: string } | string, isDigitalWallet: boolean = false): Promise<AuthorizeNetSaleResponse> {
     // Support both full opaque data object (e-commerce) and string token (legacy POS)
     const opaqueDataObj = typeof opaqueData === 'string'
       ? { dataDescriptor: 'COMMON.ACCEPT.INAPP.PAYMENT', dataValue: opaqueData }
@@ -461,10 +461,13 @@ class AuthorizeNetClient {
       amount: request.amount,
       invoiceNumber: request.invoiceNumber,
       hasOpaqueData: !!opaqueDataObj,
+      dataDescriptor: opaqueDataObj?.dataDescriptor,
+      isDigitalWallet,
     })
 
-    // Build Authorize.Net request
-    const anetRequest = {
+    // Build Authorize.Net request for opaqueData transactions (Accept.js, Apple Pay, Google Pay)
+    // Note: retail section is NOT used for opaqueData transactions per Authorize.Net docs
+    const anetRequest: any = {
       createTransactionRequest: {
         merchantAuthentication: {
           name: this.apiLoginId,
@@ -484,13 +487,25 @@ class AuthorizeNetClient {
           // NOTE: Removed customerId - UUID exceeds Authorize.Net's 20-char limit
           // Customer is already tracked in our orders table
           customerIP: request.customerIp,
-          processingOptions: {
-            isSubsequentAuth: 'false',
-          },
-          subsequentAuthInformation: undefined,
         },
       },
     }
+
+    if (isDigitalWallet) {
+      console.log('[AUTHORIZENET] Processing digital wallet payment (Apple Pay / Google Pay)')
+    }
+
+    // DEBUG: Log the EXACT request being sent to Authorize.Net
+    console.log('[AUTHORIZENET] FINAL REQUEST TO AUTHORIZE.NET:', JSON.stringify({
+      ...anetRequest,
+      createTransactionRequest: {
+        ...anetRequest.createTransactionRequest,
+        merchantAuthentication: { name: '***REDACTED***', transactionKey: '***REDACTED***' },
+      },
+    }, null, 2))
+    console.log('[AUTHORIZENET] OPAQUE DATA:', JSON.stringify(opaqueDataObj, null, 2))
+    console.log('[AUTHORIZENET] dataValue length:', opaqueDataObj?.dataValue?.length)
+    console.log('[AUTHORIZENET] dataValue preview (first 100 chars):', opaqueDataObj?.dataValue?.substring(0, 100))
 
     // CRITICAL: Enforce client-side timeout to prevent hanging
     const timeoutMs = PAYMENT_TIMEOUT * 1000 // 120 seconds
@@ -518,6 +533,9 @@ class AuthorizeNetClient {
         transId: data.transactionResponse?.transId,
       })
 
+      // DEBUG: Log FULL response for Apple Pay troubleshooting
+      console.log('[AUTHORIZENET] FULL RESPONSE:', JSON.stringify(data, null, 2))
+
       if (!response.ok) {
         throw new Error(`Authorize.Net API HTTP Error: ${response.status}`)
       }
@@ -525,6 +543,13 @@ class AuthorizeNetClient {
       // Check for API-level errors
       if (data.messages?.resultCode !== 'Ok') {
         const errorMessage = data.messages?.message?.[0]?.text || 'Unknown API error'
+        const errorCode = data.messages?.message?.[0]?.code || 'Unknown'
+        console.log('[AUTHORIZENET] API Error Details:', {
+          errorCode,
+          errorMessage,
+          allMessages: data.messages?.message,
+          transactionErrors: data.transactionResponse?.errors,
+        })
         throw new Error(`Authorize.Net API Error: ${errorMessage}`)
       }
 
@@ -1148,15 +1173,20 @@ serve(async (req) => {
       console.log(`[${requestId}] 🔍 E-commerce order (no user)`)
     }
 
+    // Determine order type - respect frontend's order_type, fall back to defaults
+    // E-commerce can be 'shipping' or 'pickup', POS is 'walk_in'
+    const orderType = body.order_type || (body.is_ecommerce ? 'shipping' : 'walk_in')
+    const isPickupOrder = orderType === 'pickup'
+
     const { data: order, error: orderError } = await supabaseAdmin
       .from('orders')
       .insert({
         vendor_id: body.vendorId,
-        pickup_location_id: body.is_ecommerce ? null : body.locationId, // E-commerce orders don't have pickup location
+        pickup_location_id: isPickupOrder ? body.pickup_location_id : (body.is_ecommerce ? null : body.locationId),
         customer_id: body.customerId || null,
         order_number: orderNumber,
-        order_type: body.is_ecommerce ? 'shipping' : 'walk_in', // E-commerce = shipping, POS = walk_in
-        delivery_type: body.is_ecommerce ? 'shipping' : 'pickup', // E-commerce = shipping, POS = pickup
+        order_type: orderType, // Respect frontend's order_type
+        delivery_type: isPickupOrder ? 'pickup' : (body.is_ecommerce ? 'shipping' : 'pickup'),
         status: OrderStatus.PENDING,
         payment_status: PaymentStatus.PENDING,
         subtotal: body.subtotal,
@@ -1165,8 +1195,8 @@ serve(async (req) => {
         payment_method: body.paymentMethod,
         idempotency_key: idempotencyKey,
         created_by_user_id: createdByUserId, // ✅ APPLE WAY: Validated FK before insert
-        // E-commerce shipping address and cost
-        ...(body.is_ecommerce && body.shipping_address ? {
+        // E-commerce shipping address and cost (only for shipping orders, not pickup)
+        ...(body.is_ecommerce && !isPickupOrder && body.shipping_address ? {
           shipping_name: body.shipping_address.name,
           shipping_address_line1: body.shipping_address.address,
           shipping_city: body.shipping_address.city,
@@ -1848,10 +1878,36 @@ serve(async (req) => {
             description: 'Authorize.Net Payment Processing',
           })
 
-          // Get opaque data from e-commerce request or legacy card token from metadata
-          const opaqueData = rawBody.payment?.opaque_data || body.metadata?.cardToken
+          // Get opaque data from e-commerce request, digital wallet, or legacy card token from metadata
+          let opaqueData: { dataDescriptor: string; dataValue: string } | undefined
+          let isDigitalWallet = false
 
-          paymentResult = await anetClient.processSale(anetRequest, opaqueData)
+          if (rawBody.payment?.digital_wallet) {
+            // Apple Pay or Google Pay digital wallet payment
+            const wallet = rawBody.payment.digital_wallet
+            const descriptor = wallet.type === 'apple'
+              ? 'COMMON.APPLE.INAPP.PAYMENT'
+              : 'COMMON.GOOGLE.INAPP.PAYMENT'
+
+            console.log(`[${requestId}] Processing ${wallet.type} Pay digital wallet payment`)
+
+            opaqueData = {
+              dataDescriptor: descriptor,
+              dataValue: wallet.token,
+            }
+            isDigitalWallet = true
+          } else if (rawBody.payment?.opaque_data) {
+            // Standard Accept.js tokenized card payment
+            opaqueData = rawBody.payment.opaque_data
+          } else if (body.metadata?.cardToken) {
+            // Legacy POS card token
+            opaqueData = {
+              dataDescriptor: 'COMMON.ACCEPT.INAPP.PAYMENT',
+              dataValue: body.metadata.cardToken,
+            }
+          }
+
+          paymentResult = await anetClient.processSale(anetRequest, opaqueData, isDigitalWallet)
           paymentSpan.finish()
 
           const responseCode = paymentResult.transactionResponse.responseCode
