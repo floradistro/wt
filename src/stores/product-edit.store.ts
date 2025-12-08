@@ -209,6 +209,8 @@ export const useProductEditStore = create<ProductEditState>()(
       /**
        * Load pricing templates for a category
        * ANTI-LOOP: Async operation returns data, doesn't call other actions
+       * Note: Products should have their primary_category_id set to the subcategory
+       * (e.g., "Fizzy" not "Beverages") so templates are found correctly.
        */
       loadTemplates: async (categoryId: string) => {
         set({ loadingTemplates: true }, false, 'productEdit/loadTemplates/start')

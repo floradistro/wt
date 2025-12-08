@@ -26,7 +26,8 @@ import {
   useOrderDetailLoading,
   useOrderDetailActions,
 } from '@/stores/order-detail.store'
-import { ConfirmPickupOrderModal, MarkReadyModal, ShipOrderModal } from '../modals'
+import { ConfirmPickupOrderModal, MarkReadyModal, ShipOrderModal, EditOrderModal } from '../modals'
+import { OrderInfoPanel } from '../shared'
 import { useAppAuth } from '@/contexts/AppAuthContext'
 import { EmailService } from '@/services/email.service'
 
@@ -45,6 +46,7 @@ export function StorePickupDetail() {
   const [showConfirmModal, setShowConfirmModal] = useState(false)
   const [showReadyModal, setShowReadyModal] = useState(false)
   const [showShipModal, setShowShipModal] = useState(false)
+  const [showEditModal, setShowEditModal] = useState(false)
   const [selectedShipLocationId, setSelectedShipLocationId] = useState<string | null>(null)
   const [isUpdating, setIsUpdating] = useState(false)
 
@@ -305,6 +307,16 @@ export function StorePickupDetail() {
                   <Ionicons name="mail" size={18} color="#fff" />
                 </Pressable>
               )}
+              {/* Edit Button */}
+              <Pressable
+                style={styles.iconButton}
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                  setShowEditModal(true)
+                }}
+              >
+                <Ionicons name="create-outline" size={18} color="#fff" />
+              </Pressable>
             </View>
           )}
         </View>
@@ -469,6 +481,11 @@ export function StorePickupDetail() {
           </View>
         </View>
 
+        {/* Comprehensive Order Info */}
+        <View style={styles.section}>
+          <OrderInfoPanel order={order} />
+        </View>
+
         {/* Danger Zone - Delete Order */}
         <View style={styles.section}>
           <Text style={[styles.sectionTitle, { color: '#ff3b30' }]}>DANGER ZONE</Text>
@@ -515,6 +532,16 @@ export function StorePickupDetail() {
         }}
         orderId={order.id}
         locationId={selectedShipLocationId}
+      />
+
+      {/* Edit Order Modal */}
+      <EditOrderModal
+        visible={showEditModal}
+        onClose={() => {
+          setShowEditModal(false)
+          refreshOrders()
+        }}
+        orderId={order.id}
       />
     </View>
   )

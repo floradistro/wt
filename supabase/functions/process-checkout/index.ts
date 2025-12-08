@@ -1242,9 +1242,9 @@ serve(async (req) => {
           } else if (productInfo.status !== 'active' && productInfo.status !== 'published') {
             // Products can be 'active' or 'published' depending on vendor setup
             unavailableProducts.push(item.productName || productId)
-          } else if (productInfo.price !== null && productInfo.price !== undefined && Math.abs(productInfo.price - item.unitPrice) > 0.01) {
-            // Price has changed since cart was built (only check if product has a price set)
-            // Some products use pricing tiers/bulk pricing without a base price
+          } else if (productInfo.price && Math.abs(productInfo.price - item.unitPrice) > 0.01) {
+            // Price has changed since cart was built (only check if product has a non-zero price set)
+            // Products with price=0 or null use tier pricing - skip validation for those
             priceDiscrepancies.push(
               `${item.productName}: cart price $${item.unitPrice}, current price $${productInfo.price}`
             )
@@ -1699,79 +1699,125 @@ serve(async (req) => {
     // Routes ALL orders (pickup, shipping, walk_in) to fulfillment locations
     // For pickup orders: Items in stock at pickup location → pickup
     //                    Items NOT in stock → ship from another location
-    // For shipping orders: Route to locations with inventory
+    // For shipping orders: Route to locations with inventory (single-location priority)
     {
       const routingSpan = transaction.startChild({
         op: 'order.route',
         description: 'Smart Order Routing',
       })
 
-      try {
-        console.log(`[${requestId}] Running smart order routing (order_type: ${body.is_ecommerce ? 'shipping' : 'pickup'})`)
+      // Retry configuration for routing (critical for multi-location fulfillment)
+      const MAX_ROUTING_RETRIES = 3
+      const ROUTING_RETRY_DELAY_MS = 100
 
-        Sentry.addBreadcrumb({
-          category: 'routing',
-          message: 'Starting smart order routing',
-          level: 'info',
-          data: { orderId: order.id, itemCount: body.items.length, orderType: body.is_ecommerce ? 'shipping' : 'pickup' },
-        })
+      let routingSuccess = false
+      let lastRoutingError: Error | null = null
 
-        // Call the smart routing function - it will:
-        // 1. Check inventory at pickup location per-item (for pickup orders)
-        // 2. Route items not in stock to ship from other locations
-        // 3. Update order_items with location_id and order_type (pickup/shipping)
-        // 4. Create order_locations records for tracking
-        const routingResult = await dbClient.queryObject(
-          `SELECT * FROM route_order_to_locations($1)`,
-          [order.id]
-        )
+      for (let attempt = 1; attempt <= MAX_ROUTING_RETRIES; attempt++) {
+        try {
+          console.log(`[${requestId}] Running smart order routing (attempt ${attempt}/${MAX_ROUTING_RETRIES}, order_type: ${body.is_ecommerce ? 'shipping' : 'pickup'})`)
 
-        const routedLocations = routingResult.rows as any[]
-        console.log(`[${requestId}] Order routed to ${routedLocations.length} location(s):`,
-          routedLocations.map(r => ({
-            location_id: r.location_id,
-            location_name: r.location_name,
-            item_count: r.item_count,
-            fulfillment_type: r.fulfillment_type
-          }))
-        )
+          Sentry.addBreadcrumb({
+            category: 'routing',
+            message: `Starting smart order routing (attempt ${attempt})`,
+            level: 'info',
+            data: { orderId: order.id, itemCount: body.items.length, orderType: body.is_ecommerce ? 'shipping' : 'pickup', attempt },
+          })
 
-        // Log if order was split (mixed pickup + shipping)
-        const hasPickup = routedLocations.some(r => r.fulfillment_type === 'pickup')
-        const hasShipping = routedLocations.some(r => r.fulfillment_type === 'shipping')
-        if (hasPickup && hasShipping) {
-          console.log(`[${requestId}] 📦 MIXED ORDER: Some items pickup, some items shipping`)
+          // Call the smart routing function - it will:
+          // 1. Check inventory at pickup location per-item (for pickup orders)
+          // 2. Route items not in stock to ship from other locations
+          // 3. For shipping: prioritize single-location fulfillment to minimize shipping costs
+          // 4. Update order_items with location_id and order_type (pickup/shipping)
+          // 5. Create order_locations records for tracking
+          const routingResult = await dbClient.queryObject(
+            `SELECT * FROM route_order_to_locations($1)`,
+            [order.id]
+          )
+
+          const routedLocations = routingResult.rows as any[]
+          console.log(`[${requestId}] Order routed to ${routedLocations.length} location(s):`,
+            routedLocations.map(r => ({
+              location_id: r.result_location_id,
+              location_name: r.result_location_name,
+              item_count: r.result_item_count,
+              fulfillment_type: r.result_fulfillment_type
+            }))
+          )
+
+          // Log if order was split (mixed pickup + shipping)
+          const hasPickup = routedLocations.some(r => r.result_fulfillment_type === 'pickup')
+          const hasShipping = routedLocations.some(r => r.result_fulfillment_type === 'shipping')
+          if (hasPickup && hasShipping) {
+            console.log(`[${requestId}] 📦 MIXED ORDER: Some items pickup, some items shipping`)
+          }
+
+          // Log single-location achievement for shipping orders
+          if (body.is_ecommerce && routedLocations.length === 1) {
+            console.log(`[${requestId}] ✅ Single-location fulfillment achieved for shipping order`)
+          }
+
+          Sentry.addBreadcrumb({
+            category: 'routing',
+            message: 'Smart order routing completed',
+            level: 'info',
+            data: {
+              locationCount: routedLocations.length,
+              locations: routedLocations.map(r => r.result_location_id),
+              isMixedOrder: hasPickup && hasShipping,
+              singleLocation: routedLocations.length === 1,
+            },
+          })
+
+          routingSpan.setStatus('ok')
+          routingSuccess = true
+          break // Success - exit retry loop
+
+        } catch (routingError) {
+          lastRoutingError = routingError as Error
+          console.warn(`[${requestId}] Smart order routing attempt ${attempt} failed:`, routingError)
+
+          if (attempt < MAX_ROUTING_RETRIES) {
+            // Exponential backoff before retry
+            const delay = ROUTING_RETRY_DELAY_MS * Math.pow(2, attempt - 1)
+            console.log(`[${requestId}] Retrying routing in ${delay}ms...`)
+            await new Promise(resolve => setTimeout(resolve, delay))
+          }
         }
+      }
 
-        Sentry.addBreadcrumb({
-          category: 'routing',
-          message: 'Smart order routing completed',
-          level: 'info',
-          data: {
-            locationCount: routedLocations.length,
-            locations: routedLocations.map(r => r.location_id),
-            isMixedOrder: hasPickup && hasShipping,
-          },
-        })
-
-        routingSpan.setStatus('ok')
-      } catch (routingError) {
-        console.warn(`[${requestId}] Smart order routing failed (non-critical):`, routingError)
+      // If all retries failed, log critical error but don't fail the order
+      if (!routingSuccess) {
+        console.error(`[${requestId}] ⚠️ CRITICAL: Smart order routing failed after ${MAX_ROUTING_RETRIES} attempts`)
         routingSpan.setStatus('unknown_error')
 
-        // Log to Sentry but don't fail the order - items will have null location_id
-        // which can be manually assigned later by staff
-        Sentry.captureException(routingError, {
-          level: 'warning',
+        // Log to Sentry with high severity - this needs staff attention
+        Sentry.captureException(lastRoutingError, {
+          level: 'error', // Elevated from 'warning' - routing failure is serious
           tags: {
             operation: 'smart_order_routing',
             requestId,
             orderId: order.id,
+            attempts: MAX_ROUTING_RETRIES.toString(),
+            routing_failed: 'true',
+          },
+          extra: {
+            message: 'Order created but routing failed - items have null location_id. Staff must manually assign fulfillment locations.',
+            orderNumber: order.order_number,
+            itemCount: body.items.length,
           },
         })
-      } finally {
-        routingSpan.finish()
+
+        // Add routing failure flag to order for staff visibility
+        await supabaseAdmin
+          .from('orders')
+          .update({
+            staff_notes: `⚠️ AUTO-ROUTING FAILED: Please manually assign fulfillment locations for this order. Error: ${lastRoutingError?.message || 'Unknown'}`,
+          })
+          .eq('id', order.id)
       }
+
+      routingSpan.finish()
     }
 
     // ========================================================================
@@ -1845,6 +1891,7 @@ serve(async (req) => {
     // ========================================================================
     let paymentResult: SPINSaleResponse | null = null
     let paymentError: Error | null = null
+    let isFraudReview = false // Track if payment is held for fraud review
 
     // CRITICAL: E-commerce orders MUST process card payment - no cash allowed
     if (body.is_ecommerce && (body.paymentMethod === 'cash' || !body.paymentMethod)) {
@@ -2244,6 +2291,25 @@ serve(async (req) => {
           if (rawBody.payment?.digital_wallet) {
             // Apple Pay or Google Pay digital wallet payment
             const wallet = rawBody.payment.digital_wallet
+
+            // Validate digital wallet type (Apple Engineering standard)
+            if (!wallet.type || !['apple', 'google'].includes(wallet.type)) {
+              return await errorResponse(
+                `Invalid digital wallet type: ${wallet.type || 'missing'}. Supported: apple, google`,
+                400,
+                requestId
+              )
+            }
+
+            // Validate token exists
+            if (!wallet.token || typeof wallet.token !== 'string' || wallet.token.trim().length === 0) {
+              return await errorResponse(
+                'Digital wallet token is required',
+                400,
+                requestId
+              )
+            }
+
             const descriptor = wallet.type === 'apple'
               ? 'COMMON.APPLE.INAPP.PAYMENT'
               : 'COMMON.GOOGLE.INAPP.PAYMENT'
@@ -2252,7 +2318,7 @@ serve(async (req) => {
 
             opaqueData = {
               dataDescriptor: descriptor,
-              dataValue: wallet.token,
+              dataValue: wallet.token.trim(),
             }
             isDigitalWallet = true
           } else if (rawBody.payment?.opaque_data) {
@@ -2410,11 +2476,30 @@ serve(async (req) => {
             // HELD FOR FRAUD REVIEW - Payment captured but needs approval
             // Staff MUST see this - customer was charged but order needs review
             // ============================================================
-            console.warn(`[${requestId}] PAYMENT HELD FOR FRAUD REVIEW:`, {
+            isFraudReview = true
+
+            console.warn(`[${requestId}] ⚠️ PAYMENT HELD FOR FRAUD REVIEW:`, {
               transactionId: paymentResult.transactionResponse.transId,
               customer: rawBody.shipping_address?.name,
               email: rawBody.customer_email,
               amount: cardAmount,
+            })
+
+            // Alert Sentry with high priority for fraud review
+            Sentry.captureMessage('Payment held for fraud review', {
+              level: 'warning',
+              tags: {
+                requestId,
+                orderId: order.id,
+                transactionId: paymentResult.transactionResponse.transId,
+                fraud_review: 'true',
+              },
+              extra: {
+                customer: rawBody.shipping_address?.name,
+                email: rawBody.customer_email,
+                amount: cardAmount,
+                orderNumber: order.order_number,
+              },
             })
 
             // Update order to 'pending_review' status so staff can see it
@@ -2428,6 +2513,7 @@ serve(async (req) => {
                 card_type: paymentResult.transactionResponse.accountType,
                 card_last_four: paymentResult.transactionResponse.accountNumber?.replace('XXXX', ''),
                 payment_data: paymentResult,
+                staff_notes: '⚠️ FRAUD REVIEW: This payment is held for review by Authorize.Net. Check Auth.net merchant portal for approval status before fulfilling.',
                 metadata: {
                   ...((order as any).metadata || {}),
                   fraud_review: true,
@@ -2441,16 +2527,16 @@ serve(async (req) => {
               await supabaseAdmin
                 .from('checkout_attempts')
                 .update({
+                  status: 'fraud_review',
                   order_id: order.id,
                   order_number: orderNumber,
                 })
                 .eq('id', checkoutAttemptId)
             }
 
-            // Return success to customer - they don't know it's under review
-            // Staff will handle the review in their dashboard
-            // Note: We return the order so customer gets confirmation
-            // but the order won't ship until staff approves in Auth.net
+            // Note: We continue to success response below, but with fraud_review flag
+            // Customer sees "order received" but with appropriate messaging
+            // Frontend should show: "Your order is being processed and may require additional verification"
 
           } else {
             // Payment declined or error (responseCode 2 or 3)
@@ -2862,7 +2948,8 @@ serve(async (req) => {
       },
     })
 
-    const finalOrderStatus = body.is_ecommerce ? 'pending' : OrderStatus.COMPLETED
+    const finalOrderStatus = isFraudReview ? 'pending_review' : (body.is_ecommerce ? 'pending' : OrderStatus.COMPLETED)
+    const finalPaymentStatus = isFraudReview ? 'held' : PaymentStatus.PAID
 
     return await successResponse({
       order: {
@@ -2873,7 +2960,7 @@ serve(async (req) => {
       orderId: order.id,
       orderNumber: order.order_number,
       orderStatus: finalOrderStatus,
-      paymentStatus: PaymentStatus.PAID,
+      paymentStatus: finalPaymentStatus,
       total: body.total,
       paymentMethod: body.paymentMethod,
       // Support both SPIN/Dejavoo and Authorize.Net response formats
@@ -2885,7 +2972,11 @@ serve(async (req) => {
         || (paymentResult as any)?.transactionResponse?.accountNumber?.replace('XXXX', ''),
       loyaltyPointsEarned: loyaltyPointsEarned,
       loyaltyPointsRedeemed: loyaltyPointsRedeemed,
-      message: 'Payment processed successfully',
+      // Fraud review flag for frontend to show appropriate messaging
+      fraudReview: isFraudReview,
+      message: isFraudReview
+        ? 'Your order has been received and is being processed. You may receive a follow-up for additional verification.'
+        : 'Payment processed successfully',
     }, requestId, duration, allowedOrigin)
 
   } catch (error) {
@@ -2988,12 +3079,10 @@ async function errorResponse(message: string, status: number, requestId: string,
   // User errors (4xx): Specific message is safe to return
   let userMessage = message
   if (status >= 500) {
-    // Log detailed error internally
+    // Log detailed error internally - full details go to Sentry
     console.error(`[${requestId}] Internal error: ${message}`)
-
-    // TEMPORARY DEBUG: Return detailed error to help diagnose issue
-    // TODO: Remove this after debugging and restore generic error message
-    userMessage = `[DEBUG] ${message} (Reference ID: ${requestId})`
+    // Generic message to user - never expose internal details
+    userMessage = `Something went wrong processing your order. Please try again or contact support. (Reference: ${requestId})`
   }
 
   // CRITICAL: Flush Sentry events before response

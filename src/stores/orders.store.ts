@@ -164,13 +164,14 @@ export const useOrdersStore = create<OrdersState>()(
       /**
        * Refresh orders (reload with current filters)
        * Shows loading state - used by pull-to-refresh
+       * CRITICAL: No limit - orders must NEVER disappear
        */
       refreshOrders: async () => {
         try {
           set({ loading: true }, false, 'orders/refreshOrders/start')
           logger.info('[OrdersStore] Refreshing orders (with loading)')
 
-          const orders = await ordersService.getOrders({ limit: 500 })
+          const orders = await ordersService.getOrders({})
 
           set({
             orders,
@@ -187,12 +188,13 @@ export const useOrdersStore = create<OrdersState>()(
       /**
        * Silent refresh - no loading state
        * Used by heartbeat polling to avoid UI flicker
+       * CRITICAL: No limit - orders must NEVER disappear
        */
       silentRefresh: async () => {
         try {
           logger.debug('[OrdersStore] Silent refresh (heartbeat)')
 
-          const orders = await ordersService.getOrders({ limit: 500 })
+          const orders = await ordersService.getOrders({})
 
           set({
             orders,
@@ -279,9 +281,13 @@ export const useOrdersStore = create<OrdersState>()(
 
       /**
        * Handle INSERT - add new order to top of list
+       * Note: Real-time payload doesn't include joined data (customer_name, etc.)
+       * We trigger a silent refresh to get the full data
        */
       _handleInsert: (order: Order) => {
         logger.info('[OrdersStore] Real-time INSERT:', order.id)
+        // For inserts, we need to fetch full data to get customer info
+        // Add optimistically first, then refresh
         set(
           (state) => ({
             orders: [order, ...state.orders.filter(o => o.id !== order.id)],
@@ -290,16 +296,34 @@ export const useOrdersStore = create<OrdersState>()(
           false,
           'orders/realtime/insert'
         )
+        // Trigger silent refresh to get full order data with joins
+        get().silentRefresh()
       },
 
       /**
        * Handle UPDATE - update existing order in place
+       * IMPORTANT: Preserve computed/joined fields (customer_name, etc.) that
+       * aren't included in real-time payloads
        */
       _handleUpdate: (order: Order) => {
         logger.info('[OrdersStore] Real-time UPDATE:', order.id)
         set(
           (state) => ({
-            orders: state.orders.map(o => o.id === order.id ? order : o),
+            orders: state.orders.map(o => {
+              if (o.id !== order.id) return o
+              // Merge: use new data but preserve computed fields if missing
+              return {
+                ...o,  // Existing data (includes customer_name, etc.)
+                ...order,  // New real-time data
+                // Preserve these computed/joined fields from existing data
+                customer_name: order.customer_name || o.customer_name,
+                customer_email: order.customer_email || o.customer_email,
+                customer_phone: order.customer_phone || o.customer_phone,
+                pickup_location_name: order.pickup_location_name || o.pickup_location_name,
+                fulfillment_locations: order.fulfillment_locations || o.fulfillment_locations,
+                location_count: order.location_count ?? o.location_count,
+              }
+            }),
             lastSyncAt: Date.now(),
           }),
           false,

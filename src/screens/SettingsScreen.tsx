@@ -36,7 +36,6 @@ import {
   SupplierManagementDetail,
   LoyaltyManagementDetail,
   EmailSettingsDetail,
-  EmailTemplatesDetail,
 } from '@/components/settings/details'
 
 // Monochrome Icons for Settings Categories
@@ -141,7 +140,6 @@ function SettingsScreen() {
   const [showLocationSelector, setShowLocationSelector] = useState(false)
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>('account')
   const [searchQuery, setSearchQuery] = useState('')
-  const [showEmailTemplates, setShowEmailTemplates] = useState(false)
 
   // ⚡ PERFORMANCE: Lazy load - only load data when tab is selected
   // This prevents loading ALL settings data on mount (6+ API calls)
@@ -215,17 +213,10 @@ function SettingsScreen() {
       id: 'email',
       title: 'Email & Notifications',
       icon: EmailIcon,
-      renderDetail: () => showEmailTemplates ? (
-        <EmailTemplatesDetail
-          headerOpacity={emailHeaderOpacity}
-          vendorLogo={vendor?.logo_url || null}
-          onBack={() => setShowEmailTemplates(false)}
-        />
-      ) : (
+      renderDetail: () => (
         <EmailSettingsDetail
           headerOpacity={emailHeaderOpacity}
           vendorLogo={vendor?.logo_url || null}
-          onNavigateToTemplates={() => setShowEmailTemplates(true)}
         />
       )
     },
@@ -265,7 +256,7 @@ function SettingsScreen() {
   ], [
     // ✅ Minimal dependencies - only visual props needed
     // All data comes from stores, so no need for data/callback dependencies
-    user, userName, locations, vendor, showEmailTemplates,
+    user, userName, locations, vendor,
     accountHeaderOpacity, locationsHeaderOpacity, emailHeaderOpacity, teamHeaderOpacity,
     suppliersHeaderOpacity, loyaltyHeaderOpacity, devToolsHeaderOpacity,
   ])

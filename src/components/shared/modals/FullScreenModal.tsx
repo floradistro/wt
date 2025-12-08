@@ -24,6 +24,7 @@ import {
   Modal,
   Pressable,
   ScrollView,
+  ActivityIndicator,
 } from 'react-native'
 import { ReactNode } from 'react'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -35,6 +36,16 @@ interface FullScreenModalProps {
   onSearchChange: (text: string) => void
   searchPlaceholder: string
   children: ReactNode
+  /** Custom action button text (replaces "Done") */
+  actionButtonText?: string
+  /** Custom action button handler (if not provided, uses onClose) */
+  onActionPress?: () => void
+  /** Disable the action button */
+  actionButtonDisabled?: boolean
+  /** Show loading state on action button */
+  actionButtonLoading?: boolean
+  /** Show close (X) button on left - auto-enabled when onActionPress is provided */
+  showCloseButton?: boolean
 }
 
 /**
@@ -61,8 +72,15 @@ export function FullScreenModal({
   onSearchChange,
   searchPlaceholder,
   children,
+  actionButtonText = 'Done',
+  onActionPress,
+  actionButtonDisabled = false,
+  actionButtonLoading = false,
+  showCloseButton,
 }: FullScreenModalProps) {
   const insets = useSafeAreaInsets()
+  // Auto-show close button when there's a custom action (so user can cancel)
+  const shouldShowCloseButton = showCloseButton ?? !!onActionPress
 
   if (!visible) return null
 
@@ -78,6 +96,12 @@ export function FullScreenModal({
       <View style={[styles.container, { paddingTop: insets.top }]}>
         {/* Header - Standard Pattern */}
         <View style={styles.searchContainer}>
+          {/* Close button (shown when there's a custom action) */}
+          {shouldShowCloseButton && (
+            <Pressable onPress={onClose} style={styles.closeButton}>
+              <Text style={styles.closeButtonText}>✕</Text>
+            </Pressable>
+          )}
           <View style={styles.searchBar}>
             <TextInput
               style={styles.searchInput}
@@ -87,8 +111,16 @@ export function FullScreenModal({
               placeholderTextColor="rgba(235,235,245,0.3)"
             />
           </View>
-          <Pressable onPress={onClose} style={styles.doneButton}>
-            <Text style={styles.doneButtonText}>Done</Text>
+          <Pressable
+            onPress={onActionPress || onClose}
+            style={[styles.doneButton, actionButtonDisabled && { opacity: 0.4 }]}
+            disabled={actionButtonDisabled || actionButtonLoading}
+          >
+            {actionButtonLoading ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <Text style={styles.doneButtonText}>{actionButtonText}</Text>
+            )}
           </Pressable>
         </View>
 
@@ -147,6 +179,19 @@ export const modalStyles = StyleSheet.create({
     fontWeight: '600',
     color: '#fff',
     letterSpacing: -0.4,
+  },
+  closeButton: {
+    width: 48,
+    height: 48,
+    backgroundColor: 'rgba(118, 118, 128, 0.24)',
+    borderRadius: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  closeButtonText: {
+    fontSize: 20,
+    fontWeight: '400',
+    color: 'rgba(235,235,245,0.6)',
   },
   content: {
     flex: 1,

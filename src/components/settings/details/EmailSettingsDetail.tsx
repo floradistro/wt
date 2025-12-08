@@ -13,34 +13,34 @@ import { layout } from '@/theme/layout'
 import { TitleSection } from '@/components/shared'
 import { DetailRow } from './DetailRow'
 import { detailCommonStyles } from './detailCommon.styles'
-import { useEmailSettingsStore, EmailTestType } from '@/stores/email-settings.store'
+import { useEmailSettingsStore } from '@/stores/email-settings.store'
+import { TemplateSlug } from '@/services/email.service'
 import { useAppAuth } from '@/contexts/AppAuthContext'
 import { uploadProductImage } from '@/services/media.service'
+import { EmailTemplatePreviewModal } from '../EmailTemplatePreviewModal'
 
 interface EmailSettingsDetailProps {
   headerOpacity: Animated.Value
   vendorLogo?: string | null
-  onNavigateToTemplates?: () => void
 }
 
-export function EmailSettingsDetail({ headerOpacity, vendorLogo, onNavigateToTemplates }: EmailSettingsDetailProps) {
+export function EmailSettingsDetail({ headerOpacity, vendorLogo }: EmailSettingsDetailProps) {
   const { vendorId, user, vendor } = useAppAuth()
   const {
     settings,
-    recentSends,
     isLoading,
     isSendingTest,
-    testingEmailType,
+    testingTemplate,
     error,
     loadSettings,
     updateSettings,
-    loadRecentSends,
     sendTestEmail,
   } = useEmailSettingsStore()
 
   const [isEditing, setIsEditing] = useState(false)
   const [testEmail, setTestEmail] = useState(user?.email || '')
   const [isUploadingImage, setIsUploadingImage] = useState(false)
+  const [previewTemplate, setPreviewTemplate] = useState<TemplateSlug | null>(null)
 
   // Form state
   const [fromName, setFromName] = useState('')
@@ -60,12 +60,7 @@ export function EmailSettingsDetail({ headerOpacity, vendorLogo, onNavigateToTem
   // Load settings on mount
   useEffect(() => {
     if (vendorId) {
-      console.log('📧 EmailSettings: vendorId =', vendorId)
-      console.log('📧 EmailSettings: user =', user)
       loadSettings(vendorId)
-      loadRecentSends(vendorId, 10)
-    } else {
-      console.log('⚠️ EmailSettings: No vendorId found!')
     }
   }, [vendorId])
 
@@ -122,8 +117,7 @@ export function EmailSettingsDetail({ headerOpacity, vendorLogo, onNavigateToTem
         enable_loyalty_updates: enableLoyaltyUpdates,
         enable_welcome_emails: enableWelcomeEmails,
         enable_marketing: enableMarketing,
-      },
-      user.id
+      }
     )
 
     if (success) {
@@ -134,7 +128,7 @@ export function EmailSettingsDetail({ headerOpacity, vendorLogo, onNavigateToTem
     }
   }
 
-  const handleSendTest = async (emailType?: EmailTestType) => {
+  const handleSendTest = async (templateSlug?: TemplateSlug) => {
     if (!vendorId || !testEmail) {
       Alert.alert('Email Required', 'Please enter a test email address in the Testing section below.')
       return
@@ -142,15 +136,20 @@ export function EmailSettingsDetail({ headerOpacity, vendorLogo, onNavigateToTem
 
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
 
-    const success = await sendTestEmail(vendorId, testEmail, vendor?.store_name, vendor?.logo_url, emailType)
+    const success = await sendTestEmail(vendorId, testEmail, templateSlug)
 
     if (success) {
-      const typeLabel = emailType ? emailType.replace('_', ' ') : 'test'
+      const typeLabel = templateSlug ? templateSlug.replace('_', ' ') : 'test'
       Alert.alert('Test Email Sent!', `${typeLabel.charAt(0).toUpperCase() + typeLabel.slice(1)} email sent to ${testEmail}`)
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
     } else {
       Alert.alert('Error', error || 'Failed to send test email')
     }
+  }
+
+  const handlePreview = (templateSlug: TemplateSlug) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    setPreviewTemplate(templateSlug)
   }
 
   const handleUploadHeaderImage = async () => {
@@ -232,8 +231,7 @@ export function EmailSettingsDetail({ headerOpacity, vendorLogo, onNavigateToTem
         enable_loyalty_updates: true,
         enable_welcome_emails: true,
         enable_marketing: true,
-      },
-      user.id
+      }
     )
 
     if (success) {
@@ -397,7 +395,6 @@ export function EmailSettingsDetail({ headerOpacity, vendorLogo, onNavigateToTem
                   <DetailRow
                     label="Status"
                     value={settings.domain_verified ? 'Verified ✓' : 'Not Verified'}
-                    valueStyle={{ color: settings.domain_verified ? '#10b981' : colors.text.tertiary }}
                   />
                 </>
               )}
@@ -467,32 +464,6 @@ export function EmailSettingsDetail({ headerOpacity, vendorLogo, onNavigateToTem
           </View>
         </View>
 
-        {/* Template Customization */}
-        {onNavigateToTemplates && (
-          <>
-            <Text style={[styles.cardSectionTitle, { marginTop: spacing.xl }]}>DESIGN</Text>
-            <View style={styles.cardWrapper}>
-              <Pressable
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                  onNavigateToTemplates()
-                }}
-                style={styles.detailCard}
-              >
-                <View style={[styles.cardInner, { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }]}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.cardTitle}>Customize Templates</Text>
-                    <Text style={[styles.cardDescription, { marginTop: 4 }]}>
-                      Edit the design of your receipts, order confirmations, and other emails
-                    </Text>
-                  </View>
-                  <Ionicons name="chevron-forward" size={20} color={colors.text.tertiary} />
-                </View>
-              </Pressable>
-            </View>
-          </>
-        )}
-
         {/* Email Types */}
         <Text style={[styles.cardSectionTitle, { marginTop: spacing.xl }]}>EMAIL TYPES</Text>
         <View style={styles.cardWrapper}>
@@ -506,35 +477,35 @@ export function EmailSettingsDetail({ headerOpacity, vendorLogo, onNavigateToTem
                 value={enableReceipts}
                 onChange={setEnableReceipts}
                 onTest={() => handleSendTest('receipt')}
-                isTesting={isSendingTest && testingEmailType === 'receipt'}
+                isTesting={isSendingTest && testingTemplate === 'receipt'}
               />
               <ToggleRow
                 label="Order Confirmations"
                 value={enableOrderConfirmations}
                 onChange={setEnableOrderConfirmations}
                 onTest={() => handleSendTest('order_confirmation')}
-                isTesting={isSendingTest && testingEmailType === 'order_confirmation'}
+                isTesting={isSendingTest && testingTemplate === 'order_confirmation'}
               />
               <ToggleRow
                 label="Order Updates"
                 value={enableOrderUpdates}
                 onChange={setEnableOrderUpdates}
-                onTest={() => handleSendTest('order_update')}
-                isTesting={isSendingTest && testingEmailType === 'order_update'}
+                onTest={() => handleSendTest('order_status_update')}
+                isTesting={isSendingTest && testingTemplate === 'order_status_update'}
               />
               <ToggleRow
                 label="Loyalty Updates"
                 value={enableLoyaltyUpdates}
                 onChange={setEnableLoyaltyUpdates}
-                onTest={() => handleSendTest('loyalty')}
-                isTesting={isSendingTest && testingEmailType === 'loyalty'}
+                onTest={() => handleSendTest('loyalty_update')}
+                isTesting={isSendingTest && testingTemplate === 'loyalty_update'}
               />
               <ToggleRow
                 label="Welcome Emails"
                 value={enableWelcomeEmails}
                 onChange={setEnableWelcomeEmails}
                 onTest={() => handleSendTest('welcome')}
-                isTesting={isSendingTest && testingEmailType === 'welcome'}
+                isTesting={isSendingTest && testingTemplate === 'welcome'}
               />
             </View>
           </View>
@@ -549,10 +520,24 @@ export function EmailSettingsDetail({ headerOpacity, vendorLogo, onNavigateToTem
                 label="Enable Marketing"
                 value={enableMarketing}
                 onChange={setEnableMarketing}
-                onTest={() => handleSendTest('marketing')}
-                isTesting={isSendingTest && testingEmailType === 'marketing'}
               />
             </View>
+          </View>
+        </View>
+
+        {/* Preview All Templates */}
+        <Text style={[styles.cardSectionTitle, { marginTop: spacing.xl }]}>PREVIEW TEMPLATES</Text>
+        <View style={styles.cardWrapper}>
+          <View style={styles.detailCard}>
+            <TemplateListItem label="Receipt" onPress={() => handlePreview('receipt')} />
+            <TemplateListItem label="Order Confirmation" onPress={() => handlePreview('order_confirmation')} />
+            <TemplateListItem label="Order Ready for Pickup" onPress={() => handlePreview('order_ready')} />
+            <TemplateListItem label="Order Shipped" onPress={() => handlePreview('order_shipped')} />
+            <TemplateListItem label="Order Status Update" onPress={() => handlePreview('order_status_update')} />
+            <TemplateListItem label="Welcome" onPress={() => handlePreview('welcome')} />
+            <TemplateListItem label="Password Reset" onPress={() => handlePreview('password_reset')} />
+            <TemplateListItem label="Loyalty Points Update" onPress={() => handlePreview('loyalty_update')} />
+            <TemplateListItem label="Back in Stock" onPress={() => handlePreview('back_in_stock')} isLast />
           </View>
         </View>
 
@@ -591,56 +576,12 @@ export function EmailSettingsDetail({ headerOpacity, vendorLogo, onNavigateToTem
                 }}
               >
                 <Text style={{ ...typography.body, color: isSendingTest || !testEmail ? colors.text.tertiary : colors.text.primary, fontWeight: '600' }}>
-                  {isSendingTest && !testingEmailType ? 'Sending...' : 'Send System Test Email'}
+                  {isSendingTest && !testingTemplate ? 'Sending...' : 'Send System Test Email'}
                 </Text>
               </Pressable>
             </View>
           </View>
         </View>
-
-        {/* Recent Sends */}
-        {recentSends.length > 0 && (
-          <>
-            <Text style={[styles.cardSectionTitle, { marginTop: spacing.xl }]}>RECENT SENDS</Text>
-            <View style={styles.cardWrapper}>
-              <View style={styles.detailCard}>
-                <View style={styles.cardInner}>
-                  {recentSends.slice(0, 5).map((send, index) => (
-                    <View key={send.id}>
-                      {index > 0 && <View style={styles.cardDivider} />}
-                      <View style={{ paddingVertical: spacing.xs }}>
-                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
-                          <Text style={{ ...typography.body, color: colors.text.primary }}>{send.subject}</Text>
-                          <View
-                            style={{
-                              paddingHorizontal: 6,
-                              paddingVertical: 2,
-                              backgroundColor: send.status === 'sent' ? '#10b98120' : '#f5923820',
-                              borderRadius: radius.xs,
-                            }}
-                          >
-                            <Text
-                              style={{
-                                ...typography.caption2,
-                                color: send.status === 'sent' ? '#10b981' : '#f59238',
-                                fontWeight: '600',
-                              }}
-                            >
-                              {send.status.toUpperCase()}
-                            </Text>
-                          </View>
-                        </View>
-                        <Text style={{ ...typography.footnote, color: colors.text.tertiary }}>
-                          {send.to_email} • {new Date(send.created_at).toLocaleString()}
-                        </Text>
-                      </View>
-                    </View>
-                  ))}
-                </View>
-              </View>
-            </View>
-          </>
-        )}
 
         {/* Save/Cancel Buttons (only shown when editing) */}
         {isEditing && (
@@ -682,7 +623,47 @@ export function EmailSettingsDetail({ headerOpacity, vendorLogo, onNavigateToTem
           </View>
         )}
       </ScrollView>
+
+      {/* Template Preview Modal */}
+      {vendorId && (
+        <EmailTemplatePreviewModal
+          visible={!!previewTemplate}
+          templateSlug={previewTemplate}
+          vendorId={vendorId}
+          onClose={() => setPreviewTemplate(null)}
+        />
+      )}
     </View>
+  )
+}
+
+interface TemplateListItemProps {
+  label: string
+  onPress: () => void
+  isLast?: boolean
+}
+
+function TemplateListItem({ label, onPress, isLast }: TemplateListItemProps) {
+  return (
+    <Pressable
+      onPress={() => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+        onPress()
+      }}
+      style={({ pressed }) => ({
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingVertical: 14,
+        paddingHorizontal: 16,
+        backgroundColor: pressed ? colors.glass.thin : 'transparent',
+        borderBottomWidth: isLast ? 0 : 0.5,
+        borderBottomColor: colors.border.subtle,
+      })}
+    >
+      <Text style={{ ...typography.body, color: colors.text.secondary }}>{label}</Text>
+      <Ionicons name="chevron-forward" size={16} color={colors.text.disabled} />
+    </Pressable>
   )
 }
 
@@ -692,6 +673,7 @@ interface ToggleRowProps {
   onChange: (value: boolean) => void
   onTest?: () => void
   isTesting?: boolean
+  onPreview?: () => void
 }
 
 function ToggleRow({ label, value, onChange, onTest, isTesting }: ToggleRowProps) {
@@ -717,7 +699,7 @@ function ToggleRow({ label, value, onChange, onTest, isTesting }: ToggleRowProps
               borderColor: colors.border.regular,
             }}
           >
-            <Text style={{ fontSize: 11, fontWeight: '600', color: isTesting ? colors.text.tertiary : colors.text.secondary }}>
+            <Text style={{ fontSize: 11, fontWeight: '600', color: isTesting ? colors.text.disabled : colors.text.tertiary }}>
               {isTesting ? 'Sending...' : 'Test'}
             </Text>
           </Pressable>

@@ -118,11 +118,14 @@ const OrderItem = React.memo<OrderItemProps>(({ order, isLast }) => {
     selectOrder(order.id)
   }, [order.id, selectOrder])
 
-  // Format time
-  const timeStr = new Date(order.created_at).toLocaleTimeString('en-US', {
-    hour: 'numeric',
-    minute: '2-digit',
-  })
+  // Format timestamp - show date + time for older orders
+  const orderDate = new Date(order.created_at)
+  const today = new Date()
+  const isToday = orderDate.toDateString() === today.toDateString()
+
+  const timeStr = isToday
+    ? orderDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
+    : `${orderDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}, ${orderDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}`
 
   // Customer initials
   const customerInitials = order.customer_name

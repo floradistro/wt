@@ -1,18 +1,24 @@
 /**
  * Send Email Edge Function
- * Production-ready email sending via Resend API
- *
- * Handles:
- * - Transactional emails (receipts, order confirmations, password resets)
- * - Marketing emails (campaigns, promotions)
- * - Email tracking (sends, opens, clicks)
- * - Vendor settings (from name/email, enable/disable)
- * - Template rendering from database (single source of truth)
+ * Using React Email for templates + Resend for delivery
  */
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.81.1'
-import { Resend } from 'https://esm.sh/resend@3.2.0'
+import React from 'npm:react@18.3.1'
+import { renderAsync } from 'npm:@react-email/components@0.0.22'
+import { Resend } from 'npm:resend@4.0.0'
+
+// Import templates
+import { Receipt } from './_templates/receipt.tsx'
+import { OrderConfirmation } from './_templates/order-confirmation.tsx'
+import { OrderReady } from './_templates/order-ready.tsx'
+import { OrderShipped } from './_templates/order-shipped.tsx'
+import { Welcome } from './_templates/welcome.tsx'
+import { PasswordReset } from './_templates/password-reset.tsx'
+import { LoyaltyUpdate } from './_templates/loyalty-update.tsx'
+import { BackInStock } from './_templates/back-in-stock.tsx'
+import { OrderStatusUpdate } from './_templates/order-status-update.tsx'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -20,34 +26,23 @@ const corsHeaders = {
 }
 
 interface SendEmailRequest {
-  // Email content - EITHER html OR templateSlug is required
   to: string
   toName?: string
-  subject?: string // Optional if using template (template has default subject)
-  html?: string // Pre-rendered HTML (legacy support)
+  subject?: string
+  html?: string // Legacy support
   text?: string
-
-  // Template-based rendering (preferred - single source of truth)
-  templateSlug?: string // e.g., 'order_confirmation', 'welcome', 'password_reset'
-  variables?: Record<string, any> // Template variables for rendering
-
-  // Email type and tracking
-  emailType: 'transactional' | 'marketing'
-  category?: string // 'receipt', 'order_confirmation', 'password_reset', etc.
-
-  // Vendor context
+  templateSlug?: string
+  data?: Record<string, any>
+  emailType?: 'transactional' | 'marketing'
+  category?: string
   vendorId: string
   customerId?: string
   orderId?: string
   campaignId?: string
   templateId?: string
-
-  // Optional overrides
   fromName?: string
   fromEmail?: string
   replyTo?: string
-
-  // Metadata
   metadata?: Record<string, any>
 }
 
@@ -72,85 +67,294 @@ interface EmailSendRecord {
 }
 
 /**
- * Render Handlebars-style template with variables
- * Supports: {{var}}, {{#if var}}...{{/if}}, {{#each arr}}...{{/each}}, {{#unless var}}...{{/unless}}
+ * Render a React Email template to HTML
  */
-function renderTemplate(template: string, variables: Record<string, any>): string {
-  let rendered = template
+async function renderTemplate(
+  templateSlug: string,
+  data: Record<string, any>,
+  vendorName: string,
+  logoUrl?: string
+): Promise<{ html: string; subject: string }> {
+  const baseProps = { vendorName, logoUrl }
 
-  // Handle {{#each array}}...{{/each}} blocks
-  const eachRegex = /\{\{#each\s+(\w+)\}\}([\s\S]*?)\{\{\/each\}\}/g
-  rendered = rendered.replace(eachRegex, (match, arrayName, content) => {
-    const arr = variables[arrayName]
-    if (!Array.isArray(arr)) return ''
-    return arr.map((item) => {
-      let itemRendered = content
-      // Replace item-level variables
-      if (typeof item === 'object' && item !== null) {
-        Object.entries(item).forEach(([key, value]) => {
-          const itemVarRegex = new RegExp(`\\{\\{${key}\\}\\}`, 'g')
-          itemRendered = itemRendered.replace(itemVarRegex, String(value ?? ''))
-        })
-      }
-      return itemRendered
-    }).join('')
-  })
+  let element: React.ReactElement
+  let subject: string
 
-  // Handle {{#if var}}...{{else}}...{{/if}} blocks (with else)
-  const ifElseRegex = /\{\{#if\s+(\w+)\}\}([\s\S]*?)\{\{else\}\}([\s\S]*?)\{\{\/if\}\}/g
-  rendered = rendered.replace(ifElseRegex, (match, varName, ifContent, elseContent) => {
-    const value = variables[varName]
-    return value ? ifContent : elseContent
-  })
+  switch (templateSlug) {
+    case 'receipt':
+      element = React.createElement(Receipt, {
+        ...baseProps,
+        orderNumber: data.order_number || '',
+        items: data.items || [],
+        subtotal: data.subtotal,
+        tax: data.tax_amount,
+        shipping: data.shipping_cost,
+        discount: data.discount_amount,
+        total: data.total || '$0.00',
+      })
+      subject = `Receipt #${data.order_number}`
+      break
 
-  // Handle {{#if var}}...{{/if}} blocks (without else)
-  const ifRegex = /\{\{#if\s+(\w+)\}\}([\s\S]*?)\{\{\/if\}\}/g
-  rendered = rendered.replace(ifRegex, (match, varName, content) => {
-    const value = variables[varName]
-    return value ? content : ''
-  })
+    case 'order_confirmation':
+      element = React.createElement(OrderConfirmation, {
+        ...baseProps,
+        customerName: data.customer_name || 'Customer',
+        orderNumber: data.order_number || '',
+        items: data.items || [],
+        subtotal: data.subtotal,
+        tax: data.tax_amount,
+        shipping: data.shipping_cost,
+        discount: data.discount_amount,
+        total: data.total || '$0.00',
+        isPickup: data.is_pickup || false,
+        pickupLocation: data.pickup_location,
+        estimatedTime: data.estimated_time,
+        shippingName: data.shipping_name,
+        shippingAddress: data.shipping_address,
+        shopUrl: data.shop_url || '#',
+      })
+      subject = `Order Confirmed #${data.order_number}`
+      break
 
-  // Handle {{#unless var}}...{{/unless}} blocks
-  const unlessRegex = /\{\{#unless\s+(\w+)\}\}([\s\S]*?)\{\{\/unless\}\}/g
-  rendered = rendered.replace(unlessRegex, (match, varName, content) => {
-    const value = variables[varName]
-    return !value ? content : ''
-  })
+    case 'order_ready':
+      element = React.createElement(OrderReady, {
+        ...baseProps,
+        orderNumber: data.order_number || '',
+        pickupLocation: data.pickup_location || '',
+        pickupAddress: data.pickup_address,
+      })
+      subject = `Your order #${data.order_number} is ready for pickup`
+      break
 
-  // Handle simple {{variable}} substitutions
-  const varRegex = /\{\{(\w+)\}\}/g
-  rendered = rendered.replace(varRegex, (match, varName) => {
-    const value = variables[varName]
-    return value !== undefined && value !== null ? String(value) : ''
-  })
+    case 'order_shipped':
+      element = React.createElement(OrderShipped, {
+        ...baseProps,
+        orderNumber: data.order_number || '',
+        customerName: data.customer_name || '',
+        shippingAddress: data.shipping_address || '',
+        trackingNumber: data.tracking_number,
+        trackingUrl: data.tracking_url,
+        carrier: data.carrier,
+      })
+      subject = `Your order #${data.order_number} has shipped`
+      break
 
-  return rendered
+    case 'welcome':
+      element = React.createElement(Welcome, {
+        ...baseProps,
+        customerName: data.customer_name || 'there',
+        shopUrl: data.shop_url || '#',
+      })
+      subject = `Welcome to ${vendorName}`
+      break
+
+    case 'password_reset':
+      element = React.createElement(PasswordReset, {
+        ...baseProps,
+        customerName: data.customer_name || 'there',
+        resetUrl: data.reset_url || '#',
+      })
+      subject = 'Reset Your Password'
+      break
+
+    case 'loyalty_update':
+      element = React.createElement(LoyaltyUpdate, {
+        ...baseProps,
+        customerName: data.customer_name || '',
+        action: data.action || 'earned',
+        points: data.points || 0,
+        totalPoints: data.total_points || 0,
+        orderNumber: data.order_number,
+        rewardsUrl: data.rewards_url || '#',
+      })
+      subject = `You ${data.action || 'earned'} ${data.points || 0} points`
+      break
+
+    case 'back_in_stock':
+      element = React.createElement(BackInStock, {
+        ...baseProps,
+        customerName: data.customer_name || '',
+        productName: data.product_name || '',
+        productUrl: data.product_url || '#',
+        productImage: data.product_image,
+      })
+      subject = `${data.product_name} is Back in Stock`
+      break
+
+    case 'order_status_update':
+      element = React.createElement(OrderStatusUpdate, {
+        ...baseProps,
+        orderNumber: data.order_number || '',
+        statusTitle: data.status_title || 'Status Update',
+        statusMessage: data.status_message || '',
+        supportEmail: data.support_email || 'support@example.com',
+        trackingNumber: data.tracking_number,
+        trackingUrl: data.tracking_url,
+        carrier: data.carrier,
+        pickupLocation: data.pickup_location,
+      })
+      subject = `Order #${data.order_number} - ${data.status_title || 'Status Update'}`
+      break
+
+    default:
+      throw new Error(`Unknown template: ${templateSlug}`)
+  }
+
+  const html = await renderAsync(element)
+  return { html, subject }
+}
+
+// Sample data for template previews
+const PREVIEW_DATA: Record<string, Record<string, any>> = {
+  receipt: {
+    order_number: 'ORD-12345',
+    items: [
+      { name: 'Premium Flower - OG Kush', quantity: 2, price: '$89.99' },
+      { name: 'Edibles - Gummy Bears', quantity: 1, price: '$24.99' },
+    ],
+    subtotal: '$204.97',
+    tax_amount: '$16.40',
+    shipping_cost: '$10.00',
+    total: '$231.37',
+  },
+  order_confirmation: {
+    customer_name: 'John',
+    order_number: 'ORD-12345',
+    items: [
+      { name: 'Premium Flower - Blue Dream', quantity: 1, price: '$49.99' },
+      { name: 'Vape Cartridge - Sativa', quantity: 2, price: '$79.98' },
+    ],
+    subtotal: '$129.97',
+    tax_amount: '$10.40',
+    shipping_cost: 'FREE',
+    total: '$140.37',
+    is_pickup: false,
+    shipping_name: 'John Doe',
+    shipping_address: '123 Main Street\nPortland, OR 97201',
+    shop_url: '#',
+  },
+  order_ready: {
+    order_number: 'ORD-12345',
+    pickup_location: 'Downtown Portland',
+    pickup_address: '456 NW Burnside St, Portland, OR 97209',
+  },
+  order_shipped: {
+    order_number: 'ORD-12345',
+    customer_name: 'John',
+    shipping_address: '123 Main Street, Portland, OR 97201',
+    tracking_number: '9400111899223456789012',
+    tracking_url: 'https://tools.usps.com/go/TrackConfirmAction?tLabels=9400111899223456789012',
+    carrier: 'USPS',
+  },
+  welcome: {
+    customer_name: 'John',
+    shop_url: '#',
+  },
+  password_reset: {
+    customer_name: 'John',
+    reset_url: '#',
+  },
+  loyalty_update: {
+    customer_name: 'John',
+    action: 'earned',
+    points: 250,
+    total_points: 1500,
+    order_number: 'ORD-12345',
+    rewards_url: '#',
+  },
+  back_in_stock: {
+    customer_name: 'John',
+    product_name: 'Premium Flower - Blue Dream',
+    product_url: '#',
+  },
+  order_status_update: {
+    order_number: 'ORD-12345',
+    status_title: 'Out for Delivery',
+    status_message: 'Your order is out for delivery and will arrive today!',
+    support_email: 'support@example.com',
+  },
 }
 
 serve(async (req) => {
-  console.log('📧 send-email function invoked')
-  console.log('📧 Request method:', req.method)
+  console.log('send-email function invoked', req.method)
 
-  // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
 
+  const url = new URL(req.url)
+
+  // Handle GET requests for template preview
+  if (req.method === 'GET') {
+    try {
+      const templateSlug = url.searchParams.get('template')
+      const vendorId = url.searchParams.get('vendorId')
+
+      if (!templateSlug) {
+        return new Response(
+          JSON.stringify({ error: 'template query param is required' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+
+      const supabaseUrl = Deno.env.get('SUPABASE_URL')!
+      const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+      const supabase = createClient(supabaseUrl, supabaseServiceKey)
+
+      // Get vendor info for branding
+      let vendorName = 'Your Store'
+      let logoUrl: string | undefined
+
+      if (vendorId) {
+        const { data: vendorInfo } = await supabase
+          .from('vendors')
+          .select('store_name, logo_url')
+          .eq('id', vendorId)
+          .single()
+
+        if (vendorInfo) {
+          vendorName = vendorInfo.store_name || vendorName
+          logoUrl = vendorInfo.logo_url
+        }
+      }
+
+      // Get preview data for this template
+      const previewData = PREVIEW_DATA[templateSlug] || {}
+
+      // Render the template
+      const { html } = await renderTemplate(templateSlug, previewData, vendorName, logoUrl)
+
+      // Return HTML directly for WebView
+      return new Response(html, {
+        status: 200,
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'text/html; charset=utf-8',
+        },
+      })
+    } catch (error) {
+      console.error('Preview error:', error)
+      return new Response(
+        `<html><body style="background:#000;color:#fff;font-family:system-ui;padding:40px;">
+          <h1>Preview Error</h1>
+          <p>${error instanceof Error ? error.message : 'Unknown error'}</p>
+        </body></html>`,
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'text/html' } }
+      )
+    }
+  }
+
   try {
-    console.log('📧 Processing email request...')
-    // Initialize Supabase client with service role
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
-    // Initialize Resend client
     const resendApiKey = Deno.env.get('RESEND_API_KEY')
     if (!resendApiKey) {
       throw new Error('RESEND_API_KEY environment variable is not set')
     }
     const resend = new Resend(resendApiKey)
 
-    // Parse request body
     const body: SendEmailRequest = await req.json()
     const {
       to,
@@ -159,8 +363,8 @@ serve(async (req) => {
       html: providedHtml,
       text,
       templateSlug,
-      variables = {},
-      emailType,
+      data = {},
+      emailType = 'transactional',
       category,
       vendorId,
       customerId,
@@ -173,26 +377,16 @@ serve(async (req) => {
       metadata = {},
     } = body
 
-    console.log(`📧 Sending ${emailType} email to ${to}`, {
-      category,
-      vendorId,
-      templateSlug,
-      hasProvidedHtml: !!providedHtml,
-    })
+    console.log(`Sending ${emailType} email to ${to}`, { templateSlug, vendorId })
 
-    // 1. Load vendor email settings
-    const { data: vendorSettings, error: settingsError } = await supabase
+    // Load vendor settings
+    const { data: vendorSettings } = await supabase
       .from('vendor_email_settings')
       .select('*')
       .eq('vendor_id', vendorId)
       .single()
 
-    if (settingsError && settingsError.code !== 'PGRST116') { // PGRST116 = not found
-      console.error('❌ Error loading vendor email settings:', settingsError)
-      throw new Error(`Failed to load vendor email settings: ${settingsError.message}`)
-    }
-
-    // 2. Check if email type is enabled
+    // Check if email type is enabled
     if (vendorSettings) {
       const enabledChecks: Record<string, boolean | undefined> = {
         receipt: vendorSettings.enable_receipts,
@@ -204,36 +398,22 @@ serve(async (req) => {
       }
 
       if (category && enabledChecks[category] === false) {
-        console.warn(`⚠️ Email type '${category}' is disabled for vendor ${vendorId}`)
+        console.warn(`Email type '${category}' is disabled for vendor ${vendorId}`)
         return new Response(
-          JSON.stringify({
-            success: false,
-            error: `Email type '${category}' is disabled`,
-          }),
-          {
-            status: 400,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          }
+          JSON.stringify({ success: false, error: `Email type '${category}' is disabled` }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
       }
 
-      // Marketing emails check
       if (emailType === 'marketing' && !vendorSettings.enable_marketing) {
-        console.warn(`⚠️ Marketing emails are disabled for vendor ${vendorId}`)
         return new Response(
-          JSON.stringify({
-            success: false,
-            error: 'Marketing emails are disabled',
-          }),
-          {
-            status: 400,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          }
+          JSON.stringify({ success: false, error: 'Marketing emails are disabled' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
       }
     }
 
-    // 3. Check customer unsubscribe preferences (for marketing emails)
+    // Check customer unsubscribe (marketing only)
     if (emailType === 'marketing' && customerId) {
       const { data: preferences } = await supabase
         .from('customer_email_preferences')
@@ -243,74 +423,46 @@ serve(async (req) => {
         .single()
 
       if (preferences?.unsubscribed_marketing) {
-        console.warn(`⚠️ Customer ${customerId} has unsubscribed from marketing emails`)
         return new Response(
-          JSON.stringify({
-            success: false,
-            error: 'Customer has unsubscribed from marketing emails',
-          }),
-          {
-            status: 400,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          }
+          JSON.stringify({ success: false, error: 'Customer has unsubscribed' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
       }
     }
 
-    // 4. Determine from name/email
-    const fromName = overrideFromName || vendorSettings?.from_name || 'Whaletools'
-    const fromEmail = overrideFromEmail || vendorSettings?.from_email || 'noreply@whaletools.io'
+    // Fetch vendor info (for logo)
+    const { data: vendorInfo } = await supabase
+      .from('vendors')
+      .select('id, store_name, logo_url')
+      .eq('id', vendorId)
+      .single()
+
+    const vendorName = vendorSettings?.from_name || vendorInfo?.store_name || 'Store'
+    const logoUrl = vendorInfo?.logo_url || vendorSettings?.vendor_logo
+    const fromName = overrideFromName || vendorSettings?.from_name || vendorInfo?.store_name || 'Store'
+    const fromEmail = overrideFromEmail || vendorSettings?.from_email || 'noreply@floradistro.com'
     const replyTo = overrideReplyTo || vendorSettings?.reply_to
 
-    // 5. Get HTML content - either from template or provided directly
     let html: string
     let subject: string
-    let resolvedTemplateId: string | undefined = templateId
 
     if (templateSlug) {
-      // Fetch template from database
-      console.log(`📄 Fetching template: ${templateSlug} for vendor ${vendorId}`)
-
-      const { data: template, error: templateError } = await supabase
-        .from('email_templates')
-        .select('*')
-        .eq('vendor_id', vendorId)
-        .eq('slug', templateSlug)
-        .eq('is_active', true)
-        .single()
-
-      if (templateError || !template) {
-        console.error('❌ Template not found:', templateError)
-        throw new Error(`Template '${templateSlug}' not found for vendor`)
-      }
-
-      resolvedTemplateId = template.id
-
-      // Build template variables with vendor info
-      const templateVariables = {
-        ...variables,
-        vendor_name: vendorSettings?.from_name || 'Store',
-        vendor_logo: vendorSettings?.vendor_logo || '',
-        email_header_image: vendorSettings?.email_header_image_url || '',
-        year: new Date().getFullYear().toString(),
-      }
-
-      // Render template
-      html = renderTemplate(template.html_content, templateVariables)
-      subject = providedSubject || renderTemplate(template.subject, templateVariables)
-
-      console.log(`✅ Template rendered: ${template.name}`)
+      // Render React Email template
+      console.log(`Rendering template: ${templateSlug}`)
+      const rendered = await renderTemplate(templateSlug, data, vendorName, logoUrl)
+      html = rendered.html
+      subject = providedSubject || rendered.subject
     } else if (providedHtml) {
-      // Use provided HTML (legacy support)
+      // Legacy: use provided HTML
       html = providedHtml
       subject = providedSubject || 'Message'
     } else {
       throw new Error('Either templateSlug or html must be provided')
     }
 
-    // 6. Send email via Resend
-    console.log(`📤 Sending via Resend from ${fromName} <${fromEmail}>`)
+    console.log(`Sending from ${fromName} <${fromEmail}>`)
 
+    // Send via Resend
     const resendResponse = await resend.emails.send({
       from: `${fromName} <${fromEmail}>`,
       to: toName ? `${toName} <${to}>` : to,
@@ -327,19 +479,19 @@ serve(async (req) => {
     })
 
     if (!resendResponse.data) {
-      console.error('❌ Resend API error:', resendResponse.error)
+      console.error('Resend API error:', resendResponse.error)
       throw new Error(`Resend API error: ${JSON.stringify(resendResponse.error)}`)
     }
 
-    console.log(`✅ Email sent successfully. Resend ID: ${resendResponse.data.id}`)
+    console.log(`Email sent. Resend ID: ${resendResponse.data.id}`)
 
-    // 7. Log email send to database
+    // Log to database
     const emailSendRecord: EmailSendRecord = {
       vendor_id: vendorId,
       customer_id: customerId,
       order_id: orderId,
       campaign_id: campaignId,
-      template_id: resolvedTemplateId,
+      template_id: templateId,
       email_type: emailType,
       to_email: to,
       to_name: toName,
@@ -350,62 +502,31 @@ serve(async (req) => {
       resend_email_id: resendResponse.data.id,
       status: 'sent',
       sent_at: new Date().toISOString(),
-      metadata: {
-        ...metadata,
-        templateSlug,
-      },
+      metadata: { ...metadata, templateSlug },
     }
 
-    const { error: insertError } = await supabase
-      .from('email_sends')
-      .insert(emailSendRecord)
-
+    const { error: insertError } = await supabase.from('email_sends').insert(emailSendRecord)
     if (insertError) {
-      console.error('❌ Error logging email send:', insertError)
-      // Don't throw - email was sent successfully, logging is secondary
-    } else {
-      console.log('✅ Email send logged to database')
+      console.error('Error logging email send:', insertError)
     }
 
-    // 8. Return success response
     return new Response(
       JSON.stringify({
         success: true,
         resendId: resendResponse.data.id,
-        emailType,
-        category,
         templateSlug,
       }),
-      {
-        status: 200,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      }
+      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
 
   } catch (error) {
-    console.error('❌ Error in send-email function:', error)
-
-    // Log full error details for debugging
-    if (error instanceof Error) {
-      console.error('Error name:', error.name)
-      console.error('Error message:', error.message)
-      console.error('Error stack:', error.stack)
-    }
-
+    console.error('Error in send-email:', error)
     return new Response(
       JSON.stringify({
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error',
-        errorDetails: error instanceof Error ? {
-          name: error.name,
-          message: error.message,
-          stack: error.stack
-        } : error,
       }),
-      {
-        status: 500,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      }
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }
 })

@@ -29,6 +29,7 @@ import { useOrdersUIActions, useSelectedOrderId } from '@/stores/orders-ui.store
 import { useLocationFilter } from '@/stores/location-filter.store'
 import { useAppAuth } from '@/contexts/AppAuthContext'
 import { TitleSection } from '@/components/shared'
+import { OrderFilterBar } from '@/components/orders/shared'
 import type { Order } from '@/services/orders.service'
 
 // ============================================
@@ -54,20 +55,28 @@ interface OrderAction {
 // HELPER FUNCTIONS
 // ============================================
 
-function getTimeAgo(date: string): string {
+function formatTimestamp(date: string): string {
+  const d = new Date(date)
   const now = new Date()
-  const then = new Date(date)
-  const diffMs = now.getTime() - then.getTime()
-  const diffMins = Math.floor(diffMs / 60000)
+  const isToday = d.toDateString() === now.toDateString()
 
-  if (diffMins < 1) return 'now'
-  if (diffMins < 60) return `${diffMins}m`
+  // Format time as 12-hour with AM/PM
+  const timeStr = d.toLocaleTimeString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true
+  })
 
-  const diffHours = Math.floor(diffMins / 60)
-  if (diffHours < 24) return `${diffHours}h`
+  if (isToday) {
+    return timeStr // Just show time for today's orders
+  }
 
-  const diffDays = Math.floor(diffHours / 24)
-  return `${diffDays}d`
+  // Show date + time for older orders
+  const dateStr = d.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric'
+  })
+  return `${dateStr}, ${timeStr}`
 }
 
 // ============================================
@@ -212,21 +221,22 @@ export function FulfillmentBoard() {
 
   const { activeItems, doneItems, activeCount, doneCount } = useMemo(() => {
     // Filter to only pickup + shipping orders (not walk_in)
+    // EXCLUDE cancelled orders - they're not actionable and shouldn't clutter the board
     const fulfillmentOrders = orders.filter(o =>
-      o.order_type === 'pickup' || o.order_type === 'shipping'
+      (o.order_type === 'pickup' || o.order_type === 'shipping') &&
+      o.status !== 'cancelled'
     )
 
     const items: BoardOrder[] = fulfillmentOrders.map(order => {
       const isPickup = order.order_type === 'pickup'
       const isShipping = order.order_type === 'shipping'
 
-      // Determine if done
+      // Determine if done (cancelled excluded above, so not needed here)
       const isDone =
         order.status === 'completed' ||
         order.status === 'delivered' ||
         order.status === 'shipped' ||
-        order.status === 'in_transit' ||
-        order.status === 'cancelled'
+        order.status === 'in_transit'
 
       // Determine the ONE action for this order
       let action: OrderAction | null = null
@@ -273,7 +283,7 @@ export function FulfillmentBoard() {
         order,
         action,
         isDone,
-        timeAgo: getTimeAgo(order.created_at),
+        timeAgo: formatTimestamp(order.created_at),
         typeIcon: isPickup ? 'storefront' : 'cube',
         typeLabel: isPickup ? 'Pickup' : 'Ship',
       }
@@ -390,16 +400,16 @@ export function FulfillmentBoard() {
     : `${activeCount} active • ${doneCount} done`
 
   const ListHeader = useMemo(() => (
-    <TitleSection
-      title="Fulfillment"
-      logo={vendor?.logo_url}
-      subtitle={subtitle}
-      hideButton
-      secondaryButtonText={locationButtonLabel}
-      secondaryButtonIcon="location-outline"
-      onSecondaryButtonPress={openLocationSelector}
-    />
-  ), [vendor?.logo_url, subtitle, locationButtonLabel, openLocationSelector])
+    <>
+      <TitleSection
+        title="Fulfillment"
+        logo={vendor?.logo_url}
+        subtitle={subtitle}
+        hideButton
+      />
+      <OrderFilterBar showLocationFilter={true} />
+    </>
+  ), [vendor?.logo_url, subtitle])
 
   // Empty state
   if (!loading && activeCount === 0 && doneCount === 0) {

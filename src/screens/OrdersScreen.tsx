@@ -22,7 +22,7 @@ import { layout } from '@/theme/layout'
 import { NavSidebar, type NavItem } from '@/components/NavSidebar'
 import { LocationSelectorModal } from '@/components/shared'
 import { OrderDetail } from '@/components/orders'
-import { FulfillmentBoard, InStoreSalesView } from '@/components/orders/views'
+import { FulfillmentBoard, InStoreSalesView, ErrorFeedView } from '@/components/orders/views'
 import { StorePickupDetail, ECommerceDetail } from '@/components/orders/detail'
 import {
   ConfirmPickupOrderModal,
@@ -163,11 +163,18 @@ function OrdersScreenComponent() {
       (o.order_type === 'pickup' || o.order_type === 'shipping') &&
       !['completed', 'delivered', 'shipped', 'in_transit', 'cancelled'].includes(o.status)
     ).length
+    // Count error orders (failed payments, cancelled e-commerce)
+    const errors = orders.filter(o =>
+      o.order_type !== 'walk_in' && (
+        o.payment_status === 'failed' ||
+        o.status === 'cancelled'
+      )
+    ).length
 
-    return { inStore, fulfillment, activeFulfillment }
+    return { inStore, fulfillment, activeFulfillment, errors }
   }, [orders])
 
-  // Simplified nav: Just TWO options - Fulfillment (unified) and In-Store Sales
+  // Nav items: Fulfillment, In-Store Sales, Error Feed
   const navItems: NavItem[] = useMemo(() => [
     {
       id: 'fulfillment',
@@ -180,6 +187,12 @@ function OrdersScreenComponent() {
       icon: 'storefront',
       label: 'In-Store Sales',
       count: orderTypeCounts.inStore,
+    },
+    {
+      id: 'errors',
+      icon: 'warning',
+      label: 'Error Feed',
+      count: orderTypeCounts.errors,
     },
   ], [orderTypeCounts])
 
@@ -223,6 +236,9 @@ function OrdersScreenComponent() {
 
       case 'in-store':
         return <InStoreSalesView isLoading={loading} />
+
+      case 'errors':
+        return <ErrorFeedView />
 
       default:
         return <FulfillmentBoard />

@@ -148,7 +148,14 @@ export const useOrderDetailStore = create<OrderDetailState>()(
        */
       loadOrderDetails: async (orderId: string) => {
         try {
-          set({ loading: true, currentOrderId: orderId }, false, 'orderDetail/loadOrderDetails')
+          // Reset form state when loading a new order to prevent cross-order contamination
+          set({
+            loading: true,
+            currentOrderId: orderId,
+            trackingNumber: '',
+            shippingCost: '',
+            staffNotes: ''
+          }, false, 'orderDetail/loadOrderDetails')
 
           logger.info('[OrderDetailStore] Loading order details:', orderId)
 
@@ -522,7 +529,11 @@ export const useOrderDetailStore = create<OrderDetailState>()(
        * Close shipping label modal
        */
       closeLabelModal: () => {
-        set({ showLabelModal: false }, false, 'orderDetail/closeLabelModal')
+        set({
+          showLabelModal: false,
+          trackingNumber: '',  // Reset form state to prevent cross-order contamination
+          shippingCost: ''     // Reset form state to prevent cross-order contamination
+        }, false, 'orderDetail/closeLabelModal')
       },
 
       /**

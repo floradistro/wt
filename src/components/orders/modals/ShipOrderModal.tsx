@@ -19,11 +19,10 @@ import {
   Text,
   TextInput,
   Pressable,
-  ActivityIndicator,
   Alert,
   Switch,
 } from 'react-native'
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect } from 'react'
 import * as Haptics from 'expo-haptics'
 import { Ionicons } from '@expo/vector-icons'
 import { FullScreenModal, modalStyles } from '@/components/shared'
@@ -93,6 +92,8 @@ export function ShipOrderModal({
     if (!visible || !orderId) {
       setOrderLocations([])
       setSelectedLocationId(null)
+      setTrackingNumber('')  // Reset form to prevent cross-order contamination
+      setShippingCost('')    // Reset form to prevent cross-order contamination
       return
     }
 
@@ -304,6 +305,10 @@ export function ShipOrderModal({
       searchValue={trackingNumber}
       onSearchChange={setTrackingNumber}
       searchPlaceholder="Tracking number *"
+      actionButtonText="Ship"
+      onActionPress={handleShip}
+      actionButtonDisabled={!trackingNumber.trim() || saving}
+      actionButtonLoading={saving}
     >
       {/* Multi-location indicator */}
       {isMultiLocation && (
@@ -451,19 +456,6 @@ export function ShipOrderModal({
         )}
       </View>
 
-      {/* Tracking Number */}
-      <View style={modalStyles.section}>
-        <Text style={modalStyles.sectionLabel}>TRACKING NUMBER *</Text>
-        <TextInput
-          style={[modalStyles.card, modalStyles.input]}
-          value={trackingNumber}
-          onChangeText={setTrackingNumber}
-          placeholder="Enter tracking number..."
-          placeholderTextColor="rgba(235,235,245,0.3)"
-          autoCapitalize="characters"
-        />
-      </View>
-
       {/* Shipping Cost */}
       <View style={modalStyles.section}>
         <Text style={modalStyles.sectionLabel}>SHIPPING COST (OPTIONAL)</Text>
@@ -510,22 +502,6 @@ export function ShipOrderModal({
           />
         </View>
       </View>
-
-      {/* Ship Button */}
-      <Pressable
-        style={[
-          modalStyles.button,
-          (!trackingNumber.trim() || saving) && modalStyles.buttonDisabled,
-        ]}
-        onPress={handleShip}
-        disabled={!trackingNumber.trim() || saving}
-      >
-        {saving ? (
-          <ActivityIndicator size="small" color="#fff" />
-        ) : (
-          <Text style={modalStyles.buttonText}>Ship</Text>
-        )}
-      </Pressable>
     </FullScreenModal>
   )
 }

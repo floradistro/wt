@@ -21,7 +21,8 @@ import { ordersService, type OrderItem } from '@/services/orders.service'
 import { useOrders, useOrdersStore, useOrdersActions } from '@/stores/orders.store'
 import { useSelectedOrderId, useOrdersUIActions, useLastShipmentAt } from '@/stores/orders-ui.store'
 import { useLocationFilter } from '@/stores/location-filter.store'
-import { MarkDeliveredModal } from '../modals'
+import { MarkDeliveredModal, EditOrderModal } from '../modals'
+import { OrderInfoPanel } from '../shared'
 
 interface LocationGroup {
   locationId: string | null
@@ -43,6 +44,7 @@ export function ECommerceDetail() {
   const lastShipmentAt = useLastShipmentAt()
 
   const [showDeliveredModal, setShowDeliveredModal] = useState(false)
+  const [showEditModal, setShowEditModal] = useState(false)
   const [isUpdating, setIsUpdating] = useState(false)
   const [isFulfilling, setIsFulfilling] = useState<string | null>(null)
   const [orderItems, setOrderItems] = useState<OrderItem[]>([])
@@ -271,6 +273,16 @@ export function ECommerceDetail() {
                   <Ionicons name="mail" size={18} color="#fff" />
                 </Pressable>
               )}
+              {/* Edit Button */}
+              <Pressable
+                style={styles.iconButton}
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                  setShowEditModal(true)
+                }}
+              >
+                <Ionicons name="create-outline" size={18} color="#fff" />
+              </Pressable>
             </View>
           )}
         </View>
@@ -418,6 +430,11 @@ export function ECommerceDetail() {
           </View>
         </View>
 
+        {/* Comprehensive Order Info */}
+        <View style={styles.section}>
+          <OrderInfoPanel order={order} />
+        </View>
+
         {/* Danger Zone - Delete Order */}
         <View style={styles.section}>
           <Text style={[styles.sectionTitle, { color: '#ff3b30' }]}>DANGER ZONE</Text>
@@ -441,6 +458,16 @@ export function ECommerceDetail() {
         visible={showDeliveredModal}
         onClose={() => {
           setShowDeliveredModal(false)
+          refreshOrders()
+        }}
+        orderId={order.id}
+      />
+
+      {/* Edit Order Modal */}
+      <EditOrderModal
+        visible={showEditModal}
+        onClose={() => {
+          setShowEditModal(false)
           refreshOrders()
         }}
         orderId={order.id}

@@ -14,7 +14,7 @@
  */
 
 import { View, Text, StyleSheet, Pressable, ActivityIndicator, ScrollView, Linking, Alert, Animated, TextInput, Image } from 'react-native'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import * as Haptics from 'expo-haptics'
 import { BlurView } from 'expo-blur'
 import { Ionicons } from '@expo/vector-icons'
@@ -23,6 +23,8 @@ import { layout } from '@/theme/layout'
 import { logger } from '@/utils/logger'
 import { deleteOrder, type Order } from '@/services/orders.service'
 import { FullScreenModal, modalStyles } from '@/components/shared'
+import { OrderInfoPanel } from './shared'
+import { EditOrderModal } from './modals'
 
 // ✅ NEW: Import from Context
 import { useAppAuth } from '@/contexts/AppAuthContext'
@@ -102,6 +104,9 @@ export function OrderDetail() {
   const successOpacity = useRef(new Animated.Value(0)).current
   const successScale = useRef(new Animated.Value(0.8)).current
   const buttonScale = useRef(new Animated.Value(1)).current
+
+  // Edit modal state
+  const [showEditModal, setShowEditModal] = useState(false)
 
   // ========================================
   // INITIALIZATION & CLEANUP
@@ -506,6 +511,17 @@ export function OrderDetail() {
                 </Pressable>
               )}
 
+              {/* Edit Button */}
+              <Pressable
+                style={styles.iconButton}
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                  setShowEditModal(true)
+                }}
+              >
+                <Ionicons name="create-outline" size={20} color={colors.text.primary} />
+              </Pressable>
+
               {/* Status Button - Always Visible, Always Actionable */}
               <Animated.View style={{ transform: [{ scale: buttonScale }] }}>
                 <Pressable
@@ -781,6 +797,11 @@ export function OrderDetail() {
           </View>
         )}
 
+        {/* Order Info Panel - Comprehensive Details */}
+        <View style={styles.section}>
+          <OrderInfoPanel order={order} />
+        </View>
+
         {/* Danger Zone - Delete Order */}
         <View style={styles.section}>
           <Text style={[styles.sectionTitle, { color: '#ff3b30' }]}>Danger Zone</Text>
@@ -887,6 +908,13 @@ export function OrderDetail() {
           <Text style={modalStyles.buttonText}>SAVE LABEL</Text>
         </Pressable>
       </FullScreenModal>
+
+      {/* Edit Order Modal */}
+      <EditOrderModal
+        visible={showEditModal}
+        onClose={() => setShowEditModal(false)}
+        orderId={order?.id || null}
+      />
     </View>
   )
 }
