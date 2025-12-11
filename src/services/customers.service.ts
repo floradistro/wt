@@ -22,6 +22,22 @@ export interface Customer {
   vendor_id?: string
   created_at: string
   updated_at: string
+  // Wallet pass fields
+  has_wallet_pass?: boolean
+  wallet_pass_created_at?: string
+}
+
+export interface CustomerWalletPass {
+  id: string
+  customer_id: string
+  vendor_id?: string
+  serial_number: string
+  pass_type: 'loyalty' | 'membership' | 'promo'
+  device_registered: boolean
+  push_token?: string
+  created_at: string
+  last_updated_at: string
+  device_registered_at?: string
 }
 
 export interface CustomerWithOrders extends Customer {
@@ -497,6 +513,96 @@ export async function deleteCustomer(customerId: string, vendorId?: string): Pro
 }
 
 /**
+ * Get customer's wallet pass
+ */
+export async function getCustomerWalletPass(
+  customerId: string,
+  vendorId?: string
+): Promise<CustomerWalletPass | null> {
+  let query = supabase
+    .from('customer_wallet_passes')
+    .select('*')
+    .eq('customer_id', customerId)
+    .eq('voided', false)
+
+  if (vendorId) {
+    query = query.eq('vendor_id', vendorId)
+  }
+
+  const { data, error } = await query.maybeSingle()
+
+  if (error) {
+    logger.error('Failed to get customer wallet pass:', error)
+    return null
+  }
+
+  return data as CustomerWalletPass | null
+}
+
+/**
+ * Check if customer has a wallet pass (quick check)
+ */
+export async function hasWalletPass(
+  customerId: string,
+  vendorId?: string
+): Promise<boolean> {
+  let query = supabase
+    .from('customer_wallet_passes')
+    .select('id', { count: 'exact', head: true })
+    .eq('customer_id', customerId)
+    .eq('voided', false)
+
+  if (vendorId) {
+    query = query.eq('vendor_id', vendorId)
+  }
+
+  const { count, error } = await query
+
+  if (error) {
+    logger.error('Failed to check wallet pass:', error)
+    return false
+  }
+
+  return (count || 0) > 0
+}
+
+/**
+ * Get wallet pass stats for a vendor
+ */
+export async function getWalletPassStats(vendorId: string): Promise<{
+  total_passes: number
+  active_passes: number
+  push_enabled: number
+  new_this_week: number
+  new_this_month: number
+}> {
+  const { data, error } = await supabase
+    .from('customer_wallet_pass_stats')
+    .select('*')
+    .eq('vendor_id', vendorId)
+    .maybeSingle()
+
+  if (error) {
+    logger.error('Failed to get wallet pass stats:', error)
+    return {
+      total_passes: 0,
+      active_passes: 0,
+      push_enabled: 0,
+      new_this_week: 0,
+      new_this_month: 0,
+    }
+  }
+
+  return data || {
+    total_passes: 0,
+    active_passes: 0,
+    push_enabled: 0,
+    new_this_week: 0,
+    new_this_month: 0,
+  }
+}
+
+/**
  * Export service object
  */
 export const customersService = {
@@ -511,4 +617,8 @@ export const customersService = {
   getCustomerWithOrders,
   getTopCustomers,
   deleteCustomer,
+  // Wallet pass functions
+  getCustomerWalletPass,
+  hasWalletPass,
+  getWalletPassStats,
 }

@@ -3,7 +3,7 @@
  * Customer intelligence + Email campaigns + Channels + Discounts + Affiliates
  */
 
-import { View, Text, StyleSheet, Pressable, TextInput, ActivityIndicator, ScrollView, Modal, Dimensions, Animated } from 'react-native'
+import { View, Text, StyleSheet, Pressable, TextInput, ActivityIndicator, ScrollView, Modal, Dimensions, Animated, Image } from 'react-native'
 import React, { useEffect, memo, useState, useCallback, useMemo, useRef } from 'react'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { WebView } from 'react-native-webview'
@@ -124,6 +124,8 @@ function MarketingScreenComponent() {
   const [editingDraftId, setEditingDraftId] = useState<string | null>(null)
   // Nav state
   const [activeNav, setActiveNav] = useState<'campaigns' | 'segments' | 'loyalty' | 'discounts' | 'channels' | 'affiliates' | 'wallet'>('campaigns')
+  // Expanded segments state (for nested campaigns view)
+  const [expandedSegments, setExpandedSegments] = useState<Set<string>>(new Set())
 
   // Wallet pass stats state
   const [walletStats, setWalletStats] = useState<{
@@ -131,8 +133,18 @@ function MarketingScreenComponent() {
     activePasses: number
     pushEnabled: number
     recentActivity: Array<{ order_number: string; status: string; updated_at: string }>
+    sampleOrder: {
+      id: string
+      order_number: string
+      status: string
+      order_type: string
+      total_amount: number
+      tracking_number?: string
+      item_count: number
+    } | null
   } | null>(null)
   const [walletLoading, setWalletLoading] = useState(false)
+  const [passPreviewHtml, setPassPreviewHtml] = useState<string | null>(null)
 
   // Loyalty & Discounts store
   const loyaltyProgram = useLoyaltyProgram()
@@ -347,6 +359,26 @@ function MarketingScreenComponent() {
           .from('order_pass_registrations')
           .select('*', { count: 'exact', head: true })
 
+        // Fetch a recent order to use as sample for the pass preview
+        const { data: sampleOrderData } = await supabase
+          .from('orders')
+          .select('id, order_number, status, order_type, total_amount, tracking_number')
+          .eq('vendor_id', vendor.id)
+          .in('status', ['confirmed', 'preparing', 'shipped', 'in_transit', 'delivered'])
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+
+        // Get item count for the sample order
+        let sampleItemCount = 0
+        if (sampleOrderData?.id) {
+          const { count } = await supabase
+            .from('order_items')
+            .select('*', { count: 'exact', head: true })
+            .eq('order_id', sampleOrderData.id)
+          sampleItemCount = count || 0
+        }
+
         // Calculate stats
         const totalPasses = passes?.length || 0
         const pushEnabled = passes?.filter(p => p.push_enabled).length || 0
@@ -356,12 +388,38 @@ function MarketingScreenComponent() {
           updated_at: p.last_updated_at,
         }))
 
+        const sampleOrder = sampleOrderData ? {
+          id: sampleOrderData.id,
+          order_number: sampleOrderData.order_number,
+          status: sampleOrderData.status,
+          order_type: sampleOrderData.order_type || 'shipping',
+          total_amount: sampleOrderData.total_amount,
+          tracking_number: sampleOrderData.tracking_number,
+          item_count: sampleItemCount,
+        } : null
+
         setWalletStats({
           totalPasses,
           activePasses: activeCount || 0,
           pushEnabled,
           recentActivity,
+          sampleOrder,
         })
+
+        // Fetch the HTML preview for the sample order
+        if (sampleOrder?.id) {
+          try {
+            const previewResponse = await fetch(
+              `https://uaednwpxursknmwdeejn.supabase.co/functions/v1/order-pass-preview?order_id=${sampleOrder.id}`
+            )
+            if (previewResponse.ok) {
+              const html = await previewResponse.text()
+              if (!cancelled) setPassPreviewHtml(html)
+            }
+          } catch (previewErr) {
+            console.error('[MarketingScreen] Preview fetch error:', previewErr)
+          }
+        }
       } catch (err) {
         console.error('[MarketingScreen] Wallet stats exception:', err)
       } finally {
@@ -1184,44 +1242,6 @@ function MarketingScreenComponent() {
               subtitle={`${totalCustomersWithMetrics.toLocaleString()} customers analyzed`}
             />
 
-            {/* RFM SEGMENT BREAKDOWN */}
-            {rfmDistribution.length > 0 && (
-              <View style={styles.section}>
-                <Text style={styles.sectionTitle}>RFM Analysis</Text>
-                <Text style={styles.sectionSubtitle}>Customer behavior segments based on Recency, Frequency & Monetary value</Text>
-
-                <View style={styles.segmentGrid}>
-                  {rfmDistribution
-                    .filter(item => item.count > 0)
-                    .map((item) => {
-                      const percentage = totalCustomersWithMetrics > 0
-                        ? ((item.count / totalCustomersWithMetrics) * 100).toFixed(1)
-                        : '0'
-                      return (
-                        <Pressable
-                          key={item.segment}
-                          style={styles.segmentCard}
-                          onPress={() => {
-                            // Find matching segment and open creator
-                            const matchingSegment = segments.find(s =>
-                              s.name.toLowerCase().includes(item.segment.toLowerCase())
-                            )
-                            handleOpenCreator(matchingSegment?.id)
-                          }}
-                        >
-                          <View style={[styles.segmentDot, { backgroundColor: item.color }]} />
-                          <View style={styles.segmentInfo}>
-                            <Text style={styles.segmentName}>{item.segment}</Text>
-                            <Text style={styles.segmentCount}>{item.count.toLocaleString()} customers</Text>
-                          </View>
-                          <Text style={styles.segmentPercent}>{percentage}%</Text>
-                        </Pressable>
-                      )
-                    })}
-                </View>
-              </View>
-            )}
-
             {/* MARKETING REACHABILITY */}
             {contactReachability && (
               <View style={styles.section}>
@@ -1296,35 +1316,171 @@ function MarketingScreenComponent() {
               </View>
             )}
 
-            {/* TARGET AUDIENCES */}
+            {/* TARGET AUDIENCES - Expandable with nested campaigns */}
             {segments.length > 0 && (
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>Target Audiences</Text>
-                <Text style={styles.sectionSubtitle}>Pre-built segments ready to email</Text>
+                <Text style={styles.sectionSubtitle}>Segments with campaign history</Text>
 
                 <View style={styles.segmentGrid}>
                   {segments
-                    .filter(s => s.customer_count > 0)
-                    .sort((a, b) => b.customer_count - a.customer_count)
-                    .map((seg) => (
-                      <Pressable
-                        key={seg.id}
-                        style={styles.segmentCard}
-                        onPress={() => handleOpenCreator(seg.id)}
-                      >
-                        <View style={[styles.segmentDot, { backgroundColor: seg.color || '#6366F1' }]} />
-                        <View style={styles.segmentInfo}>
-                          <Text style={styles.segmentName}>{seg.name}</Text>
-                          <Text style={styles.segmentCount}>{seg.customer_count.toLocaleString()} customers</Text>
+                    .filter(s => s.customer_count > 0 || s.name === 'Staff') // Always show Staff for testing
+                    .sort((a, b) => {
+                      // Staff always first, then by customer count
+                      if (a.name === 'Staff') return -1
+                      if (b.name === 'Staff') return 1
+                      return b.customer_count - a.customer_count
+                    })
+                    .map((seg) => {
+                      // Find campaigns targeting this segment
+                      const segmentCampaigns = campaigns.filter(c =>
+                        c.audience_filter?.segment_id === seg.id
+                      ).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+
+                      const isExpanded = expandedSegments.has(seg.id)
+                      const hasNeverEmailed = segmentCampaigns.length === 0
+                      const sentCampaigns = segmentCampaigns.filter(c => c.status === 'sent')
+
+                      return (
+                        <View key={seg.id} style={styles.expandableSegmentContainer}>
+                          {/* Segment Header - Tappable to expand */}
+                          <Pressable
+                            style={[
+                              styles.segmentCard,
+                              isExpanded && styles.segmentCardExpanded,
+                              hasNeverEmailed && styles.segmentCardNeverEmailed
+                            ]}
+                            onPress={() => {
+                              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                              setExpandedSegments(prev => {
+                                const next = new Set(prev)
+                                if (next.has(seg.id)) {
+                                  next.delete(seg.id)
+                                } else {
+                                  next.add(seg.id)
+                                }
+                                return next
+                              })
+                            }}
+                          >
+                            <View style={[styles.segmentDot, { backgroundColor: seg.color || '#6366F1' }]} />
+                            <View style={styles.segmentInfo}>
+                              <Text style={styles.segmentName}>{seg.name}</Text>
+                              <View style={styles.segmentMetaRow}>
+                                <Text style={styles.segmentCount}>{seg.customer_count.toLocaleString()} customers</Text>
+                                {hasNeverEmailed ? (
+                                  <View style={styles.neverEmailedBadge}>
+                                    <Ionicons name="alert-circle" size={12} color="#F59E0B" />
+                                    <Text style={styles.neverEmailedText}>Never emailed</Text>
+                                  </View>
+                                ) : (
+                                  <Text style={styles.campaignCountBadge}>
+                                    {sentCampaigns.length} campaign{sentCampaigns.length !== 1 ? 's' : ''} sent
+                                  </Text>
+                                )}
+                              </View>
+                            </View>
+                            <Ionicons
+                              name={isExpanded ? "chevron-up" : "chevron-down"}
+                              size={20}
+                              color={colors.text.tertiary}
+                            />
+                          </Pressable>
+
+                          {/* Expanded Content - Campaign History + New Campaign Button */}
+                          {isExpanded && (
+                            <View style={styles.expandedContent}>
+                              {/* Campaign History */}
+                              {segmentCampaigns.length > 0 ? (
+                                <View style={styles.campaignHistoryList}>
+                                  {segmentCampaigns.slice(0, 5).map((campaign) => {
+                                    const openRate = campaign.sent_count > 0
+                                      ? ((campaign.opened_count / campaign.sent_count) * 100).toFixed(0)
+                                      : '0'
+                                    return (
+                                      <Pressable
+                                        key={campaign.id}
+                                        style={styles.campaignHistoryItem}
+                                        onPress={() => {
+                                          setSelectedCampaign(campaign)
+                                          setShowCampaignDetail(true)
+                                        }}
+                                      >
+                                        <View style={styles.campaignHistoryInfo}>
+                                          <Text style={styles.campaignHistoryName} numberOfLines={1}>
+                                            {campaign.name || campaign.subject}
+                                          </Text>
+                                          <Text style={styles.campaignHistoryDate}>
+                                            {campaign.sent_at
+                                              ? new Date(campaign.sent_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                                              : campaign.status === 'draft' ? 'Draft' : 'Pending'}
+                                          </Text>
+                                        </View>
+                                        <View style={styles.campaignHistoryStats}>
+                                          {campaign.status === 'sent' && (
+                                            <Text style={styles.campaignHistoryOpenRate}>{openRate}% open</Text>
+                                          )}
+                                          <View style={[
+                                            styles.campaignStatusDot,
+                                            { backgroundColor: campaign.status === 'sent' ? '#10B981' : campaign.status === 'draft' ? '#6B7280' : '#F59E0B' }
+                                          ]} />
+                                        </View>
+                                      </Pressable>
+                                    )
+                                  })}
+                                  {segmentCampaigns.length > 5 && (
+                                    <Text style={styles.moreCampaignsText}>
+                                      +{segmentCampaigns.length - 5} more campaigns
+                                    </Text>
+                                  )}
+                                </View>
+                              ) : (
+                                <View style={styles.noCampaignsMessage}>
+                                  <Ionicons name="mail-unread-outline" size={24} color="#F59E0B" />
+                                  <Text style={styles.noCampaignsText}>
+                                    This segment hasn't been emailed yet
+                                  </Text>
+                                  <Text style={styles.noCampaignsSubtext}>
+                                    {seg.ai_description || `${seg.customer_count.toLocaleString()} potential customers waiting to hear from you`}
+                                  </Text>
+                                </View>
+                              )}
+
+                              {/* New Campaign Button */}
+                              <Pressable
+                                style={styles.newCampaignButton}
+                                onPress={() => {
+                                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+                                  handleOpenCreator(seg.id)
+                                }}
+                              >
+                                <Ionicons name="add-circle-outline" size={18} color="#FFFFFF" />
+                                <Text style={styles.newCampaignButtonText}>New Campaign for {seg.name}</Text>
+                              </Pressable>
+
+                              {/* AI Targeting Tips */}
+                              {seg.targeting_tips && seg.targeting_tips.length > 0 && (
+                                <View style={styles.targetingTips}>
+                                  <Text style={styles.targetingTipsLabel}>Targeting ideas:</Text>
+                                  <View style={styles.targetingTipsList}>
+                                    {seg.targeting_tips.slice(0, 3).map((tip, idx) => (
+                                      <View key={idx} style={styles.targetingTipChip}>
+                                        <Text style={styles.targetingTipText}>{tip}</Text>
+                                      </View>
+                                    ))}
+                                  </View>
+                                </View>
+                              )}
+                            </View>
+                          )}
                         </View>
-                        <Ionicons name="mail-outline" size={18} color={colors.text.tertiary} />
-                      </Pressable>
-                    ))}
+                      )
+                    })}
                 </View>
               </View>
             )}
 
-            {segments.length === 0 && rfmDistribution.length === 0 && (
+            {segments.length === 0 && (
               <View style={styles.emptyState}>
                 <Ionicons name="pie-chart-outline" size={64} color={colors.text.quaternary} />
                 <Text style={styles.emptyTitle}>No segments yet</Text>
@@ -1552,25 +1708,136 @@ function MarketingScreenComponent() {
         return (
           <ScrollView
             style={styles.contentScroll}
-            contentContainerStyle={styles.contentScrollContent}
+            contentContainerStyle={[styles.contentScrollContent, { paddingBottom: layout.dockHeight + spacing.lg }]}
             showsVerticalScrollIndicator={false}
           >
             {/* HEADER */}
             <TitleSection
               title="Channels"
               logo={vendor?.logo_url}
-              subtitle="Marketing channels"
+              subtitle="Customer reach by channel"
             />
 
-            <View style={styles.placeholderContent}>
-              <View style={styles.placeholderIcon}>
-                <Ionicons name="share-social-outline" size={48} color={colors.text.quaternary} />
+            {/* Channel Stats */}
+            <View style={styles.heroSection}>
+              <View style={styles.heroCard}>
+                <Ionicons name="mail" size={24} color="#007AFF" style={{ marginBottom: spacing.xs }} />
+                <Text style={styles.heroNumber}>{contactReachability?.email_reachable || 0}</Text>
+                <Text style={styles.heroLabel}>Email</Text>
               </View>
-              <Text style={styles.placeholderTitle}>Coming Soon</Text>
-              <Text style={styles.placeholderSubtitle}>
-                Connect your marketing channels like SMS, push notifications, and social media
-              </Text>
+              <View style={styles.heroCard}>
+                <Ionicons name="chatbubble" size={24} color="#34c759" style={{ marginBottom: spacing.xs }} />
+                <Text style={styles.heroNumber}>{contactReachability?.sms_reachable || 0}</Text>
+                <Text style={styles.heroLabel}>SMS</Text>
+              </View>
+              <View style={styles.heroCard}>
+                <Ionicons name="wallet" size={24} color="#A855F7" style={{ marginBottom: spacing.xs }} />
+                <Text style={styles.heroNumber}>{contactReachability?.wallet_pass_push_enabled || 0}</Text>
+                <Text style={styles.heroLabel}>Wallet Push</Text>
+              </View>
+              <View style={styles.heroCard}>
+                <Ionicons name="people" size={24} color={colors.text.secondary} style={{ marginBottom: spacing.xs }} />
+                <Text style={styles.heroNumber}>{contactReachability?.total || 0}</Text>
+                <Text style={styles.heroLabel}>Total</Text>
+              </View>
             </View>
+
+            {/* Channel Details */}
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Channel Breakdown</Text>
+              <View style={styles.glassCard}>
+                {/* Email Channel */}
+                <View style={styles.channelRow}>
+                  <View style={styles.channelIcon}>
+                    <Ionicons name="mail" size={20} color="#007AFF" />
+                  </View>
+                  <View style={styles.channelInfo}>
+                    <Text style={styles.channelName}>Email</Text>
+                    <Text style={styles.channelDescription}>
+                      {contactReachability?.email_reachable || 0} reachable customers
+                    </Text>
+                  </View>
+                  <View style={styles.channelStats}>
+                    <Text style={styles.channelPercent}>
+                      {contactReachability?.total
+                        ? Math.round((contactReachability.email_reachable / contactReachability.total) * 100)
+                        : 0}%
+                    </Text>
+                    <View style={[styles.channelStatusDot, { backgroundColor: '#34c759' }]} />
+                  </View>
+                </View>
+
+                {/* SMS Channel */}
+                <View style={styles.channelRow}>
+                  <View style={styles.channelIcon}>
+                    <Ionicons name="chatbubble" size={20} color="#34c759" />
+                  </View>
+                  <View style={styles.channelInfo}>
+                    <Text style={styles.channelName}>SMS</Text>
+                    <Text style={styles.channelDescription}>
+                      {contactReachability?.sms_reachable || 0} reachable customers
+                    </Text>
+                  </View>
+                  <View style={styles.channelStats}>
+                    <Text style={styles.channelPercent}>
+                      {contactReachability?.total
+                        ? Math.round((contactReachability.sms_reachable / contactReachability.total) * 100)
+                        : 0}%
+                    </Text>
+                    <View style={[styles.channelStatusDot, { backgroundColor: '#ff9500' }]} />
+                  </View>
+                </View>
+
+                {/* Apple Wallet Channel */}
+                <View style={[styles.channelRow, styles.borderBottom && false]}>
+                  <View style={styles.channelIcon}>
+                    <Ionicons name="wallet" size={20} color="#A855F7" />
+                  </View>
+                  <View style={styles.channelInfo}>
+                    <Text style={styles.channelName}>Apple Wallet</Text>
+                    <Text style={styles.channelDescription}>
+                      {contactReachability?.wallet_pass_total || 0} passes created •{' '}
+                      {contactReachability?.wallet_pass_push_enabled || 0} push enabled
+                    </Text>
+                  </View>
+                  <View style={styles.channelStats}>
+                    <Text style={styles.channelPercent}>
+                      {contactReachability?.total && contactReachability.wallet_pass_total
+                        ? Math.round((contactReachability.wallet_pass_total / contactReachability.total) * 100)
+                        : 0}%
+                    </Text>
+                    <View style={[styles.channelStatusDot, { backgroundColor: '#34c759' }]} />
+                  </View>
+                </View>
+              </View>
+            </View>
+
+            {/* Unreachable Customers */}
+            {(contactReachability?.unreachable || 0) > 0 && (
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Unreachable</Text>
+                <View style={styles.glassCard}>
+                  <View style={styles.channelRow}>
+                    <View style={[styles.channelIcon, { backgroundColor: 'rgba(255,59,48,0.1)' }]}>
+                      <Ionicons name="alert-circle" size={20} color="#ff3b30" />
+                    </View>
+                    <View style={styles.channelInfo}>
+                      <Text style={styles.channelName}>No Contact Info</Text>
+                      <Text style={styles.channelDescription}>
+                        {contactReachability?.unreachable || 0} customers with no email or phone
+                      </Text>
+                    </View>
+                    <View style={styles.channelStats}>
+                      <Text style={[styles.channelPercent, { color: '#ff3b30' }]}>
+                        {contactReachability?.total
+                          ? Math.round((contactReachability.unreachable / contactReachability.total) * 100)
+                          : 0}%
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+              </View>
+            )}
           </ScrollView>
         )
 
@@ -1857,73 +2124,127 @@ function MarketingScreenComponent() {
               </View>
             </View>
 
-            {/* PASS PREVIEW */}
+            {/* PASS PREVIEW - Tap to Open Actual Pass */}
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Order Pass Preview</Text>
-              <Text style={styles.sectionSubtitle}>How your order passes appear in customers' Apple Wallet</Text>
+              <Text style={styles.sectionTitle}>Your Wallet Passes</Text>
+              <Text style={styles.sectionSubtitle}>
+                Tap a pass to preview and add to Apple Wallet
+              </Text>
 
-              {/* Mock Pass Preview */}
-              <View style={styles.walletPassPreview}>
-                <View style={styles.walletPassCard}>
-                  {/* Pass Header */}
-                  <View style={styles.walletPassHeader}>
-                    {vendor?.logo_url ? (
-                      <View style={styles.walletPassLogo}>
-                        <Text style={styles.walletPassLogoText}>
-                          {vendor.store_name?.charAt(0) || 'F'}
+              <View style={styles.passCardsContainer}>
+                {/* Order Pass */}
+                {walletStats?.sampleOrder ? (
+                  <Pressable
+                    style={({ pressed }) => [styles.passCard, pressed && styles.passCardPressed]}
+                    onPress={() => {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+                      const passUrl = `https://uaednwpxursknmwdeejn.supabase.co/functions/v1/order-pass?order_id=${walletStats.sampleOrder!.id}`
+                      const { Linking } = require('react-native')
+                      Linking.openURL(passUrl)
+                    }}
+                  >
+                    {/* Mini Pass Preview - styled to match actual pass */}
+                    <View style={styles.miniPassContainer}>
+                      {/* Header */}
+                      <View style={styles.miniPassHeader}>
+                        {vendor?.logo_url ? (
+                          <Image source={{ uri: vendor.logo_url }} style={styles.miniPassLogo} />
+                        ) : (
+                          <View style={styles.miniPassLogoPlaceholder}>
+                            <Text style={styles.miniPassLogoText}>{vendor?.store_name?.charAt(0) || 'F'}</Text>
+                          </View>
+                        )}
+                        <Text style={styles.miniPassStoreName}>{vendor?.store_name || 'Flora Distro'}</Text>
+                        <View style={styles.miniPassHeaderField}>
+                          <Text style={styles.miniPassLabel}>ORDER</Text>
+                          <Text style={styles.miniPassValue}>{walletStats.sampleOrder.order_type === 'pickup' ? 'PICKUP' : 'SHIPPING'}</Text>
+                        </View>
+                      </View>
+                      {/* Status */}
+                      <View style={styles.miniPassStatus}>
+                        <Text style={styles.miniPassLabel}>STATUS</Text>
+                        <Text style={styles.miniPassStatusValue}>
+                          {walletStats.sampleOrder.status === 'pending' || walletStats.sampleOrder.status === 'confirmed' ? '✓ CONFIRMED' :
+                           walletStats.sampleOrder.status === 'shipped' ? '🚚 SHIPPED' :
+                           walletStats.sampleOrder.status === 'delivered' ? '✅ DELIVERED' :
+                           walletStats.sampleOrder.status.replace(/_/g, ' ').toUpperCase()}
                         </Text>
                       </View>
-                    ) : (
-                      <View style={styles.walletPassLogo}>
-                        <Text style={styles.walletPassLogoText}>F</Text>
+                      {/* QR placeholder */}
+                      <View style={styles.miniPassQR}>
+                        <Ionicons name="qr-code" size={48} color="#333" />
+                        <Text style={styles.miniPassQRText}>{walletStats.sampleOrder.order_number}</Text>
                       </View>
-                    )}
-                    <Text style={styles.walletPassStoreName}>{vendor?.store_name || 'Flora Distro'}</Text>
-                    <View style={styles.walletPassHeaderField}>
-                      <Text style={styles.walletPassFieldLabel}>ORDER</Text>
-                      <Text style={styles.walletPassFieldValue}>SHIPPING</Text>
+                    </View>
+                    <View style={styles.passCardLabel}>
+                      <Ionicons name="cube-outline" size={16} color={colors.text.secondary} />
+                      <Text style={styles.passCardLabelText}>Order Pass</Text>
+                      <Ionicons name="chevron-forward" size={16} color={colors.text.quaternary} />
+                    </View>
+                  </Pressable>
+                ) : (
+                  <View style={[styles.passCard, styles.passCardEmpty]}>
+                    <View style={styles.passCardEmptyContent}>
+                      <Ionicons name="cube-outline" size={32} color={colors.text.quaternary} />
+                      <Text style={styles.passCardEmptyText}>Order Pass</Text>
+                      <Text style={styles.passCardEmptySubtext}>Create an order to preview</Text>
                     </View>
                   </View>
+                )}
 
-                  {/* Primary Field */}
-                  <View style={styles.walletPassPrimary}>
-                    <Text style={styles.walletPassPrimaryLabel}>STATUS</Text>
-                    <Text style={styles.walletPassPrimaryValue}>SHIPPED</Text>
+                {/* Staff/Loyalty Pass */}
+                <Pressable
+                  style={({ pressed }) => [styles.passCard, pressed && styles.passCardPressed]}
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+                    const passUrl = `https://uaednwpxursknmwdeejn.supabase.co/functions/v1/wallet-pass?email=${encodeURIComponent(user?.email || '')}`
+                    const { Linking } = require('react-native')
+                    Linking.openURL(passUrl)
+                  }}
+                >
+                  {/* Mini Pass Preview - Loyalty style */}
+                  <View style={styles.miniPassContainer}>
+                    {/* Header */}
+                    <View style={styles.miniPassHeader}>
+                      {vendor?.logo_url ? (
+                        <Image source={{ uri: vendor.logo_url }} style={styles.miniPassLogo} />
+                      ) : (
+                        <View style={styles.miniPassLogoPlaceholder}>
+                          <Text style={styles.miniPassLogoText}>{vendor?.store_name?.charAt(0) || 'F'}</Text>
+                        </View>
+                      )}
+                      <Text style={styles.miniPassStoreName}>{vendor?.store_name || 'Flora Distro'}</Text>
+                      <View style={styles.miniPassHeaderField}>
+                        <Text style={styles.miniPassLabel}>MEMBER</Text>
+                        <Text style={styles.miniPassValue}>STAFF</Text>
+                      </View>
+                    </View>
+                    {/* Points */}
+                    <View style={styles.miniPassStatus}>
+                      <Text style={styles.miniPassLabel}>POINTS</Text>
+                      <Text style={styles.miniPassStatusValue}>⭐ 0</Text>
+                    </View>
+                    {/* QR placeholder */}
+                    <View style={styles.miniPassQR}>
+                      <Ionicons name="qr-code" size={48} color="#333" />
+                      <Text style={styles.miniPassQRText}>{user?.email?.split('@')[0] || 'staff'}</Text>
+                    </View>
                   </View>
-
-                  {/* Secondary Fields */}
-                  <View style={styles.walletPassSecondary}>
-                    <View style={styles.walletPassSecondaryField}>
-                      <Text style={styles.walletPassFieldLabel}>DETAILS</Text>
-                      <Text style={styles.walletPassFieldValue}>On the way</Text>
-                    </View>
-                    <View style={styles.walletPassSecondaryField}>
-                      <Text style={styles.walletPassFieldLabel}>TOTAL</Text>
-                      <Text style={styles.walletPassFieldValue}>$89.99</Text>
-                    </View>
+                  <View style={styles.passCardLabel}>
+                    <Ionicons name="star-outline" size={16} color={colors.text.secondary} />
+                    <Text style={styles.passCardLabelText}>Loyalty Pass</Text>
+                    <Ionicons name="chevron-forward" size={16} color={colors.text.quaternary} />
                   </View>
+                </Pressable>
+              </View>
 
-                  {/* Auxiliary Fields */}
-                  <View style={styles.walletPassAuxiliary}>
-                    <View style={styles.walletPassSecondaryField}>
-                      <Text style={styles.walletPassFieldLabel}>PROGRESS</Text>
-                      <Text style={styles.walletPassFieldValue}>Step 3 of 4</Text>
-                    </View>
-                    <View style={styles.walletPassSecondaryField}>
-                      <Text style={styles.walletPassFieldLabel}>TRACKING</Text>
-                      <Text style={styles.walletPassFieldValue}>9400111...</Text>
-                    </View>
-                  </View>
-                </View>
-
-                {/* Pass Description */}
-                <View style={styles.walletPassDescription}>
-                  <Text style={styles.walletPassDescriptionTitle}>Real-time Order Updates</Text>
-                  <Text style={styles.walletPassDescriptionText}>
-                    Customers receive push notifications on their lock screen when order status changes.
-                    Pass automatically updates with tracking info and delivery progress.
-                  </Text>
-                </View>
+              {/* Pass Info */}
+              <View style={styles.walletPassDescription}>
+                <Text style={styles.walletPassDescriptionTitle}>Real-time Push Notifications</Text>
+                <Text style={styles.walletPassDescriptionText}>
+                  When order status changes, customers receive instant notifications on their lock screen.
+                  The pass automatically updates with tracking info and delivery progress.
+                </Text>
               </View>
             </View>
 
@@ -2851,6 +3172,152 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
     color: colors.text.secondary,
+  },
+
+  // Expandable Segment Cards with Nested Campaigns
+  expandableSegmentContainer: {
+    marginBottom: spacing.xs,
+  },
+  segmentCardExpanded: {
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
+  },
+  segmentCardNeverEmailed: {
+    borderLeftWidth: 3,
+    borderLeftColor: '#F59E0B',
+  },
+  segmentMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginTop: 2,
+  },
+  neverEmailedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(245, 158, 11, 0.15)',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+  },
+  neverEmailedText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#F59E0B',
+  },
+  campaignCountBadge: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: colors.text.quaternary,
+  },
+  expandedContent: {
+    backgroundColor: colors.glass.thin,
+    borderBottomLeftRadius: radius.md,
+    borderBottomRightRadius: radius.md,
+    padding: spacing.md,
+    gap: spacing.md,
+  },
+  campaignHistoryList: {
+    gap: spacing.xs,
+  },
+  campaignHistoryItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: colors.glass.regular,
+    borderRadius: radius.sm,
+    padding: spacing.sm,
+  },
+  campaignHistoryInfo: {
+    flex: 1,
+  },
+  campaignHistoryName: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: colors.text.primary,
+  },
+  campaignHistoryDate: {
+    fontSize: 11,
+    color: colors.text.tertiary,
+    marginTop: 2,
+  },
+  campaignHistoryStats: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  campaignHistoryOpenRate: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#10B981',
+  },
+  campaignStatusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  moreCampaignsText: {
+    fontSize: 12,
+    color: colors.text.tertiary,
+    textAlign: 'center',
+    marginTop: spacing.xs,
+  },
+  noCampaignsMessage: {
+    alignItems: 'center',
+    padding: spacing.md,
+    gap: spacing.xs,
+  },
+  noCampaignsText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#F59E0B',
+  },
+  noCampaignsSubtext: {
+    fontSize: 12,
+    color: colors.text.tertiary,
+    textAlign: 'center',
+    maxWidth: 280,
+  },
+  newCampaignButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    backgroundColor: '#6366F1',
+    borderRadius: radius.md,
+    paddingVertical: 12,
+    paddingHorizontal: spacing.md,
+  },
+  newCampaignButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  targetingTips: {
+    marginTop: spacing.xs,
+  },
+  targetingTipsLabel: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: colors.text.tertiary,
+    marginBottom: spacing.xs,
+  },
+  targetingTipsList: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.xs,
+  },
+  targetingTipChip: {
+    backgroundColor: 'rgba(99, 102, 241, 0.15)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  targetingTipText: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: '#818CF8',
   },
 
   // Reachability Grid
@@ -4057,5 +4524,451 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.text.tertiary,
     marginTop: spacing.xs,
+  },
+
+  // Shared Styles (used by Wallet and Affiliates)
+  glassCard: {
+    backgroundColor: colors.glass.regular,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border.regular,
+    overflow: 'hidden',
+  },
+  borderBottom: {
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border.regular,
+  },
+  emptyState: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: spacing.xxl,
+  },
+  emptyStateTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: colors.text.primary,
+    marginTop: spacing.md,
+    marginBottom: spacing.xs,
+  },
+  emptyStateText: {
+    fontSize: 14,
+    color: colors.text.secondary,
+    textAlign: 'center',
+    maxWidth: 280,
+  },
+
+  // Wallet Pass Preview Styles
+  passCardsContainer: {
+    flexDirection: 'row',
+    gap: spacing.lg,
+    marginTop: spacing.lg,
+    justifyContent: 'center',
+    flexWrap: 'wrap',
+  },
+  passCard: {
+    width: 280,
+    borderRadius: 16,
+    overflow: 'hidden',
+    backgroundColor: colors.background.secondary,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  passCardEmpty: {
+    borderWidth: 2,
+    borderColor: colors.border.primary,
+    borderStyle: 'dashed',
+    backgroundColor: 'transparent',
+  },
+  passCardContent: {
+    width: '100%',
+    height: 340,
+    backgroundColor: '#000',
+  },
+  passCardEmptyContent: {
+    flex: 1,
+    height: 340,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  passCardEmptyText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.text.tertiary,
+  },
+  passCardEmptySubtext: {
+    fontSize: 13,
+    color: colors.text.quaternary,
+  },
+  passCardLabel: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    padding: spacing.md,
+    backgroundColor: colors.background.tertiary,
+  },
+  passCardLabelText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.text.primary,
+    flex: 1,
+  },
+  passCardOrderNumber: {
+    fontSize: 12,
+    color: colors.text.secondary,
+    fontFamily: 'monospace',
+  },
+  passCardPressed: {
+    opacity: 0.8,
+    transform: [{ scale: 0.98 }],
+  },
+  // Mini Pass Preview Styles (matches actual Apple Wallet pass)
+  miniPassContainer: {
+    backgroundColor: 'rgb(18, 18, 18)',
+    padding: spacing.md,
+    paddingBottom: 0,
+  },
+  miniPassHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: spacing.md,
+  },
+  miniPassLogo: {
+    width: 28,
+    height: 28,
+    borderRadius: 6,
+    marginRight: spacing.sm,
+  },
+  miniPassLogoPlaceholder: {
+    width: 28,
+    height: 28,
+    borderRadius: 6,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: spacing.sm,
+  },
+  miniPassLogoText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  miniPassStoreName: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  miniPassHeaderField: {
+    alignItems: 'flex-end',
+  },
+  miniPassLabel: {
+    fontSize: 9,
+    fontWeight: '500',
+    color: 'rgb(156, 163, 175)',
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
+  },
+  miniPassValue: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: '#fff',
+  },
+  miniPassStatus: {
+    alignItems: 'center',
+    paddingVertical: spacing.md,
+  },
+  miniPassStatusValue: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#fff',
+    marginTop: spacing.xs,
+  },
+  miniPassQR: {
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    padding: spacing.md,
+    alignItems: 'center',
+    marginTop: spacing.sm,
+  },
+  miniPassQRText: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: '#333',
+    marginTop: spacing.xs,
+  },
+  walletPassPreview: {
+    marginTop: spacing.lg,
+    alignItems: 'center',
+  },
+  actualPassContainer: {
+    width: 360,
+    height: 420,
+    borderRadius: 20,
+    overflow: 'hidden',
+    backgroundColor: '#000',
+  },
+  passWebView: {
+    flex: 1,
+    backgroundColor: 'transparent',
+  },
+  downloadPassButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    backgroundColor: '#007AFF',
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.xl,
+    borderRadius: radius.lg,
+    marginTop: spacing.lg,
+  },
+  downloadPassButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  walletPassCard: {
+    width: 320,
+    backgroundColor: 'rgb(18, 18, 18)',
+    borderRadius: 12,
+    padding: spacing.lg,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.4,
+    shadowRadius: 16,
+    elevation: 12,
+  },
+  walletPassHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: spacing.lg,
+  },
+  walletPassLogo: {
+    width: 36,
+    height: 36,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: spacing.sm,
+  },
+  walletPassLogoImage: {
+    width: 36,
+    height: 36,
+    borderRadius: 8,
+    marginRight: spacing.sm,
+  },
+  walletPassLogoText: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  walletPassStoreName: {
+    flex: 1,
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  walletPassHeaderField: {
+    alignItems: 'flex-end',
+  },
+  walletPassFieldLabel: {
+    fontSize: 9,
+    fontWeight: '600',
+    color: 'rgba(255, 255, 255, 0.5)',
+    letterSpacing: 0.5,
+    marginBottom: 2,
+  },
+  walletPassFieldValue: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: '#fff',
+  },
+  walletPassPrimary: {
+    alignItems: 'center',
+    paddingVertical: spacing.lg,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  walletPassPrimaryLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: 'rgba(255, 255, 255, 0.5)',
+    letterSpacing: 1,
+    marginBottom: spacing.xs,
+  },
+  walletPassPrimaryValue: {
+    fontSize: 32,
+    fontWeight: '700',
+    color: '#34c759',
+    letterSpacing: 2,
+  },
+  walletPassSecondary: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingTop: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  walletPassSecondaryField: {
+    flex: 1,
+  },
+  walletPassAuxiliary: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingTop: spacing.md,
+    marginTop: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  walletPassDescription: {
+    marginTop: spacing.xl,
+    padding: spacing.lg,
+    backgroundColor: colors.glass.regular,
+    borderRadius: radius.lg,
+    maxWidth: 320,
+  },
+  walletPassDescriptionTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.text.primary,
+    marginBottom: spacing.xs,
+  },
+  walletPassDescriptionText: {
+    fontSize: 13,
+    color: colors.text.secondary,
+    lineHeight: 18,
+  },
+
+  // Activity Row Styles
+  activityRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: spacing.md,
+  },
+  activityIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: colors.glass.regular,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: spacing.md,
+  },
+  activityInfo: {
+    flex: 1,
+  },
+  activityOrder: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.text.primary,
+  },
+  activityStatus: {
+    fontSize: 13,
+    color: colors.text.secondary,
+    marginTop: 2,
+  },
+  activityTime: {
+    fontSize: 12,
+    color: colors.text.tertiary,
+  },
+
+  // Coming Soon Cards
+  comingSoonCards: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginTop: spacing.lg,
+    gap: spacing.md,
+  },
+  comingSoonCard: {
+    flex: 1,
+    minWidth: 280,
+    backgroundColor: colors.glass.regular,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    borderWidth: 1,
+    borderColor: colors.border.regular,
+  },
+  comingSoonIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: colors.glass.thin,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: spacing.md,
+  },
+  comingSoonTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.text.primary,
+    marginBottom: spacing.xs,
+  },
+  comingSoonDescription: {
+    fontSize: 13,
+    color: colors.text.secondary,
+    lineHeight: 18,
+  },
+
+  // Channel Row Styles (for Channels tab)
+  channelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border.primary,
+  },
+  channelIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: spacing.md,
+  },
+  channelInfo: {
+    flex: 1,
+  },
+  channelName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.text.primary,
+    marginBottom: 2,
+  },
+  channelDescription: {
+    fontSize: 13,
+    color: colors.text.secondary,
+  },
+  channelStats: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  channelPercent: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.text.primary,
+  },
+  channelStatusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+
+  // Loading Overlay
+  loadingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 })

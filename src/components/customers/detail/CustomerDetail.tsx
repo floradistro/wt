@@ -12,7 +12,7 @@ import React, { useState, useEffect, memo } from 'react'
 import { View, Text, ScrollView, Pressable, TextInput, Alert, ActivityIndicator, Platform } from 'react-native'
 import * as Haptics from 'expo-haptics'
 import { Ionicons } from '@expo/vector-icons'
-import type { Customer, CustomerWithOrders } from '@/services/customers.service'
+import type { Customer, CustomerWithOrders, CustomerWalletPass } from '@/services/customers.service'
 import { customersService } from '@/services/customers.service'
 import { logger } from '@/utils/logger'
 import { colors } from '@/theme/tokens'
@@ -44,6 +44,8 @@ export const CustomerDetail = memo(() => {
   const [customAmount, setCustomAmount] = useState('')
   const [customerWithOrders, setCustomerWithOrders] = useState<CustomerWithOrders | null>(null)
   const [loadingOrders, setLoadingOrders] = useState(false)
+  const [walletPass, setWalletPass] = useState<CustomerWalletPass | null>(null)
+  const [loadingWalletPass, setLoadingWalletPass] = useState(false)
 
   // ✅ Sync editedCustomer when customer changes from store
   useEffect(() => {
@@ -70,6 +72,25 @@ export const CustomerDetail = memo(() => {
 
     loadOrders()
   }, [customer?.id])
+
+  // ✅ Load wallet pass info when selected
+  useEffect(() => {
+    if (!customer?.id || !vendorId) return
+
+    const loadWalletPass = async () => {
+      try {
+        setLoadingWalletPass(true)
+        const pass = await customersService.getCustomerWalletPass(customer.id, vendorId)
+        setWalletPass(pass)
+      } catch (err) {
+        logger.error('Failed to load wallet pass:', err)
+      } finally {
+        setLoadingWalletPass(false)
+      }
+    }
+
+    loadWalletPass()
+  }, [customer?.id, vendorId])
 
   // Guard: No customer selected
   if (!customer) {
@@ -460,13 +481,75 @@ export const CustomerDetail = memo(() => {
         {/* Apple Wallet Section - iOS only */}
         {Platform.OS === 'ios' && vendorId && (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Loyalty Card</Text>
-            <AddToWalletButton
-              customerId={customer.id}
-              vendorId={vendorId}
-              customerName={customer.full_name || `${customer.first_name || ''} ${customer.last_name || ''}`.trim()}
-              loyaltyPoints={customer.loyalty_points || 0}
-            />
+            <Text style={styles.sectionTitle}>Apple Wallet</Text>
+            <View style={styles.cardGlass}>
+              {/* Wallet Pass Status */}
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Loyalty Pass</Text>
+                {loadingWalletPass ? (
+                  <ActivityIndicator size="small" color={colors.text.secondary} />
+                ) : walletPass ? (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <View style={{
+                      width: 8,
+                      height: 8,
+                      borderRadius: 4,
+                      backgroundColor: walletPass.device_registered ? '#34c759' : '#ff9500'
+                    }} />
+                    <Text style={styles.infoValue}>
+                      {walletPass.device_registered ? 'Active on Device' : 'Pass Created'}
+                    </Text>
+                  </View>
+                ) : (
+                  <Text style={[styles.infoValue, { color: colors.text.tertiary }]}>Not Set Up</Text>
+                )}
+              </View>
+
+              {/* Pass Details (if exists) */}
+              {walletPass && (
+                <>
+                  <View style={styles.infoRow}>
+                    <Text style={styles.infoLabel}>Created</Text>
+                    <Text style={styles.infoValue}>
+                      {new Date(walletPass.created_at).toLocaleDateString('en-US', {
+                        month: 'short',
+                        day: 'numeric',
+                        year: 'numeric'
+                      })}
+                    </Text>
+                  </View>
+                  {walletPass.device_registered && walletPass.device_registered_at && (
+                    <View style={styles.infoRow}>
+                      <Text style={styles.infoLabel}>Added to Wallet</Text>
+                      <Text style={styles.infoValue}>
+                        {new Date(walletPass.device_registered_at).toLocaleDateString('en-US', {
+                          month: 'short',
+                          day: 'numeric',
+                          year: 'numeric'
+                        })}
+                      </Text>
+                    </View>
+                  )}
+                  <View style={styles.infoRow}>
+                    <Text style={styles.infoLabel}>Push Notifications</Text>
+                    <Text style={[styles.infoValue, { color: walletPass.push_token ? '#34c759' : colors.text.tertiary }]}>
+                      {walletPass.push_token ? 'Enabled' : 'Not Available'}
+                    </Text>
+                  </View>
+                </>
+              )}
+
+              {/* Send/Resend Pass Button */}
+              <View style={[styles.infoRow, styles.lastRow, { paddingTop: 12 }]}>
+                <AddToWalletButton
+                  customerId={customer.id}
+                  vendorId={vendorId}
+                  customerName={customer.full_name || `${customer.first_name || ''} ${customer.last_name || ''}`.trim()}
+                  loyaltyPoints={customer.loyalty_points || 0}
+                  compact={!!walletPass}
+                />
+              </View>
+            </View>
           </View>
         )}
 

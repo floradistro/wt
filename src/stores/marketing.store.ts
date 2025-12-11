@@ -124,6 +124,10 @@ export interface ContactReachability {
   sms_reachable: number    // phone_only + email_and_phone
   any_reachable: number    // total - no_contact
   unreachable: number      // no_contact
+  // Wallet pass channel
+  wallet_pass_total: number      // Total customers with loyalty passes
+  wallet_pass_active: number     // Customers with pass on device
+  wallet_pass_push_enabled: number // Customers who can receive push notifications
 }
 
 export type CreatorStep = 'prompt' | 'preview' | 'audience' | 'confirm'
@@ -389,7 +393,28 @@ export const useMarketingStore = create<MarketingStore>((set, get) => ({
       const sms_reachable = phone_only + email_and_phone
       const any_reachable = total - no_contact
 
-      logger.info(`[MarketingStore] Contact reachability loaded: ${total} customers`)
+      // Fetch wallet pass stats
+      let wallet_pass_total = 0
+      let wallet_pass_active = 0
+      let wallet_pass_push_enabled = 0
+
+      try {
+        const { data: walletStats } = await supabase
+          .from('customer_wallet_pass_stats')
+          .select('*')
+          .eq('vendor_id', vendorId)
+          .maybeSingle()
+
+        if (walletStats) {
+          wallet_pass_total = walletStats.total_passes || 0
+          wallet_pass_active = walletStats.active_passes || 0
+          wallet_pass_push_enabled = walletStats.push_enabled || 0
+        }
+      } catch (walletErr) {
+        logger.warn('[MarketingStore] Wallet pass stats not available:', walletErr)
+      }
+
+      logger.info(`[MarketingStore] Contact reachability loaded: ${total} customers, ${wallet_pass_total} wallet passes`)
 
       set({
         contactReachability: {
@@ -402,6 +427,9 @@ export const useMarketingStore = create<MarketingStore>((set, get) => ({
           sms_reachable,
           any_reachable,
           unreachable: no_contact,
+          wallet_pass_total,
+          wallet_pass_active,
+          wallet_pass_push_enabled,
         },
         isLoadingReachability: false,
       })
