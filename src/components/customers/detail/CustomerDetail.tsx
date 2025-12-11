@@ -8,12 +8,13 @@
  * - Calls store actions directly (no callbacks)
  */
 
-import React, { useState, useEffect, memo } from 'react'
+import React, { useState, useEffect, memo, useCallback } from 'react'
 import { View, Text, ScrollView, Pressable, TextInput, Alert, ActivityIndicator, Platform } from 'react-native'
 import * as Haptics from 'expo-haptics'
 import { Ionicons } from '@expo/vector-icons'
 import type { Customer, CustomerWithOrders, CustomerWalletPass } from '@/services/customers.service'
 import { customersService } from '@/services/customers.service'
+import { supabase } from '@/lib/supabase/client'
 import { logger } from '@/utils/logger'
 import { colors } from '@/theme/tokens'
 import { layout } from '@/theme/layout'
@@ -74,7 +75,7 @@ export const CustomerDetail = memo(() => {
   }, [customer?.id])
 
   // ✅ Load wallet pass function (extracted for reuse)
-  const loadWalletPass = async () => {
+  const loadWalletPass = useCallback(async () => {
     if (!customer?.id || !vendorId) return
     try {
       setLoadingWalletPass(true)
@@ -85,12 +86,37 @@ export const CustomerDetail = memo(() => {
     } finally {
       setLoadingWalletPass(false)
     }
-  }
+  }, [customer?.id, vendorId])
 
-  // ✅ Load wallet pass info when selected
+  // ✅ Load wallet pass info when selected + REALTIME subscription
   useEffect(() => {
     loadWalletPass()
-  }, [customer?.id, vendorId])
+
+    // Subscribe to realtime changes for this customer's wallet passes
+    if (!customer?.id) return
+
+    const channel = supabase
+      .channel(`wallet-pass-${customer.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*', // INSERT, UPDATE, DELETE
+          schema: 'public',
+          table: 'customer_wallet_passes',
+          filter: `customer_id=eq.${customer.id}`,
+        },
+        (payload) => {
+          logger.debug('[CustomerDetail] Wallet pass realtime update:', payload.eventType)
+          // Refresh wallet pass data on any change
+          loadWalletPass()
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [customer?.id, vendorId, loadWalletPass])
 
   // Guard: No customer selected
   if (!customer) {
