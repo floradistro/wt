@@ -85,6 +85,11 @@ interface LoadOrdersOptions {
 // Heartbeat interval (30 seconds) - catches any missed real-time events
 const HEARTBEAT_INTERVAL = 30000
 
+// Retry configuration for realtime subscriptions
+const MAX_RETRY_ATTEMPTS = 3
+const INITIAL_RETRY_DELAY = 5000 // 5 seconds
+let realtimeRetryCount = 0
+
 const initialState = {
   orders: [],
   loading: false,

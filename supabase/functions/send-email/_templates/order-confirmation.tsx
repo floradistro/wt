@@ -11,6 +11,7 @@ interface Item {
 interface OrderConfirmationProps {
   vendorName: string
   logoUrl?: string
+  supportEmail?: string
   customerName: string
   orderNumber: string
   items: Item[]
@@ -30,6 +31,7 @@ interface OrderConfirmationProps {
 export function OrderConfirmation({
   vendorName,
   logoUrl,
+  supportEmail,
   customerName,
   orderNumber,
   items,
@@ -46,7 +48,7 @@ export function OrderConfirmation({
   shopUrl,
 }: OrderConfirmationProps) {
   return (
-    <Layout vendorName={vendorName} logoUrl={logoUrl}>
+    <Layout vendorName={vendorName} logoUrl={logoUrl} supportEmail={supportEmail}>
       <Section style={{ textAlign: 'center' as const, marginBottom: '40px' }}>
         <Title>Order Confirmed</Title>
         <Subtitle>Order #{orderNumber}</Subtitle>

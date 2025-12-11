@@ -11,6 +11,7 @@ interface Item {
 interface ReceiptProps {
   vendorName: string
   logoUrl?: string
+  supportEmail?: string
   orderNumber: string
   items: Item[]
   subtotal?: string
@@ -23,6 +24,7 @@ interface ReceiptProps {
 export function Receipt({
   vendorName,
   logoUrl,
+  supportEmail,
   orderNumber,
   items,
   subtotal,
@@ -32,7 +34,7 @@ export function Receipt({
   total,
 }: ReceiptProps) {
   return (
-    <Layout vendorName={vendorName} logoUrl={logoUrl}>
+    <Layout vendorName={vendorName} logoUrl={logoUrl} supportEmail={supportEmail}>
       <Section style={{ textAlign: 'center' as const, marginBottom: '40px' }}>
         <Title>Receipt</Title>
         <Subtitle>Order #{orderNumber}</Subtitle>

@@ -250,7 +250,7 @@ export function EditablePricingSection({ product }: EditablePricingSectionProps)
           </>
         ) : (
           <>
-            {/* View Mode - SINGLE SOURCE: Read from LIVE template */}
+            {/* View Mode - Read from TEMPLATE (so template changes propagate to all products) */}
             {product.pricing_template?.default_tiers && product.pricing_template.default_tiers.length > 0 ? (
               <>
                 <View style={styles.pricingModeHeader}>

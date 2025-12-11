@@ -14,11 +14,13 @@ import { View, Text, StyleSheet, Pressable, TextInput, ScrollView, ActivityIndic
 import { useState, useEffect } from 'react'
 import * as Haptics from 'expo-haptics'
 import { logger } from '@/utils/logger'
+import { supabase } from '@/lib/supabase/client'
 import { useInventoryAdjustments } from '@/hooks/useInventoryAdjustments'
 import type { AdjustmentType } from '@/services/inventory-adjustments.service'
 import { useOriginalProduct } from '@/stores/product-edit.store'
 import { useActiveModal, useSelectedLocation, productUIActions } from '@/stores/product-ui.store'
 import { FullScreenModal, modalStyles } from '@/components/shared/modals/FullScreenModal'
+import type { InventoryItem } from '@/types/pos'
 
 const ADJUSTMENT_TYPES: { value: AdjustmentType; label: string; description: string; quickReasons: string[] }[] = [
   {
@@ -81,6 +83,67 @@ export function AdjustInventoryModal() {
   const [selectedLocationName, setSelectedLocationName] = useState(storeLocationName)
   const [searchValue, setSearchValue] = useState('')
 
+  // BULLETPROOF: Fetch ALL inventory for this product (not filtered by location)
+  const [fullInventory, setFullInventory] = useState<InventoryItem[]>([])
+  const [loadingInventory, setLoadingInventory] = useState(false)
+
+  // Fetch full inventory when modal opens
+  useEffect(() => {
+    async function fetchFullInventory() {
+      if (!visible || !product?.id) return
+
+      try {
+        setLoadingInventory(true)
+        const { data, error } = await supabase
+          .from('inventory_with_holds')
+          .select(`
+            id,
+            product_id,
+            location_id,
+            total_quantity,
+            held_quantity,
+            available_quantity,
+            locations (name)
+          `)
+          .eq('product_id', product.id)
+
+        if (error) {
+          logger.error('[AdjustInventoryModal] Failed to fetch inventory:', error)
+          return
+        }
+
+        if (data) {
+          const inventory: InventoryItem[] = data.map((inv: any) => ({
+            id: inv.id,
+            location_id: inv.location_id,
+            location_name: inv.locations?.name || 'Unknown',
+            quantity: inv.total_quantity || 0,
+            available_quantity: inv.available_quantity || 0,
+            reserved_quantity: inv.held_quantity || 0,
+          }))
+          setFullInventory(inventory)
+
+          // If no location selected yet, select first one
+          if (!selectedLocationId && inventory.length > 0) {
+            setSelectedLocationId(inventory[0].location_id)
+            setSelectedLocationName(inventory[0].location_name)
+          }
+
+          logger.debug('[AdjustInventoryModal] Loaded full inventory:', {
+            productId: product.id,
+            locations: inventory.length,
+          })
+        }
+      } catch (err) {
+        logger.error('[AdjustInventoryModal] Error:', err)
+      } finally {
+        setLoadingInventory(false)
+      }
+    }
+
+    fetchFullInventory()
+  }, [visible, product?.id])
+
   const { createAdjustment } = useInventoryAdjustments(product?.id, selectedLocationId)
   const [adjustmentType, setAdjustmentType] = useState<AdjustmentType>('count_correction')
   const [quantityChange, setQuantityChange] = useState('')
@@ -97,8 +160,8 @@ export function AdjustInventoryModal() {
     setSelectedLocationName(storeLocationName)
   }, [storeLocationId, storeLocationName])
 
-  // Get current inventory for this location
-  const currentInventory = product?.inventory?.find(inv => inv.location_id === selectedLocationId)
+  // Get current inventory for this location (use fullInventory for accurate data)
+  const currentInventory = fullInventory.find(inv => inv.location_id === selectedLocationId)
   const currentQuantity = currentInventory?.quantity || 0
 
   // Calculate new quantity
@@ -216,8 +279,15 @@ export function AdjustInventoryModal() {
       onSearchChange={setSearchValue}
       searchPlaceholder={`Adjust ${product.name}`}
     >
-      {/* Location Selector */}
-      {product.inventory && product.inventory.length > 1 && (
+      {/* Location Selector - Uses fullInventory for accurate ALL locations */}
+      {loadingInventory ? (
+        <View style={modalStyles.section}>
+          <Text style={modalStyles.sectionLabel}>LOCATION</Text>
+          <View style={modalStyles.card}>
+            <ActivityIndicator size="small" color="rgba(255,255,255,0.5)" />
+          </View>
+        </View>
+      ) : fullInventory.length > 1 && (
         <View style={modalStyles.section}>
           <Text style={modalStyles.sectionLabel}>LOCATION</Text>
           <Pressable
@@ -233,7 +303,7 @@ export function AdjustInventoryModal() {
 
           {showLocationPicker && (
             <View style={styles.pickerContainer}>
-              {product.inventory.map(inv => (
+              {fullInventory.map(inv => (
                 <Pressable
                   key={inv.location_id}
                   style={[

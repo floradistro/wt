@@ -13,10 +13,11 @@ import {
 interface LayoutProps {
   vendorName: string
   logoUrl?: string
+  supportEmail?: string
   children: React.ReactNode
 }
 
-export function Layout({ vendorName, logoUrl, children }: LayoutProps) {
+export function Layout({ vendorName, logoUrl, supportEmail, children }: LayoutProps) {
   const year = new Date().getFullYear()
 
   return (
@@ -45,6 +46,14 @@ export function Layout({ vendorName, logoUrl, children }: LayoutProps) {
 
           {/* Footer */}
           <Section style={styles.footer}>
+            {supportEmail && (
+              <Link
+                href={`mailto:${supportEmail}`}
+                style={styles.supportButton}
+              >
+                Contact Support
+              </Link>
+            )}
             <Text style={styles.footerText}>
               {vendorName} {year}
             </Text>
@@ -91,6 +100,17 @@ const styles = {
     textAlign: 'center' as const,
     padding: '32px 40px',
     borderTop: '1px solid #27272a',
+  },
+  supportButton: {
+    display: 'inline-block',
+    fontSize: '12px',
+    fontWeight: 500,
+    color: '#ffffff',
+    textDecoration: 'none',
+    padding: '10px 20px',
+    backgroundColor: '#dc2626',
+    borderRadius: '4px',
+    marginBottom: '16px',
   },
   footerText: {
     margin: 0,

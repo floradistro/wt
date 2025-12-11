@@ -6,6 +6,7 @@ import { POSScreen } from '@/screens/POSScreen'
 import { ProductsScreen } from '@/screens/ProductsScreen'
 import { OrdersScreen } from '@/screens/OrdersScreen'
 import { CustomersScreen } from '@/screens/CustomersScreen'
+import { MarketingScreen } from '@/screens/MarketingScreen'
 import { SettingsScreen } from '@/screens/SettingsScreen'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { DockOffsetContext } from './DockOffsetContext'
@@ -13,8 +14,9 @@ import { layout } from '@/theme/layout'
 import { device } from '@/theme'
 import { useOrderNotifications, setNotificationNavigator, clearNotificationNavigator } from '@/hooks/useOrderNotifications'
 import { useBadgeCounts } from '@/stores/order-filter.store'
+import { navigationActions } from '@/stores/navigation.store'
 
-const screens = [POSScreen, ProductsScreen, OrdersScreen, CustomersScreen, SettingsScreen]
+const screens = [POSScreen, ProductsScreen, OrdersScreen, CustomersScreen, MarketingScreen, SettingsScreen]
 
 export function DashboardNavigator() {
   // Enable location-aware order notifications globally
@@ -27,11 +29,13 @@ export function DashboardNavigator() {
   const [isFullWidth, setIsFullWidth] = useState(false)
   const { width: screenWidth } = useWindowDimensions()
 
-  // Register navigation callback for notifications
+  // Register navigation callback for notifications and global navigation
   useEffect(() => {
     setNotificationNavigator(setActiveTab)
+    navigationActions.registerNavigator(setActiveTab)
     return () => {
       clearNotificationNavigator()
+      navigationActions.unregisterNavigator()
     }
     // setActiveTab is stable (from useState), won't cause re-runs
   }, [setActiveTab])
@@ -45,6 +49,7 @@ export function DashboardNavigator() {
     layout.sidebarWidth, // Products - has sidebar
     layout.sidebarWidth, // Orders - has sidebar
     layout.sidebarWidth, // Customers - has sidebar
+    layout.sidebarWidth, // Marketing - has sidebar
     layout.sidebarWidth, // Settings - has sidebar
   ]
 

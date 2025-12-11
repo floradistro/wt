@@ -17,11 +17,13 @@
  */
 
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native'
-import { useMemo, useCallback } from 'react'
+import { useMemo, useCallback, useState } from 'react'
 import { LiquidGlassView, isLiquidGlassSupported } from '@callstack/liquid-glass'
 import * as Haptics from 'expo-haptics'
 import { POSCartItem } from './POSCartItem'
 import { POSTotalsSection } from './POSTotalsSection'
+import { POSMissingContactBanner } from '../POSMissingContactBanner'
+import { POSUpdateContactModal } from '../POSUpdateContactModal'
 import { layout } from '@/theme/layout'
 
 // Stores
@@ -39,6 +41,11 @@ interface POSCartProps {
 }
 
 export function POSCart({ onEndSession }: POSCartProps) {
+  // ========================================
+  // LOCAL STATE
+  // ========================================
+  const [showUpdateContactModal, setShowUpdateContactModal] = useState(false)
+
   // ========================================
   // STORES - Cart Data
   // ========================================
@@ -97,8 +104,18 @@ export function POSCart({ onEndSession }: POSCartProps) {
     // Store actions are stable from zustand, safe to omit from deps
   }, [])
 
+  const handleUpdateContactInfo = useCallback(() => {
+    setShowUpdateContactModal(true)
+  }, [])
+
   return (
     <View style={styles.cartCard}>
+      {/* Update Contact Modal */}
+      <POSUpdateContactModal
+        visible={showUpdateContactModal}
+        onClose={() => setShowUpdateContactModal(false)}
+      />
+
       {/* iOS 26 Perfectly Simple Cart Header */}
       <View style={styles.cartHeader}>
         {/* Customer Section - iOS 26 Rounded Container or Pill Button */}
@@ -173,6 +190,11 @@ export function POSCart({ onEndSession }: POSCartProps) {
             </View>
             </TouchableOpacity>
           </LiquidGlassView>
+        )}
+
+        {/* Missing Contact Banner - shows when customer needs email/phone */}
+        {selectedCustomer && (
+          <POSMissingContactBanner onUpdateCustomer={handleUpdateContactInfo} />
         )}
 
         {/* Discount Selector - Pill Style */}

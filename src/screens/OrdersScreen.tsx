@@ -163,6 +163,16 @@ function OrdersScreenComponent() {
       (o.order_type === 'pickup' || o.order_type === 'shipping') &&
       !['completed', 'delivered', 'shipped', 'in_transit', 'cancelled'].includes(o.status)
     ).length
+    // Count active pickup orders (in-store pickup)
+    const activePickup = orders.filter(o =>
+      o.order_type === 'pickup' &&
+      !['completed', 'delivered', 'shipped', 'in_transit', 'cancelled'].includes(o.status)
+    ).length
+    // Count active e-commerce orders (shipping)
+    const activeEcommerce = orders.filter(o =>
+      o.order_type === 'shipping' &&
+      !['completed', 'delivered', 'shipped', 'in_transit', 'cancelled'].includes(o.status)
+    ).length
     // Count error orders (failed payments, cancelled e-commerce)
     const errors = orders.filter(o =>
       o.order_type !== 'walk_in' && (
@@ -171,7 +181,7 @@ function OrdersScreenComponent() {
       )
     ).length
 
-    return { inStore, fulfillment, activeFulfillment, errors }
+    return { inStore, fulfillment, activeFulfillment, activePickup, activeEcommerce, errors }
   }, [orders])
 
   // Nav items: Fulfillment, In-Store Sales, Error Feed

@@ -1,46 +1,38 @@
-import { Audio } from 'expo-av'
+import * as Haptics from 'expo-haptics'
+
+/**
+ * Audio feedback module
+ *
+ * Uses haptic feedback for now since expo-av is deprecated and
+ * expo-audio requires hooks-based API that doesn't work for
+ * imperative calls. Haptics provide excellent tactile feedback
+ * on iOS devices.
+ *
+ * TODO: Implement proper audio with expo-audio in a React context
+ * when needed for actual sound playback.
+ */
 
 /**
  * Jobs Principle: Success beep (system sound)
- * Audible confirmation
+ * Audible confirmation - uses haptic feedback
  */
 export async function playSuccessBeep() {
   try {
-    await Audio.setAudioModeAsync({
-      playsInSilentModeIOS: true,
-      staysActiveInBackground: false,
-    })
-
-    // Single beep for ID capture
-    const { sound } = await Audio.Sound.createAsync(
-      { uri: 'https://actions.google.com/sounds/v1/alarms/beep_short.ogg' },
-      { shouldPlay: true, volume: 0.8 }
-    )
-
-    setTimeout(() => sound.unloadAsync(), 500)
+    await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
   } catch (_error) {
+    // Silent fail - don't block on haptic errors
   }
 }
 
 /**
  * Jobs Principle: Rejection tone
- * Audible rejection signal
+ * Audible rejection signal - uses error haptic
  */
 export async function playRejectionTone() {
   try {
-    await Audio.setAudioModeAsync({
-      playsInSilentModeIOS: true,
-      staysActiveInBackground: false,
-    })
-
-    // Use error/buzzer sound
-    const { sound } = await Audio.Sound.createAsync(
-      { uri: 'https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg' },
-      { shouldPlay: true, volume: 0.5 }
-    )
-
-    setTimeout(() => sound.unloadAsync(), 1000)
+    await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
   } catch (_error) {
+    // Silent fail - don't block on haptic errors
   }
 }
 
@@ -49,27 +41,12 @@ export async function playRejectionTone() {
  * "Make it sound like closing the Activity rings on Apple Watch.
  *  It should feel premium, rewarding, and make people smile."
  *
- * Single satisfying beep for sale completion
+ * Uses success haptic for satisfying feedback
  */
 export async function playSaleCompletionSound() {
   try {
-    await Audio.setAudioModeAsync({
-      playsInSilentModeIOS: true,
-      staysActiveInBackground: false,
-    })
-
-    // Single satisfying beep
-    const { sound } = await Audio.Sound.createAsync(
-      { uri: 'https://actions.google.com/sounds/v1/alarms/beep_short.ogg' },
-      { shouldPlay: true, volume: 1.0 }
-    )
-
-    // Clean up
-    setTimeout(() => {
-      sound.unloadAsync()
-    }, 500)
-
-  } catch (error) {
-    // Silent fail - don't block checkout on audio errors
+    await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+  } catch (_error) {
+    // Silent fail - don't block checkout on haptic errors
   }
 }

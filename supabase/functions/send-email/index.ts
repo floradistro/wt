@@ -25,6 +25,63 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
+/**
+ * Check if email is a placeholder/fake email that should NOT receive emails
+ * This prevents accidentally sending to walk-in, phone-only, or test customers
+ */
+function isPlaceholderEmail(email: string): boolean {
+  if (!email) return true
+
+  const emailLower = email.toLowerCase().trim()
+
+  // Check for placeholder domain patterns
+  const placeholderDomains = [
+    '@walk-in.local',
+    '@walkin.local',
+    '@phone.local',
+    '@alpine.local',
+    '@pos.local',
+    '@deleted.local',
+    '@example.com',
+    '@example.org',
+    '@example.net',
+    '@test.com',
+    '@test.local',
+  ]
+
+  for (const domain of placeholderDomains) {
+    if (emailLower.endsWith(domain)) {
+      return true
+    }
+  }
+
+  // Check for placeholder patterns in local part
+  const placeholderPatterns = [
+    /^walkin-/i,
+    /^deleted\./i,
+    /^merged\./i,
+    /^test-/i,
+    /^fake@/i,
+    /^noemail/i,
+    /^none@/i,
+    /^na@/i,
+    /^unknown@/i,
+    /^placeholder/i,
+    /^customer@/i,
+    /^guest@/i,
+    /^anonymous/i,
+    /alpineiq/i,
+  ]
+
+  for (const pattern of placeholderPatterns) {
+    if (pattern.test(emailLower)) {
+      return true
+    }
+  }
+
+  return false
+}
+
 interface SendEmailRequest {
   to: string
   toName?: string
@@ -73,9 +130,10 @@ async function renderTemplate(
   templateSlug: string,
   data: Record<string, any>,
   vendorName: string,
-  logoUrl?: string
+  logoUrl?: string,
+  supportEmail?: string
 ): Promise<{ html: string; subject: string }> {
-  const baseProps = { vendorName, logoUrl }
+  const baseProps = { vendorName, logoUrl, supportEmail }
 
   let element: React.ReactElement
   let subject: string
@@ -304,6 +362,7 @@ serve(async (req) => {
       // Get vendor info for branding
       let vendorName = 'Your Store'
       let logoUrl: string | undefined
+      let supportEmail: string | undefined
 
       if (vendorId) {
         const { data: vendorInfo } = await supabase
@@ -312,17 +371,25 @@ serve(async (req) => {
           .eq('id', vendorId)
           .single()
 
+        const { data: vendorSettings } = await supabase
+          .from('vendor_email_settings')
+          .select('reply_to, from_email')
+          .eq('vendor_id', vendorId)
+          .single()
+
         if (vendorInfo) {
           vendorName = vendorInfo.store_name || vendorName
           logoUrl = vendorInfo.logo_url
         }
+
+        supportEmail = vendorSettings?.reply_to || 'support@floradistro.com'
       }
 
       // Get preview data for this template
       const previewData = PREVIEW_DATA[templateSlug] || {}
 
       // Render the template
-      const { html } = await renderTemplate(templateSlug, previewData, vendorName, logoUrl)
+      const { html } = await renderTemplate(templateSlug, previewData, vendorName, logoUrl, supportEmail)
 
       // Return HTML directly for WebView
       return new Response(html, {
@@ -378,6 +445,19 @@ serve(async (req) => {
     } = body
 
     console.log(`Sending ${emailType} email to ${to}`, { templateSlug, vendorId })
+
+    // CRITICAL: Block placeholder/fake emails from receiving any emails
+    if (isPlaceholderEmail(to)) {
+      console.warn(`Blocked email to placeholder address: ${to}`)
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: 'Cannot send email to placeholder address. Customer needs a real email address.',
+          isPlaceholder: true,
+        }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
 
     // Load vendor settings
     const { data: vendorSettings } = await supabase
@@ -449,7 +529,8 @@ serve(async (req) => {
     if (templateSlug) {
       // Render React Email template
       console.log(`Rendering template: ${templateSlug}`)
-      const rendered = await renderTemplate(templateSlug, data, vendorName, logoUrl)
+      const supportEmail = replyTo || 'support@floradistro.com'
+      const rendered = await renderTemplate(templateSlug, data, vendorName, logoUrl, supportEmail)
       html = rendered.html
       subject = providedSubject || rendered.subject
     } else if (providedHtml) {

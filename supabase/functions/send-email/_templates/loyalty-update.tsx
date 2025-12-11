@@ -5,6 +5,7 @@ import { Layout, Title, Paragraph, Button, Card, CardLabel } from './layout.tsx'
 interface LoyaltyUpdateProps {
   vendorName: string
   logoUrl?: string
+  supportEmail?: string
   customerName: string
   action: 'earned' | 'redeemed'
   points: number
@@ -16,6 +17,7 @@ interface LoyaltyUpdateProps {
 export function LoyaltyUpdate({
   vendorName,
   logoUrl,
+  supportEmail,
   customerName,
   action,
   points,
@@ -27,7 +29,7 @@ export function LoyaltyUpdate({
   const orderContext = orderNumber ? ` on order #${orderNumber}` : ''
 
   return (
-    <Layout vendorName={vendorName} logoUrl={logoUrl}>
+    <Layout vendorName={vendorName} logoUrl={logoUrl} supportEmail={supportEmail}>
       <Section style={{ textAlign: 'center' as const, marginBottom: '32px' }}>
         <Title>Points {action === 'earned' ? 'Earned' : 'Redeemed'}</Title>
       </Section>

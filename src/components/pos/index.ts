@@ -12,6 +12,10 @@ export { POSAddCustomerModal } from './POSAddCustomerModal'
 export { POSCustomerMatchModal } from './POSCustomerMatchModal'
 export type { CustomerMatch, MatchConfidence } from './POSCustomerMatchModal'
 
+// Customer Contact Info
+export { POSMissingContactBanner } from './POSMissingContactBanner'
+export { POSUpdateContactModal } from './POSUpdateContactModal'
+
 // Unified Modal Component
 export { POSModal } from './POSModal'
 

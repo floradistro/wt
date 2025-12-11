@@ -5,6 +5,7 @@ import { Layout, Title, Subtitle, Button, Card, CardLabel, CardValue } from './l
 interface OrderShippedProps {
   vendorName: string
   logoUrl?: string
+  supportEmail?: string
   orderNumber: string
   customerName: string
   shippingAddress: string
@@ -16,6 +17,7 @@ interface OrderShippedProps {
 export function OrderShipped({
   vendorName,
   logoUrl,
+  supportEmail,
   orderNumber,
   customerName,
   shippingAddress,
@@ -24,7 +26,7 @@ export function OrderShipped({
   carrier,
 }: OrderShippedProps) {
   return (
-    <Layout vendorName={vendorName} logoUrl={logoUrl}>
+    <Layout vendorName={vendorName} logoUrl={logoUrl} supportEmail={supportEmail}>
       <Section style={{ textAlign: 'center' as const, marginBottom: '40px' }}>
         <Title>Your Order Has Shipped</Title>
         <Subtitle>Order #{orderNumber}</Subtitle>

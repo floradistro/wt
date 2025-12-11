@@ -217,46 +217,57 @@ export async function getOrders(params?: {
     throw new Error(`Failed to fetch orders: ${error.message}`)
   }
 
-  // Batch fetch order_locations for all orders (for split order filtering)
-  // Only fetch for recent orders to avoid performance issues
-  const recentOrders = (data || []).slice(0, 200) // Limit to 200 most recent
-  const orderIds = recentOrders.map((o: any) => o.id)
+  // Batch fetch order_locations for ALL orders (no limits - orders must never have orphaned data)
+  const allOrders = data || []
+  const orderIds = allOrders.map((o: any) => o.id)
   let orderLocationsMap: Record<string, any[]> = {}
 
   if (orderIds.length > 0) {
-    const { data: locationsData, error: locError } = await supabase
-      .from('order_locations')
-      .select(`
-        id,
-        order_id,
-        location_id,
-        item_count,
-        total_quantity,
-        fulfillment_status,
-        tracking_number,
-        tracking_url,
-        shipping_carrier,
-        shipped_at,
-        locations:location_id (name)
-      `)
-      .in('order_id', orderIds)
+    // Batch fetch in chunks of 500 to avoid Supabase IN clause limits
+    const BATCH_SIZE = 500
+    const batches = []
+    for (let i = 0; i < orderIds.length; i += BATCH_SIZE) {
+      batches.push(orderIds.slice(i, i + BATCH_SIZE))
+    }
+
+    let allLocationsData: any[] = []
+    for (const batchIds of batches) {
+      const { data: locationsData, error: locError } = await supabase
+        .from('order_locations')
+        .select(`
+          id,
+          order_id,
+          location_id,
+          item_count,
+          total_quantity,
+          fulfillment_status,
+          tracking_number,
+          tracking_url,
+          shipping_carrier,
+          shipped_at,
+          locations:location_id (name)
+        `)
+        .in('order_id', batchIds)
+
+      if (!locError && locationsData) {
+        allLocationsData = allLocationsData.concat(locationsData)
+      }
+    }
 
     console.log('[getOrders] order_locations fetch:', {
       orderIdsCount: orderIds.length,
-      locationsFound: locationsData?.length || 0,
-      error: locError?.message,
+      locationsFound: allLocationsData.length,
+      batches: batches.length,
     })
 
-    if (!locError && locationsData) {
-      // Group by order_id
-      locationsData.forEach((loc: any) => {
-        if (!orderLocationsMap[loc.order_id]) {
-          orderLocationsMap[loc.order_id] = []
-        }
-        orderLocationsMap[loc.order_id].push(loc)
-      })
-      console.log('[getOrders] orderLocationsMap keys:', Object.keys(orderLocationsMap).length)
-    }
+    // Group by order_id
+    allLocationsData.forEach((loc: any) => {
+      if (!orderLocationsMap[loc.order_id]) {
+        orderLocationsMap[loc.order_id] = []
+      }
+      orderLocationsMap[loc.order_id].push(loc)
+    })
+    console.log('[getOrders] orderLocationsMap keys:', Object.keys(orderLocationsMap).length)
   }
 
   // Flatten customer and location data
@@ -886,10 +897,21 @@ export async function getOrderShipments(orderId: string): Promise<OrderLocation[
  */
 export async function deleteOrder(orderId: string): Promise<void> {
   // Delete in correct order to avoid foreign key constraints:
-  // 1. order_items (references orders)
-  // 2. order_locations (references orders)
-  // 3. order_payments (references orders)
+  // 1. checkout_attempts (references orders - NO CASCADE)
+  // 2. order_items (has CASCADE but explicit is safer)
+  // 3. order_locations (has CASCADE but explicit is safer)
   // 4. orders (main table)
+
+  // Delete checkout attempts (no CASCADE on this FK)
+  const { error: checkoutError } = await supabase
+    .from('checkout_attempts')
+    .delete()
+    .eq('order_id', orderId)
+
+  if (checkoutError) {
+    console.error('Failed to delete checkout attempts:', checkoutError)
+    // Continue - some orders might not have checkout attempts
+  }
 
   // Delete order items
   const { error: itemsError } = await supabase
@@ -947,6 +969,50 @@ export async function deleteOrdersBulk(orderIds: string[]): Promise<{ deleted: n
 }
 
 /**
+ * Check if an order has an Apple Wallet pass
+ * Returns pass info if exists, null otherwise
+ */
+export async function getOrderWalletPass(orderId: string): Promise<{
+  hasPass: boolean
+  serialNumber?: string
+  lastUpdated?: string
+  deviceCount?: number
+} | null> {
+  try {
+    const { data, error } = await supabase
+      .from('order_passes')
+      .select('serial_number, last_updated_at, push_enabled')
+      .eq('order_id', orderId)
+      .maybeSingle()
+
+    if (error) {
+      console.error('[getOrderWalletPass] Error:', error)
+      return null
+    }
+
+    if (!data) {
+      return { hasPass: false }
+    }
+
+    // Check how many devices have registered this pass
+    const { count: deviceCount } = await supabase
+      .from('order_pass_registrations')
+      .select('*', { count: 'exact', head: true })
+      .eq('serial_number', data.serial_number)
+
+    return {
+      hasPass: true,
+      serialNumber: data.serial_number,
+      lastUpdated: data.last_updated_at,
+      deviceCount: deviceCount || 0,
+    }
+  } catch (err) {
+    console.error('[getOrderWalletPass] Exception:', err)
+    return null
+  }
+}
+
+/**
  * Export service object
  */
 export const ordersService = {
@@ -962,4 +1028,5 @@ export const ordersService = {
   getOrderShipments,
   deleteOrder,
   deleteOrdersBulk,
+  getOrderWalletPass,
 }

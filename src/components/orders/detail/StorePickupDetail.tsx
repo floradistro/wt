@@ -16,7 +16,7 @@ import { Ionicons } from '@expo/vector-icons'
 import { colors, spacing, radius } from '@/theme/tokens'
 import { layout } from '@/theme/layout'
 import { logger } from '@/utils/logger'
-import { deleteOrder, type Order } from '@/services/orders.service'
+import { deleteOrder, type Order, getOrderWalletPass } from '@/services/orders.service'
 import { useOrders, useOrdersStore, useOrdersActions } from '@/stores/orders.store'
 import { useSelectedOrderId, useOrdersUIActions } from '@/stores/orders-ui.store'
 import { useLocationFilter } from '@/stores/location-filter.store'
@@ -30,6 +30,7 @@ import { ConfirmPickupOrderModal, MarkReadyModal, ShipOrderModal, EditOrderModal
 import { OrderInfoPanel } from '../shared'
 import { useAppAuth } from '@/contexts/AppAuthContext'
 import { EmailService } from '@/services/email.service'
+import { useNavigateToCustomer } from '@/stores/navigation.store'
 
 export function StorePickupDetail() {
   const selectedOrderId = useSelectedOrderId()
@@ -49,10 +50,12 @@ export function StorePickupDetail() {
   const [showEditModal, setShowEditModal] = useState(false)
   const [selectedShipLocationId, setSelectedShipLocationId] = useState<string | null>(null)
   const [isUpdating, setIsUpdating] = useState(false)
+  const [walletPassInfo, setWalletPassInfo] = useState<{ hasPass: boolean; deviceCount?: number } | null>(null)
 
   const { vendor } = useAppAuth()
   const vendorId = vendor?.id
   const { selectedLocationIds } = useLocationFilter()
+  const navigateToCustomer = useNavigateToCustomer()
 
   // When location filter is applied, ONLY show that location's items
   // This provides focused view for staff at a specific location
@@ -79,6 +82,16 @@ export function StorePickupDetail() {
       loadOrderDetails(order.id)
     }
     return () => resetDetail()
+  }, [order?.id])
+
+  // Load wallet pass info
+  useEffect(() => {
+    if (!order?.id) return
+    const loadWalletPass = async () => {
+      const passInfo = await getOrderWalletPass(order.id)
+      setWalletPassInfo(passInfo)
+    }
+    loadWalletPass()
   }, [order?.id])
 
   const handleBack = () => selectOrder(null)
@@ -111,6 +124,18 @@ export function StorePickupDetail() {
     if (order?.customer_email) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
       Linking.openURL(`mailto:${order.customer_email}`)
+    }
+  }
+
+  const handleViewCustomerProfile = async () => {
+    if (order?.customer_id) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+      try {
+        await navigateToCustomer(order.customer_id)
+      } catch (error) {
+        logger.error('Failed to navigate to customer:', error)
+        Alert.alert('Error', 'Could not open customer profile')
+      }
     }
   }
 
@@ -449,26 +474,52 @@ export function StorePickupDetail() {
           })
         )}
 
-        {/* Customer Contact */}
-        {(order.customer_email || order.customer_phone) && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>CUSTOMER</Text>
-            <View style={styles.card}>
-              {order.customer_email && (
-                <Pressable style={styles.contactRow} onPress={handleEmail}>
-                  <Ionicons name="mail-outline" size={18} color="rgba(255,255,255,0.5)" />
-                  <Text style={styles.contactText}>{order.customer_email}</Text>
-                </Pressable>
-              )}
-              {order.customer_phone && (
-                <Pressable style={[styles.contactRow, !order.customer_email && styles.lastContactRow]} onPress={handleCall}>
-                  <Ionicons name="call-outline" size={18} color="rgba(255,255,255,0.5)" />
-                  <Text style={styles.contactText}>{order.customer_phone}</Text>
+        {/* Customer Contact - Enhanced Section */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>CUSTOMER</Text>
+          <View style={styles.card}>
+            {/* Customer Name - Prominent */}
+            <View style={styles.customerHeader}>
+              <View style={styles.customerAvatar}>
+                <Text style={styles.customerAvatarText}>
+                  {(order.customer_name || 'G').charAt(0).toUpperCase()}
+                </Text>
+              </View>
+              <View style={styles.customerInfo}>
+                <Text style={styles.customerNameText}>{order.customer_name || 'Guest'}</Text>
+                {order.customer_id && (
+                  <Text style={styles.customerIdText}>Customer ID: {order.customer_id.slice(0, 8)}...</Text>
+                )}
+              </View>
+              {order.customer_id && (
+                <Pressable style={styles.viewProfileButton} onPress={handleViewCustomerProfile}>
+                  <Text style={styles.viewProfileText}>View Profile</Text>
+                  <Ionicons name="arrow-forward" size={14} color="#0a84ff" />
                 </Pressable>
               )}
             </View>
+
+            {/* Contact Info */}
+            {(order.customer_email || order.customer_phone) && (
+              <View style={styles.contactSection}>
+                {order.customer_email && (
+                  <Pressable style={styles.contactRow} onPress={handleEmail}>
+                    <Ionicons name="mail-outline" size={18} color="rgba(255,255,255,0.5)" />
+                    <Text style={styles.contactText}>{order.customer_email}</Text>
+                    <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.3)" />
+                  </Pressable>
+                )}
+                {order.customer_phone && (
+                  <Pressable style={[styles.contactRow, styles.lastContactRow]} onPress={handleCall}>
+                    <Ionicons name="call-outline" size={18} color="rgba(255,255,255,0.5)" />
+                    <Text style={styles.contactText}>{order.customer_phone}</Text>
+                    <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.3)" />
+                  </Pressable>
+                )}
+              </View>
+            )}
           </View>
-        )}
+        </View>
 
         {/* Order Summary */}
         <View style={styles.section}>
@@ -480,6 +531,47 @@ export function StorePickupDetail() {
             </View>
           </View>
         </View>
+
+        {/* Apple Wallet Pass Status */}
+        {walletPassInfo && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>APPLE WALLET</Text>
+            <View style={styles.card}>
+              <View style={styles.walletRow}>
+                <View style={styles.walletIcon}>
+                  <Ionicons
+                    name={walletPassInfo.hasPass ? "wallet" : "wallet-outline"}
+                    size={20}
+                    color={walletPassInfo.hasPass && walletPassInfo.deviceCount && walletPassInfo.deviceCount > 0 ? "#34c759" : "rgba(255,255,255,0.5)"}
+                  />
+                </View>
+                <View style={styles.walletInfo}>
+                  <Text style={styles.walletTitle}>
+                    {walletPassInfo.hasPass
+                      ? walletPassInfo.deviceCount && walletPassInfo.deviceCount > 0
+                        ? "Pass Added to Wallet"
+                        : "Pass Generated"
+                      : "No Wallet Pass"
+                    }
+                  </Text>
+                  <Text style={styles.walletSubtitle}>
+                    {walletPassInfo.hasPass
+                      ? walletPassInfo.deviceCount && walletPassInfo.deviceCount > 0
+                        ? `Active on ${walletPassInfo.deviceCount} device${walletPassInfo.deviceCount > 1 ? 's' : ''}`
+                        : "Customer hasn't added to Wallet yet"
+                      : "Customer can add from order confirmation"
+                    }
+                  </Text>
+                </View>
+                {walletPassInfo.hasPass && walletPassInfo.deviceCount && walletPassInfo.deviceCount > 0 && (
+                  <View style={styles.walletBadge}>
+                    <Ionicons name="checkmark-circle" size={18} color="#34c759" />
+                  </View>
+                )}
+              </View>
+            </View>
+          </View>
+        )}
 
         {/* Comprehensive Order Info */}
         <View style={styles.section}>
@@ -841,6 +933,59 @@ const styles = StyleSheet.create({
     borderRadius: radius.xl,
     padding: 16,
   },
+  // Customer Section - Enhanced
+  customerHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingBottom: 12,
+  },
+  customerAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  customerAvatarText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.7)',
+  },
+  customerInfo: {
+    flex: 1,
+  },
+  customerNameText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  customerIdText: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.4)',
+    marginTop: 2,
+  },
+  viewProfileButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: 'rgba(10,132,255,0.15)',
+    borderRadius: 12,
+  },
+  viewProfileText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#0a84ff',
+  },
+  contactSection: {
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.05)',
+    paddingTop: 12,
+    marginTop: 4,
+  },
   contactRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -855,6 +1000,7 @@ const styles = StyleSheet.create({
   contactText: {
     fontSize: 15,
     color: 'rgba(255,255,255,0.7)',
+    flex: 1,
   },
   totalRow: {
     flexDirection: 'row',
@@ -880,5 +1026,35 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
     color: '#ff3b30',
+  },
+  // Wallet Pass Styles
+  walletRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  walletIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  walletInfo: {
+    flex: 1,
+  },
+  walletTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  walletSubtitle: {
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.5)',
+    marginTop: 2,
+  },
+  walletBadge: {
+    marginLeft: 8,
   },
 })

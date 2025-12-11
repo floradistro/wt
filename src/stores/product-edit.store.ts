@@ -87,19 +87,21 @@ export const useProductEditStore = create<ProductEditState>()(
           customFields: product.custom_fields,
         })
 
-        // SINGLE SOURCE: Read from pricing_template, not pricing_data
+        // Read from pricing_template (so template changes propagate)
         const hasTiers = product.pricing_template?.default_tiers && product.pricing_template.default_tiers.length > 0
         const pricingTiers = hasTiers
-          ? product.pricing_template.default_tiers.map((t: any) => ({
+          ? product.pricing_template!.default_tiers.map((t: any) => ({
               id: t.id,
               label: t.label,
-              quantity: t.quantity,
+              qty: t.quantity,
               unit: t.unit,
               price: t.default_price,
               enabled: true,
               sort_order: t.sort_order,
             }))
           : []
+
+        const pricingMode = hasTiers ? 'tiered' : 'single'
 
         set(
           {
@@ -111,7 +113,7 @@ export const useProductEditStore = create<ProductEditState>()(
             editedDescription: product.description || '',
             editedPrice: product.price?.toString() || product.regular_price?.toString() || '',
             editedCostPrice: product.cost_price?.toString() || '',
-            pricingMode: hasTiers ? 'tiered' : 'single',
+            pricingMode,
             pricingTiers,
             selectedTemplateId: product.pricing_template_id || null,
             editedCustomFields: product.custom_fields || {},
@@ -132,19 +134,21 @@ export const useProductEditStore = create<ProductEditState>()(
           customFields: product.custom_fields,
         })
 
-        // SINGLE SOURCE: Read from pricing_template, not pricing_data
+        // Read from pricing_template (so template changes propagate)
         const hasTiers = product.pricing_template?.default_tiers && product.pricing_template.default_tiers.length > 0
         const pricingTiers = hasTiers
-          ? product.pricing_template.default_tiers.map((t: any) => ({
+          ? product.pricing_template!.default_tiers.map((t: any) => ({
               id: t.id,
               label: t.label,
-              quantity: t.quantity,
+              qty: t.quantity,
               unit: t.unit,
               price: t.default_price,
               enabled: true,
               sort_order: t.sort_order,
             }))
           : []
+
+        const pricingMode = hasTiers ? 'tiered' : 'single'
 
         set(
           {
@@ -156,7 +160,7 @@ export const useProductEditStore = create<ProductEditState>()(
             editedDescription: product.description || '',
             editedPrice: product.price?.toString() || product.regular_price?.toString() || '',
             editedCostPrice: product.cost_price?.toString() || '',
-            pricingMode: hasTiers ? 'tiered' : 'single',
+            pricingMode,
             pricingTiers,
             selectedTemplateId: product.pricing_template_id || null,
             editedCustomFields: product.custom_fields || {},
@@ -302,6 +306,7 @@ export const useProductEditStore = create<ProductEditState>()(
             description: state.editedDescription,
             ...costPriceUpdate,
             pricing_data: pricingData,
+            pricing_template_id: state.selectedTemplateId || null,  // ✅ Update the actual column!
             custom_fields: validCustomFields,
             updated_at: new Date().toISOString(),
           }
@@ -363,19 +368,21 @@ export const useProductEditStore = create<ProductEditState>()(
 
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
 
-        // SINGLE SOURCE: Read from pricing_template, not pricing_data
+        // Read from pricing_template (so template changes propagate)
         const hasTiers = originalProduct.pricing_template?.default_tiers && originalProduct.pricing_template.default_tiers.length > 0
         const pricingTiers = hasTiers
-          ? originalProduct.pricing_template.default_tiers.map((t: any) => ({
+          ? originalProduct.pricing_template!.default_tiers.map((t: any) => ({
               id: t.id,
               label: t.label,
-              quantity: t.quantity,
+              qty: t.quantity,
               unit: t.unit,
               price: t.default_price,
               enabled: true,
               sort_order: t.sort_order,
             }))
           : []
+
+        const pricingMode = hasTiers ? 'tiered' : 'single'
 
         set(
           {
@@ -385,7 +392,7 @@ export const useProductEditStore = create<ProductEditState>()(
             editedDescription: originalProduct.description || '',
             editedPrice: originalProduct.price?.toString() || originalProduct.regular_price?.toString() || '',
             editedCostPrice: originalProduct.cost_price?.toString() || '',
-            pricingMode: hasTiers ? 'tiered' : 'single',
+            pricingMode,
             pricingTiers,
             selectedTemplateId: originalProduct.pricing_template_id || null,
             editedCustomFields: originalProduct.custom_fields || {},

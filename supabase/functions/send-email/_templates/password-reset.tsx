@@ -5,6 +5,7 @@ import { Layout, Title, Paragraph, Button } from './layout.tsx'
 interface PasswordResetProps {
   vendorName: string
   logoUrl?: string
+  supportEmail?: string
   customerName: string
   resetUrl: string
 }
@@ -12,11 +13,12 @@ interface PasswordResetProps {
 export function PasswordReset({
   vendorName,
   logoUrl,
+  supportEmail,
   customerName,
   resetUrl,
 }: PasswordResetProps) {
   return (
-    <Layout vendorName={vendorName} logoUrl={logoUrl}>
+    <Layout vendorName={vendorName} logoUrl={logoUrl} supportEmail={supportEmail}>
       <Section style={{ textAlign: 'center' as const, marginBottom: '32px' }}>
         <Title>Reset Your Password</Title>
       </Section>

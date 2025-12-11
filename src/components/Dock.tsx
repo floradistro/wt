@@ -55,6 +55,16 @@ function CustomersIcon({ color }: { color: string }) {
   )
 }
 
+function MarketingIcon({ color }: { color: string }) {
+  return (
+    <View style={styles.marketingIcon}>
+      {/* Megaphone shape */}
+      <View style={[styles.megaphoneBell, { borderColor: color }]} />
+      <View style={[styles.megaphoneHandle, { backgroundColor: color }]} />
+    </View>
+  )
+}
+
 function SettingsIcon({ color }: { color: string }) {
   return (
     <View style={styles.dotsIcon}>
@@ -70,6 +80,7 @@ const tabs = [
   { Icon: ProductsIcon, name: 'Products' },
   { Icon: OrdersIcon, name: 'Orders' },
   { Icon: CustomersIcon, name: 'Customers' },
+  { Icon: MarketingIcon, name: 'Marketing' },
   { Icon: SettingsIcon, name: 'Settings' },
 ]
 
@@ -325,5 +336,30 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
     textAlign: 'center',
+  },
+
+  // Marketing icon (megaphone)
+  marketingIcon: {
+    width: 28,
+    height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  megaphoneBell: {
+    width: 18,
+    height: 14,
+    borderWidth: 2.5,
+    borderRadius: 2,
+    borderTopRightRadius: 8,
+    borderBottomRightRadius: 8,
+    borderLeftWidth: 0,
+    marginLeft: -4,
+  },
+  megaphoneHandle: {
+    position: 'absolute',
+    left: 4,
+    width: 4,
+    height: 20,
+    borderRadius: 2,
   },
 })

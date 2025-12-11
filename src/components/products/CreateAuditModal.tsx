@@ -323,13 +323,15 @@ export function CreateAuditModal({ visible, onClose, onCreated }: CreateAuditMod
     })
 
     let filtered = products.filter(p => {
-      // Has inventory at selected location
-      const hasInventory = p.inventory?.some(inv => inv.location_id === selectedLocationId)
+      // Has inventory at selected location with quantity > 0
+      const locationInventory = p.inventory?.find(inv => inv.location_id === selectedLocationId)
+      const hasInventoryAtLocation = locationInventory && locationInventory.quantity > 0
 
-      // Also check if inventory_quantity exists (fallback)
-      const hasQuantity = (p.inventory_quantity ?? 0) >= 0
+      // Also check inventory_quantity (set when loading for specific location)
+      const hasQuantity = (p.inventory_quantity ?? 0) > 0
 
-      if (!hasInventory && !hasQuantity) return false
+      // Must have stock at this location
+      if (!hasInventoryAtLocation && !hasQuantity) return false
 
       // Filter by categories if any selected
       if (selectedCategoryIds.length > 0) {

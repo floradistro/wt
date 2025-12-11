@@ -113,9 +113,81 @@ function MoveIcon({ color }: { color: string }) {
   )
 }
 
+// Monochrome Megaphone Icon (Campaigns)
+function MegaphoneIcon({ color }: { color: string }) {
+  return (
+    <View style={styles.iconContainer}>
+      <View style={[styles.megaphoneCone, { borderColor: color, borderLeftColor: 'transparent' }]} />
+      <View style={[styles.megaphoneHandle, { backgroundColor: color }]} />
+    </View>
+  )
+}
+
+// Monochrome Share Icon (Channels)
+function ShareIcon({ color }: { color: string }) {
+  return (
+    <View style={styles.iconContainer}>
+      <View style={[styles.shareCircle, { borderColor: color, top: 0 }]} />
+      <View style={[styles.shareCircle, { borderColor: color, bottom: 0, left: 0 }]} />
+      <View style={[styles.shareCircle, { borderColor: color, bottom: 0, right: 0 }]} />
+      <View style={[styles.shareLine, { backgroundColor: color, transform: [{ rotate: '-45deg' }], top: 6, left: 4 }]} />
+      <View style={[styles.shareLine, { backgroundColor: color, transform: [{ rotate: '45deg' }], top: 6, right: 4 }]} />
+    </View>
+  )
+}
+
+// Monochrome Pricetag Icon (Discounts)
+function PricetagIcon({ color }: { color: string }) {
+  return (
+    <View style={styles.iconContainer}>
+      <View style={[styles.pricetagBody, { borderColor: color }]} />
+      <View style={[styles.pricetagHole, { borderColor: color }]} />
+    </View>
+  )
+}
+
+// Monochrome People Icon (Affiliates)
+function PeopleIcon({ color }: { color: string }) {
+  return (
+    <View style={styles.iconContainer}>
+      {/* First person */}
+      <View style={[styles.personHead, { backgroundColor: color, left: 2 }]} />
+      <View style={[styles.personBody, { backgroundColor: color, left: 0 }]} />
+      {/* Second person */}
+      <View style={[styles.personHead, { backgroundColor: color, right: 2 }]} />
+      <View style={[styles.personBody, { backgroundColor: color, right: 0 }]} />
+    </View>
+  )
+}
+
+// Monochrome Star Icon (Loyalty)
+function StarIcon({ color }: { color: string }) {
+  return (
+    <View style={styles.iconContainer}>
+      <View style={[styles.starCenter, { backgroundColor: color }]} />
+      <View style={[styles.starPoint, { backgroundColor: color, top: 0, left: '50%', marginLeft: -2, transform: [{ rotate: '0deg' }] }]} />
+      <View style={[styles.starPoint, { backgroundColor: color, top: 4, right: 0, transform: [{ rotate: '72deg' }] }]} />
+      <View style={[styles.starPoint, { backgroundColor: color, bottom: 1, right: 2, transform: [{ rotate: '144deg' }] }]} />
+      <View style={[styles.starPoint, { backgroundColor: color, bottom: 1, left: 2, transform: [{ rotate: '216deg' }] }]} />
+      <View style={[styles.starPoint, { backgroundColor: color, top: 4, left: 0, transform: [{ rotate: '288deg' }] }]} />
+    </View>
+  )
+}
+
+// Monochrome Pie Chart Icon (Segments)
+function PieChartIcon({ color }: { color: string }) {
+  return (
+    <View style={styles.iconContainer}>
+      <View style={[styles.pieChartCircle, { borderColor: color }]} />
+      <View style={[styles.pieChartSlice, { backgroundColor: color }]} />
+      <View style={[styles.pieChartLine, { backgroundColor: color }]} />
+    </View>
+  )
+}
+
 export interface NavItem {
   id: string
-  icon: 'grid' | 'warning' | 'box' | 'folder' | 'doc' | 'list' | 'user' | 'move' | React.ComponentType<{ color: string }> // Icon type or custom component
+  icon: 'grid' | 'warning' | 'box' | 'folder' | 'doc' | 'list' | 'user' | 'move' | 'cube' | 'storefront' | 'airplane' | 'cart' | 'megaphone' | 'share' | 'pricetag' | 'people' | 'star' | 'pie' | React.ComponentType<{ color: string }> // Icon type or custom component
   label: string
   count?: number
   badge?: 'warning' | 'error' | 'info'
@@ -269,6 +341,24 @@ export function NavSidebar({
                     break
                   case 'move':
                     IconComponent = <MoveIcon color={iconColor} />
+                    break
+                  case 'megaphone':
+                    IconComponent = <MegaphoneIcon color={iconColor} />
+                    break
+                  case 'share':
+                    IconComponent = <ShareIcon color={iconColor} />
+                    break
+                  case 'pricetag':
+                    IconComponent = <PricetagIcon color={iconColor} />
+                    break
+                  case 'people':
+                    IconComponent = <PeopleIcon color={iconColor} />
+                    break
+                  case 'star':
+                    IconComponent = <StarIcon color={iconColor} />
+                    break
+                  case 'pie':
+                    IconComponent = <PieChartIcon color={iconColor} />
                     break
                   default:
                     IconComponent = <GridIcon color={iconColor} />
@@ -816,5 +906,118 @@ const styles = StyleSheet.create({
     position: 'absolute',
     right: 0,
     top: 5,
+  },
+
+  // Megaphone icon styles
+  megaphoneCone: {
+    width: 0,
+    height: 0,
+    borderTopWidth: 6,
+    borderBottomWidth: 6,
+    borderLeftWidth: 10,
+    borderTopColor: 'transparent',
+    borderBottomColor: 'transparent',
+    position: 'absolute',
+    right: 0,
+    top: 2,
+  },
+  megaphoneHandle: {
+    width: 4,
+    height: 8,
+    borderRadius: 1,
+    position: 'absolute',
+    left: 0,
+    top: 3,
+  },
+
+  // Share icon styles
+  shareCircle: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    borderWidth: 1.5,
+    position: 'absolute',
+  },
+  shareLine: {
+    width: 6,
+    height: 1.5,
+    position: 'absolute',
+  },
+
+  // Pricetag icon styles
+  pricetagBody: {
+    width: 12,
+    height: 10,
+    borderWidth: 1.5,
+    borderRadius: 2,
+    position: 'absolute',
+    right: 0,
+    top: 2,
+    transform: [{ rotate: '45deg' }],
+  },
+  pricetagHole: {
+    width: 3,
+    height: 3,
+    borderRadius: 1.5,
+    borderWidth: 1.5,
+    position: 'absolute',
+    left: 3,
+    top: 5,
+  },
+
+  // People icon styles
+  personHead: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    position: 'absolute',
+    top: 0,
+  },
+  personBody: {
+    width: 6,
+    height: 5,
+    borderTopLeftRadius: 3,
+    borderTopRightRadius: 3,
+    position: 'absolute',
+    bottom: 0,
+  },
+
+  // Star icon styles
+  starCenter: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    position: 'absolute',
+    top: 6,
+    left: 6,
+  },
+  starPoint: {
+    width: 4,
+    height: 6,
+    borderRadius: 2,
+    position: 'absolute',
+  },
+  // Pie Chart Icon Styles
+  pieChartCircle: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 1.5,
+    position: 'absolute',
+  },
+  pieChartSlice: {
+    width: 9,
+    height: 9,
+    position: 'absolute',
+    top: 0,
+    left: 9,
+    borderTopRightRadius: 9,
+  },
+  pieChartLine: {
+    width: 1.5,
+    height: 9,
+    position: 'absolute',
+    top: 0,
+    left: 8.25,
   },
 })

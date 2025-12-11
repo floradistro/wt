@@ -19,7 +19,7 @@ import { layout } from '@/theme/layout'
 import { useAuth, useAuthActions } from '@/stores/auth.store'
 import { useUsersManagementStore } from '@/stores/users-management.store'
 import { useSuppliersManagementStore } from '@/stores/suppliers-management.store'
-import { useLoyaltyCampaignsStore, startLoyaltyCampaignsRealtimeMonitoring, stopLoyaltyCampaignsRealtimeMonitoring } from '@/stores/loyalty-campaigns.store'
+// Loyalty moved to Marketing screen
 import { usePaymentProcessorsSettingsStore } from '@/stores/payment-processors-settings.store'
 import { useAppAuth } from '@/contexts/AppAuthContext'
 import { useLocationFilter } from '@/stores/location-filter.store'
@@ -27,15 +27,15 @@ import { NavSidebar, type NavItem } from '@/components/NavSidebar'
 import { LocationSelectorModal } from '@/components/shared'
 import { logger } from '@/utils/logger'
 
-// Import all detail components
+// Import all detail components (Loyalty moved to Marketing)
 import {
   AccountDetail,
   DeveloperToolsDetail,
   LocationsDetail,
   UserManagementDetail,
   SupplierManagementDetail,
-  LoyaltyManagementDetail,
   EmailSettingsDetail,
+  ShippingSettingsDetail,
 } from '@/components/settings/details'
 
 // Monochrome Icons for Settings Categories
@@ -99,21 +99,25 @@ function SuppliersIcon({ color }: { color: string }) {
   )
 }
 
-function LoyaltyIcon({ color }: { color: string }) {
-  return (
-    <View style={styles.iconContainer}>
-      <View style={[styles.loyaltyIconStar, { borderColor: color }]}>
-        <View style={[styles.loyaltyIconSparkle, { backgroundColor: color }]} />
-      </View>
-    </View>
-  )
-}
+// LoyaltyIcon moved to Marketing screen
 
 function EmailIcon({ color }: { color: string }) {
   return (
     <View style={styles.iconContainer}>
       <View style={[styles.emailIconEnvelope, { borderColor: color }]}>
         <View style={[styles.emailIconFlap, { borderColor: color }]} />
+      </View>
+    </View>
+  )
+}
+
+function ShippingIcon({ color }: { color: string }) {
+  return (
+    <View style={styles.iconContainer}>
+      <View style={[styles.shippingIconTruck, { borderColor: color }]}>
+        <View style={[styles.shippingIconCab, { borderColor: color }]} />
+        <View style={[styles.shippingIconWheel1, { backgroundColor: color }]} />
+        <View style={[styles.shippingIconWheel2, { backgroundColor: color }]} />
       </View>
     </View>
   )
@@ -154,12 +158,7 @@ function SettingsScreen() {
       case 'suppliers':
         useSuppliersManagementStore.getState().loadSuppliers(user.id)
         break
-      case 'loyalty':
-        useLoyaltyCampaignsStore.getState().loadProgram(user.id)
-        useLoyaltyCampaignsStore.getState().loadCampaigns(user.id)
-        // Start real-time monitoring for loyalty
-        startLoyaltyCampaignsRealtimeMonitoring(user.id)
-        break
+      // Loyalty moved to Marketing screen
       case 'locations':
         if (vendor?.id) {
           usePaymentProcessorsSettingsStore.getState().loadProcessors(vendor.id)
@@ -170,9 +169,7 @@ function SettingsScreen() {
 
     return () => {
       // Clean up subscriptions when tab changes or component unmounts
-      if (selectedCategoryId === 'loyalty') {
-        stopLoyaltyCampaignsRealtimeMonitoring()
-      }
+      // Loyalty cleanup moved to Marketing screen
     }
   }, [user?.id, vendor?.id, selectedCategoryId])
 
@@ -182,7 +179,8 @@ function SettingsScreen() {
   const emailHeaderOpacity = useRef(new Animated.Value(0)).current
   const teamHeaderOpacity = useRef(new Animated.Value(0)).current
   const suppliersHeaderOpacity = useRef(new Animated.Value(0)).current
-  const loyaltyHeaderOpacity = useRef(new Animated.Value(0)).current
+  // loyaltyHeaderOpacity moved to Marketing screen
+  const shippingHeaderOpacity = useRef(new Animated.Value(0)).current
   const devToolsHeaderOpacity = useRef(new Animated.Value(0)).current
 
   const userName = useMemo(() => {
@@ -238,12 +236,13 @@ function SettingsScreen() {
         vendorLogo={vendor?.logo_url || null}
       />
     },
+    // Loyalty & Rewards moved to Marketing screen
     {
-      id: 'loyalty',
-      title: 'Loyalty & Rewards',
-      icon: LoyaltyIcon,
-      renderDetail: () => <LoyaltyManagementDetail
-        headerOpacity={loyaltyHeaderOpacity}
+      id: 'shipping',
+      title: 'Shipping',
+      icon: ShippingIcon,
+      renderDetail: () => <ShippingSettingsDetail
+        headerOpacity={shippingHeaderOpacity}
         vendorLogo={vendor?.logo_url || null}
       />
     },
@@ -258,7 +257,7 @@ function SettingsScreen() {
     // All data comes from stores, so no need for data/callback dependencies
     user, userName, locations, vendor,
     accountHeaderOpacity, locationsHeaderOpacity, emailHeaderOpacity, teamHeaderOpacity,
-    suppliersHeaderOpacity, loyaltyHeaderOpacity, devToolsHeaderOpacity,
+    suppliersHeaderOpacity, shippingHeaderOpacity, devToolsHeaderOpacity,
   ])
 
   // Convert categories to NavItems
@@ -495,22 +494,7 @@ const styles = StyleSheet.create({
     left: '50%',
     marginLeft: -3,
   },
-  loyaltyIconStar: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    borderWidth: 1.5,
-  },
-  loyaltyIconSparkle: {
-    width: 8,
-    height: 8,
-    position: 'absolute',
-    top: '50%',
-    left: '50%',
-    marginTop: -4,
-    marginLeft: -4,
-    transform: [{ rotate: '45deg' }],
-  },
+  // Loyalty icon styles moved to Marketing screen
   emailIconEnvelope: {
     width: 20,
     height: 14,
@@ -529,6 +513,41 @@ const styles = StyleSheet.create({
     top: -1,
     left: 3,
     transform: [{ rotate: '45deg' }, { scaleY: 0.7 }],
+  },
+  // Shipping icon styles
+  shippingIconTruck: {
+    width: 22,
+    height: 14,
+    borderRadius: radius.xs,
+    borderWidth: 1.5,
+    position: 'relative',
+  },
+  shippingIconCab: {
+    width: 8,
+    height: 10,
+    borderWidth: 1.5,
+    borderLeftWidth: 0,
+    borderTopRightRadius: radius.xs,
+    borderBottomRightRadius: radius.xs,
+    position: 'absolute',
+    right: -8,
+    bottom: 0,
+  },
+  shippingIconWheel1: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+    position: 'absolute',
+    bottom: -3,
+    left: 3,
+  },
+  shippingIconWheel2: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+    position: 'absolute',
+    bottom: -3,
+    right: -5,
   },
 })
 

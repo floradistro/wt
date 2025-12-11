@@ -25,7 +25,7 @@ import { colors, spacing, radius } from '@/theme/tokens'
 import { layout } from '@/theme/layout'
 import { useFilteredOrders } from '@/stores/order-filter.store'
 import { useOrdersLoading, useOrdersActions, useOrdersStore, useConnectionState } from '@/stores/orders.store'
-import { useOrdersUIActions, useSelectedOrderId } from '@/stores/orders-ui.store'
+import { useOrdersUIActions, useSelectedOrderId, useDateRange } from '@/stores/orders-ui.store'
 import { useLocationFilter } from '@/stores/location-filter.store'
 import { useAppAuth } from '@/contexts/AppAuthContext'
 import { TitleSection } from '@/components/shared'
@@ -43,6 +43,7 @@ interface BoardOrder {
   timeAgo: string
   typeIcon: 'storefront' | 'cube'  // Pickup vs Ship
   typeLabel: string
+  itemCount: number
 }
 
 interface OrderAction {
@@ -54,6 +55,17 @@ interface OrderAction {
 // ============================================
 // HELPER FUNCTIONS
 // ============================================
+
+function getDateRangeLabel(dateRange: string): string {
+  switch (dateRange) {
+    case 'today': return 'Today'
+    case 'week': return 'This Week'
+    case 'month': return 'This Month'
+    case 'all': return 'All Time'
+    case 'custom': return 'Custom Range'
+    default: return 'Today'
+  }
+}
 
 function formatTimestamp(date: string): string {
   const d = new Date(date)
@@ -91,7 +103,7 @@ interface BoardItemProps {
 }
 
 const BoardItem = React.memo<BoardItemProps>(({ item, onPress, isSelected, onAction }) => {
-  const { order, action, isDone, timeAgo, typeIcon, typeLabel } = item
+  const { order, action, isDone, timeAgo, typeIcon, typeLabel, itemCount } = item
 
   const customerInitials = order.customer_name
     ? order.customer_name
@@ -131,7 +143,7 @@ const BoardItem = React.memo<BoardItemProps>(({ item, onPress, isSelected, onAct
               {order.customer_name || 'Guest'}
             </Text>
             <Text style={[styles.itemCount, isDone && styles.textDone]}>
-              {order.item_count || order.items?.length || 0} item{(order.item_count || order.items?.length || 0) !== 1 ? 's' : ''}
+              {itemCount} item{itemCount !== 1 ? 's' : ''}
             </Text>
           </View>
 
@@ -188,6 +200,12 @@ const BoardItem = React.memo<BoardItemProps>(({ item, onPress, isSelected, onAct
 BoardItem.displayName = 'BoardItem'
 
 // ============================================
+// TYPES
+// ============================================
+
+type OrderTypeFilter = 'all' | 'pickup' | 'shipping'
+
+// ============================================
 // MAIN COMPONENT
 // ============================================
 
@@ -200,8 +218,10 @@ export function FulfillmentBoard() {
   const selectedOrderId = useSelectedOrderId()
   const { selectOrder, openShipModal } = useOrdersUIActions()
   const { selectedLocationIds } = useLocationFilter()
+  const dateRange = useDateRange()
 
   const [showDone, setShowDone] = useState(false)
+  const [orderTypeFilter, setOrderTypeFilter] = useState<OrderTypeFilter>('all')
 
   // Connection status for subtitle
   const connectionLabel = connectionState === 'connected' ? 'Live' :
@@ -222,10 +242,19 @@ export function FulfillmentBoard() {
   const { activeItems, doneItems, activeCount, doneCount } = useMemo(() => {
     // Filter to only pickup + shipping orders (not walk_in)
     // EXCLUDE cancelled orders - they're not actionable and shouldn't clutter the board
-    const fulfillmentOrders = orders.filter(o =>
-      (o.order_type === 'pickup' || o.order_type === 'shipping') &&
-      o.status !== 'cancelled'
-    )
+    // Apply orderTypeFilter if specified
+    const fulfillmentOrders = orders.filter(o => {
+      // Base filter: must be pickup or shipping, not cancelled
+      const isValidType = o.order_type === 'pickup' || o.order_type === 'shipping'
+      const notCancelled = o.status !== 'cancelled'
+
+      if (!isValidType || !notCancelled) return false
+
+      // Apply type filter
+      if (orderTypeFilter === 'pickup') return o.order_type === 'pickup'
+      if (orderTypeFilter === 'shipping') return o.order_type === 'shipping'
+      return true // 'all' shows both
+    })
 
     const items: BoardOrder[] = fulfillmentOrders.map(order => {
       const isPickup = order.order_type === 'pickup'
@@ -279,6 +308,11 @@ export function FulfillmentBoard() {
         }
       }
 
+      // Calculate item count from fulfillment_locations
+      const itemCount = order.fulfillment_locations?.reduce(
+        (sum, loc) => sum + (loc.item_count || 0), 0
+      ) || 0
+
       return {
         order,
         action,
@@ -286,6 +320,7 @@ export function FulfillmentBoard() {
         timeAgo: formatTimestamp(order.created_at),
         typeIcon: isPickup ? 'storefront' : 'cube',
         typeLabel: isPickup ? 'Pickup' : 'Ship',
+        itemCount,
       }
     })
 
@@ -298,7 +333,6 @@ export function FulfillmentBoard() {
       .filter(i => i.isDone)
       .sort((a, b) => new Date(b.order.updated_at || b.order.created_at).getTime() -
                       new Date(a.order.updated_at || a.order.created_at).getTime())
-      .slice(0, 50) // Limit done items for performance
 
     return {
       activeItems: active,
@@ -306,7 +340,7 @@ export function FulfillmentBoard() {
       activeCount: active.length,
       doneCount: done.length,
     }
-  }, [orders, openShipModal])
+  }, [orders, openShipModal, orderTypeFilter])
 
   // ============================================
   // HANDLERS
@@ -374,7 +408,7 @@ export function FulfillmentBoard() {
         <Pressable style={styles.doneToggle} onPress={toggleDone}>
           <View style={styles.doneToggleLeft}>
             <Ionicons name="checkmark-circle" size={18} color="#34c759" />
-            <Text style={styles.doneToggleText}>Done Today ({doneCount})</Text>
+            <Text style={styles.doneToggleText}>Done {getDateRangeLabel(dateRange)} ({doneCount})</Text>
           </View>
           <Ionicons
             name={showDone ? 'chevron-up' : 'chevron-down'}
@@ -386,7 +420,7 @@ export function FulfillmentBoard() {
     }
 
     return renderItem({ item })
-  }, [renderItem, toggleDone, doneCount, showDone])
+  }, [renderItem, toggleDone, doneCount, showDone, dateRange])
 
   const listKeyExtractor = useCallback((item: any, index: number) => {
     if (item.type === 'header') return `header-${item.title}`
@@ -399,6 +433,26 @@ export function FulfillmentBoard() {
     ? `${activeCount} active • ${doneCount} done • ${connectionLabel}`
     : `${activeCount} active • ${doneCount} done`
 
+  // Calculate counts per filter type for badges
+  const filterCounts = useMemo(() => {
+    const fulfillmentOrders = orders.filter(o =>
+      (o.order_type === 'pickup' || o.order_type === 'shipping') &&
+      o.status !== 'cancelled' &&
+      !['completed', 'delivered', 'shipped', 'in_transit'].includes(o.status)
+    )
+    return {
+      all: fulfillmentOrders.length,
+      pickup: fulfillmentOrders.filter(o => o.order_type === 'pickup').length,
+      shipping: fulfillmentOrders.filter(o => o.order_type === 'shipping').length,
+    }
+  }, [orders])
+
+  // Handle filter change
+  const handleFilterChange = useCallback((filter: OrderTypeFilter) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    setOrderTypeFilter(filter)
+  }, [])
+
   const ListHeader = useMemo(() => (
     <>
       <TitleSection
@@ -407,9 +461,80 @@ export function FulfillmentBoard() {
         subtitle={subtitle}
         hideButton
       />
+      {/* Order Type Filter Pills */}
+      <View style={styles.filterContainer}>
+        <Pressable
+          style={[styles.filterPill, orderTypeFilter === 'all' && styles.filterPillActive]}
+          onPress={() => handleFilterChange('all')}
+        >
+          <Text style={[styles.filterPillText, orderTypeFilter === 'all' && styles.filterPillTextActive]}>
+            All
+          </Text>
+          {filterCounts.all > 0 && (
+            <View style={[styles.filterBadge, orderTypeFilter === 'all' && styles.filterBadgeActive]}>
+              <Text style={[styles.filterBadgeText, orderTypeFilter === 'all' && styles.filterBadgeTextActive]}>
+                {filterCounts.all}
+              </Text>
+            </View>
+          )}
+        </Pressable>
+        <Pressable
+          style={[styles.filterPill, orderTypeFilter === 'pickup' && styles.filterPillActive]}
+          onPress={() => handleFilterChange('pickup')}
+        >
+          <Ionicons
+            name="storefront"
+            size={14}
+            color={orderTypeFilter === 'pickup' ? '#000' : 'rgba(255,255,255,0.6)'}
+          />
+          <Text style={[styles.filterPillText, orderTypeFilter === 'pickup' && styles.filterPillTextActive]}>
+            Pickup
+          </Text>
+          {filterCounts.pickup > 0 && (
+            <View style={[styles.filterBadge, orderTypeFilter === 'pickup' && styles.filterBadgeActive]}>
+              <Text style={[styles.filterBadgeText, orderTypeFilter === 'pickup' && styles.filterBadgeTextActive]}>
+                {filterCounts.pickup}
+              </Text>
+            </View>
+          )}
+        </Pressable>
+        <Pressable
+          style={[styles.filterPill, orderTypeFilter === 'shipping' && styles.filterPillActive]}
+          onPress={() => handleFilterChange('shipping')}
+        >
+          <Ionicons
+            name="airplane"
+            size={14}
+            color={orderTypeFilter === 'shipping' ? '#000' : 'rgba(255,255,255,0.6)'}
+          />
+          <Text style={[styles.filterPillText, orderTypeFilter === 'shipping' && styles.filterPillTextActive]}>
+            E-Commerce
+          </Text>
+          {filterCounts.shipping > 0 && (
+            <View style={[styles.filterBadge, orderTypeFilter === 'shipping' && styles.filterBadgeActive]}>
+              <Text style={[styles.filterBadgeText, orderTypeFilter === 'shipping' && styles.filterBadgeTextActive]}>
+                {filterCounts.shipping}
+              </Text>
+            </View>
+          )}
+        </Pressable>
+      </View>
       <OrderFilterBar showLocationFilter={true} />
     </>
-  ), [vendor?.logo_url, subtitle])
+  ), [vendor?.logo_url, subtitle, orderTypeFilter, filterCounts, handleFilterChange])
+
+  // Empty state message based on filter
+  const emptyMessage = orderTypeFilter === 'pickup'
+    ? 'Store pickup orders will appear here'
+    : orderTypeFilter === 'shipping'
+      ? 'E-commerce shipping orders will appear here'
+      : 'Pickup and shipping orders will appear here'
+
+  const emptyIcon = orderTypeFilter === 'pickup'
+    ? 'storefront-outline'
+    : orderTypeFilter === 'shipping'
+      ? 'airplane-outline'
+      : 'cube-outline'
 
   // Empty state
   if (!loading && activeCount === 0 && doneCount === 0) {
@@ -417,10 +542,10 @@ export function FulfillmentBoard() {
       <View style={styles.container}>
         {ListHeader}
         <View style={styles.emptyState}>
-          <Ionicons name="cube-outline" size={48} color="rgba(255,255,255,0.2)" />
+          <Ionicons name={emptyIcon as any} size={48} color="rgba(255,255,255,0.2)" />
           <Text style={styles.emptyTitle}>No Orders</Text>
           <Text style={styles.emptyText}>
-            Pickup and shipping orders will appear here
+            {emptyMessage}
           </Text>
         </View>
       </View>
@@ -642,5 +767,53 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: 'rgba(255,255,255,0.5)',
     textAlign: 'center',
+  },
+
+  // Filter Pills
+  filterContainer: {
+    flexDirection: 'row',
+    paddingHorizontal: layout.containerMargin,
+    paddingBottom: spacing.sm,
+    gap: spacing.xs,
+  },
+  filterPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 20,
+  },
+  filterPillActive: {
+    backgroundColor: '#fff',
+  },
+  filterPillText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.7)',
+  },
+  filterPillTextActive: {
+    color: '#000',
+  },
+  filterBadge: {
+    minWidth: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 6,
+  },
+  filterBadgeActive: {
+    backgroundColor: 'rgba(0,0,0,0.15)',
+  },
+  filterBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: 'rgba(255,255,255,0.7)',
+  },
+  filterBadgeTextActive: {
+    color: '#000',
   },
 })

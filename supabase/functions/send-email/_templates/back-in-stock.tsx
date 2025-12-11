@@ -5,6 +5,7 @@ import { Layout, Title, Paragraph, Button, Card } from './layout.tsx'
 interface BackInStockProps {
   vendorName: string
   logoUrl?: string
+  supportEmail?: string
   customerName: string
   productName: string
   productUrl: string
@@ -14,13 +15,14 @@ interface BackInStockProps {
 export function BackInStock({
   vendorName,
   logoUrl,
+  supportEmail,
   customerName,
   productName,
   productUrl,
   productImage,
 }: BackInStockProps) {
   return (
-    <Layout vendorName={vendorName} logoUrl={logoUrl}>
+    <Layout vendorName={vendorName} logoUrl={logoUrl} supportEmail={supportEmail}>
       <Section style={{ textAlign: 'center' as const, marginBottom: '32px' }}>
         <Title>Back in Stock</Title>
       </Section>

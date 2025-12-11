@@ -170,6 +170,11 @@ interface CheckoutRequest {
   campaignDiscountAmount?: number
   campaignId?: string
 
+  // Affiliate Marketing
+  affiliate_id?: string  // UUID of validated affiliate
+  affiliate_code?: string  // The code the customer entered
+  affiliate_discount_amount?: number  // Discount applied from affiliate code
+
   // Split Payment
   splitPayments?: Array<{ method: 'cash' | 'card'; amount: number }>
   cashAmount?: number
@@ -1088,9 +1093,12 @@ serve(async (req) => {
       subtotal: body.subtotal,
       loyaltyDiscount: body.loyaltyDiscountAmount || 0,
       campaignDiscount: body.campaignDiscountAmount || 0,
+      affiliateDiscount: body.affiliate_discount_amount || 0,
+      affiliateCode: body.affiliate_code || null,
+      affiliateId: body.affiliate_id || null,
       taxAmount: body.taxAmount,
       total: body.total,
-      calculation: `${body.subtotal} - ${body.loyaltyDiscountAmount || 0} - ${body.campaignDiscountAmount || 0} + ${body.taxAmount} tax = ${body.total}`,
+      calculation: `${body.subtotal} - ${body.loyaltyDiscountAmount || 0} - ${body.campaignDiscountAmount || 0} - ${body.affiliate_discount_amount || 0} + ${body.taxAmount} tax = ${body.total}`,
     })
 
     // Validate each line item
@@ -1460,6 +1468,12 @@ serve(async (req) => {
         shipping_country: 'US',
         shipping_cost: body.shipping || 0,
       } : {}),
+      // Affiliate tracking (if affiliate code was used at checkout)
+      ...(body.affiliate_id ? {
+        affiliate_id: body.affiliate_id,
+        affiliate_code: body.affiliate_code || null,
+        affiliate_discount_amount: body.affiliate_discount_amount || 0,
+      } : {}),
       metadata: {
         ...body.metadata,
         customer_name: body.customerName || (body.is_ecommerce ? 'Online Customer' : 'Walk-In'),
@@ -1467,6 +1481,8 @@ serve(async (req) => {
         loyalty_discount_amount: body.loyaltyDiscountAmount || 0,
         campaign_discount_amount: body.campaignDiscountAmount || 0,
         campaign_id: body.campaignId || null,
+        affiliate_discount_amount: body.affiliate_discount_amount || 0,
+        affiliate_code: body.affiliate_code || null,
         session_id: body.sessionId,
         register_id: body.registerId,
         request_id: requestId,

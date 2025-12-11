@@ -8,6 +8,10 @@ export interface Vendor {
   store_name: string
   logo_url: string | null
   ecommerce_url?: string | null
+  // Shipping settings
+  free_shipping_enabled?: boolean
+  free_shipping_threshold?: number | null
+  default_shipping_cost?: number | null
 }
 
 export interface User {
@@ -43,6 +47,7 @@ export interface Location {
   tax_rate?: number
   tax_name?: string
   is_primary: boolean
+  is_active?: boolean
 }
 
 export interface PricingTier {

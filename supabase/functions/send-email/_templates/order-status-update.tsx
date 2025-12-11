@@ -28,7 +28,7 @@ export function OrderStatusUpdate({
   pickupLocation,
 }: OrderStatusUpdateProps) {
   return (
-    <Layout vendorName={vendorName} logoUrl={logoUrl}>
+    <Layout vendorName={vendorName} logoUrl={logoUrl} supportEmail={supportEmail}>
       <Section style={{ textAlign: 'center' as const, marginBottom: '40px' }}>
         <Title>{statusTitle}</Title>
         <Subtitle>Order #{orderNumber}</Subtitle>

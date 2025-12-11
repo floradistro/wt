@@ -5,6 +5,7 @@ import { Layout, Title, Paragraph, Button } from './layout.tsx'
 interface WelcomeProps {
   vendorName: string
   logoUrl?: string
+  supportEmail?: string
   customerName: string
   shopUrl: string
 }
@@ -12,11 +13,12 @@ interface WelcomeProps {
 export function Welcome({
   vendorName,
   logoUrl,
+  supportEmail,
   customerName,
   shopUrl,
 }: WelcomeProps) {
   return (
-    <Layout vendorName={vendorName} logoUrl={logoUrl}>
+    <Layout vendorName={vendorName} logoUrl={logoUrl} supportEmail={supportEmail}>
       <Section style={{ textAlign: 'center' as const, marginBottom: '32px' }}>
         <Title>Welcome</Title>
       </Section>

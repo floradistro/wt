@@ -5,6 +5,7 @@ import { Layout, Title, Subtitle, Paragraph, Card, CardLabel, CardValue } from '
 interface OrderReadyProps {
   vendorName: string
   logoUrl?: string
+  supportEmail?: string
   orderNumber: string
   pickupLocation: string
   pickupAddress?: string
@@ -13,12 +14,13 @@ interface OrderReadyProps {
 export function OrderReady({
   vendorName,
   logoUrl,
+  supportEmail,
   orderNumber,
   pickupLocation,
   pickupAddress,
 }: OrderReadyProps) {
   return (
-    <Layout vendorName={vendorName} logoUrl={logoUrl}>
+    <Layout vendorName={vendorName} logoUrl={logoUrl} supportEmail={supportEmail}>
       <Section style={{ textAlign: 'center' as const, marginBottom: '40px' }}>
         <Title>Your Order is Ready</Title>
         <Subtitle>Order #{orderNumber}</Subtitle>

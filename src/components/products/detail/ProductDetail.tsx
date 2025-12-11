@@ -18,7 +18,8 @@ import { useAppAuth } from '@/contexts/AppAuthContext'
 import { layout } from '@/theme/layout'
 import { spacing, radius, colors } from '@/theme/tokens'
 import { logger } from '@/utils/logger'
-import type { Product } from '@/types/products'
+import { supabase } from '@/lib/supabase/client'
+import type { Product, InventoryItem } from '@/types/pos'
 import { EditableDescriptionSection } from '@/components/products/EditableDescriptionSection'
 import { EditablePricingSection } from '@/components/products/EditablePricingSection'
 import { EditableCustomFieldsSection } from '@/components/products/EditableCustomFieldsSection'
@@ -99,7 +100,64 @@ export function ProductDetail({ product, onBack, onProductUpdated }: ProductDeta
   const { activeModal, selectedLocationId, selectedLocationName } = useProductUIState()
   const lastAdjustmentResult = useLastAdjustmentResult()
 
-  const hasMultipleLocations = (product.inventory?.length || 0) > 1
+  // FULL inventory state - fetch ALL locations for this product
+  // (parent might only pass filtered inventory based on location selection)
+  const [fullInventory, setFullInventory] = useState<InventoryItem[]>(product.inventory || [])
+  const [fullTotalStock, setFullTotalStock] = useState<number>(product.total_stock || 0)
+
+  // Fetch ALL inventory for this product on mount and after adjustments
+  useEffect(() => {
+    async function fetchFullInventory() {
+      try {
+        const { data, error } = await supabase
+          .from('inventory_with_holds')
+          .select(`
+            id,
+            product_id,
+            location_id,
+            total_quantity,
+            held_quantity,
+            available_quantity,
+            locations (name)
+          `)
+          .eq('product_id', product.id)
+
+        if (error) {
+          logger.error('[ProductDetail] Failed to fetch full inventory:', error)
+          return
+        }
+
+        if (data) {
+          const inventory: InventoryItem[] = data.map((inv: any) => ({
+            id: inv.id,
+            location_id: inv.location_id,
+            location_name: inv.locations?.name || 'Unknown',
+            quantity: inv.total_quantity || 0,
+            available_quantity: inv.available_quantity || 0,
+            reserved_quantity: inv.held_quantity || 0,
+          }))
+          setFullInventory(inventory)
+
+          // Calculate true total stock across all locations
+          const total = inventory.reduce((sum, inv) => sum + (inv.quantity || 0), 0)
+          setFullTotalStock(total)
+
+          logger.debug('[ProductDetail] Loaded full inventory:', {
+            productId: product.id,
+            productName: product.name,
+            locations: inventory.length,
+            totalStock: total,
+          })
+        }
+      } catch (err) {
+        logger.error('[ProductDetail] Error fetching inventory:', err)
+      }
+    }
+
+    fetchFullInventory()
+  }, [product.id, lastAdjustmentResult])
+
+  const hasMultipleLocations = fullInventory.length > 1
 
   // Use store values when editing, fallback to product when store not initialized
   const editedName = storeEditedName || product.name
@@ -463,7 +521,7 @@ export function ProductDetail({ product, onBack, onProductUpdated }: ProductDeta
         {/* Pricing Section */}
         <EditablePricingSection product={product} />
 
-        {/* Inventory Section */}
+        {/* Inventory Section - Uses fullInventory/fullTotalStock for accurate cross-location totals */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>INVENTORY</Text>
           <View style={styles.cardGlass}>
@@ -472,20 +530,20 @@ export function ProductDetail({ product, onBack, onProductUpdated }: ProductDeta
               <Text
                 style={[
                   styles.inventoryTotal,
-                  (product.total_stock ?? 0) === 0 && styles.stockOut,
-                  (product.total_stock ?? 0) > 0 && (product.total_stock ?? 0) < 10 && styles.stockLow,
-                  (product.total_stock ?? 0) >= 10 && styles.stockOk,
+                  fullTotalStock === 0 && styles.stockOut,
+                  fullTotalStock > 0 && fullTotalStock < 10 && styles.stockLow,
+                  fullTotalStock >= 10 && styles.stockOk,
                 ]}
               >
-                {product.total_stock ?? 0}g
+                {fullTotalStock}g
               </Text>
             </View>
 
-            {/* Multi-location breakdown */}
-            {hasMultipleLocations && product.inventory && (
+            {/* Multi-location breakdown - always show if there's inventory at multiple locations */}
+            {hasMultipleLocations && (
               <View style={styles.inventoryLocationBreakdown}>
                 <View style={styles.inventoryLocationDivider} />
-                {product.inventory.map((inv) => (
+                {fullInventory.map((inv) => (
                   <View key={inv.location_id} style={styles.inventoryLocationRow}>
                     <View style={styles.inventoryLocationInfo}>
                       <Text style={styles.inventoryLocationName}>{inv.location_name}</Text>
@@ -493,7 +551,7 @@ export function ProductDetail({ product, onBack, onProductUpdated }: ProductDeta
                         <View
                           style={[
                             styles.locationBarFill,
-                            { width: `${((inv.quantity || 0) / (product.total_stock || 1)) * 100}%` }
+                            { width: `${((inv.quantity || 0) / (fullTotalStock || 1)) * 100}%` }
                           ]}
                         />
                       </View>

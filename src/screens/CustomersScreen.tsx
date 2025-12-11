@@ -18,7 +18,6 @@ import { colors } from '@/theme/tokens'
 import { layout } from '@/theme/layout'
 import { NavSidebar, type NavItem } from '@/components/NavSidebar'
 import { TitleSection } from '@/components/shared'
-import type { FilterPill } from '@/components/shared'
 import { useDockOffset } from '@/navigation/DockOffsetContext'
 import { logger } from '@/utils/logger'
 import { useAppAuth } from '@/contexts/AppAuthContext'
@@ -29,6 +28,10 @@ import {
   customersListActions,
 } from '@/stores/customers-list.store'
 import {
+  useSegments,
+  useMarketingActions,
+} from '@/stores/marketing.store'
+import {
   useSelectedCustomerUI,
   customersUIActions,
 } from '@/stores/customers-ui.store'
@@ -36,7 +39,7 @@ import type { Customer } from '@/services/customers.service'
 import { CustomerItem, CustomerDetail, EditCustomerModal } from '@/components/customers'
 import { customersStyles as styles } from '@/components/customers/customers.styles'
 
-type CustomerFilter = 'all' | 'top-customers' | 'recent'
+type CustomerFilter = 'all' | 'top-customers' | 'recent' | `segment:${string}`
 
 // Section Header Component
 const SectionHeader = React.memo<{ title: string }>(({ title }) => (
@@ -59,6 +62,10 @@ function CustomersScreenComponent() {
   const searchQuery = useSearchQuery()
   const selectedCustomer = useSelectedCustomerUI()
 
+  // Segments from marketing store
+  const segments = useSegments()
+  const { loadSegments } = useMarketingActions()
+
   // Local filter state (replaces activeNav from store)
   const [activeFilter, setActiveFilter] = useState<CustomerFilter>('all')
 
@@ -67,25 +74,48 @@ function CustomersScreenComponent() {
     const startTime = performance.now()
     const filtered = [...customers]
     let result
-    switch (activeFilter) {
-      case 'top-customers':
-        result = filtered.sort((a, b) => (b.total_spent || 0) - (a.total_spent || 0)).slice(0, 50)
-        break
-      case 'recent':
-        result = filtered.sort((a, b) =>
-          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-        ).slice(0, 50)
-        break
-      default:
-        result = filtered.sort((a, b) => {
+
+    // Check if filtering by segment
+    if (activeFilter.startsWith('segment:')) {
+      const segmentId = activeFilter.replace('segment:', '')
+      const segment = segments.find(s => s.id === segmentId)
+      if (segment) {
+        // Filter by RFM segment name (matches rfm_segment field in customer_metrics)
+        // For now, we show all customers when segment is selected (actual filtering would need customer_metrics join)
+        // TODO: Implement proper segment filtering via API
+        result = filtered.filter(c => {
+          // Check if customer's rfm_segment matches segment name
+          // This is a placeholder - actual implementation would query customer_metrics
+          return true
+        }).sort((a, b) => {
           const nameA = (a.full_name || a.first_name || '').toLowerCase()
           const nameB = (b.full_name || b.first_name || '').toLowerCase()
           return nameA.localeCompare(nameB)
         })
+      } else {
+        result = filtered
+      }
+    } else {
+      switch (activeFilter) {
+        case 'top-customers':
+          result = filtered.sort((a, b) => (b.total_spent || 0) - (a.total_spent || 0)).slice(0, 50)
+          break
+        case 'recent':
+          result = filtered.sort((a, b) =>
+            new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+          ).slice(0, 50)
+          break
+        default:
+          result = filtered.sort((a, b) => {
+            const nameA = (a.full_name || a.first_name || '').toLowerCase()
+            const nameB = (b.full_name || b.first_name || '').toLowerCase()
+            return nameA.localeCompare(nameB)
+          })
+      }
     }
     logger.info(`[CustomersScreen] filteredCustomers computed in ${(performance.now() - startTime).toFixed(2)}ms`)
     return result
-  }, [customers, activeFilter])
+  }, [customers, activeFilter, segments])
 
   const groupedCustomers = useMemo(() => {
     if (activeFilter !== 'all') return null
@@ -119,24 +149,24 @@ function CustomersScreenComponent() {
     return result
   }, [filteredCustomers, activeFilter])
 
-  // Define filter pills
-  const filterPills: FilterPill[] = useMemo(() => [
-    { id: 'all', label: 'All' },
-    { id: 'top-customers', label: 'Top Customers' },
-    { id: 'recent', label: 'Recent' },
-  ], [])
-
-  // Handle filter selection
-  const handleFilterSelect = (filterId: string) => {
-    setActiveFilter(filterId as CustomerFilter)
-    customersUIActions.clearSelection()
-  }
+  // Get current filter label for display
+  const currentFilterLabel = useMemo(() => {
+    if (activeFilter === 'all') return 'customers'
+    if (activeFilter === 'top-customers') return 'top customers'
+    if (activeFilter === 'recent') return 'recent'
+    if (activeFilter.startsWith('segment:')) {
+      const segmentId = activeFilter.replace('segment:', '')
+      const segment = segments.find(s => s.id === segmentId)
+      return segment?.name.toLowerCase() || 'segment'
+    }
+    return 'customers'
+  }, [activeFilter, segments])
 
   // Animation State (still needed for UI)
   const slideAnim = useRef(new Animated.Value(0)).current
   const contentWidth = useRef(0)
 
-  // Load customers on mount
+  // Load customers and segments on mount
   useEffect(() => {
     if (!vendor?.id) return
 
@@ -147,10 +177,13 @@ function CustomersScreenComponent() {
     })
     customersListActions.setupRealtimeSubscription()
 
+    // Also load segments for filtering
+    loadSegments(vendor.id)
+
     return () => {
       customersListActions.cleanupRealtimeSubscription()
     }
-  }, [vendor?.id])
+  }, [vendor?.id, loadSegments])
 
   // Search Effect with debouncing (skip initial load - handled above)
   const isInitialMount = useRef(true)
@@ -184,17 +217,34 @@ function CustomersScreenComponent() {
     }).start()
   }, [selectedCustomer, slideAnim])
 
-  // Navigation Items (simplified - filters now in pills)
+  // Navigation Items with segments
   const navItems: NavItem[] = useMemo(
     () => [
       {
-        id: 'customers',
-        icon: 'grid',
-        label: 'Customers',
+        id: 'all',
+        icon: 'people',
+        label: 'All Customers',
         count: customers.length,
       },
+      {
+        id: 'top-customers',
+        icon: 'star',
+        label: 'Top Customers',
+      },
+      {
+        id: 'recent',
+        icon: 'list',
+        label: 'Recent',
+      },
+      // Segment filters (from RFM analysis)
+      ...segments.map(segment => ({
+        id: `segment:${segment.id}`,
+        icon: 'pie' as const,
+        label: segment.name,
+        count: segment.customer_count,
+      })),
     ],
-    [customers.length]
+    [customers.length, segments]
   )
 
   // ⚡ PERFORMANCE: Flatten sections for FlatList (matches OrdersScreen pattern)
@@ -259,12 +309,9 @@ function CustomersScreenComponent() {
     <TitleSection
       title="Customers"
       logo={vendor?.logo_url}
-      subtitle={`${filteredCustomers.length} ${activeFilter === 'all' ? 'customers' : activeFilter === 'top-customers' ? 'top customers' : 'recent'}`}
-      filterPills={filterPills}
-      activeFilterId={activeFilter}
-      onFilterSelect={handleFilterSelect}
+      subtitle={`${filteredCustomers.length} ${currentFilterLabel}`}
     />
-  ), [vendor?.logo_url, filteredCustomers.length, activeFilter, filterPills, handleFilterSelect])
+  ), [vendor?.logo_url, filteredCustomers.length, currentFilterLabel])
 
   const ListEmptyComponent = useCallback(() => (
     <View style={styles.emptyState}>
@@ -303,9 +350,11 @@ function CustomersScreenComponent() {
         <NavSidebar
           width={layout.sidebarWidth}
           items={navItems}
-          activeItemId="customers"
+          activeItemId={activeFilter}
           onItemPress={(id) => {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+            setActiveFilter(id as CustomerFilter)
+            customersUIActions.clearSelection()
           }}
           searchValue={searchQuery}
           onSearchChange={customersListActions.setSearchQuery}

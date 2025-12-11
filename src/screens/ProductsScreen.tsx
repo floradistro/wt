@@ -219,9 +219,12 @@ function ProductsScreenComponent() {
             if (allProductsMap.has(product.id)) {
               const existing = allProductsMap.get(product.id)!
               // Merge inventory arrays and quantities from this location
+              // IMPORTANT: Also sum total_stock and stock_quantity, not just inventory_quantity
               allProductsMap.set(product.id, {
                 ...existing,
                 inventory_quantity: (existing.inventory_quantity || 0) + (product.inventory_quantity || 0),
+                total_stock: (existing.total_stock || 0) + (product.total_stock || 0),
+                stock_quantity: (existing.stock_quantity || 0) + (product.stock_quantity || 0),
                 inventory: [...(existing.inventory || []), ...(product.inventory || [])], // Merge inventory arrays
               })
             } else {
@@ -341,9 +344,12 @@ function ProductsScreenComponent() {
             if (selectedProductsMap.has(product.id)) {
               const existing = selectedProductsMap.get(product.id)!
               // Merge inventory arrays and quantities from this location
+              // IMPORTANT: Also sum total_stock and stock_quantity, not just inventory_quantity
               selectedProductsMap.set(product.id, {
                 ...existing,
                 inventory_quantity: (existing.inventory_quantity || 0) + (product.inventory_quantity || 0),
+                total_stock: (existing.total_stock || 0) + (product.total_stock || 0),
+                stock_quantity: (existing.stock_quantity || 0) + (product.stock_quantity || 0),
                 inventory: [...(existing.inventory || []), ...(product.inventory || [])],
               })
             } else {

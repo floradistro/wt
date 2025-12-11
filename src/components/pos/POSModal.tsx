@@ -32,6 +32,7 @@ import {
   Platform,
   TouchableOpacity,
 } from 'react-native'
+import { BlurView } from 'expo-blur'
 import { LiquidGlassView, isLiquidGlassSupported } from '@callstack/liquid-glass'
 import * as Haptics from 'expo-haptics'
 import { memo, useRef, useEffect, ReactNode } from 'react'
@@ -114,15 +115,15 @@ function POSModal({
         accessibilityLabel={`${title}${subtitle ? `. ${subtitle}` : ''}`}
         onAccessibilityEscape={handleClose}
       >
-        <LiquidGlassView
-          effect="regular"
-          colorScheme="dark"
-          style={[
-            StyleSheet.absoluteFill,
-            !isLiquidGlassSupported && styles.overlayFallback,
-          ]}
+        {/* Blurred background overlay */}
+        <BlurView
+          intensity={40}
+          tint="dark"
+          style={StyleSheet.absoluteFill}
           accessible={false}
         />
+        {/* Dark tint over blur for better contrast */}
+        <View style={styles.overlayTint} />
 
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -144,10 +145,12 @@ function POSModal({
             >
               {/* @ts-expect-error - ViewStyle type issue with conditional maxWidth */}
               <View style={[styles.modalContentWrapper, maxWidth && { maxWidth }]}>
+                {/* Solid background layer for readability */}
+                <View style={styles.modalSolidBackground} />
                 <LiquidGlassView
                   effect="regular"
                   colorScheme="dark"
-                  tintColor="rgba(15,15,15,0.92)"
+                  tintColor="rgba(8,8,8,0.98)"
                   style={[
                     styles.modalContent,
                     !isLiquidGlassSupported && styles.modalContentFallback,
@@ -194,8 +197,9 @@ const styles = StyleSheet.create({
   overlayContainer: {
     flex: 1,
   },
-  overlayFallback: {
-    backgroundColor: 'rgba(0,0,0,0.95)',
+  overlayTint: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.5)',
   },
   keyboardView: {
     flex: 1,
@@ -208,6 +212,12 @@ const styles = StyleSheet.create({
   modalContentWrapper: {
     alignSelf: 'center',
     width: '100%',
+    position: 'relative',
+  },
+  modalSolidBackground: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(10,10,10,0.97)',
+    borderRadius: radius.xxl,
   },
   modalContent: {
     borderRadius: radius.xxl,
@@ -215,7 +225,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   modalContentFallback: {
-    backgroundColor: 'rgba(18,18,18,0.96)',
+    backgroundColor: 'rgba(12,12,12,0.99)',
   },
   header: {
     paddingHorizontal: spacing.xl,
