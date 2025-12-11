@@ -3,7 +3,7 @@
  * Customer intelligence + Email campaigns + Channels + Discounts + Affiliates
  */
 
-import { View, Text, StyleSheet, Pressable, TextInput, ActivityIndicator, ScrollView, Modal, Dimensions, Animated, Image } from 'react-native'
+import { View, Text, StyleSheet, Pressable, TextInput, ActivityIndicator, ScrollView, Modal, Dimensions, Animated, Image, Linking } from 'react-native'
 import React, { useEffect, memo, useState, useCallback, useMemo, useRef } from 'react'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { WebView } from 'react-native-webview'
@@ -55,6 +55,24 @@ import {
   type Affiliate,
   type CreateAffiliateInput,
 } from '@/stores/affiliates.store'
+// Meta (Facebook/Instagram) imports
+import {
+  useMetaIntegration,
+  useIsMetaConnected,
+  useIsMetaConnecting,
+  useMetaCampaigns,
+  useIsMetaSyncing,
+  useMetaPosts,
+  useIsSyncingMetaPosts,
+  useMetaPostsFilter,
+  useMetaFullInsights,
+  useIsLoadingMetaInsights,
+  useMetaActions,
+  formatMetaSpend,
+  formatMetaNumber,
+  type MetaPost,
+  type MetaFullInsights,
+} from '@/stores/meta.store'
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window')
 
@@ -123,12 +141,13 @@ function MarketingScreenComponent() {
   // Editing draft state
   const [editingDraftId, setEditingDraftId] = useState<string | null>(null)
   // Nav state
-  const [activeNav, setActiveNav] = useState<'campaigns' | 'segments' | 'loyalty' | 'discounts' | 'channels' | 'affiliates' | 'wallet'>('campaigns')
+  const [activeNav, setActiveNav] = useState<'campaigns' | 'segments' | 'loyalty' | 'discounts' | 'channels' | 'meta' | 'affiliates' | 'wallet'>('campaigns')
   // Expanded segments state (for nested campaigns view)
   const [expandedSegments, setExpandedSegments] = useState<Set<string>>(new Set())
 
   // Wallet pass stats state
   const [walletStats, setWalletStats] = useState<{
+    // Order passes
     totalPasses: number
     activePasses: number
     pushEnabled: number
@@ -142,6 +161,13 @@ function MarketingScreenComponent() {
       tracking_number?: string
       item_count: number
     } | null
+    // Loyalty passes (customer_wallet_passes)
+    loyaltyPasses: {
+      total: number
+      active: number
+      pushEnabled: number
+    }
+    recentLoyaltyActivity: Array<{ customer_name: string; created_at: string }>
   } | null>(null)
   const [walletLoading, setWalletLoading] = useState(false)
   const [passPreviewHtml, setPassPreviewHtml] = useState<string | null>(null)
@@ -189,6 +215,36 @@ function MarketingScreenComponent() {
     return affiliates.find(a => a.id === selectedAffiliateId.id) || selectedAffiliateId
   }, [selectedAffiliateId, affiliates])
 
+  // Meta (Facebook/Instagram) store
+  const metaIntegration = useMetaIntegration()
+  const isMetaConnected = useIsMetaConnected()
+  const isMetaConnecting = useIsMetaConnecting()
+  const metaCampaigns = useMetaCampaigns()
+  const isMetaSyncing = useIsMetaSyncing()
+  const metaPosts = useMetaPosts()
+  const isSyncingPosts = useIsSyncingMetaPosts()
+  const postsFilter = useMetaPostsFilter()
+  const metaInsights = useMetaFullInsights()
+  const isLoadingInsights = useIsLoadingMetaInsights()
+  const {
+    loadIntegration: loadMetaIntegration,
+    connect: connectMeta,
+    disconnect: disconnectMeta,
+    syncCampaigns: syncMetaCampaigns,
+    loadPosts: loadMetaPosts,
+    syncPosts: syncMetaPosts,
+    setPostsFilter: setMetaPostsFilter,
+    loadFullInsights: loadMetaInsights,
+    subscribeToRealtime: subscribeToMetaRealtime,
+    unsubscribeFromRealtime: unsubscribeFromMetaRealtime,
+  } = useMetaActions()
+
+  // Meta connection UI state
+  const [showMetaConnectModal, setShowMetaConnectModal] = useState(false)
+  const [metaAccessToken, setMetaAccessToken] = useState('')
+  const [metaAdAccountId, setMetaAdAccountId] = useState('')
+  const [metaPixelId, setMetaPixelId] = useState('')
+
   // Affiliate form state
   const [showAffiliateModal, setShowAffiliateModal] = useState(false)
   const [affiliateFormData, setAffiliateFormData] = useState<CreateAffiliateInput>({
@@ -205,49 +261,69 @@ function MarketingScreenComponent() {
     notes: '',
   })
 
+  // Meta sub-tab state
+  const [metaSubTab, setMetaSubTab] = useState<'overview' | 'ads' | 'posts' | 'insights'>('overview')
+
   // Nav items
-  const navItems: NavItem[] = useMemo(() => [
-    {
-      id: 'campaigns',
-      icon: 'megaphone',
-      label: 'Campaigns',
-      count: campaigns.length,
-    },
-    {
-      id: 'segments',
-      icon: 'pie',
-      label: 'Segments',
-      count: segments.length,
-    },
-    {
-      id: 'loyalty',
-      icon: 'star',
-      label: 'Loyalty',
-    },
-    {
-      id: 'discounts',
-      icon: 'pricetag',
-      label: 'Discounts',
-      count: discountCampaigns.length,
-    },
-    {
-      id: 'channels',
-      icon: 'share',
-      label: 'Channels',
-    },
-    {
-      id: 'affiliates',
-      icon: 'people',
-      label: 'Affiliates',
-      count: affiliates.length,
-    },
-    {
-      id: 'wallet',
-      icon: 'wallet',
-      label: 'Wallet',
-      count: walletStats?.activePasses,
-    },
-  ], [campaigns.length, segments.length, discountCampaigns.length, affiliates.length, walletStats?.activePasses])
+  const navItems: NavItem[] = useMemo(() => {
+    const items: NavItem[] = [
+      {
+        id: 'campaigns',
+        icon: 'megaphone',
+        label: 'Campaigns',
+        count: campaigns.length,
+      },
+      {
+        id: 'segments',
+        icon: 'pie',
+        label: 'Segments',
+        count: segments.length,
+      },
+      {
+        id: 'loyalty',
+        icon: 'star',
+        label: 'Loyalty',
+      },
+      {
+        id: 'discounts',
+        icon: 'pricetag',
+        label: 'Discounts',
+        count: discountCampaigns.length,
+      },
+      {
+        id: 'channels',
+        icon: 'share',
+        label: 'Channels',
+      },
+    ]
+
+    // Add Meta nav item when connected
+    if (isMetaConnected) {
+      items.push({
+        id: 'meta',
+        icon: 'logo-facebook',
+        label: 'Meta',
+        count: metaCampaigns.filter(c => c.status === 'ACTIVE').length || undefined,
+      })
+    }
+
+    items.push(
+      {
+        id: 'affiliates',
+        icon: 'people',
+        label: 'Affiliates',
+        count: affiliates.length,
+      },
+      {
+        id: 'wallet',
+        icon: 'wallet',
+        label: 'Wallet',
+        count: walletStats?.loyaltyPasses?.total || walletStats?.totalPasses,
+      }
+    )
+
+    return items
+  }, [campaigns.length, segments.length, discountCampaigns.length, affiliates.length, walletStats?.loyaltyPasses?.total, walletStats?.totalPasses, isMetaConnected, metaCampaigns])
 
   // Load data on mount
   useEffect(() => {
@@ -263,12 +339,30 @@ function MarketingScreenComponent() {
       loadAffiliates(vendor.id)
       loadAffiliateStats(vendor.id)
       unsubscribeAffiliates = subscribeToAffiliateUpdates(vendor.id)
+      // Load Meta integration
+      loadMetaIntegration(vendor.id)
+      subscribeToMetaRealtime(vendor.id)
     }
     return () => {
       unsubscribeFromRealtime()
       unsubscribeAffiliates?.()
+      unsubscribeFromMetaRealtime()
     }
   }, [vendor?.id])
+
+  // Load Meta posts when connected
+  useEffect(() => {
+    if (vendor?.id && isMetaConnected) {
+      loadMetaPosts(vendor.id)
+    }
+  }, [vendor?.id, isMetaConnected])
+
+  // Load Meta insights when insights tab is active
+  useEffect(() => {
+    if (vendor?.id && isMetaConnected && metaSubTab === 'insights' && !metaInsights) {
+      loadMetaInsights(vendor.id)
+    }
+  }, [vendor?.id, isMetaConnected, metaSubTab])
 
   // Load loyalty and discounts data (requires auth user ID)
   useEffect(() => {
@@ -379,7 +473,7 @@ function MarketingScreenComponent() {
           sampleItemCount = count || 0
         }
 
-        // Calculate stats
+        // Calculate order pass stats
         const totalPasses = passes?.length || 0
         const pushEnabled = passes?.filter(p => p.push_enabled).length || 0
         const recentActivity = (passes || []).slice(0, 5).map(p => ({
@@ -398,12 +492,58 @@ function MarketingScreenComponent() {
           item_count: sampleItemCount,
         } : null
 
+        // Fetch loyalty pass stats from customer_wallet_passes
+        let loyaltyPasses = { total: 0, active: 0, pushEnabled: 0 }
+        let recentLoyaltyActivity: Array<{ customer_name: string; created_at: string }> = []
+
+        try {
+          // Get stats from the view
+          const { data: loyaltyStats } = await supabase
+            .from('customer_wallet_pass_stats')
+            .select('*')
+            .eq('vendor_id', vendor.id)
+            .maybeSingle()
+
+          if (loyaltyStats) {
+            loyaltyPasses = {
+              total: loyaltyStats.total_passes || 0,
+              active: loyaltyStats.active_passes || 0,
+              pushEnabled: loyaltyStats.push_enabled || 0,
+            }
+          }
+
+          // Get recent loyalty pass activity
+          const { data: recentPasses } = await supabase
+            .from('customer_wallet_passes')
+            .select(`
+              created_at,
+              customers!inner(
+                first_name,
+                last_name
+              )
+            `)
+            .eq('vendor_id', vendor.id)
+            .order('created_at', { ascending: false })
+            .limit(5)
+
+          if (recentPasses) {
+            recentLoyaltyActivity = recentPasses.map(p => ({
+              customer_name: `${(p.customers as any)?.first_name || ''} ${(p.customers as any)?.last_name || ''}`.trim() || 'Unknown',
+              created_at: p.created_at,
+            }))
+          }
+        } catch (loyaltyErr) {
+          console.error('[MarketingScreen] Loyalty pass stats error:', loyaltyErr)
+        }
+
         setWalletStats({
           totalPasses,
           activePasses: activeCount || 0,
           pushEnabled,
           recentActivity,
           sampleOrder,
+          loyaltyPasses,
+          recentLoyaltyActivity,
         })
 
         // Fetch the HTML preview for the sample order
@@ -1838,6 +1978,768 @@ function MarketingScreenComponent() {
                 </View>
               </View>
             )}
+
+            {/* Meta (Facebook/Instagram) Integration */}
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Meta Ads</Text>
+              <View style={styles.glassCard}>
+                {/* Connection Status */}
+                <View style={styles.channelRow}>
+                  <View style={[styles.channelIcon, { backgroundColor: isMetaConnected ? 'rgba(24,119,242,0.1)' : 'rgba(107,114,128,0.1)' }]}>
+                    <Ionicons name="logo-facebook" size={20} color={isMetaConnected ? '#1877F2' : colors.text.secondary} />
+                  </View>
+                  <View style={styles.channelInfo}>
+                    <Text style={styles.channelName}>Facebook & Instagram</Text>
+                    <Text style={styles.channelDescription}>
+                      {isMetaConnected
+                        ? `Connected • ${metaIntegration?.ad_account_id || 'No ad account'}`
+                        : 'Connect to manage ads and track conversions'}
+                    </Text>
+                  </View>
+                  <Pressable
+                    style={[
+                      styles.metaConnectButton,
+                      isMetaConnected && styles.metaConnectedButton,
+                    ]}
+                    onPress={() => {
+                      if (isMetaConnected) {
+                        // Show disconnect confirmation
+                        if (vendor?.id) {
+                          disconnectMeta(vendor.id)
+                        }
+                      } else {
+                        setShowMetaConnectModal(true)
+                      }
+                    }}
+                    disabled={isMetaConnecting}
+                  >
+                    {isMetaConnecting ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <Text style={styles.metaConnectButtonText}>
+                        {isMetaConnected ? 'Disconnect' : 'Connect'}
+                      </Text>
+                    )}
+                  </Pressable>
+                </View>
+
+                {/* Meta Stats (if connected) */}
+                {isMetaConnected && (
+                  <>
+                    <View style={[styles.channelRow, { marginTop: spacing.md }]}>
+                      <View style={[styles.channelIcon, { backgroundColor: 'rgba(239,68,68,0.1)' }]}>
+                        <Ionicons name="megaphone" size={20} color="#EF4444" />
+                      </View>
+                      <View style={styles.channelInfo}>
+                        <Text style={styles.channelName}>Active Campaigns</Text>
+                        <Text style={styles.channelDescription}>
+                          {metaCampaigns.filter(c => c.status === 'ACTIVE').length} running
+                        </Text>
+                      </View>
+                      <Pressable
+                        style={styles.metaSyncButton}
+                        onPress={() => vendor?.id && syncMetaCampaigns(vendor.id)}
+                        disabled={isMetaSyncing}
+                      >
+                        {isMetaSyncing ? (
+                          <ActivityIndicator size="small" color="#007AFF" />
+                        ) : (
+                          <Ionicons name="refresh" size={18} color="#007AFF" />
+                        )}
+                      </Pressable>
+                    </View>
+
+                    {/* Quick Stats */}
+                    {metaCampaigns.length > 0 && (
+                      <View style={styles.metaQuickStats}>
+                        <View style={styles.metaStatItem}>
+                          <Text style={styles.metaStatValue}>
+                            {formatMetaNumber(metaCampaigns.reduce((sum, c) => sum + c.impressions, 0))}
+                          </Text>
+                          <Text style={styles.metaStatLabel}>Impressions</Text>
+                        </View>
+                        <View style={styles.metaStatItem}>
+                          <Text style={styles.metaStatValue}>
+                            {formatMetaNumber(metaCampaigns.reduce((sum, c) => sum + c.clicks, 0))}
+                          </Text>
+                          <Text style={styles.metaStatLabel}>Clicks</Text>
+                        </View>
+                        <View style={styles.metaStatItem}>
+                          <Text style={styles.metaStatValue}>
+                            {formatMetaSpend(metaCampaigns.reduce((sum, c) => sum + c.spend, 0))}
+                          </Text>
+                          <Text style={styles.metaStatLabel}>Spend</Text>
+                        </View>
+                        <View style={styles.metaStatItem}>
+                          <Text style={styles.metaStatValue}>
+                            {metaCampaigns.reduce((sum, c) => sum + c.conversions, 0)}
+                          </Text>
+                          <Text style={styles.metaStatLabel}>Conversions</Text>
+                        </View>
+                      </View>
+                    )}
+
+                    {/* Pixel Status */}
+                    <View style={[styles.channelRow, { marginTop: spacing.md }]}>
+                      <View style={[styles.channelIcon, { backgroundColor: metaIntegration?.pixel_id ? 'rgba(16,185,129,0.1)' : 'rgba(245,158,11,0.1)' }]}>
+                        <Ionicons name="analytics" size={20} color={metaIntegration?.pixel_id ? '#10B981' : '#F59E0B'} />
+                      </View>
+                      <View style={styles.channelInfo}>
+                        <Text style={styles.channelName}>Conversion Tracking</Text>
+                        <Text style={styles.channelDescription}>
+                          {metaIntegration?.pixel_id
+                            ? `Pixel: ${metaIntegration.pixel_id}`
+                            : 'No pixel configured - add in settings'}
+                        </Text>
+                      </View>
+                      <View style={[styles.channelStatusDot, { backgroundColor: metaIntegration?.pixel_id ? '#10B981' : '#F59E0B' }]} />
+                    </View>
+                  </>
+                )}
+              </View>
+            </View>
+
+            <View style={{ height: 100 }} />
+          </ScrollView>
+        )
+
+      case 'meta':
+        return (
+          <ScrollView
+            style={styles.contentScroll}
+            contentContainerStyle={[styles.contentScrollContent, { paddingBottom: layout.dockHeight + spacing.lg }]}
+            showsVerticalScrollIndicator={false}
+          >
+            {/* HEADER */}
+            <TitleSection
+              title="Meta"
+              logo={vendor?.logo_url}
+              subtitle="Facebook & Instagram Marketing"
+            />
+
+            {/* Sub-tabs */}
+            <View style={styles.metaTabBar}>
+              {(['overview', 'ads', 'posts', 'insights'] as const).map((tab) => (
+                <Pressable
+                  key={tab}
+                  style={[styles.metaTab, metaSubTab === tab && styles.metaTabActive]}
+                  onPress={() => setMetaSubTab(tab)}
+                >
+                  <Ionicons
+                    name={
+                      tab === 'overview' ? 'grid' :
+                      tab === 'ads' ? 'megaphone' :
+                      tab === 'posts' ? 'images' :
+                      'stats-chart'
+                    }
+                    size={18}
+                    color={metaSubTab === tab ? '#1877F2' : colors.text.secondary}
+                  />
+                  <Text style={[styles.metaTabText, metaSubTab === tab && styles.metaTabTextActive]}>
+                    {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+
+            {/* Overview Sub-view */}
+            {metaSubTab === 'overview' && (
+              <>
+                {/* Quick Stats */}
+                <View style={styles.heroSection}>
+                  <View style={styles.heroCard}>
+                    <Ionicons name="eye" size={24} color="#1877F2" style={{ marginBottom: spacing.xs }} />
+                    <Text style={styles.heroNumber}>
+                      {formatMetaNumber(metaCampaigns.reduce((sum, c) => sum + c.impressions, 0))}
+                    </Text>
+                    <Text style={styles.heroLabel}>Impressions</Text>
+                  </View>
+                  <View style={styles.heroCard}>
+                    <Ionicons name="people" size={24} color="#E1306C" style={{ marginBottom: spacing.xs }} />
+                    <Text style={styles.heroNumber}>
+                      {formatMetaNumber(metaCampaigns.reduce((sum, c) => sum + c.reach, 0))}
+                    </Text>
+                    <Text style={styles.heroLabel}>Reach</Text>
+                  </View>
+                  <View style={styles.heroCard}>
+                    <Ionicons name="hand-left" size={24} color="#34c759" style={{ marginBottom: spacing.xs }} />
+                    <Text style={styles.heroNumber}>
+                      {formatMetaNumber(metaCampaigns.reduce((sum, c) => sum + c.clicks, 0))}
+                    </Text>
+                    <Text style={styles.heroLabel}>Clicks</Text>
+                  </View>
+                  <View style={styles.heroCard}>
+                    <Ionicons name="cash" size={24} color="#F59E0B" style={{ marginBottom: spacing.xs }} />
+                    <Text style={styles.heroNumber}>
+                      {formatMetaSpend(metaCampaigns.reduce((sum, c) => sum + c.spend, 0))}
+                    </Text>
+                    <Text style={styles.heroLabel}>Spend</Text>
+                  </View>
+                </View>
+
+                {/* Connection Info */}
+                <View style={styles.section}>
+                  <Text style={styles.sectionTitle}>Connection</Text>
+                  <View style={styles.glassCard}>
+                    <View style={styles.channelRow}>
+                      <View style={[styles.channelIcon, { backgroundColor: 'rgba(24,119,242,0.1)' }]}>
+                        <Ionicons name="checkmark-circle" size={20} color="#10B981" />
+                      </View>
+                      <View style={styles.channelInfo}>
+                        <Text style={styles.channelName}>Connected to Meta</Text>
+                        <Text style={styles.channelDescription}>
+                          Ad Account: {metaIntegration?.ad_account_id || 'Not set'}
+                        </Text>
+                      </View>
+                      <Pressable
+                        style={styles.metaSyncButton}
+                        onPress={() => vendor?.id && syncMetaCampaigns(vendor.id)}
+                        disabled={isMetaSyncing}
+                      >
+                        {isMetaSyncing ? (
+                          <ActivityIndicator size="small" color="#007AFF" />
+                        ) : (
+                          <Ionicons name="refresh" size={18} color="#007AFF" />
+                        )}
+                      </Pressable>
+                    </View>
+                    {metaIntegration?.page_id && (
+                      <View style={styles.channelRow}>
+                        <View style={[styles.channelIcon, { backgroundColor: 'rgba(24,119,242,0.1)' }]}>
+                          <Ionicons name="logo-facebook" size={20} color="#1877F2" />
+                        </View>
+                        <View style={styles.channelInfo}>
+                          <Text style={styles.channelName}>Facebook Page</Text>
+                          <Text style={styles.channelDescription}>ID: {metaIntegration.page_id}</Text>
+                        </View>
+                      </View>
+                    )}
+                    {metaIntegration?.instagram_business_id && (
+                      <View style={styles.channelRow}>
+                        <View style={[styles.channelIcon, { backgroundColor: 'rgba(225,48,108,0.1)' }]}>
+                          <Ionicons name="logo-instagram" size={20} color="#E1306C" />
+                        </View>
+                        <View style={styles.channelInfo}>
+                          <Text style={styles.channelName}>Instagram Business</Text>
+                          <Text style={styles.channelDescription}>ID: {metaIntegration.instagram_business_id}</Text>
+                        </View>
+                      </View>
+                    )}
+                    {metaIntegration?.pixel_id && (
+                      <View style={styles.channelRow}>
+                        <View style={[styles.channelIcon, { backgroundColor: 'rgba(16,185,129,0.1)' }]}>
+                          <Ionicons name="analytics" size={20} color="#10B981" />
+                        </View>
+                        <View style={styles.channelInfo}>
+                          <Text style={styles.channelName}>Pixel</Text>
+                          <Text style={styles.channelDescription}>ID: {metaIntegration.pixel_id}</Text>
+                        </View>
+                      </View>
+                    )}
+                  </View>
+                </View>
+
+                {/* Active Campaigns Summary */}
+                <View style={styles.section}>
+                  <Text style={styles.sectionTitle}>Active Campaigns</Text>
+                  {metaCampaigns.filter(c => c.status === 'ACTIVE').length === 0 ? (
+                    <View style={styles.glassCard}>
+                      <View style={{ padding: spacing.xl, alignItems: 'center' }}>
+                        <Ionicons name="megaphone-outline" size={48} color={colors.text.quaternary} />
+                        <Text style={{ color: colors.text.tertiary, marginTop: spacing.md }}>
+                          No active campaigns
+                        </Text>
+                      </View>
+                    </View>
+                  ) : (
+                    <View style={styles.glassCard}>
+                      {metaCampaigns.filter(c => c.status === 'ACTIVE').slice(0, 5).map((campaign) => (
+                        <View key={campaign.id} style={styles.channelRow}>
+                          <View style={[styles.channelIcon, { backgroundColor: 'rgba(16,185,129,0.1)' }]}>
+                            <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#10B981' }} />
+                          </View>
+                          <View style={styles.channelInfo}>
+                            <Text style={styles.channelName} numberOfLines={1}>{campaign.name}</Text>
+                            <Text style={styles.channelDescription}>
+                              {formatMetaSpend(campaign.spend)} spent • {formatMetaNumber(campaign.impressions)} impressions
+                            </Text>
+                          </View>
+                          <Text style={{ color: colors.text.secondary, fontSize: 13 }}>
+                            {campaign.roas ? `${campaign.roas.toFixed(1)}x ROAS` : '-'}
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+                </View>
+              </>
+            )}
+
+            {/* Ads Sub-view */}
+            {metaSubTab === 'ads' && (
+              <>
+                <View style={styles.section}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.md }}>
+                    <Text style={styles.sectionTitle}>All Campaigns</Text>
+                    <Pressable
+                      style={styles.metaSyncButton}
+                      onPress={() => vendor?.id && syncMetaCampaigns(vendor.id)}
+                      disabled={isMetaSyncing}
+                    >
+                      {isMetaSyncing ? (
+                        <ActivityIndicator size="small" color="#007AFF" />
+                      ) : (
+                        <>
+                          <Ionicons name="refresh" size={16} color="#007AFF" />
+                          <Text style={{ color: '#007AFF', marginLeft: 4, fontSize: 13 }}>Sync</Text>
+                        </>
+                      )}
+                    </Pressable>
+                  </View>
+
+                  {metaCampaigns.length === 0 ? (
+                    <View style={styles.glassCard}>
+                      <View style={{ padding: spacing.xl, alignItems: 'center' }}>
+                        <Ionicons name="megaphone-outline" size={48} color={colors.text.quaternary} />
+                        <Text style={{ color: colors.text.tertiary, marginTop: spacing.md }}>
+                          No campaigns found
+                        </Text>
+                        <Text style={{ color: colors.text.quaternary, marginTop: spacing.xs, fontSize: 13 }}>
+                          Sync to pull campaigns from Meta
+                        </Text>
+                      </View>
+                    </View>
+                  ) : (
+                    <View style={styles.glassCard}>
+                      {metaCampaigns.map((campaign) => (
+                        <View key={campaign.id} style={styles.metaCampaignRow}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                            <View style={[
+                              styles.metaStatusDot,
+                              { backgroundColor: campaign.status === 'ACTIVE' ? '#10B981' : campaign.status === 'PAUSED' ? '#F59E0B' : '#6B7280' }
+                            ]} />
+                            <View style={{ flex: 1, marginLeft: spacing.sm }}>
+                              <Text style={styles.metaCampaignName} numberOfLines={1}>{campaign.name}</Text>
+                              <Text style={styles.metaCampaignObjective}>{campaign.objective?.replace('OUTCOME_', '') || 'Unknown'}</Text>
+                            </View>
+                          </View>
+                          <View style={styles.metaCampaignStats}>
+                            <View style={styles.metaCampaignStat}>
+                              <Text style={styles.metaCampaignStatValue}>{formatMetaSpend(campaign.spend)}</Text>
+                              <Text style={styles.metaCampaignStatLabel}>Spend</Text>
+                            </View>
+                            <View style={styles.metaCampaignStat}>
+                              <Text style={styles.metaCampaignStatValue}>{formatMetaNumber(campaign.impressions)}</Text>
+                              <Text style={styles.metaCampaignStatLabel}>Impr</Text>
+                            </View>
+                            <View style={styles.metaCampaignStat}>
+                              <Text style={styles.metaCampaignStatValue}>{formatMetaNumber(campaign.clicks)}</Text>
+                              <Text style={styles.metaCampaignStatLabel}>Clicks</Text>
+                            </View>
+                            <View style={styles.metaCampaignStat}>
+                              <Text style={styles.metaCampaignStatValue}>{campaign.ctr?.toFixed(2) || '0'}%</Text>
+                              <Text style={styles.metaCampaignStatLabel}>CTR</Text>
+                            </View>
+                          </View>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+                </View>
+              </>
+            )}
+
+            {/* Posts Sub-view */}
+            {metaSubTab === 'posts' && (
+              <>
+                {/* Filter Bar */}
+                <View style={styles.section}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.md }}>
+                    <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+                      {(['all', 'facebook', 'instagram'] as const).map((filter) => (
+                        <Pressable
+                          key={filter}
+                          style={[
+                            styles.metaFilterButton,
+                            postsFilter === filter && styles.metaFilterButtonActive,
+                          ]}
+                          onPress={() => {
+                            setMetaPostsFilter(filter)
+                            if (vendor?.id) loadMetaPosts(vendor.id, filter)
+                          }}
+                        >
+                          <Ionicons
+                            name={filter === 'all' ? 'grid' : filter === 'facebook' ? 'logo-facebook' : 'logo-instagram'}
+                            size={14}
+                            color={postsFilter === filter ? '#fff' : colors.text.secondary}
+                          />
+                          <Text style={[
+                            styles.metaFilterButtonText,
+                            postsFilter === filter && styles.metaFilterButtonTextActive,
+                          ]}>
+                            {filter === 'all' ? 'All' : filter === 'facebook' ? 'Facebook' : 'Instagram'}
+                          </Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                    <Pressable
+                      style={styles.metaSyncButton}
+                      onPress={() => vendor?.id && syncMetaPosts(vendor.id, postsFilter)}
+                      disabled={isSyncingPosts}
+                    >
+                      {isSyncingPosts ? (
+                        <ActivityIndicator size="small" color="#007AFF" />
+                      ) : (
+                        <>
+                          <Ionicons name="refresh" size={16} color="#007AFF" />
+                          <Text style={{ color: '#007AFF', marginLeft: 4, fontSize: 13 }}>Sync</Text>
+                        </>
+                      )}
+                    </Pressable>
+                  </View>
+
+                  {/* Posts Grid */}
+                  {metaPosts.length === 0 ? (
+                    <View style={styles.glassCard}>
+                      <View style={{ padding: spacing.xl, alignItems: 'center' }}>
+                        <Ionicons name="images-outline" size={48} color={colors.text.quaternary} />
+                        <Text style={{ color: colors.text.tertiary, marginTop: spacing.md, fontSize: 16, fontWeight: '600' }}>
+                          No Posts Yet
+                        </Text>
+                        <Text style={{ color: colors.text.quaternary, marginTop: spacing.xs, fontSize: 13, textAlign: 'center' }}>
+                          Sync to pull posts from your Facebook Page & Instagram
+                        </Text>
+                        <Pressable
+                          style={[styles.metaConnectButton, { marginTop: spacing.lg }]}
+                          onPress={() => vendor?.id && syncMetaPosts(vendor.id)}
+                          disabled={isSyncingPosts}
+                        >
+                          {isSyncingPosts ? (
+                            <ActivityIndicator size="small" color="#fff" />
+                          ) : (
+                            <Text style={styles.metaConnectButtonText}>Sync Posts</Text>
+                          )}
+                        </Pressable>
+                      </View>
+                    </View>
+                  ) : (
+                    <View style={styles.igGrid}>
+                      {metaPosts.map((post) => {
+                        const isVideo = post.post_type === 'video' || post.media_type === 'VIDEO'
+                        const isCarousel = post.media_type === 'CAROUSEL_ALBUM' || post.post_type === 'album'
+                        // For videos, prefer thumbnail_url; for others prefer full_picture/media_url
+                        const imageUrl = isVideo
+                          ? (post.thumbnail_url || post.full_picture || post.media_url)
+                          : (post.full_picture || post.media_url || post.thumbnail_url)
+                        const likes = post.platform === 'instagram'
+                          ? (post.ig_likes_count || 0)
+                          : (post.reactions_count || post.likes_count || 0)
+                        const comments = post.platform === 'instagram'
+                          ? (post.ig_comments_count || 0)
+                          : (post.comments_count || 0)
+
+                        return (
+                          <Pressable
+                            key={post.id}
+                            style={styles.igPostCell}
+                            onPress={() => post.permalink_url && Linking.openURL(post.permalink_url)}
+                          >
+                            {/* Image */}
+                            {imageUrl ? (
+                              <Image
+                                source={{ uri: imageUrl }}
+                                style={styles.igPostImage}
+                                resizeMode="cover"
+                              />
+                            ) : (
+                              <View style={[styles.igPostImage, styles.igPostPlaceholder]}>
+                                <Ionicons
+                                  name={post.platform === 'instagram' ? 'logo-instagram' : 'logo-facebook'}
+                                  size={40}
+                                  color={post.platform === 'instagram' ? '#E1306C' : '#1877F2'}
+                                />
+                                {post.message && (
+                                  <Text style={styles.igPostPlaceholderText} numberOfLines={3}>
+                                    {post.message}
+                                  </Text>
+                                )}
+                              </View>
+                            )}
+
+                            {/* Type indicator (video/carousel) */}
+                            {(isVideo || isCarousel) && (
+                              <View style={styles.igTypeIndicator}>
+                                <Ionicons
+                                  name={isVideo ? 'play' : 'copy'}
+                                  size={16}
+                                  color="#fff"
+                                />
+                              </View>
+                            )}
+
+                            {/* Platform badge */}
+                            <View style={[
+                              styles.igPlatformBadge,
+                              { backgroundColor: post.platform === 'instagram' ? '#E1306C' : '#1877F2' }
+                            ]}>
+                              <Ionicons
+                                name={post.platform === 'instagram' ? 'logo-instagram' : 'logo-facebook'}
+                                size={10}
+                                color="#fff"
+                              />
+                            </View>
+
+                            {/* Bottom gradient with stats */}
+                            <View style={styles.igStatsBar}>
+                              <View style={styles.igStatItem}>
+                                <Ionicons name="heart" size={14} color="#fff" />
+                                <Text style={styles.igStatText}>{formatMetaNumber(likes)}</Text>
+                              </View>
+                              <View style={styles.igStatItem}>
+                                <Ionicons name="chatbubble" size={14} color="#fff" />
+                                <Text style={styles.igStatText}>{formatMetaNumber(comments)}</Text>
+                              </View>
+                            </View>
+                          </Pressable>
+                        )
+                      })}
+                    </View>
+                  )}
+                </View>
+              </>
+            )}
+
+            {/* Insights Sub-view */}
+            {metaSubTab === 'insights' && (
+              <>
+                {/* Insights Header with Refresh */}
+                <View style={styles.section}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.md }}>
+                    <Text style={styles.sectionTitle}>Ad Performance</Text>
+                    <Pressable
+                      style={[styles.metaSyncButton, { flexDirection: 'row', alignItems: 'center', gap: 4 }, isLoadingInsights && { opacity: 0.6 }]}
+                      onPress={() => vendor?.id && loadMetaInsights(vendor.id)}
+                      disabled={isLoadingInsights}
+                    >
+                      {isLoadingInsights ? (
+                        <ActivityIndicator size="small" color="#1877F2" />
+                      ) : (
+                        <Ionicons name="refresh" size={16} color="#1877F2" />
+                      )}
+                      <Text style={{ color: '#1877F2', fontSize: 13 }}>
+                        {isLoadingInsights ? 'Loading...' : 'Refresh'}
+                      </Text>
+                    </Pressable>
+                  </View>
+
+                  {/* Date Range Display */}
+                  {metaInsights?.dateRange && (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: spacing.md }}>
+                      <Ionicons name="calendar-outline" size={14} color={colors.text.quaternary} />
+                      <Text style={{ color: colors.text.tertiary, fontSize: 13, marginLeft: spacing.xs }}>
+                        {metaInsights.dateRange.start} to {metaInsights.dateRange.end}
+                      </Text>
+                    </View>
+                  )}
+
+                  {/* Loading State */}
+                  {isLoadingInsights && !metaInsights && (
+                    <View style={styles.glassCard}>
+                      <View style={{ padding: spacing.xl, alignItems: 'center' }}>
+                        <ActivityIndicator size="large" color="#1877F2" />
+                        <Text style={{ color: colors.text.tertiary, marginTop: spacing.md, fontSize: 14 }}>
+                          Loading insights...
+                        </Text>
+                      </View>
+                    </View>
+                  )}
+
+                  {/* Summary Stats */}
+                  {metaInsights?.summary && (
+                    <View style={styles.insightsGrid}>
+                      <View style={styles.insightCard}>
+                        <Text style={styles.insightValue}>{formatMetaSpend(metaInsights.summary.spend)}</Text>
+                        <Text style={styles.insightLabel}>Total Spend</Text>
+                      </View>
+                      <View style={styles.insightCard}>
+                        <Text style={styles.insightValue}>{formatMetaNumber(metaInsights.summary.impressions)}</Text>
+                        <Text style={styles.insightLabel}>Impressions</Text>
+                      </View>
+                      <View style={styles.insightCard}>
+                        <Text style={styles.insightValue}>{formatMetaNumber(metaInsights.summary.reach)}</Text>
+                        <Text style={styles.insightLabel}>Reach</Text>
+                      </View>
+                      <View style={styles.insightCard}>
+                        <Text style={styles.insightValue}>{formatMetaNumber(metaInsights.summary.clicks)}</Text>
+                        <Text style={styles.insightLabel}>Clicks</Text>
+                      </View>
+                      <View style={styles.insightCard}>
+                        <Text style={styles.insightValue}>{metaInsights.summary.purchases}</Text>
+                        <Text style={styles.insightLabel}>Purchases</Text>
+                      </View>
+                      <View style={styles.insightCard}>
+                        <Text style={[styles.insightValue, metaInsights.summary.roas >= 1 ? { color: '#10B981' } : { color: '#EF4444' }]}>
+                          {metaInsights.summary.roas.toFixed(2)}x
+                        </Text>
+                        <Text style={styles.insightLabel}>ROAS</Text>
+                      </View>
+                      <View style={styles.insightCard}>
+                        <Text style={styles.insightValue}>{formatMetaSpend(metaInsights.summary.cpc)}</Text>
+                        <Text style={styles.insightLabel}>CPC</Text>
+                      </View>
+                      <View style={styles.insightCard}>
+                        <Text style={styles.insightValue}>{metaInsights.summary.ctr.toFixed(2)}%</Text>
+                        <Text style={styles.insightLabel}>CTR</Text>
+                      </View>
+                    </View>
+                  )}
+                </View>
+
+                {/* Daily Spend Chart */}
+                {metaInsights?.daily && metaInsights.daily.length > 0 && (
+                  <View style={styles.section}>
+                    <Text style={styles.sectionTitle}>Daily Spend</Text>
+                    <View style={styles.glassCard}>
+                      <View style={styles.chartContainer}>
+                        {(() => {
+                          const maxSpend = Math.max(...metaInsights.daily.map(d => d.spend), 1)
+                          return metaInsights.daily.slice(-14).map((day, idx) => (
+                            <View key={day.date} style={styles.chartBar}>
+                              <View style={[styles.chartBarFill, { height: `${(day.spend / maxSpend) * 100}%` }]} />
+                              <Text style={styles.chartBarLabel}>{day.date.slice(-2)}</Text>
+                            </View>
+                          ))
+                        })()}
+                      </View>
+                      <View style={styles.chartLegend}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                          <View style={{ width: 12, height: 12, backgroundColor: '#1877F2', borderRadius: 2, marginRight: spacing.xs }} />
+                          <Text style={{ color: colors.text.tertiary, fontSize: 12 }}>Daily Spend</Text>
+                        </View>
+                      </View>
+                    </View>
+                  </View>
+                )}
+
+                {/* Campaign Breakdown */}
+                {metaInsights?.campaigns && metaInsights.campaigns.length > 0 && (
+                  <View style={styles.section}>
+                    <Text style={styles.sectionTitle}>Campaign Performance</Text>
+                    <View style={styles.glassCard}>
+                      {metaInsights.campaigns.map((campaign, idx) => (
+                        <View key={campaign.campaignId} style={[styles.campaignRow, idx > 0 && { borderTopWidth: 1, borderTopColor: colors.border.subtle }]}>
+                          <View style={{ flex: 1 }}>
+                            <Text style={styles.campaignName} numberOfLines={1}>{campaign.campaignName}</Text>
+                            <View style={{ flexDirection: 'row', gap: spacing.md, marginTop: spacing.xs }}>
+                              <Text style={styles.campaignStat}>
+                                <Text style={{ color: colors.text.quaternary }}>Spend: </Text>
+                                {formatMetaSpend(campaign.spend)}
+                              </Text>
+                              <Text style={styles.campaignStat}>
+                                <Text style={{ color: colors.text.quaternary }}>Clicks: </Text>
+                                {formatMetaNumber(campaign.clicks)}
+                              </Text>
+                              <Text style={styles.campaignStat}>
+                                <Text style={{ color: colors.text.quaternary }}>Purchases: </Text>
+                                {campaign.purchases}
+                              </Text>
+                            </View>
+                          </View>
+                          <View style={{ alignItems: 'flex-end' }}>
+                            <Text style={[styles.roasBadge, campaign.roas >= 1 ? styles.roasPositive : styles.roasNegative]}>
+                              {campaign.roas.toFixed(2)}x ROAS
+                            </Text>
+                          </View>
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                )}
+
+                {/* Page & Instagram Insights */}
+                {(metaInsights?.page || metaInsights?.instagram) && (
+                  <View style={styles.section}>
+                    <Text style={styles.sectionTitle}>Organic Performance</Text>
+                    <View style={{ flexDirection: 'row', gap: spacing.md }}>
+                      {/* Facebook Page */}
+                      {metaInsights.page && (
+                        <View style={[styles.glassCard, { flex: 1 }]}>
+                          <View style={styles.organicHeader}>
+                            <Ionicons name="logo-facebook" size={20} color="#1877F2" />
+                            <Text style={styles.organicTitle}>Facebook Page</Text>
+                          </View>
+                          <View style={styles.organicStats}>
+                            <View style={styles.organicStat}>
+                              <Text style={styles.organicValue}>{formatMetaNumber(metaInsights.page.totalFollowers)}</Text>
+                              <Text style={styles.organicLabel}>Followers</Text>
+                            </View>
+                            <View style={styles.organicStat}>
+                              <Text style={[styles.organicValue, { color: '#10B981' }]}>+{metaInsights.page.newFollowers}</Text>
+                              <Text style={styles.organicLabel}>New</Text>
+                            </View>
+                            <View style={styles.organicStat}>
+                              <Text style={styles.organicValue}>{formatMetaNumber(metaInsights.page.reach)}</Text>
+                              <Text style={styles.organicLabel}>Reach</Text>
+                            </View>
+                            <View style={styles.organicStat}>
+                              <Text style={styles.organicValue}>{formatMetaNumber(metaInsights.page.postEngagements)}</Text>
+                              <Text style={styles.organicLabel}>Engagements</Text>
+                            </View>
+                          </View>
+                        </View>
+                      )}
+
+                      {/* Instagram */}
+                      {metaInsights.instagram && (
+                        <View style={[styles.glassCard, { flex: 1 }]}>
+                          <View style={styles.organicHeader}>
+                            <Ionicons name="logo-instagram" size={20} color="#E4405F" />
+                            <Text style={styles.organicTitle}>Instagram</Text>
+                          </View>
+                          <View style={styles.organicStats}>
+                            <View style={styles.organicStat}>
+                              <Text style={styles.organicValue}>{formatMetaNumber(metaInsights.instagram.followers)}</Text>
+                              <Text style={styles.organicLabel}>Followers</Text>
+                            </View>
+                            <View style={styles.organicStat}>
+                              <Text style={styles.organicValue}>{formatMetaNumber(metaInsights.instagram.reach)}</Text>
+                              <Text style={styles.organicLabel}>Reach</Text>
+                            </View>
+                            <View style={styles.organicStat}>
+                              <Text style={styles.organicValue}>{formatMetaNumber(metaInsights.instagram.profileViews)}</Text>
+                              <Text style={styles.organicLabel}>Profile Views</Text>
+                            </View>
+                            <View style={styles.organicStat}>
+                              <Text style={styles.organicValue}>{formatMetaNumber(metaInsights.instagram.impressions)}</Text>
+                              <Text style={styles.organicLabel}>Impressions</Text>
+                            </View>
+                          </View>
+                        </View>
+                      )}
+                    </View>
+                  </View>
+                )}
+
+                {/* No Data State */}
+                {!isLoadingInsights && !metaInsights?.summary && (
+                  <View style={styles.section}>
+                    <View style={styles.glassCard}>
+                      <View style={{ padding: spacing.xl, alignItems: 'center' }}>
+                        <Ionicons name="stats-chart-outline" size={48} color={colors.text.quaternary} />
+                        <Text style={{ color: colors.text.tertiary, marginTop: spacing.md, fontSize: 16, fontWeight: '600' }}>
+                          No Insights Available
+                        </Text>
+                        <Text style={{ color: colors.text.quaternary, marginTop: spacing.xs, fontSize: 13, textAlign: 'center' }}>
+                          Connect an ad account and run campaigns to see insights
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+                )}
+              </>
+            )}
+
+            <View style={{ height: 100 }} />
           </ScrollView>
         )
 
@@ -2093,34 +2995,99 @@ function MarketingScreenComponent() {
             <TitleSection
               title="Apple Wallet"
               logo={vendor?.logo_url}
-              subtitle="Order pass marketing & analytics"
+              subtitle="Loyalty & order pass marketing"
             />
 
-            {/* HERO STATS */}
-            <View style={styles.heroSection}>
-              <View style={styles.heroCard}>
-                <Ionicons name="wallet" size={24} color={colors.text.secondary} style={{ marginBottom: spacing.xs }} />
-                <Text style={styles.heroNumber}>{walletStats?.totalPasses || 0}</Text>
-                <Text style={styles.heroLabel}>Total Passes</Text>
+            {/* LOYALTY PASS STATS */}
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Loyalty Passes</Text>
+              <Text style={styles.sectionSubtitle}>Customer loyalty cards added to Apple Wallet</Text>
+              <View style={styles.heroSection}>
+                <View style={styles.heroCard}>
+                  <Ionicons name="card" size={24} color="#A855F7" style={{ marginBottom: spacing.xs }} />
+                  <Text style={styles.heroNumber}>{walletStats?.loyaltyPasses?.total || 0}</Text>
+                  <Text style={styles.heroLabel}>Total Created</Text>
+                </View>
+                <View style={styles.heroCard}>
+                  <Ionicons name="phone-portrait" size={24} color="#34c759" style={{ marginBottom: spacing.xs }} />
+                  <Text style={styles.heroNumber}>{walletStats?.loyaltyPasses?.active || 0}</Text>
+                  <Text style={styles.heroLabel}>Active on Devices</Text>
+                </View>
+                <View style={styles.heroCard}>
+                  <Ionicons name="notifications" size={24} color="#007AFF" style={{ marginBottom: spacing.xs }} />
+                  <Text style={styles.heroNumber}>{walletStats?.loyaltyPasses?.pushEnabled || 0}</Text>
+                  <Text style={styles.heroLabel}>Push Enabled</Text>
+                </View>
+                <View style={styles.heroCard}>
+                  <Ionicons name="trending-up" size={24} color="#10B981" style={{ marginBottom: spacing.xs }} />
+                  <Text style={styles.heroNumber}>
+                    {walletStats?.loyaltyPasses?.total && walletStats?.loyaltyPasses?.active
+                      ? `${Math.round((walletStats.loyaltyPasses.active / walletStats.loyaltyPasses.total) * 100)}%`
+                      : '0%'}
+                  </Text>
+                  <Text style={styles.heroLabel}>Adoption Rate</Text>
+                </View>
               </View>
-              <View style={styles.heroCard}>
-                <Ionicons name="phone-portrait" size={24} color="#34c759" style={{ marginBottom: spacing.xs }} />
-                <Text style={styles.heroNumber}>{walletStats?.activePasses || 0}</Text>
-                <Text style={styles.heroLabel}>Active on Devices</Text>
+            </View>
+
+            {/* RECENT LOYALTY ACTIVITY */}
+            {walletStats?.recentLoyaltyActivity && walletStats.recentLoyaltyActivity.length > 0 && (
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Recent Loyalty Pass Activity</Text>
+                <View style={styles.glassCard}>
+                  {walletStats.recentLoyaltyActivity.map((activity, index) => (
+                    <View
+                      key={`loyalty-${index}`}
+                      style={[
+                        styles.activityRow,
+                        index < walletStats.recentLoyaltyActivity.length - 1 && styles.borderBottom,
+                      ]}
+                    >
+                      <View style={styles.activityIcon}>
+                        <Ionicons name="card" size={20} color="#A855F7" />
+                      </View>
+                      <View style={styles.activityInfo}>
+                        <Text style={styles.activityOrder}>{activity.customer_name}</Text>
+                        <Text style={styles.activityStatus}>Added loyalty pass</Text>
+                      </View>
+                      <Text style={styles.activityTime}>
+                        {new Date(activity.created_at).toLocaleDateString()}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
               </View>
-              <View style={styles.heroCard}>
-                <Ionicons name="notifications" size={24} color="#007AFF" style={{ marginBottom: spacing.xs }} />
-                <Text style={styles.heroNumber}>{walletStats?.pushEnabled || 0}</Text>
-                <Text style={styles.heroLabel}>Push Enabled</Text>
-              </View>
-              <View style={styles.heroCard}>
-                <Ionicons name="trending-up" size={24} color="#A855F7" style={{ marginBottom: spacing.xs }} />
-                <Text style={styles.heroNumber}>
-                  {walletStats?.totalPasses && walletStats?.activePasses
-                    ? `${Math.round((walletStats.activePasses / walletStats.totalPasses) * 100)}%`
-                    : '0%'}
-                </Text>
-                <Text style={styles.heroLabel}>Adoption Rate</Text>
+            )}
+
+            {/* ORDER PASS STATS */}
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Order Passes</Text>
+              <Text style={styles.sectionSubtitle}>Order tracking passes for shipments</Text>
+              <View style={styles.heroSection}>
+                <View style={styles.heroCard}>
+                  <Ionicons name="cube" size={24} color={colors.text.secondary} style={{ marginBottom: spacing.xs }} />
+                  <Text style={styles.heroNumber}>{walletStats?.totalPasses || 0}</Text>
+                  <Text style={styles.heroLabel}>Total Passes</Text>
+                </View>
+                <View style={styles.heroCard}>
+                  <Ionicons name="phone-portrait" size={24} color="#34c759" style={{ marginBottom: spacing.xs }} />
+                  <Text style={styles.heroNumber}>{walletStats?.activePasses || 0}</Text>
+                  <Text style={styles.heroLabel}>Active on Devices</Text>
+                </View>
+                <View style={styles.heroCard}>
+                  <Ionicons name="notifications" size={24} color="#007AFF" style={{ marginBottom: spacing.xs }} />
+                  <Text style={styles.heroNumber}>{walletStats?.pushEnabled || 0}</Text>
+                  <Text style={styles.heroLabel}>Push Enabled</Text>
+                </View>
+                <View style={styles.heroCard}>
+                  <Ionicons name="trending-up" size={24} color="#A855F7" style={{ marginBottom: spacing.xs }} />
+                  <Text style={styles.heroNumber}>
+                    {walletStats?.totalPasses && walletStats?.activePasses
+                      ? `${Math.round((walletStats.activePasses / walletStats.totalPasses) * 100)}%`
+                      : '0%'}
+                  </Text>
+                  <Text style={styles.heroLabel}>Adoption Rate</Text>
+                </View>
               </View>
             </View>
 
@@ -2345,7 +3312,7 @@ function MarketingScreenComponent() {
           width={layout.sidebarWidth}
           items={navItems}
           activeItemId={activeNav}
-          onItemPress={(id) => setActiveNav(id as 'campaigns' | 'loyalty' | 'discounts' | 'channels' | 'affiliates' | 'wallet')}
+          onItemPress={(id) => setActiveNav(id as 'campaigns' | 'segments' | 'loyalty' | 'discounts' | 'channels' | 'meta' | 'affiliates' | 'wallet')}
           vendorName={vendor?.store_name || ''}
           vendorLogo={vendor?.logo_url || null}
         />
@@ -2567,31 +3534,49 @@ function MarketingScreenComponent() {
                         </View>
                       </Pressable>
 
-                      {/* Segment options */}
-                      {segments.filter(s => s.customer_count > 0).slice(0, 5).map((segment) => (
-                        <Pressable
-                          key={segment.id}
-                          style={[styles.audienceOption, selectedSegmentId === segment.id && styles.audienceOptionSelected]}
-                          onPress={() => setSelectedSegment(segment.id)}
-                        >
-                          <View style={[styles.radio, selectedSegmentId === segment.id && styles.radioSelected]}>
-                            {selectedSegmentId === segment.id && <View style={styles.radioDot} />}
-                          </View>
-                          <View style={styles.audienceInfo}>
-                            <View style={styles.audienceNameRow}>
-                              <Text style={styles.audienceName}>{segment.name}</Text>
-                              <View style={[styles.segmentBadge, { backgroundColor: `${segment.color || '#6366F1'}20` }]}>
-                                <Text style={[styles.segmentBadgeText, { color: segment.color || '#6366F1' }]}>
-                                  {segment.customer_count}
-                                </Text>
-                              </View>
+                      {/* Segment options - ensure selected segment always appears at top */}
+                      {(() => {
+                        // Build segments list: selected segment first (if any), then other segments
+                        const segmentsWithCustomers = segments.filter(s => s.customer_count > 0 || s.name === 'Staff')
+                        const selectedSeg = selectedSegmentId ? segments.find(s => s.id === selectedSegmentId) : null
+
+                        // If selected segment exists and isn't in the filtered list, add it
+                        let displaySegments: typeof segments = []
+                        if (selectedSeg && !segmentsWithCustomers.find(s => s.id === selectedSeg.id)) {
+                          displaySegments = [selectedSeg, ...segmentsWithCustomers.slice(0, 4)]
+                        } else if (selectedSeg) {
+                          // Move selected segment to top
+                          const others = segmentsWithCustomers.filter(s => s.id !== selectedSeg.id)
+                          displaySegments = [selectedSeg, ...others.slice(0, 4)]
+                        } else {
+                          displaySegments = segmentsWithCustomers.slice(0, 5)
+                        }
+
+                        return displaySegments.map((segment) => (
+                          <Pressable
+                            key={segment.id}
+                            style={[styles.audienceOption, selectedSegmentId === segment.id && styles.audienceOptionSelected]}
+                            onPress={() => setSelectedSegment(segment.id)}
+                          >
+                            <View style={[styles.radio, selectedSegmentId === segment.id && styles.radioSelected]}>
+                              {selectedSegmentId === segment.id && <View style={styles.radioDot} />}
                             </View>
-                            {segment.description && (
-                              <Text style={styles.audienceDesc}>{segment.description}</Text>
-                            )}
-                          </View>
-                        </Pressable>
-                      ))}
+                            <View style={styles.audienceInfo}>
+                              <View style={styles.audienceNameRow}>
+                                <Text style={styles.audienceName}>{segment.name}</Text>
+                                <View style={[styles.segmentBadge, { backgroundColor: `${segment.color || '#6366F1'}20` }]}>
+                                  <Text style={[styles.segmentBadgeText, { color: segment.color || '#6366F1' }]}>
+                                    {segment.customer_count}
+                                  </Text>
+                                </View>
+                              </View>
+                              {segment.description && (
+                                <Text style={styles.audienceDesc}>{segment.description}</Text>
+                              )}
+                            </View>
+                          </Pressable>
+                        ))
+                      })()}
                     </View>
 
                     {/* STEP 4: Send */}
@@ -2998,6 +3983,101 @@ function MarketingScreenComponent() {
             </View>
           </ScrollView>
         </View>
+      </Modal>
+
+      {/* Meta Connect Modal */}
+      <Modal
+        visible={showMetaConnectModal}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setShowMetaConnectModal(false)}
+      >
+        <Pressable
+          style={styles.modalOverlay}
+          onPress={() => setShowMetaConnectModal(false)}
+        >
+          <Pressable style={styles.metaModal} onPress={e => e.stopPropagation()}>
+            <View style={styles.metaModalHeader}>
+              <Ionicons name="logo-facebook" size={32} color="#1877F2" />
+              <Text style={styles.metaModalTitle}>Connect Meta</Text>
+              <Text style={styles.metaModalSubtitle}>
+                Manage Facebook & Instagram ads from your dashboard
+              </Text>
+            </View>
+
+            <View style={styles.metaModalContent}>
+              <Text style={styles.metaInputLabel}>Access Token</Text>
+              <TextInput
+                style={styles.metaInput}
+                placeholder="Paste your access token"
+                placeholderTextColor={colors.text.tertiary}
+                value={metaAccessToken}
+                onChangeText={setMetaAccessToken}
+                multiline
+                numberOfLines={3}
+              />
+
+              <Text style={[styles.metaInputLabel, { marginTop: spacing.md }]}>Ad Account ID (optional)</Text>
+              <TextInput
+                style={styles.metaInput}
+                placeholder="act_123456789"
+                placeholderTextColor={colors.text.tertiary}
+                value={metaAdAccountId}
+                onChangeText={setMetaAdAccountId}
+              />
+
+              <Text style={[styles.metaInputLabel, { marginTop: spacing.md }]}>Pixel ID (optional)</Text>
+              <TextInput
+                style={styles.metaInput}
+                placeholder="123456789012345"
+                placeholderTextColor={colors.text.tertiary}
+                value={metaPixelId}
+                onChangeText={setMetaPixelId}
+              />
+
+              <Text style={styles.metaHelpText}>
+                Get your access token from the Meta Business Suite or Graph API Explorer.
+                The token needs ads_management and ads_read permissions.
+              </Text>
+            </View>
+
+            <View style={styles.metaModalActions}>
+              <Pressable
+                style={styles.metaModalCancel}
+                onPress={() => setShowMetaConnectModal(false)}
+              >
+                <Text style={styles.metaModalCancelText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.metaModalConnect, !metaAccessToken && { opacity: 0.5 }]}
+                onPress={async () => {
+                  if (!metaAccessToken || !vendor?.id) return
+                  const success = await connectMeta(
+                    vendor.id,
+                    metaAccessToken,
+                    metaAdAccountId || undefined,
+                    metaPixelId || undefined
+                  )
+                  if (success) {
+                    setShowMetaConnectModal(false)
+                    setMetaAccessToken('')
+                    setMetaAdAccountId('')
+                    setMetaPixelId('')
+                    // Sync campaigns after connecting
+                    syncMetaCampaigns(vendor.id)
+                  }
+                }}
+                disabled={!metaAccessToken || isMetaConnecting}
+              >
+                {isMetaConnecting ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={styles.metaModalConnectText}>Connect</Text>
+                )}
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
       </Modal>
     </SafeAreaView>
   )
@@ -4970,5 +6050,484 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+
+  // Meta (Facebook/Instagram) Styles
+  metaConnectButton: {
+    backgroundColor: '#1877F2',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: radius.md,
+  },
+  metaConnectedButton: {
+    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+  },
+  metaConnectButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  metaSyncButton: {
+    padding: 8,
+    borderRadius: radius.sm,
+    backgroundColor: 'rgba(0, 122, 255, 0.1)',
+  },
+  metaQuickStats: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    paddingVertical: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.border.primary,
+    marginTop: spacing.sm,
+  },
+  metaStatItem: {
+    alignItems: 'center',
+  },
+  metaStatValue: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.text.primary,
+    marginBottom: 2,
+  },
+  metaStatLabel: {
+    fontSize: 11,
+    color: colors.text.tertiary,
+    textTransform: 'uppercase',
+  },
+
+  // Meta Modal
+  metaModal: {
+    backgroundColor: colors.background.secondary,
+    borderRadius: radius.xl,
+    width: '90%',
+    maxWidth: 440,
+    overflow: 'hidden',
+  },
+  metaModalHeader: {
+    alignItems: 'center',
+    paddingVertical: spacing.xl,
+    paddingHorizontal: spacing.lg,
+    backgroundColor: colors.background.primary,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border.primary,
+  },
+  metaModalTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: colors.text.primary,
+    marginTop: spacing.sm,
+  },
+  metaModalSubtitle: {
+    fontSize: 14,
+    color: colors.text.secondary,
+    textAlign: 'center',
+    marginTop: spacing.xs,
+  },
+  metaModalContent: {
+    padding: spacing.lg,
+  },
+  metaInputLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.text.secondary,
+    marginBottom: spacing.xs,
+  },
+  metaInput: {
+    backgroundColor: colors.background.primary,
+    borderWidth: 1,
+    borderColor: colors.border.primary,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    fontSize: 15,
+    color: colors.text.primary,
+    minHeight: 44,
+  },
+  metaHelpText: {
+    fontSize: 12,
+    color: colors.text.tertiary,
+    marginTop: spacing.md,
+    lineHeight: 18,
+  },
+  metaModalActions: {
+    flexDirection: 'row',
+    padding: spacing.lg,
+    gap: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.border.primary,
+  },
+  metaModalCancel: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: radius.md,
+    backgroundColor: colors.glass.regular,
+    alignItems: 'center',
+  },
+  metaModalCancelText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.text.primary,
+  },
+  metaModalConnect: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: radius.md,
+    backgroundColor: '#1877F2',
+    alignItems: 'center',
+  },
+  metaModalConnectText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+  },
+
+  // Meta Dashboard Tabs
+  metaTabBar: {
+    flexDirection: 'row',
+    backgroundColor: colors.glass.regular,
+    borderRadius: radius.lg,
+    padding: 4,
+    marginBottom: spacing.lg,
+  },
+  metaTab: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    borderRadius: radius.md,
+    gap: 6,
+  },
+  metaTabActive: {
+    backgroundColor: colors.background.primary,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+  },
+  metaTabText: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: colors.text.secondary,
+  },
+  metaTabTextActive: {
+    color: '#1877F2',
+    fontWeight: '600',
+  },
+
+  // Meta Campaign Row
+  metaStatusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  metaCampaignRow: {
+    flexDirection: 'column',
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border.primary,
+  },
+  metaCampaignName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.text.primary,
+    marginBottom: 2,
+  },
+  metaCampaignObjective: {
+    fontSize: 12,
+    color: colors.text.tertiary,
+    textTransform: 'capitalize',
+  },
+  metaCampaignStats: {
+    flexDirection: 'row',
+    marginTop: spacing.sm,
+    gap: spacing.md,
+  },
+  metaCampaignStat: {
+    alignItems: 'center',
+    minWidth: 60,
+  },
+  metaCampaignStatValue: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.text.primary,
+  },
+  metaCampaignStatLabel: {
+    fontSize: 10,
+    color: colors.text.tertiary,
+    textTransform: 'uppercase',
+    marginTop: 2,
+  },
+
+  // Meta Posts Filter
+  metaFilterButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: radius.md,
+    backgroundColor: colors.glass.regular,
+    gap: 6,
+  },
+  metaFilterButtonActive: {
+    backgroundColor: '#1877F2',
+  },
+  metaFilterButtonText: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: colors.text.secondary,
+  },
+  metaFilterButtonTextActive: {
+    color: '#fff',
+  },
+
+  // Meta Posts Grid
+  metaPostsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.md,
+  },
+  metaPostCard: {
+    width: (SCREEN_WIDTH - spacing.lg * 2 - spacing.md * 2) / 3,
+    backgroundColor: colors.background.secondary,
+    borderRadius: radius.lg,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: colors.border.primary,
+  },
+  metaPostImage: {
+    width: '100%',
+    height: 120,
+    backgroundColor: colors.glass.regular,
+  },
+  metaPostPlatformBadge: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  metaPostContent: {
+    padding: spacing.sm,
+  },
+  metaPostMessage: {
+    fontSize: 12,
+    color: colors.text.primary,
+    lineHeight: 16,
+    marginBottom: spacing.xs,
+  },
+  metaPostStats: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    marginBottom: spacing.xs,
+  },
+  metaPostStat: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+  },
+  metaPostStatText: {
+    fontSize: 11,
+    color: colors.text.tertiary,
+  },
+  metaPostDate: {
+    fontSize: 10,
+    color: colors.text.quaternary,
+  },
+
+  // Instagram-style Grid
+  igGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 2,
+    backgroundColor: colors.background.primary,
+    borderRadius: radius.lg,
+    overflow: 'hidden',
+  },
+  igPostCell: {
+    width: (SCREEN_WIDTH - spacing.lg * 2 - 4) / 3,
+    aspectRatio: 1,
+    position: 'relative',
+  },
+  igPostImage: {
+    width: '100%',
+    height: '100%',
+  },
+  igPostPlaceholder: {
+    backgroundColor: colors.glass.heavy,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: spacing.sm,
+  },
+  igPostPlaceholderText: {
+    fontSize: 10,
+    color: colors.text.tertiary,
+    textAlign: 'center',
+    marginTop: spacing.xs,
+  },
+  igTypeIndicator: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    borderRadius: 4,
+    padding: 4,
+  },
+  igPlatformBadge: {
+    position: 'absolute',
+    top: 8,
+    left: 8,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  igStatsBar: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.md,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+  },
+  igStatItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  igStatText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  // Insights styles
+  insightsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+  },
+  insightCard: {
+    width: (SCREEN_WIDTH - spacing.lg * 2 - spacing.sm * 3) / 4,
+    backgroundColor: colors.glass.regular,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    alignItems: 'center',
+  },
+  insightValue: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: colors.text.primary,
+  },
+  insightLabel: {
+    fontSize: 11,
+    color: colors.text.tertiary,
+    marginTop: 4,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  chartContainer: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    height: 120,
+    padding: spacing.md,
+    paddingBottom: spacing.xl,
+    gap: 4,
+  },
+  chartBar: {
+    flex: 1,
+    alignItems: 'center',
+    height: '100%',
+    justifyContent: 'flex-end',
+  },
+  chartBarFill: {
+    width: '80%',
+    backgroundColor: '#1877F2',
+    borderRadius: 4,
+    minHeight: 4,
+  },
+  chartBarLabel: {
+    fontSize: 10,
+    color: colors.text.quaternary,
+    marginTop: 4,
+  },
+  chartLegend: {
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.border.subtle,
+    paddingTop: spacing.sm,
+  },
+  campaignRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: spacing.md,
+  },
+  campaignName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.text.primary,
+  },
+  campaignStat: {
+    fontSize: 12,
+    color: colors.text.secondary,
+  },
+  roasBadge: {
+    fontSize: 12,
+    fontWeight: '700',
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+    borderRadius: radius.sm,
+  },
+  roasPositive: {
+    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+    color: '#10B981',
+  },
+  roasNegative: {
+    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+    color: '#EF4444',
+  },
+  organicHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    padding: spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border.subtle,
+  },
+  organicTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.text.primary,
+  },
+  organicStats: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    padding: spacing.md,
+  },
+  organicStat: {
+    width: '50%',
+    marginBottom: spacing.sm,
+  },
+  organicValue: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.text.primary,
+  },
+  organicLabel: {
+    fontSize: 11,
+    color: colors.text.tertiary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
 })
