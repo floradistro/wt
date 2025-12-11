@@ -399,19 +399,26 @@ export const useMarketingStore = create<MarketingStore>((set, get) => ({
       let wallet_pass_push_enabled = 0
 
       try {
-        const { data: walletStats } = await supabase
+        const { data: walletStats, error: walletError } = await supabase
           .from('customer_wallet_pass_stats')
           .select('*')
           .eq('vendor_id', vendorId)
           .maybeSingle()
 
-        if (walletStats) {
+        logger.info(`[MarketingStore] Wallet stats query result:`, { walletStats, walletError, vendorId })
+
+        if (walletError) {
+          logger.error('[MarketingStore] Wallet pass stats error:', walletError)
+        } else if (walletStats) {
           wallet_pass_total = walletStats.total_passes || 0
           wallet_pass_active = walletStats.active_passes || 0
           wallet_pass_push_enabled = walletStats.push_enabled || 0
+          logger.info(`[MarketingStore] Wallet pass stats: total=${wallet_pass_total}, active=${wallet_pass_active}, push=${wallet_pass_push_enabled}`)
+        } else {
+          logger.info('[MarketingStore] No wallet stats found for vendor')
         }
       } catch (walletErr) {
-        logger.warn('[MarketingStore] Wallet pass stats not available:', walletErr)
+        logger.error('[MarketingStore] Wallet pass stats exception:', walletErr)
       }
 
       logger.info(`[MarketingStore] Contact reachability loaded: ${total} customers, ${wallet_pass_total} wallet passes`)
@@ -747,19 +754,37 @@ export const useMarketingStore = create<MarketingStore>((set, get) => ({
   getAudienceCount: async (segmentId: string | null, vendorId: string) => {
     try {
       if (segmentId) {
-        // Use the database function to count segment customers
-        const { data, error } = await supabase
-          .rpc('get_segment_customers', { p_segment_id: segmentId }, { count: 'exact', head: true })
+        // Look up segment from store first
+        const segment = get().segments.find(s => s.id === segmentId)
 
-        if (error) {
-          // Fallback: try to get count from segment itself
-          const segment = get().segments.find(s => s.id === segmentId)
-          if (segment?.customer_count) {
-            return segment.customer_count
-          }
-          throw error
+        // For manual segments (like Staff) - always use stored customer_count
+        if (segment?.segment_rules?.manual || segment?.segment_rules?.customer_ids) {
+          logger.info(`[MarketingStore] Manual segment "${segment.name}" count: ${segment.customer_count}`)
+          return segment.customer_count || 0
         }
-        return data?.length || 0
+
+        // For all other segments - use the stored customer_count (most reliable)
+        // The segment counts are pre-calculated and updated by the system
+        if (segment?.customer_count !== undefined) {
+          logger.info(`[MarketingStore] Segment "${segment.name}" count: ${segment.customer_count}`)
+          return segment.customer_count
+        }
+
+        // Fallback: If segment not in store, query it directly from DB
+        const { data: dbSegment, error: segmentError } = await supabase
+          .from('customer_segments')
+          .select('customer_count, name')
+          .eq('id', segmentId)
+          .single()
+
+        if (!segmentError && dbSegment) {
+          logger.info(`[MarketingStore] Segment "${dbSegment.name}" count from DB: ${dbSegment.customer_count}`)
+          return dbSegment.customer_count || 0
+        }
+
+        // Last resort fallback
+        logger.warn(`[MarketingStore] Could not find segment ${segmentId}`)
+        return 0
       }
 
       // No segment selected - get all active customers with email (exact count, no row limit)
@@ -771,6 +796,7 @@ export const useMarketingStore = create<MarketingStore>((set, get) => ({
         .not('email', 'is', null)
 
       if (error) throw error
+      logger.info(`[MarketingStore] All customers with email count: ${count}`)
       return count || 0
     } catch (err) {
       logger.error('[MarketingStore] Get audience count error:', err)
