@@ -73,22 +73,22 @@ export const CustomerDetail = memo(() => {
     loadOrders()
   }, [customer?.id])
 
+  // ✅ Load wallet pass function (extracted for reuse)
+  const loadWalletPass = async () => {
+    if (!customer?.id || !vendorId) return
+    try {
+      setLoadingWalletPass(true)
+      const pass = await customersService.getCustomerWalletPass(customer.id, vendorId)
+      setWalletPass(pass)
+    } catch (err) {
+      logger.error('Failed to load wallet pass:', err)
+    } finally {
+      setLoadingWalletPass(false)
+    }
+  }
+
   // ✅ Load wallet pass info when selected
   useEffect(() => {
-    if (!customer?.id || !vendorId) return
-
-    const loadWalletPass = async () => {
-      try {
-        setLoadingWalletPass(true)
-        const pass = await customersService.getCustomerWalletPass(customer.id, vendorId)
-        setWalletPass(pass)
-      } catch (err) {
-        logger.error('Failed to load wallet pass:', err)
-      } finally {
-        setLoadingWalletPass(false)
-      }
-    }
-
     loadWalletPass()
   }, [customer?.id, vendorId])
 
@@ -547,6 +547,7 @@ export const CustomerDetail = memo(() => {
                   customerName={customer.full_name || `${customer.first_name || ''} ${customer.last_name || ''}`.trim()}
                   loyaltyPoints={customer.loyalty_points || 0}
                   compact={!!walletPass}
+                  onPassDownloaded={loadWalletPass}
                 />
               </View>
             </View>

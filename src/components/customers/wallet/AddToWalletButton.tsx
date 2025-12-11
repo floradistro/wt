@@ -20,6 +20,7 @@ interface AddToWalletButtonProps {
   customerName?: string
   loyaltyPoints?: number
   compact?: boolean
+  onPassDownloaded?: () => void // Callback when pass is successfully downloaded
 }
 
 export const AddToWalletButton = memo(({
@@ -28,6 +29,7 @@ export const AddToWalletButton = memo(({
   customerName,
   loyaltyPoints = 0,
   compact = false,
+  onPassDownloaded,
 }: AddToWalletButtonProps) => {
   const isDownloading = useWalletIsDownloading()
   const [isSharing, setIsSharing] = useState(false)
@@ -43,8 +45,13 @@ export const AddToWalletButton = memo(({
 
       logger.debug('[AddToWalletButton] Starting wallet pass download')
 
-      // Download the pass
+      // Download the pass (this also registers it in customer_wallet_passes)
       const fileUri = await walletActions.downloadPass(customerId, vendorId)
+
+      // Notify parent that pass was downloaded (for instant UI update)
+      if (fileUri && onPassDownloaded) {
+        onPassDownloaded()
+      }
 
       if (!fileUri) {
         Alert.alert(
