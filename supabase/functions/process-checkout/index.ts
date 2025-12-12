@@ -1158,7 +1158,7 @@ serve(async (req) => {
     }
 
     // Validate total = subtotal - discounts + tax + shipping (within 0.01 tolerance)
-    const totalDiscounts = (body.loyaltyDiscountAmount || 0) + (body.campaignDiscountAmount || 0)
+    const totalDiscounts = (body.loyaltyDiscountAmount || 0) + (body.campaignDiscountAmount || 0) + (body.affiliate_discount_amount || 0)
     const expectedTotal = body.subtotal - totalDiscounts + body.taxAmount + (body.shipping || 0)
     if (Math.abs(body.total - expectedTotal) > 0.01) {
       Sentry.captureMessage('Total mismatch detected', {
@@ -1169,6 +1169,7 @@ serve(async (req) => {
             subtotal: body.subtotal,
             loyaltyDiscountAmount: body.loyaltyDiscountAmount || 0,
             campaignDiscountAmount: body.campaignDiscountAmount || 0,
+            affiliateDiscountAmount: body.affiliate_discount_amount || 0,
             taxAmount: body.taxAmount,
             shipping: body.shipping || 0,
             calculatedTotal: expectedTotal,

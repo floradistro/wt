@@ -306,16 +306,11 @@ serve(async (req) => {
           followers = pageInfo.followers_count || pageInfo.fan_count || 0
         }
 
-        // Get page posts with engagement for the period
-        // Convert dates to Unix timestamps for the API
-        const sinceTimestamp = Math.floor(new Date(startDate).getTime() / 1000).toString()
-        const untilTimestamp = Math.floor(new Date(endDate + 'T23:59:59').getTime() / 1000).toString()
-
+        // Get page posts with engagement - fetch all posts (no date filter)
+        // Engagement metrics are cumulative totals on each post
         const postsResponse = await fetch(
           `${META_GRAPH_API}/${integration.page_id}/posts?` + new URLSearchParams({
-            fields: 'likes.summary(true),comments.summary(true),shares,reactions.summary(true)',
-            since: sinceTimestamp,
-            until: untilTimestamp,
+            fields: 'likes.summary(true),comments.summary(true),shares,reactions.summary(true),created_time',
             limit: '100',
             access_token: accessToken,
           })
@@ -329,7 +324,9 @@ serve(async (req) => {
 
         if (postsResponse.ok) {
           const postsData = await postsResponse.json()
-          console.log(`Found ${postsData.data?.length || 0} Facebook posts`)
+          console.log(`Fetched ${postsData.data?.length || 0} Facebook posts total`)
+
+          // Count ALL posts and their engagement (not filtered by date)
           for (const post of postsData.data || []) {
             postCount++
             totalLikes += post.likes?.summary?.total_count || 0
@@ -337,9 +334,32 @@ serve(async (req) => {
             totalShares += post.shares?.count || 0
             totalReactions += post.reactions?.summary?.total_count || 0
           }
+          console.log(`Facebook: ${postCount} posts total, ${totalLikes} likes, ${totalComments} comments, ${totalShares} shares`)
         } else {
           const postsError = await postsResponse.json()
           console.error('Posts fetch error:', postsError)
+          pageError = postsError.error?.message || 'Failed to fetch posts'
+        }
+
+        // If no posts from API, try to get from synced posts in database
+        if (postCount === 0) {
+          console.log('No posts from API, checking database for synced posts...')
+          const { data: syncedPosts } = await supabase
+            .from('meta_posts')
+            .select('likes_count, comments_count, shares_count, reactions_count')
+            .eq('vendor_id', vendorId)
+            .eq('platform', 'facebook')
+
+          if (syncedPosts && syncedPosts.length > 0) {
+            postCount = syncedPosts.length
+            for (const post of syncedPosts) {
+              totalLikes += post.likes_count || 0
+              totalComments += post.comments_count || 0
+              totalShares += post.shares_count || 0
+              totalReactions += post.reactions_count || 0
+            }
+            console.log(`Facebook from DB: ${postCount} posts, ${totalLikes} likes`)
+          }
         }
 
         pageInsights = {
@@ -442,21 +462,39 @@ serve(async (req) => {
 
         if (mediaResponse.ok) {
           const mediaData = await mediaResponse.json()
-          const startTimestamp = new Date(startDate).getTime()
           console.log(`Found ${mediaData.data?.length || 0} Instagram media items`)
 
+          // Count ALL posts and their engagement (not filtered by date)
           for (const media of mediaData.data || []) {
-            const mediaTime = new Date(media.timestamp).getTime()
-            if (mediaTime >= startTimestamp) {
-              recentPostCount++
-              totalLikes += media.like_count || 0
-              totalComments += media.comments_count || 0
-            }
+            recentPostCount++
+            totalLikes += media.like_count || 0
+            totalComments += media.comments_count || 0
           }
-          console.log(`Instagram: ${recentPostCount} recent posts, ${totalLikes} likes, ${totalComments} comments`)
+          console.log(`Instagram: ${recentPostCount} posts total, ${totalLikes} likes, ${totalComments} comments`)
         } else {
           const mediaError = await mediaResponse.json()
           console.error('Instagram media fetch error:', mediaError)
+          instagramError = mediaError.error?.message || 'Failed to fetch media'
+        }
+
+        // If no posts from API, try to get from synced posts in database
+        if (recentPostCount === 0) {
+          console.log('No IG posts from API, checking database for synced posts...')
+          const { data: syncedPosts } = await supabase
+            .from('meta_posts')
+            .select('ig_likes_count, ig_comments_count, ig_reach, ig_impressions')
+            .eq('vendor_id', vendorId)
+            .eq('platform', 'instagram')
+
+          if (syncedPosts && syncedPosts.length > 0) {
+            recentPostCount = syncedPosts.length
+            for (const post of syncedPosts) {
+              totalLikes += post.ig_likes_count || 0
+              totalComments += post.ig_comments_count || 0
+              reach += post.ig_reach || 0
+            }
+            console.log(`Instagram from DB: ${recentPostCount} posts, ${totalLikes} likes, ${reach} reach`)
+          }
         }
 
         instagramInsights = {

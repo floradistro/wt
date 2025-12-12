@@ -358,11 +358,25 @@ interface MetaActions {
   createCampaign: (vendorId: string, campaign: CreateCampaignParams) => Promise<MetaCampaign | null>
   updateCampaignStatus: (vendorId: string, metaCampaignId: string, status: 'ACTIVE' | 'PAUSED') => Promise<boolean>
 
+  // Campaign Drafts
+  saveCampaignDraft: (vendorId: string, draft: CampaignDraftParams) => Promise<void>
+  deleteCampaignDraft: (draftId: string) => Promise<void>
+
   // Ad Sets
   loadAdSets: (vendorId: string, campaignId?: string) => Promise<void>
+  createAdSet: (vendorId: string, adSet: CreateAdSetParams) => Promise<MetaAdSet | null>
+  updateAdSet: (vendorId: string, metaAdSetId: string, updates: UpdateAdSetParams) => Promise<boolean>
+  updateAdSetStatus: (vendorId: string, metaAdSetId: string, status: 'ACTIVE' | 'PAUSED') => Promise<boolean>
 
   // Ads
   loadAds: (vendorId: string, adSetId?: string) => Promise<void>
+  createAd: (vendorId: string, ad: CreateAdParams) => Promise<MetaAd | null>
+  updateAd: (vendorId: string, metaAdId: string, updates: UpdateAdParams) => Promise<boolean>
+  updateAdStatus: (vendorId: string, metaAdId: string, status: 'ACTIVE' | 'PAUSED') => Promise<boolean>
+
+  // Creative
+  uploadImage: (vendorId: string, imageData: string, filename?: string) => Promise<{ imageHash: string; url?: string } | null>
+  searchTargeting: (vendorId: string, type: string, query: string) => Promise<any[]>
 
   // Audiences
   loadAudiences: (vendorId: string) => Promise<void>
@@ -396,10 +410,98 @@ interface MetaActions {
 interface CreateCampaignParams {
   name: string
   objective: string
+  status?: 'ACTIVE' | 'PAUSED'
   daily_budget?: number
   lifetime_budget?: number
   start_time?: string
   stop_time?: string
+}
+
+interface CampaignDraftParams {
+  id?: string
+  name: string
+  objective: string
+  daily_budget?: number
+  lifetime_budget?: number
+  status: 'DRAFT'
+}
+
+interface CreateAdSetParams {
+  campaignId: string
+  name: string
+  status?: 'ACTIVE' | 'PAUSED'
+  daily_budget?: number
+  lifetime_budget?: number
+  start_time?: string
+  end_time?: string
+  optimization_goal?: string
+  billing_event?: string
+  bid_strategy?: string
+  bid_amount?: number
+  targeting?: {
+    geo_locations?: {
+      countries?: string[]
+      cities?: { key: string; radius?: number; distance_unit?: string }[]
+      regions?: { key: string }[]
+    }
+    age_min?: number
+    age_max?: number
+    genders?: number[]
+    interests?: { id: string; name: string }[]
+    behaviors?: { id: string; name: string }[]
+    custom_audiences?: { id: string }[]
+    excluded_custom_audiences?: { id: string }[]
+    publisher_platforms?: string[]
+    facebook_positions?: string[]
+    instagram_positions?: string[]
+  }
+}
+
+interface UpdateAdSetParams {
+  name?: string
+  status?: 'ACTIVE' | 'PAUSED' | 'DELETED'
+  daily_budget?: number
+  lifetime_budget?: number
+  start_time?: string
+  end_time?: string
+  optimization_goal?: string
+  bid_strategy?: string
+  bid_amount?: number
+  targeting?: CreateAdSetParams['targeting']
+}
+
+interface CreateAdParams {
+  adSetId: string
+  name: string
+  status?: 'ACTIVE' | 'PAUSED'
+  creativeId?: string
+  creative?: {
+    name?: string
+    link_data?: {
+      link: string
+      message?: string
+      name?: string
+      description?: string
+      call_to_action?: { type: string; value?: { link?: string } }
+      image_hash?: string
+      image_url?: string
+      video_id?: string
+    }
+    object_story_spec?: {
+      page_id: string
+      instagram_actor_id?: string
+      link_data?: any
+      video_data?: any
+    }
+  }
+  tracking_specs?: any[]
+  conversion_domain?: string
+}
+
+interface UpdateAdParams {
+  name?: string
+  status?: 'ACTIVE' | 'PAUSED' | 'DELETED'
+  creativeId?: string
 }
 
 interface SendConversionParams {
@@ -642,16 +744,20 @@ export const useMetaStore = create<MetaStore>((set, get) => ({
         throw new Error(errorData.error || 'Failed to create campaign')
       }
 
-      const newCampaign = await response.json()
+      const data = await response.json()
+      const newCampaign = data.campaign
 
-      set(state => ({
-        campaigns: [newCampaign, ...state.campaigns],
-      }))
+      if (newCampaign) {
+        set(state => ({
+          campaigns: [newCampaign, ...state.campaigns],
+        }))
+      }
 
       return newCampaign
-    } catch (err) {
+    } catch (err: any) {
       logger.error('[MetaStore] Create campaign error:', err)
-      return null
+      // Re-throw so UI can display the error
+      throw err
     }
   },
 
@@ -688,6 +794,81 @@ export const useMetaStore = create<MetaStore>((set, get) => ({
   },
 
   // ============================================================================
+  // CAMPAIGN DRAFTS
+  // ============================================================================
+
+  saveCampaignDraft: async (vendorId: string, draft: CampaignDraftParams) => {
+    try {
+      const draftData = {
+        vendor_id: vendorId,
+        name: draft.name,
+        objective: draft.objective,
+        daily_budget: draft.daily_budget || null,
+        lifetime_budget: draft.lifetime_budget || null,
+        status: 'DRAFT',
+        meta_campaign_id: `draft_${Date.now()}`, // Placeholder ID for drafts
+        meta_account_id: 'draft',
+        impressions: 0,
+        reach: 0,
+        clicks: 0,
+        spend: 0,
+        conversions: 0,
+        conversion_value: 0,
+        updated_at: new Date().toISOString(),
+      }
+
+      if (draft.id) {
+        // Update existing draft
+        const { error } = await supabase
+          .from('meta_campaigns')
+          .update(draftData)
+          .eq('id', draft.id)
+
+        if (error) throw error
+        logger.info('[MetaStore] Draft updated:', draft.id)
+      } else {
+        // Insert new draft
+        const { error } = await supabase
+          .from('meta_campaigns')
+          .insert({
+            ...draftData,
+            created_at: new Date().toISOString(),
+          })
+
+        if (error) throw error
+        logger.info('[MetaStore] Draft saved')
+      }
+
+      // Reload campaigns to show the draft
+      await get().loadCampaigns(vendorId)
+    } catch (err) {
+      logger.error('[MetaStore] Save draft error:', err)
+      throw err
+    }
+  },
+
+  deleteCampaignDraft: async (draftId: string) => {
+    try {
+      const { error } = await supabase
+        .from('meta_campaigns')
+        .delete()
+        .eq('id', draftId)
+
+      if (error) throw error
+
+      // Remove from local state
+      set(state => ({
+        campaigns: state.campaigns.filter(c => c.id !== draftId),
+      }))
+
+      logger.info('[MetaStore] Draft deleted:', draftId)
+    } catch (err) {
+      logger.error('[MetaStore] Delete draft error:', err)
+      throw err
+    }
+  },
+
+  // ============================================================================
   // AD SETS
   // ============================================================================
 
@@ -709,6 +890,107 @@ export const useMetaStore = create<MetaStore>((set, get) => ({
       set({ adSets: data || [] })
     } catch (err) {
       logger.error('[MetaStore] Load ad sets error:', err)
+    }
+  },
+
+  createAdSet: async (vendorId: string, adSet: CreateAdSetParams) => {
+    try {
+      const response = await fetch(
+        `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/meta-create-adset`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY}`,
+          },
+          body: JSON.stringify({ vendorId, ...adSet }),
+        }
+      )
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || 'Failed to create ad set')
+      }
+
+      const data = await response.json()
+      const newAdSet = data.adSet
+
+      if (newAdSet) {
+        set(state => ({
+          adSets: [newAdSet, ...state.adSets],
+        }))
+      }
+
+      logger.info('[MetaStore] Ad set created:', newAdSet?.name)
+      return newAdSet
+    } catch (err: any) {
+      logger.error('[MetaStore] Create ad set error:', err)
+      throw err
+    }
+  },
+
+  updateAdSet: async (vendorId: string, metaAdSetId: string, updates: UpdateAdSetParams) => {
+    try {
+      const response = await fetch(
+        `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/meta-update-adset`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY}`,
+          },
+          body: JSON.stringify({ vendorId, metaAdSetId, ...updates }),
+        }
+      )
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || 'Failed to update ad set')
+      }
+
+      // Update local state
+      set(state => ({
+        adSets: state.adSets.map(a =>
+          a.meta_ad_set_id === metaAdSetId ? { ...a, ...updates } : a
+        ),
+      }))
+
+      logger.info('[MetaStore] Ad set updated:', metaAdSetId)
+      return true
+    } catch (err: any) {
+      logger.error('[MetaStore] Update ad set error:', err)
+      throw err
+    }
+  },
+
+  updateAdSetStatus: async (vendorId: string, metaAdSetId: string, status: 'ACTIVE' | 'PAUSED') => {
+    try {
+      const response = await fetch(
+        `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/meta-update-adset`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY}`,
+          },
+          body: JSON.stringify({ vendorId, metaAdSetId, status }),
+        }
+      )
+
+      if (!response.ok) {
+        throw new Error('Failed to update ad set status')
+      }
+
+      set(state => ({
+        adSets: state.adSets.map(a =>
+          a.meta_ad_set_id === metaAdSetId ? { ...a, status } : a
+        ),
+      }))
+
+      return true
+    } catch (err) {
+      logger.error('[MetaStore] Update ad set status error:', err)
+      return false
     }
   },
 
@@ -734,6 +1016,196 @@ export const useMetaStore = create<MetaStore>((set, get) => ({
       set({ ads: data || [] })
     } catch (err) {
       logger.error('[MetaStore] Load ads error:', err)
+    }
+  },
+
+  createAd: async (vendorId: string, ad: CreateAdParams) => {
+    try {
+      const response = await fetch(
+        `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/meta-create-ad`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY}`,
+          },
+          body: JSON.stringify({ vendorId, ...ad }),
+        }
+      )
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || 'Failed to create ad')
+      }
+
+      const data = await response.json()
+      const newAd = data.ad
+
+      if (newAd) {
+        set(state => ({
+          ads: [newAd, ...state.ads],
+        }))
+      }
+
+      logger.info('[MetaStore] Ad created:', newAd?.name)
+      return newAd
+    } catch (err: any) {
+      logger.error('[MetaStore] Create ad error:', err)
+      throw err
+    }
+  },
+
+  updateAd: async (vendorId: string, metaAdId: string, updates: UpdateAdParams) => {
+    try {
+      const response = await fetch(
+        `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/meta-update-ad`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY}`,
+          },
+          body: JSON.stringify({ vendorId, metaAdId, ...updates }),
+        }
+      )
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || 'Failed to update ad')
+      }
+
+      set(state => ({
+        ads: state.ads.map(a =>
+          a.meta_ad_id === metaAdId ? { ...a, ...updates } : a
+        ),
+      }))
+
+      logger.info('[MetaStore] Ad updated:', metaAdId)
+      return true
+    } catch (err: any) {
+      logger.error('[MetaStore] Update ad error:', err)
+      throw err
+    }
+  },
+
+  updateAdStatus: async (vendorId: string, metaAdId: string, status: 'ACTIVE' | 'PAUSED') => {
+    try {
+      const response = await fetch(
+        `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/meta-update-ad`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY}`,
+          },
+          body: JSON.stringify({ vendorId, metaAdId, status }),
+        }
+      )
+
+      if (!response.ok) {
+        throw new Error('Failed to update ad status')
+      }
+
+      set(state => ({
+        ads: state.ads.map(a =>
+          a.meta_ad_id === metaAdId ? { ...a, status } : a
+        ),
+      }))
+
+      return true
+    } catch (err) {
+      logger.error('[MetaStore] Update ad status error:', err)
+      return false
+    }
+  },
+
+  // Reach Estimation - Live audience size
+  getReachEstimate: async (vendorId: string, targeting: any, optimization_goal?: string) => {
+    try {
+      logger.info('[MetaStore] Fetching reach estimate...', { vendorId, targeting })
+      const response = await fetch(
+        `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/meta-reach-estimate`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY}`,
+          },
+          body: JSON.stringify({ vendorId, targeting, optimization_goal }),
+        }
+      )
+
+      if (!response.ok) {
+        logger.error('[MetaStore] Reach estimate HTTP error:', response.status)
+        return null
+      }
+
+      const data = await response.json()
+      logger.info('[MetaStore] Reach estimate response:', data)
+
+      if (data.isFallback) {
+        logger.warn('[MetaStore] Using fallback estimate. API error:', data.apiError || data.error)
+      }
+
+      return data.estimate
+    } catch (err) {
+      logger.error('[MetaStore] Reach estimate error:', err)
+      return null
+    }
+  },
+
+  // Creative & Targeting
+  uploadImage: async (vendorId: string, imageData: string, filename?: string) => {
+    try {
+      const response = await fetch(
+        `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/meta-upload-image`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY}`,
+          },
+          body: JSON.stringify({ vendorId, imageData, filename }),
+        }
+      )
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || 'Failed to upload image')
+      }
+
+      const data = await response.json()
+      logger.info('[MetaStore] Image uploaded:', data.imageHash)
+      return { imageHash: data.imageHash, url: data.url }
+    } catch (err: any) {
+      logger.error('[MetaStore] Upload image error:', err)
+      return null
+    }
+  },
+
+  searchTargeting: async (vendorId: string, type: string, query: string) => {
+    try {
+      const response = await fetch(
+        `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/meta-get-targeting`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY}`,
+          },
+          body: JSON.stringify({ vendorId, type, query }),
+        }
+      )
+
+      if (!response.ok) {
+        throw new Error('Failed to search targeting options')
+      }
+
+      const data = await response.json()
+      return data.data || []
+    } catch (err) {
+      logger.error('[MetaStore] Search targeting error:', err)
+      return []
     }
   },
 
@@ -1131,8 +1603,19 @@ export const useMetaActions = () => useMetaStore(
     syncCampaigns: state.syncCampaigns,
     createCampaign: state.createCampaign,
     updateCampaignStatus: state.updateCampaignStatus,
+    saveCampaignDraft: state.saveCampaignDraft,
+    deleteCampaignDraft: state.deleteCampaignDraft,
     loadAdSets: state.loadAdSets,
+    createAdSet: state.createAdSet,
+    updateAdSet: state.updateAdSet,
+    updateAdSetStatus: state.updateAdSetStatus,
     loadAds: state.loadAds,
+    createAd: state.createAd,
+    updateAd: state.updateAd,
+    updateAdStatus: state.updateAdStatus,
+    uploadImage: state.uploadImage,
+    searchTargeting: state.searchTargeting,
+    getReachEstimate: state.getReachEstimate,
     loadAudiences: state.loadAudiences,
     syncAudienceFromSegment: state.syncAudienceFromSegment,
     createLookalikeAudience: state.createLookalikeAudience,

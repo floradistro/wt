@@ -580,9 +580,9 @@ export const CustomerDetail = memo(() => {
           </View>
         )}
 
-        {/* Recent Orders Section */}
+        {/* Order History Section */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Recent Orders</Text>
+          <Text style={styles.sectionTitle}>Order History</Text>
           <View style={styles.cardGlass}>
             {loadingOrders ? (
               <View style={{ padding: 20, alignItems: 'center' }}>

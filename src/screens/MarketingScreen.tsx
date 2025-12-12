@@ -3,7 +3,8 @@
  * Customer intelligence + Email campaigns + Channels + Discounts + Affiliates
  */
 
-import { View, Text, StyleSheet, Pressable, TextInput, ActivityIndicator, ScrollView, Modal, Dimensions, Animated, Image, Linking } from 'react-native'
+import { View, Text, StyleSheet, Pressable, TextInput, ActivityIndicator, ScrollView, Modal, Dimensions, Animated, Image, Linking, Alert, KeyboardAvoidingView, Platform } from 'react-native'
+import Slider from '@react-native-community/slider'
 import React, { useEffect, memo, useState, useCallback, useMemo, useRef } from 'react'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { WebView } from 'react-native-webview'
@@ -61,6 +62,8 @@ import {
   useIsMetaConnected,
   useIsMetaConnecting,
   useMetaCampaigns,
+  useMetaAdSets,
+  useMetaAds,
   useIsMetaSyncing,
   useMetaPosts,
   useIsSyncingMetaPosts,
@@ -72,6 +75,8 @@ import {
   formatMetaNumber,
   type MetaPost,
   type MetaFullInsights,
+  type MetaAdSet,
+  type MetaAd,
 } from '@/stores/meta.store'
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window')
@@ -220,6 +225,8 @@ function MarketingScreenComponent() {
   const isMetaConnected = useIsMetaConnected()
   const isMetaConnecting = useIsMetaConnecting()
   const metaCampaigns = useMetaCampaigns()
+  const metaAdSets = useMetaAdSets()
+  const metaAds = useMetaAds()
   const isMetaSyncing = useIsMetaSyncing()
   const metaPosts = useMetaPosts()
   const isSyncingPosts = useIsSyncingMetaPosts()
@@ -231,6 +238,19 @@ function MarketingScreenComponent() {
     connect: connectMeta,
     disconnect: disconnectMeta,
     syncCampaigns: syncMetaCampaigns,
+    createCampaign: createMetaCampaign,
+    updateCampaignStatus: updateMetaCampaignStatus,
+    saveCampaignDraft,
+    deleteCampaignDraft,
+    loadAdSets: loadMetaAdSets,
+    createAdSet: createMetaAdSet,
+    updateAdSetStatus: updateMetaAdSetStatus,
+    loadAds: loadMetaAds,
+    createAd: createMetaAd,
+    updateAdStatus: updateMetaAdStatus,
+    uploadImage: uploadMetaImage,
+    searchTargeting,
+    getReachEstimate,
     loadPosts: loadMetaPosts,
     syncPosts: syncMetaPosts,
     setPostsFilter: setMetaPostsFilter,
@@ -244,6 +264,16 @@ function MarketingScreenComponent() {
   const [metaAccessToken, setMetaAccessToken] = useState('')
   const [metaAdAccountId, setMetaAdAccountId] = useState('')
   const [metaPixelId, setMetaPixelId] = useState('')
+
+  // Campaign creation state
+  const [showCampaignModal, setShowCampaignModal] = useState(false)
+  const [isCreatingCampaign, setIsCreatingCampaign] = useState(false)
+  const [campaignForm, setCampaignForm] = useState({
+    name: '',
+    objective: 'OUTCOME_SALES',
+    dailyBudget: 25, // numeric for slider
+    status: 'PAUSED' as 'ACTIVE' | 'PAUSED',
+  })
 
   // Affiliate form state
   const [showAffiliateModal, setShowAffiliateModal] = useState(false)
@@ -264,6 +294,47 @@ function MarketingScreenComponent() {
   // Meta sub-tab state
   const [metaSubTab, setMetaSubTab] = useState<'overview' | 'ads' | 'posts' | 'insights'>('overview')
   const [insightsDateRange, setInsightsDateRange] = useState<'7d' | '14d' | '30d' | '90d'>('30d')
+
+  // Meta Ads drill-down state
+  const [selectedMetaCampaign, setSelectedMetaCampaign] = useState<string | null>(null)
+  const [selectedMetaAdSet, setSelectedMetaAdSet] = useState<string | null>(null)
+  const [showAdSetModal, setShowAdSetModal] = useState(false)
+  const [showAdModal, setShowAdModal] = useState(false)
+  const [adSetForm, setAdSetForm] = useState({
+    name: '',
+    dailyBudget: 20,
+    status: 'PAUSED' as 'ACTIVE' | 'PAUSED',
+    optimization_goal: 'LINK_CLICKS',
+    billing_event: 'IMPRESSIONS',
+    countries: ['US'] as string[],
+    age_min: 18,
+    age_max: 65,
+    genders: [] as number[],
+    interests: [] as { id: string; name: string }[],
+    publisher_platforms: ['facebook', 'instagram'] as string[],
+  })
+  const [adForm, setAdForm] = useState({
+    name: '',
+    status: 'PAUSED' as 'ACTIVE' | 'PAUSED',
+    headline: '',
+    primaryText: '',
+    websiteUrl: '',
+    callToAction: 'LEARN_MORE',
+    imageHash: '',
+  })
+  const [isCreatingAdSet, setIsCreatingAdSet] = useState(false)
+  const [isCreatingAd, setIsCreatingAd] = useState(false)
+
+  // Interest search state
+  const [interestSearch, setInterestSearch] = useState('')
+  const [interestResults, setInterestResults] = useState<{ id: string; name: string; audience_size?: number }[]>([])
+  const [isSearchingInterests, setIsSearchingInterests] = useState(false)
+
+  // Reach estimation state
+  const [reachEstimate, setReachEstimate] = useState<{ users_lower_bound: number; users_upper_bound: number } | null>(null)
+  const [displayedReach, setDisplayedReach] = useState({ lower: 0, upper: 0 })
+  const reachDebounceRef = useRef<NodeJS.Timeout | null>(null)
+  const interestSearchRef = useRef<NodeJS.Timeout | null>(null)
 
   // Nav items
   const navItems: NavItem[] = useMemo(() => {
@@ -357,6 +428,72 @@ function MarketingScreenComponent() {
       loadMetaPosts(vendor.id)
     }
   }, [vendor?.id, isMetaConnected])
+
+  // Load ad sets when a campaign is selected
+  useEffect(() => {
+    if (vendor?.id && selectedMetaCampaign) {
+      loadMetaAdSets(vendor.id, selectedMetaCampaign)
+    }
+  }, [vendor?.id, selectedMetaCampaign])
+
+  // Load ads when an ad set is selected
+  useEffect(() => {
+    if (vendor?.id && selectedMetaAdSet) {
+      loadMetaAds(vendor.id, selectedMetaAdSet)
+    }
+  }, [vendor?.id, selectedMetaAdSet])
+
+  // Fetch reach estimate when ad set form targeting changes
+  useEffect(() => {
+    if (!showAdSetModal || !vendor?.id) return
+
+    // Clear existing timeout
+    if (reachDebounceRef.current) {
+      clearTimeout(reachDebounceRef.current)
+    }
+
+    // Debounce the API call
+    reachDebounceRef.current = setTimeout(async () => {
+      const targeting: any = {
+        geo_locations: { countries: adSetForm.countries },
+        age_min: adSetForm.age_min,
+        age_max: adSetForm.age_max,
+      }
+      if (adSetForm.genders.length > 0) targeting.genders = adSetForm.genders
+      if (adSetForm.interests.length > 0) targeting.interests = adSetForm.interests
+      if (adSetForm.publisher_platforms.length > 0) targeting.publisher_platforms = adSetForm.publisher_platforms
+
+      const estimate = await getReachEstimate(vendor.id, targeting, adSetForm.optimization_goal)
+      if (estimate) {
+        setReachEstimate(estimate)
+        setDisplayedReach({ lower: estimate.users_lower_bound, upper: estimate.users_upper_bound })
+      }
+    }, 100)
+
+    return () => {
+      if (reachDebounceRef.current) {
+        clearTimeout(reachDebounceRef.current)
+      }
+    }
+  }, [showAdSetModal, vendor?.id, adSetForm.countries, adSetForm.age_min, adSetForm.age_max, adSetForm.genders, adSetForm.interests, adSetForm.publisher_platforms, adSetForm.optimization_goal])
+
+  // Get current campaign and ad set objects
+  const currentCampaign = useMemo(() =>
+    metaCampaigns.find(c => c.meta_campaign_id === selectedMetaCampaign),
+    [metaCampaigns, selectedMetaCampaign]
+  )
+  const currentAdSet = useMemo(() =>
+    metaAdSets.find(a => a.meta_ad_set_id === selectedMetaAdSet),
+    [metaAdSets, selectedMetaAdSet]
+  )
+  const filteredAdSets = useMemo(() =>
+    selectedMetaCampaign ? metaAdSets.filter(a => a.meta_campaign_id === selectedMetaCampaign) : [],
+    [metaAdSets, selectedMetaCampaign]
+  )
+  const filteredAds = useMemo(() =>
+    selectedMetaAdSet ? metaAds.filter(a => a.meta_ad_set_id === selectedMetaAdSet) : [],
+    [metaAds, selectedMetaAdSet]
+  )
 
   // Load Meta insights when insights tab is active
   // Calculate date range for insights
@@ -1283,7 +1420,7 @@ function MarketingScreenComponent() {
                       size={32}
                       color={colors.text.quaternary}
                     />
-                    <Text style={styles.noCampaignsText}>
+                    <Text style={styles.emptyStateText}>
                       {campaignTab === 'drafts' ? 'No drafts yet' : 'No sent campaigns yet'}
                     </Text>
                   </View>
@@ -2014,31 +2151,54 @@ function MarketingScreenComponent() {
                         : 'Connect to manage ads and track conversions'}
                     </Text>
                   </View>
-                  <Pressable
-                    style={[
-                      styles.metaConnectButton,
-                      isMetaConnected && styles.metaConnectedButton,
-                    ]}
-                    onPress={() => {
-                      if (isMetaConnected) {
-                        // Show disconnect confirmation
-                        if (vendor?.id) {
-                          disconnectMeta(vendor.id)
-                        }
-                      } else {
-                        setShowMetaConnectModal(true)
-                      }
-                    }}
-                    disabled={isMetaConnecting}
-                  >
-                    {isMetaConnecting ? (
-                      <ActivityIndicator size="small" color="#fff" />
-                    ) : (
-                      <Text style={styles.metaConnectButtonText}>
-                        {isMetaConnected ? 'Disconnect' : 'Connect'}
-                      </Text>
-                    )}
-                  </Pressable>
+                  {isMetaConnected ? (
+                    <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+                      <Pressable
+                        style={styles.metaEditButton}
+                        onPress={() => {
+                          // Pre-fill with existing values
+                          setMetaAdAccountId(metaIntegration?.ad_account_id || '')
+                          setMetaPixelId(metaIntegration?.pixel_id || '')
+                          setMetaAccessToken('') // Don't pre-fill token for security
+                          setShowMetaConnectModal(true)
+                        }}
+                      >
+                        <Ionicons name="pencil" size={14} color="#007AFF" />
+                        <Text style={styles.metaEditButtonText}>Edit</Text>
+                      </Pressable>
+                      <Pressable
+                        style={styles.metaDisconnectButton}
+                        onPress={() => {
+                          Alert.alert(
+                            'Disconnect Meta',
+                            'Are you sure you want to disconnect your Meta account? This will remove access to your ads data.',
+                            [
+                              { text: 'Cancel', style: 'cancel' },
+                              {
+                                text: 'Disconnect',
+                                style: 'destructive',
+                                onPress: () => vendor?.id && disconnectMeta(vendor.id)
+                              }
+                            ]
+                          )
+                        }}
+                      >
+                        <Text style={styles.metaDisconnectButtonText}>Disconnect</Text>
+                      </Pressable>
+                    </View>
+                  ) : (
+                    <Pressable
+                      style={styles.metaConnectButton}
+                      onPress={() => setShowMetaConnectModal(true)}
+                      disabled={isMetaConnecting}
+                    >
+                      {isMetaConnecting ? (
+                        <ActivityIndicator size="small" color="#fff" />
+                      ) : (
+                        <Text style={styles.metaConnectButtonText}>Connect</Text>
+                      )}
+                    </Pressable>
+                  )}
                 </View>
 
                 {/* Meta Stats (if connected) */}
@@ -2197,7 +2357,42 @@ function MarketingScreenComponent() {
 
                 {/* Connection Info */}
                 <View style={styles.section}>
-                  <Text style={styles.sectionTitle}>Connection</Text>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.sm }}>
+                    <Text style={styles.sectionTitle}>Connection</Text>
+                    <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+                      <Pressable
+                        style={styles.metaEditButton}
+                        onPress={() => {
+                          setMetaAdAccountId(metaIntegration?.ad_account_id || '')
+                          setMetaPixelId(metaIntegration?.pixel_id || '')
+                          setMetaAccessToken('')
+                          setShowMetaConnectModal(true)
+                        }}
+                      >
+                        <Ionicons name="pencil" size={14} color="#007AFF" />
+                        <Text style={styles.metaEditButtonText}>Edit</Text>
+                      </Pressable>
+                      <Pressable
+                        style={styles.metaDisconnectButton}
+                        onPress={() => {
+                          Alert.alert(
+                            'Disconnect Meta',
+                            'Are you sure you want to disconnect your Meta account?',
+                            [
+                              { text: 'Cancel', style: 'cancel' },
+                              {
+                                text: 'Disconnect',
+                                style: 'destructive',
+                                onPress: () => vendor?.id && disconnectMeta(vendor.id)
+                              }
+                            ]
+                          )
+                        }}
+                      >
+                        <Text style={styles.metaDisconnectButtonText}>Disconnect</Text>
+                      </Pressable>
+                    </View>
+                  </View>
                   <View style={styles.glassCard}>
                     <View style={styles.channelRow}>
                       <View style={[styles.channelIcon, { backgroundColor: 'rgba(24,119,242,0.1)' }]}>
@@ -2293,75 +2488,328 @@ function MarketingScreenComponent() {
               </>
             )}
 
-            {/* Ads Sub-view */}
+            {/* Ads Sub-view with drill-down navigation */}
             {metaSubTab === 'ads' && (
               <>
                 <View style={styles.section}>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.md }}>
-                    <Text style={styles.sectionTitle}>All Campaigns</Text>
+                  {/* Breadcrumb Navigation */}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: spacing.md, flexWrap: 'wrap' }}>
                     <Pressable
-                      style={styles.metaSyncButton}
-                      onPress={() => vendor?.id && syncMetaCampaigns(vendor.id)}
-                      disabled={isMetaSyncing}
+                      onPress={() => {
+                        setSelectedMetaCampaign(null)
+                        setSelectedMetaAdSet(null)
+                      }}
+                      style={{ flexDirection: 'row', alignItems: 'center' }}
                     >
-                      {isMetaSyncing ? (
-                        <ActivityIndicator size="small" color="#007AFF" />
-                      ) : (
-                        <>
-                          <Ionicons name="refresh" size={16} color="#007AFF" />
-                          <Text style={{ color: '#007AFF', marginLeft: 4, fontSize: 13 }}>Sync</Text>
-                        </>
-                      )}
+                      <Ionicons name="megaphone" size={16} color={selectedMetaCampaign ? '#007AFF' : colors.text.primary} />
+                      <Text style={{ marginLeft: 4, color: selectedMetaCampaign ? '#007AFF' : colors.text.primary, fontWeight: '600' }}>
+                        Campaigns
+                      </Text>
                     </Pressable>
+                    {selectedMetaCampaign && currentCampaign && (
+                      <>
+                        <Ionicons name="chevron-forward" size={16} color={colors.text.quaternary} style={{ marginHorizontal: 4 }} />
+                        <Pressable
+                          onPress={() => setSelectedMetaAdSet(null)}
+                          style={{ flexDirection: 'row', alignItems: 'center' }}
+                        >
+                          <Text
+                            style={{ color: selectedMetaAdSet ? '#007AFF' : colors.text.primary, fontWeight: '600' }}
+                            numberOfLines={1}
+                          >
+                            {currentCampaign.name}
+                          </Text>
+                        </Pressable>
+                      </>
+                    )}
+                    {selectedMetaAdSet && currentAdSet && (
+                      <>
+                        <Ionicons name="chevron-forward" size={16} color={colors.text.quaternary} style={{ marginHorizontal: 4 }} />
+                        <Text style={{ color: colors.text.primary, fontWeight: '600' }} numberOfLines={1}>
+                          {currentAdSet.name}
+                        </Text>
+                      </>
+                    )}
                   </View>
 
-                  {metaCampaigns.length === 0 ? (
-                    <View style={styles.glassCard}>
-                      <View style={{ padding: spacing.xl, alignItems: 'center' }}>
-                        <Ionicons name="megaphone-outline" size={48} color={colors.text.quaternary} />
-                        <Text style={{ color: colors.text.tertiary, marginTop: spacing.md }}>
-                          No campaigns found
-                        </Text>
-                        <Text style={{ color: colors.text.quaternary, marginTop: spacing.xs, fontSize: 13 }}>
-                          Sync to pull campaigns from Meta
-                        </Text>
-                      </View>
+                  {/* Header with actions */}
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.md }}>
+                    <Text style={styles.sectionTitle}>
+                      {selectedMetaAdSet ? 'Ads' : selectedMetaCampaign ? 'Ad Sets' : 'All Campaigns'}
+                    </Text>
+                    <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+                      {!selectedMetaCampaign && (
+                        <>
+                          <Pressable
+                            style={styles.metaSyncButton}
+                            onPress={() => vendor?.id && syncMetaCampaigns(vendor.id)}
+                            disabled={isMetaSyncing}
+                          >
+                            {isMetaSyncing ? (
+                              <ActivityIndicator size="small" color="#007AFF" />
+                            ) : (
+                              <>
+                                <Ionicons name="refresh" size={16} color="#007AFF" />
+                                <Text style={{ color: '#007AFF', marginLeft: 4, fontSize: 13 }}>Sync</Text>
+                              </>
+                            )}
+                          </Pressable>
+                          <Pressable
+                            style={[styles.metaSyncButton, { backgroundColor: '#10B981' }]}
+                            onPress={() => {
+                              setCampaignForm({ name: '', objective: 'OUTCOME_SALES', dailyBudget: 25, status: 'PAUSED' })
+                              setShowCampaignModal(true)
+                            }}
+                          >
+                            <Ionicons name="add" size={16} color="#fff" />
+                            <Text style={{ color: '#fff', marginLeft: 4, fontSize: 13, fontWeight: '600' }}>New Campaign</Text>
+                          </Pressable>
+                        </>
+                      )}
+                      {selectedMetaCampaign && !selectedMetaAdSet && (
+                        <Pressable
+                          style={[styles.metaSyncButton, { backgroundColor: '#10B981' }]}
+                          onPress={() => {
+                            setAdSetForm({
+                              name: '',
+                              dailyBudget: 10,
+                              status: 'PAUSED',
+                              optimization_goal: 'LINK_CLICKS',
+                              billing_event: 'IMPRESSIONS',
+                              countries: ['US'],
+                              age_min: 18,
+                              age_max: 65,
+                              genders: [],
+                              interests: [],
+                              publisher_platforms: ['facebook', 'instagram'],
+                            })
+                            setShowAdSetModal(true)
+                          }}
+                        >
+                          <Ionicons name="add" size={16} color="#fff" />
+                          <Text style={{ color: '#fff', marginLeft: 4, fontSize: 13, fontWeight: '600' }}>New Ad Set</Text>
+                        </Pressable>
+                      )}
+                      {selectedMetaAdSet && (
+                        <Pressable
+                          style={[styles.metaSyncButton, { backgroundColor: '#10B981' }]}
+                          onPress={() => {
+                            setAdForm({
+                              name: '',
+                              status: 'PAUSED',
+                              headline: '',
+                              primaryText: '',
+                              websiteUrl: '',
+                              callToAction: 'LEARN_MORE',
+                              imageHash: '',
+                            })
+                            setShowAdModal(true)
+                          }}
+                        >
+                          <Ionicons name="add" size={16} color="#fff" />
+                          <Text style={{ color: '#fff', marginLeft: 4, fontSize: 13, fontWeight: '600' }}>New Ad</Text>
+                        </Pressable>
+                      )}
                     </View>
-                  ) : (
-                    <View style={styles.glassCard}>
-                      {metaCampaigns.map((campaign) => (
-                        <View key={campaign.id} style={styles.metaCampaignRow}>
-                          <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
-                            <View style={[
-                              styles.metaStatusDot,
-                              { backgroundColor: campaign.status === 'ACTIVE' ? '#10B981' : campaign.status === 'PAUSED' ? '#F59E0B' : '#6B7280' }
-                            ]} />
-                            <View style={{ flex: 1, marginLeft: spacing.sm }}>
-                              <Text style={styles.metaCampaignName} numberOfLines={1}>{campaign.name}</Text>
-                              <Text style={styles.metaCampaignObjective}>{campaign.objective?.replace('OUTCOME_', '') || 'Unknown'}</Text>
-                            </View>
-                          </View>
-                          <View style={styles.metaCampaignStats}>
-                            <View style={styles.metaCampaignStat}>
-                              <Text style={styles.metaCampaignStatValue}>{formatMetaSpend(campaign.spend)}</Text>
-                              <Text style={styles.metaCampaignStatLabel}>Spend</Text>
-                            </View>
-                            <View style={styles.metaCampaignStat}>
-                              <Text style={styles.metaCampaignStatValue}>{formatMetaNumber(campaign.impressions)}</Text>
-                              <Text style={styles.metaCampaignStatLabel}>Impr</Text>
-                            </View>
-                            <View style={styles.metaCampaignStat}>
-                              <Text style={styles.metaCampaignStatValue}>{formatMetaNumber(campaign.clicks)}</Text>
-                              <Text style={styles.metaCampaignStatLabel}>Clicks</Text>
-                            </View>
-                            <View style={styles.metaCampaignStat}>
-                              <Text style={styles.metaCampaignStatValue}>{campaign.ctr?.toFixed(2) || '0'}%</Text>
-                              <Text style={styles.metaCampaignStatLabel}>CTR</Text>
-                            </View>
+                  </View>
+
+                  {/* Campaigns List */}
+                  {!selectedMetaCampaign && (
+                    <>
+                      {metaCampaigns.length === 0 ? (
+                        <View style={styles.glassCard}>
+                          <View style={{ padding: spacing.xl, alignItems: 'center' }}>
+                            <Ionicons name="megaphone-outline" size={48} color={colors.text.quaternary} />
+                            <Text style={{ color: colors.text.tertiary, marginTop: spacing.md }}>
+                              No campaigns found
+                            </Text>
+                            <Text style={{ color: colors.text.quaternary, marginTop: spacing.xs, fontSize: 13 }}>
+                              Create a new campaign or sync from Meta
+                            </Text>
                           </View>
                         </View>
-                      ))}
-                    </View>
+                      ) : (
+                        <View style={styles.glassCard}>
+                          {metaCampaigns.map((campaign) => (
+                            <Pressable
+                              key={campaign.id}
+                              style={styles.metaCampaignRow}
+                              onPress={() => {
+                                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                                setSelectedMetaCampaign(campaign.meta_campaign_id)
+                              }}
+                            >
+                              <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                                <View
+                                  style={[
+                                    styles.metaStatusDot,
+                                    { backgroundColor: campaign.status === 'ACTIVE' ? '#10B981' : campaign.status === 'PAUSED' ? '#F59E0B' : '#6B7280' }
+                                  ]}
+                                />
+                                <View style={{ flex: 1, marginLeft: spacing.sm }}>
+                                  <Text style={styles.metaCampaignName} numberOfLines={1}>{campaign.name}</Text>
+                                  <Text style={styles.metaCampaignObjective}>{campaign.objective?.replace('OUTCOME_', '') || 'Unknown'}</Text>
+                                </View>
+                              </View>
+                              <View style={styles.metaCampaignStats}>
+                                <View style={styles.metaCampaignStat}>
+                                  <Text style={styles.metaCampaignStatValue}>{formatMetaSpend(campaign.spend)}</Text>
+                                  <Text style={styles.metaCampaignStatLabel}>Spend</Text>
+                                </View>
+                                <View style={styles.metaCampaignStat}>
+                                  <Text style={styles.metaCampaignStatValue}>{formatMetaNumber(campaign.clicks)}</Text>
+                                  <Text style={styles.metaCampaignStatLabel}>Clicks</Text>
+                                </View>
+                                <Ionicons name="chevron-forward" size={18} color={colors.text.quaternary} />
+                              </View>
+                            </Pressable>
+                          ))}
+                        </View>
+                      )}
+                    </>
+                  )}
+
+                  {/* Ad Sets List */}
+                  {selectedMetaCampaign && !selectedMetaAdSet && (
+                    <>
+                      {filteredAdSets.length === 0 ? (
+                        <View style={styles.glassCard}>
+                          <View style={{ padding: spacing.xl, alignItems: 'center' }}>
+                            <Ionicons name="layers-outline" size={48} color={colors.text.quaternary} />
+                            <Text style={{ color: colors.text.tertiary, marginTop: spacing.md }}>
+                              No ad sets yet
+                            </Text>
+                            <Text style={{ color: colors.text.quaternary, marginTop: spacing.xs, fontSize: 13 }}>
+                              Create an ad set to target your audience
+                            </Text>
+                          </View>
+                        </View>
+                      ) : (
+                        <View style={styles.glassCard}>
+                          {filteredAdSets.map((adSet) => (
+                            <Pressable
+                              key={adSet.id}
+                              style={styles.metaCampaignRow}
+                              onPress={() => {
+                                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                                setSelectedMetaAdSet(adSet.meta_ad_set_id)
+                              }}
+                            >
+                              <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                                <Pressable
+                                  style={[
+                                    styles.metaStatusDot,
+                                    { backgroundColor: adSet.status === 'ACTIVE' ? '#10B981' : adSet.status === 'PAUSED' ? '#F59E0B' : '#6B7280' }
+                                  ]}
+                                  onPress={async (e) => {
+                                    e.stopPropagation()
+                                    if (!vendor?.id) return
+                                    const newStatus = adSet.status === 'ACTIVE' ? 'PAUSED' : 'ACTIVE'
+                                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                                    await updateMetaAdSetStatus(vendor.id, adSet.meta_ad_set_id, newStatus)
+                                  }}
+                                />
+                                <View style={{ flex: 1, marginLeft: spacing.sm }}>
+                                  <Text style={styles.metaCampaignName} numberOfLines={1}>{adSet.name}</Text>
+                                  <Text style={styles.metaCampaignObjective}>
+                                    {adSet.optimization_goal?.replace(/_/g, ' ') || 'Unknown'} • {adSet.daily_budget ? `$${adSet.daily_budget}/day` : 'No budget'}
+                                  </Text>
+                                </View>
+                              </View>
+                              <View style={styles.metaCampaignStats}>
+                                <View style={styles.metaCampaignStat}>
+                                  <Text style={styles.metaCampaignStatValue}>{formatMetaSpend(adSet.spend)}</Text>
+                                  <Text style={styles.metaCampaignStatLabel}>Spend</Text>
+                                </View>
+                                <View style={styles.metaCampaignStat}>
+                                  <Text style={styles.metaCampaignStatValue}>{formatMetaNumber(adSet.clicks)}</Text>
+                                  <Text style={styles.metaCampaignStatLabel}>Clicks</Text>
+                                </View>
+                                <Ionicons name="chevron-forward" size={18} color={colors.text.quaternary} />
+                              </View>
+                            </Pressable>
+                          ))}
+                        </View>
+                      )}
+                    </>
+                  )}
+
+                  {/* Ads List */}
+                  {selectedMetaAdSet && (
+                    <>
+                      {filteredAds.length === 0 ? (
+                        <View style={styles.glassCard}>
+                          <View style={{ padding: spacing.xl, alignItems: 'center' }}>
+                            <Ionicons name="image-outline" size={48} color={colors.text.quaternary} />
+                            <Text style={{ color: colors.text.tertiary, marginTop: spacing.md }}>
+                              No ads yet
+                            </Text>
+                            <Text style={{ color: colors.text.quaternary, marginTop: spacing.xs, fontSize: 13 }}>
+                              Create an ad with creative to start advertising
+                            </Text>
+                          </View>
+                        </View>
+                      ) : (
+                        <View style={styles.glassCard}>
+                          {filteredAds.map((ad) => (
+                            <View key={ad.id} style={styles.metaCampaignRow}>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                                <Pressable
+                                  style={[
+                                    styles.metaStatusDot,
+                                    { backgroundColor: ad.status === 'ACTIVE' ? '#10B981' : ad.status === 'PAUSED' ? '#F59E0B' : '#6B7280' }
+                                  ]}
+                                  onPress={async () => {
+                                    if (!vendor?.id) return
+                                    const newStatus = ad.status === 'ACTIVE' ? 'PAUSED' : 'ACTIVE'
+                                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                                    await updateMetaAdStatus(vendor.id, ad.meta_ad_id, newStatus)
+                                  }}
+                                />
+                                <View style={{ flex: 1, marginLeft: spacing.sm }}>
+                                  <Text style={styles.metaCampaignName} numberOfLines={1}>{ad.name}</Text>
+                                  <Text style={styles.metaCampaignObjective}>
+                                    {ad.effective_status?.replace(/_/g, ' ') || ad.status || 'Unknown'}
+                                  </Text>
+                                </View>
+                              </View>
+                              <View style={styles.metaCampaignStats}>
+                                <View style={styles.metaCampaignStat}>
+                                  <Text style={styles.metaCampaignStatValue}>{formatMetaSpend(ad.spend)}</Text>
+                                  <Text style={styles.metaCampaignStatLabel}>Spend</Text>
+                                </View>
+                                <View style={styles.metaCampaignStat}>
+                                  <Text style={styles.metaCampaignStatValue}>{formatMetaNumber(ad.impressions)}</Text>
+                                  <Text style={styles.metaCampaignStatLabel}>Impr</Text>
+                                </View>
+                                <View style={styles.metaCampaignStat}>
+                                  <Text style={styles.metaCampaignStatValue}>{formatMetaNumber(ad.clicks)}</Text>
+                                  <Text style={styles.metaCampaignStatLabel}>Clicks</Text>
+                                </View>
+                                <Pressable
+                                  style={[
+                                    styles.campaignActionButton,
+                                    { backgroundColor: ad.status === 'ACTIVE' ? 'rgba(245,158,11,0.2)' : 'rgba(16,185,129,0.2)' }
+                                  ]}
+                                  onPress={async () => {
+                                    if (!vendor?.id) return
+                                    const newStatus = ad.status === 'ACTIVE' ? 'PAUSED' : 'ACTIVE'
+                                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+                                    await updateMetaAdStatus(vendor.id, ad.meta_ad_id, newStatus)
+                                  }}
+                                >
+                                  <Ionicons
+                                    name={ad.status === 'ACTIVE' ? 'pause' : 'play'}
+                                    size={14}
+                                    color={ad.status === 'ACTIVE' ? '#F59E0B' : '#10B981'}
+                                  />
+                                </Pressable>
+                              </View>
+                            </View>
+                          ))}
+                        </View>
+                      )}
+                    </>
                   )}
                 </View>
               </>
@@ -2530,330 +2978,229 @@ function MarketingScreenComponent() {
             {/* Insights Sub-view */}
             {metaSubTab === 'insights' && (
               <>
-                {/* Insights Header with Refresh */}
-                <View style={styles.section}>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.md }}>
-                    <Text style={styles.sectionTitle}>Account Overview</Text>
-                    <Pressable
-                      style={[styles.metaSyncButton, { flexDirection: 'row', alignItems: 'center', gap: 4 }, isLoadingInsights && { opacity: 0.6 }]}
-                      onPress={() => vendor?.id && loadMetaInsights(vendor.id)}
-                      disabled={isLoadingInsights}
-                    >
-                      {isLoadingInsights ? (
-                        <ActivityIndicator size="small" color="#1877F2" />
-                      ) : (
-                        <Ionicons name="refresh" size={16} color="#1877F2" />
-                      )}
-                      <Text style={{ color: '#1877F2', fontSize: 13 }}>
-                        {isLoadingInsights ? 'Loading...' : 'Refresh'}
-                      </Text>
-                    </Pressable>
-                  </View>
-
-                  {/* Date Range Display */}
-                  {metaInsights?.dateRange && (
-                    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: spacing.md }}>
-                      <Ionicons name="calendar-outline" size={14} color={colors.text.quaternary} />
-                      <Text style={{ color: colors.text.tertiary, fontSize: 13, marginLeft: spacing.xs }}>
-                        {metaInsights.dateRange.start} to {metaInsights.dateRange.end}
-                      </Text>
-                    </View>
-                  )}
-
-                  {/* Loading State */}
-                  {isLoadingInsights && !metaInsights && (
-                    <View style={styles.glassCard}>
-                      <View style={{ padding: spacing.xl, alignItems: 'center' }}>
-                        <ActivityIndicator size="large" color="#1877F2" />
-                        <Text style={{ color: colors.text.tertiary, marginTop: spacing.md, fontSize: 14 }}>
-                          Loading insights...
+                {/* Header with Date Range */}
+                <View style={styles.insightsHeader}>
+                  <View style={styles.insightsDatePills}>
+                    {(['7d', '14d', '30d', '90d'] as const).map((range) => (
+                      <Pressable
+                        key={range}
+                        style={[
+                          styles.insightsDatePill,
+                          insightsDateRange === range && styles.insightsDatePillActive,
+                        ]}
+                        onPress={() => setInsightsDateRange(range)}
+                      >
+                        <Text style={[
+                          styles.insightsDatePillText,
+                          insightsDateRange === range && styles.insightsDatePillTextActive,
+                        ]}>
+                          {range === '7d' ? '7D' : range === '14d' ? '14D' : range === '30d' ? '30D' : '90D'}
                         </Text>
-                      </View>
-                    </View>
-                  )}
+                      </Pressable>
+                    ))}
+                  </View>
+                  <Pressable
+                    style={styles.insightsRefreshBtn}
+                    onPress={() => {
+                      if (vendor?.id) {
+                        const { start, end } = getInsightsDateRange()
+                        loadMetaInsights(vendor.id, start, end)
+                      }
+                    }}
+                    disabled={isLoadingInsights}
+                  >
+                    {isLoadingInsights ? (
+                      <ActivityIndicator size="small" color={colors.text.secondary} />
+                    ) : (
+                      <Ionicons name="refresh" size={18} color={colors.text.secondary} />
+                    )}
+                  </Pressable>
                 </View>
 
-                {/* Hero Stats - Followers Overview */}
-                {(metaInsights?.page || metaInsights?.instagram) && (
-                  <View style={styles.insightsHeroRow}>
-                    {/* Facebook Card */}
-                    {metaInsights?.page && (
-                      <View style={[styles.insightsHeroStat, { backgroundColor: '#1877F2' }]}>
-                        <Ionicons name="logo-facebook" size={28} color="rgba(255,255,255,0.9)" style={{ marginBottom: spacing.xs }} />
-                        <Text style={styles.insightsHeroValue}>{formatMetaNumber(metaInsights.page.totalFollowers)}</Text>
-                        <Text style={styles.insightsHeroLabel}>Facebook</Text>
-                        {metaInsights.page.newFollowers > 0 && (
-                          <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: spacing.xs, backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: spacing.sm, paddingVertical: 2, borderRadius: radius.full }}>
-                            <Ionicons name="trending-up" size={12} color="#FFFFFF" />
-                            <Text style={{ color: '#FFFFFF', fontSize: 11, fontWeight: '600', marginLeft: 4 }}>+{metaInsights.page.newFollowers}</Text>
+                {/* Loading State */}
+                {isLoadingInsights && (
+                  <View style={styles.insightsLoading}>
+                    <ActivityIndicator size="large" color="#1877F2" />
+                    <Text style={styles.insightsLoadingText}>Loading insights...</Text>
+                  </View>
+                )}
+
+                {/* Main Content - Always show structure */}
+                {!isLoadingInsights && (
+                  <>
+                    {/* Platform Cards Row */}
+                    <View style={styles.platformCardsRow}>
+                      {/* Facebook Card */}
+                      <View style={styles.platformCard}>
+                        <View style={styles.platformCardHeader}>
+                          <View style={[styles.platformIcon, { backgroundColor: '#1877F2' }]}>
+                            <FontAwesome5 name="facebook-f" size={16} color="#fff" />
                           </View>
-                        )}
-                      </View>
-                    )}
-                    {/* Instagram Card */}
-                    {metaInsights?.instagram && (
-                      <View style={[styles.insightsHeroStat, { backgroundColor: '#E4405F' }]}>
-                        <Ionicons name="logo-instagram" size={28} color="rgba(255,255,255,0.9)" style={{ marginBottom: spacing.xs }} />
-                        <Text style={styles.insightsHeroValue}>{formatMetaNumber(metaInsights.instagram.followers)}</Text>
-                        <Text style={styles.insightsHeroLabel}>Instagram</Text>
-                        {(metaInsights.instagram.newFollowers || 0) > 0 && (
-                          <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: spacing.xs, backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: spacing.sm, paddingVertical: 2, borderRadius: radius.full }}>
-                            <Ionicons name="trending-up" size={12} color="#FFFFFF" />
-                            <Text style={{ color: '#FFFFFF', fontSize: 11, fontWeight: '600', marginLeft: 4 }}>+{metaInsights.instagram.newFollowers}</Text>
+                          <Text style={styles.platformName}>Facebook</Text>
+                        </View>
+                        <View style={styles.platformStats}>
+                          <View style={styles.platformStatRow}>
+                            <Text style={styles.platformStatLabel}>Followers</Text>
+                            <Text style={styles.platformStatValue}>
+                              {metaInsights?.page?.totalFollowers != null ? formatMetaNumber(metaInsights.page.totalFollowers) : '—'}
+                            </Text>
                           </View>
-                        )}
-                      </View>
-                    )}
-                  </View>
-                )}
-
-                {/* Facebook Page Engagement */}
-                {metaInsights?.page && (
-                  <View style={styles.insightsSectionCard}>
-                    <View style={styles.insightsSectionHeader}>
-                      <Ionicons name="logo-facebook" size={20} color="#1877F2" />
-                      <Text style={styles.insightsSectionTitle}>Facebook Engagement</Text>
-                      <View style={styles.insightsSectionBadge}>
-                        <Text style={styles.insightsSectionBadgeText}>{(metaInsights.page as any).postCount || 0} posts</Text>
-                      </View>
-                    </View>
-                    <View style={styles.insightsSectionContent}>
-                      <View style={styles.insightsStatRow}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
-                          <Ionicons name="heart" size={18} color="#EF4444" />
-                          <Text style={styles.insightsStatLabel}>Total Reactions</Text>
-                        </View>
-                        <Text style={styles.insightsStatValue}>{formatMetaNumber((metaInsights.page as any).totalReactions || metaInsights.page.postEngagements)}</Text>
-                      </View>
-                      <View style={styles.insightsStatRow}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
-                          <Ionicons name="thumbs-up" size={18} color="#1877F2" />
-                          <Text style={styles.insightsStatLabel}>Likes</Text>
-                        </View>
-                        <Text style={styles.insightsStatValue}>{formatMetaNumber((metaInsights.page as any).totalLikes || 0)}</Text>
-                      </View>
-                      <View style={styles.insightsStatRow}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
-                          <Ionicons name="chatbubble" size={18} color="#10B981" />
-                          <Text style={styles.insightsStatLabel}>Comments</Text>
-                        </View>
-                        <Text style={styles.insightsStatValue}>{formatMetaNumber((metaInsights.page as any).totalComments || 0)}</Text>
-                      </View>
-                      <View style={[styles.insightsStatRow, styles.insightsStatRowLast]}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
-                          <Ionicons name="share-social" size={18} color="#8B5CF6" />
-                          <Text style={styles.insightsStatLabel}>Shares</Text>
-                        </View>
-                        <Text style={styles.insightsStatValue}>{formatMetaNumber((metaInsights.page as any).totalShares || 0)}</Text>
-                      </View>
-                    </View>
-                  </View>
-                )}
-
-                {/* Instagram Engagement */}
-                {metaInsights?.instagram && (
-                  <View style={styles.insightsSectionCard}>
-                    <View style={styles.insightsSectionHeader}>
-                      <Ionicons name="logo-instagram" size={20} color="#E4405F" />
-                      <Text style={styles.insightsSectionTitle}>Instagram Activity</Text>
-                      <View style={styles.insightsSectionBadge}>
-                        <Text style={styles.insightsSectionBadgeText}>{(metaInsights.instagram as any).mediaCount || 0} posts</Text>
-                      </View>
-                    </View>
-                    <View style={styles.insightsSectionContent}>
-                      <View style={styles.insightsStatRow}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
-                          <Ionicons name="heart" size={18} color="#EF4444" />
-                          <Text style={styles.insightsStatLabel}>Likes (30d)</Text>
-                        </View>
-                        <Text style={styles.insightsStatValue}>{formatMetaNumber((metaInsights.instagram as any).totalLikes || 0)}</Text>
-                      </View>
-                      <View style={styles.insightsStatRow}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
-                          <Ionicons name="chatbubble" size={18} color="#10B981" />
-                          <Text style={styles.insightsStatLabel}>Comments (30d)</Text>
-                        </View>
-                        <Text style={styles.insightsStatValue}>{formatMetaNumber((metaInsights.instagram as any).totalComments || 0)}</Text>
-                      </View>
-                      <View style={styles.insightsStatRow}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
-                          <Ionicons name="eye" size={18} color="#1877F2" />
-                          <Text style={styles.insightsStatLabel}>Profile Views</Text>
-                        </View>
-                        <Text style={styles.insightsStatValue}>{formatMetaNumber(metaInsights.instagram.profileViews)}</Text>
-                      </View>
-                      <View style={[styles.insightsStatRow, styles.insightsStatRowLast]}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
-                          <Ionicons name="people" size={18} color="#8B5CF6" />
-                          <Text style={styles.insightsStatLabel}>Reach</Text>
-                        </View>
-                        <Text style={styles.insightsStatValue}>{formatMetaNumber(metaInsights.instagram.reach)}</Text>
-                      </View>
-                    </View>
-                  </View>
-                )}
-
-                {/* Paid Ads Performance */}
-                {metaInsights?.summary && (
-                  <View style={styles.insightsSectionCard}>
-                    <View style={styles.insightsSectionHeader}>
-                      <Ionicons name="megaphone" size={20} color="#F59E0B" />
-                      <Text style={styles.insightsSectionTitle}>Paid Ads</Text>
-                      <View style={[styles.insightsSectionBadge, metaInsights.summary.roas >= 1 ? { backgroundColor: 'rgba(16,185,129,0.15)' } : { backgroundColor: 'rgba(239,68,68,0.15)' }]}>
-                        <Text style={[styles.insightsSectionBadgeText, metaInsights.summary.roas >= 1 ? { color: '#10B981' } : { color: '#EF4444' }]}>
-                          {metaInsights.summary.roas.toFixed(2)}x ROAS
-                        </Text>
-                      </View>
-                    </View>
-                    <View style={styles.insightsSectionContent}>
-                      {/* Top row - key metrics */}
-                      <View style={{ flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.md }}>
-                        <View style={{ flex: 1, backgroundColor: 'rgba(245,158,11,0.1)', borderRadius: radius.md, padding: spacing.md, alignItems: 'center' }}>
-                          <Text style={{ fontSize: 20, fontWeight: '700', color: '#F59E0B' }}>{formatMetaSpend(metaInsights.summary.spend)}</Text>
-                          <Text style={{ fontSize: 11, color: colors.text.tertiary, marginTop: 2 }}>Total Spend</Text>
-                        </View>
-                        <View style={{ flex: 1, backgroundColor: 'rgba(16,185,129,0.1)', borderRadius: radius.md, padding: spacing.md, alignItems: 'center' }}>
-                          <Text style={{ fontSize: 20, fontWeight: '700', color: '#10B981' }}>{metaInsights.summary.purchases}</Text>
-                          <Text style={{ fontSize: 11, color: colors.text.tertiary, marginTop: 2 }}>Purchases</Text>
-                        </View>
-                      </View>
-                      {/* Stats rows */}
-                      <View style={styles.insightsStatRow}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
-                          <Ionicons name="eye-outline" size={18} color={colors.text.tertiary} />
-                          <Text style={styles.insightsStatLabel}>Impressions</Text>
-                        </View>
-                        <Text style={styles.insightsStatValue}>{formatMetaNumber(metaInsights.summary.impressions)}</Text>
-                      </View>
-                      <View style={styles.insightsStatRow}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
-                          <Ionicons name="people-outline" size={18} color={colors.text.tertiary} />
-                          <Text style={styles.insightsStatLabel}>Reach</Text>
-                        </View>
-                        <Text style={styles.insightsStatValue}>{formatMetaNumber(metaInsights.summary.reach)}</Text>
-                      </View>
-                      <View style={styles.insightsStatRow}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
-                          <Ionicons name="finger-print-outline" size={18} color={colors.text.tertiary} />
-                          <Text style={styles.insightsStatLabel}>Clicks</Text>
-                        </View>
-                        <Text style={styles.insightsStatValue}>{formatMetaNumber(metaInsights.summary.clicks)}</Text>
-                      </View>
-                      <View style={styles.insightsStatRow}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
-                          <Ionicons name="cash-outline" size={18} color={colors.text.tertiary} />
-                          <Text style={styles.insightsStatLabel}>Cost per Click</Text>
-                        </View>
-                        <Text style={styles.insightsStatValue}>{formatMetaSpend(metaInsights.summary.cpc)}</Text>
-                      </View>
-                      <View style={[styles.insightsStatRow, styles.insightsStatRowLast]}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
-                          <Ionicons name="trending-up-outline" size={18} color={colors.text.tertiary} />
-                          <Text style={styles.insightsStatLabel}>Click-through Rate</Text>
-                        </View>
-                        <Text style={styles.insightsStatValue}>{metaInsights.summary.ctr.toFixed(2)}%</Text>
-                      </View>
-                    </View>
-                  </View>
-                )}
-
-                {/* Daily Spend Chart */}
-                {metaInsights?.daily && metaInsights.daily.length > 0 && (
-                  <View style={styles.insightsSectionCard}>
-                    <View style={styles.insightsSectionHeader}>
-                      <Ionicons name="bar-chart" size={20} color="#8B5CF6" />
-                      <Text style={styles.insightsSectionTitle}>Daily Trend</Text>
-                    </View>
-                    <View style={{ padding: spacing.md }}>
-                      <View style={styles.chartContainer}>
-                        {(() => {
-                          const maxSpend = Math.max(...metaInsights.daily.map(d => d.spend), 1)
-                          return metaInsights.daily.slice(-14).map((day, idx) => (
-                            <View key={day.date} style={styles.chartBar}>
-                              <View style={[styles.chartBarFill, { height: `${(day.spend / maxSpend) * 100}%`, backgroundColor: '#8B5CF6' }]} />
-                              <Text style={styles.chartBarLabel}>{day.date.slice(-2)}</Text>
-                            </View>
-                          ))
-                        })()}
-                      </View>
-                    </View>
-                  </View>
-                )}
-
-                {/* Campaign Breakdown */}
-                {metaInsights?.campaigns && metaInsights.campaigns.length > 0 && (
-                  <View style={styles.insightsSectionCard}>
-                    <View style={styles.insightsSectionHeader}>
-                      <Ionicons name="layers" size={20} color="#06B6D4" />
-                      <Text style={styles.insightsSectionTitle}>Campaigns</Text>
-                      <View style={[styles.insightsSectionBadge, { backgroundColor: 'rgba(6,182,212,0.15)' }]}>
-                        <Text style={[styles.insightsSectionBadgeText, { color: '#06B6D4' }]}>{metaInsights.campaigns.length} active</Text>
-                      </View>
-                    </View>
-                    <View style={{ padding: spacing.sm }}>
-                      {metaInsights.campaigns.slice(0, 5).map((campaign, idx) => (
-                        <View key={campaign.campaignId} style={[styles.campaignRow, idx > 0 && { borderTopWidth: 1, borderTopColor: colors.border.subtle }]}>
-                          <View style={{ flex: 1 }}>
-                            <Text style={styles.campaignName} numberOfLines={1}>{campaign.campaignName}</Text>
-                            <View style={{ flexDirection: 'row', gap: spacing.md, marginTop: spacing.xs }}>
-                              <Text style={styles.campaignStat}>
-                                <Text style={{ color: colors.text.quaternary }}>Spend: </Text>
-                                {formatMetaSpend(campaign.spend)}
-                              </Text>
-                              <Text style={styles.campaignStat}>
-                                <Text style={{ color: colors.text.quaternary }}>Clicks: </Text>
-                                {formatMetaNumber(campaign.clicks)}
-                              </Text>
-                            </View>
+                          <View style={styles.platformStatRow}>
+                            <Text style={styles.platformStatLabel}>Posts</Text>
+                            <Text style={styles.platformStatValue}>
+                              {(metaInsights?.page as any)?.postCount != null ? (metaInsights?.page as any)?.postCount : '—'}
+                            </Text>
                           </View>
-                          <View style={[styles.roasBadge, campaign.roas >= 1 ? styles.roasPositive : styles.roasNegative]}>
-                            <Text style={{ fontSize: 12, fontWeight: '700', color: campaign.roas >= 1 ? '#10B981' : '#EF4444' }}>
-                              {campaign.roas.toFixed(1)}x
+                          <View style={styles.platformStatRow}>
+                            <Text style={styles.platformStatLabel}>Likes</Text>
+                            <Text style={styles.platformStatValue}>
+                              {(metaInsights?.page as any)?.totalLikes != null ? formatMetaNumber((metaInsights?.page as any)?.totalLikes) : '—'}
+                            </Text>
+                          </View>
+                          <View style={styles.platformStatRow}>
+                            <Text style={styles.platformStatLabel}>Comments</Text>
+                            <Text style={styles.platformStatValue}>
+                              {(metaInsights?.page as any)?.totalComments != null ? formatMetaNumber((metaInsights?.page as any)?.totalComments) : '—'}
+                            </Text>
+                          </View>
+                          <View style={styles.platformStatRow}>
+                            <Text style={styles.platformStatLabel}>Shares</Text>
+                            <Text style={styles.platformStatValue}>
+                              {(metaInsights?.page as any)?.totalShares != null ? formatMetaNumber((metaInsights?.page as any)?.totalShares) : '—'}
                             </Text>
                           </View>
                         </View>
-                      ))}
-                    </View>
-                  </View>
-                )}
+                      </View>
 
-                {/* No Data State / Debug Info */}
-                {!isLoadingInsights && !metaInsights?.summary && !metaInsights?.page && !metaInsights?.instagram && (
-                  <View style={styles.section}>
-                    <View style={styles.glassCard}>
-                      <View style={{ padding: spacing.xl, alignItems: 'center' }}>
-                        <Ionicons name="stats-chart-outline" size={48} color={colors.text.quaternary} />
-                        <Text style={{ color: colors.text.tertiary, marginTop: spacing.md, fontSize: 16, fontWeight: '600' }}>
-                          No Insights Available
-                        </Text>
-                        <Text style={{ color: colors.text.quaternary, marginTop: spacing.xs, fontSize: 13, textAlign: 'center' }}>
-                          Connect a Facebook Page or Instagram account to see insights
-                        </Text>
-
-                        {/* Debug info */}
-                        {(metaInsights as any)?.debug && (
-                          <View style={{ marginTop: spacing.lg, padding: spacing.md, backgroundColor: 'rgba(255,0,0,0.1)', borderRadius: radius.md, width: '100%' }}>
-                            <Text style={{ color: '#EF4444', fontSize: 12, fontWeight: '600', marginBottom: spacing.xs }}>Debug Info:</Text>
-                            {(metaInsights as any).debug.pageError && (
-                              <Text style={{ color: '#EF4444', fontSize: 11, marginBottom: 4 }}>
-                                Page Error: {(metaInsights as any).debug.pageError}
-                              </Text>
-                            )}
-                            {(metaInsights as any).debug.instagramError && (
-                              <Text style={{ color: '#EF4444', fontSize: 11, marginBottom: 4 }}>
-                                Instagram Error: {(metaInsights as any).debug.instagramError}
-                              </Text>
-                            )}
-                            <Text style={{ color: colors.text.quaternary, fontSize: 10, marginTop: spacing.xs }}>
-                              Has Page ID: {(metaInsights as any).debug.hasPageId ? 'Yes' : 'No'} |
-                              Has IG ID: {(metaInsights as any).debug.hasInstagramId ? 'Yes' : 'No'} |
-                              Has Ad Account: {(metaInsights as any).debug.hasAdAccountId ? 'Yes' : 'No'}
+                      {/* Instagram Card */}
+                      <View style={styles.platformCard}>
+                        <View style={styles.platformCardHeader}>
+                          <View style={[styles.platformIcon, { backgroundColor: '#E4405F' }]}>
+                            <FontAwesome5 name="instagram" size={16} color="#fff" />
+                          </View>
+                          <Text style={styles.platformName}>Instagram</Text>
+                        </View>
+                        <View style={styles.platformStats}>
+                          <View style={styles.platformStatRow}>
+                            <Text style={styles.platformStatLabel}>Followers</Text>
+                            <Text style={styles.platformStatValue}>
+                              {metaInsights?.instagram?.followers != null ? formatMetaNumber(metaInsights.instagram.followers) : '—'}
                             </Text>
                           </View>
-                        )}
+                          <View style={styles.platformStatRow}>
+                            <Text style={styles.platformStatLabel}>Posts</Text>
+                            <Text style={styles.platformStatValue}>
+                              {(metaInsights?.instagram as any)?.recentPostCount != null ? (metaInsights?.instagram as any)?.recentPostCount : '—'}
+                            </Text>
+                          </View>
+                          <View style={styles.platformStatRow}>
+                            <Text style={styles.platformStatLabel}>Likes</Text>
+                            <Text style={styles.platformStatValue}>
+                              {(metaInsights?.instagram as any)?.totalLikes != null ? formatMetaNumber((metaInsights?.instagram as any)?.totalLikes) : '—'}
+                            </Text>
+                          </View>
+                          <View style={styles.platformStatRow}>
+                            <Text style={styles.platformStatLabel}>Comments</Text>
+                            <Text style={styles.platformStatValue}>
+                              {(metaInsights?.instagram as any)?.totalComments != null ? formatMetaNumber((metaInsights?.instagram as any)?.totalComments) : '—'}
+                            </Text>
+                          </View>
+                          <View style={styles.platformStatRow}>
+                            <Text style={styles.platformStatLabel}>Reach</Text>
+                            <Text style={styles.platformStatValue}>
+                              {metaInsights?.instagram?.reach != null ? formatMetaNumber(metaInsights.instagram.reach) : '—'}
+                            </Text>
+                          </View>
+                        </View>
                       </View>
                     </View>
-                  </View>
+
+                    {/* Ads Performance Section */}
+                    {metaInsights?.summary && (
+                      <View style={styles.adsSection}>
+                        <View style={styles.adsSectionHeader}>
+                          <FontAwesome5 name="bullhorn" size={14} color="#F59E0B" />
+                          <Text style={styles.adsSectionTitle}>Paid Ads</Text>
+                          <View style={[
+                            styles.roasBadge,
+                            { backgroundColor: metaInsights.summary.roas >= 1 ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)' }
+                          ]}>
+                            <Text style={[
+                              styles.roasBadgeText,
+                              { color: metaInsights.summary.roas >= 1 ? '#10B981' : '#EF4444' }
+                            ]}>
+                              {metaInsights.summary.roas.toFixed(2)}x ROAS
+                            </Text>
+                          </View>
+                        </View>
+                        <View style={styles.adsGrid}>
+                          <View style={styles.adsGridItem}>
+                            <Text style={[styles.adsGridValue, { color: '#F59E0B' }]}>{formatMetaSpend(metaInsights.summary.spend)}</Text>
+                            <Text style={styles.adsGridLabel}>Spend</Text>
+                          </View>
+                          <View style={styles.adsGridItem}>
+                            <Text style={[styles.adsGridValue, { color: '#10B981' }]}>{metaInsights.summary.purchases}</Text>
+                            <Text style={styles.adsGridLabel}>Sales</Text>
+                          </View>
+                          <View style={styles.adsGridItem}>
+                            <Text style={styles.adsGridValue}>{formatMetaNumber(metaInsights.summary.impressions)}</Text>
+                            <Text style={styles.adsGridLabel}>Impressions</Text>
+                          </View>
+                          <View style={styles.adsGridItem}>
+                            <Text style={styles.adsGridValue}>{formatMetaNumber(metaInsights.summary.clicks)}</Text>
+                            <Text style={styles.adsGridLabel}>Clicks</Text>
+                          </View>
+                          <View style={styles.adsGridItem}>
+                            <Text style={styles.adsGridValue}>{metaInsights.summary.ctr.toFixed(2)}%</Text>
+                            <Text style={styles.adsGridLabel}>CTR</Text>
+                          </View>
+                          <View style={styles.adsGridItem}>
+                            <Text style={styles.adsGridValue}>{formatMetaSpend(metaInsights.summary.cpc)}</Text>
+                            <Text style={styles.adsGridLabel}>CPC</Text>
+                          </View>
+                        </View>
+                      </View>
+                    )}
+
+                    {/* Campaigns List */}
+                    {metaInsights?.campaigns && metaInsights.campaigns.length > 0 && (
+                      <View style={styles.campaignsSection}>
+                        <Text style={styles.campaignsSectionTitle}>Top Campaigns</Text>
+                        {metaInsights.campaigns.slice(0, 5).map((campaign) => (
+                          <View key={campaign.campaignId} style={styles.campaignRow}>
+                            <View style={styles.campaignRowInfo}>
+                              <Text style={styles.campaignRowName} numberOfLines={1}>{campaign.campaignName}</Text>
+                              <Text style={styles.campaignRowStats}>
+                                {formatMetaSpend(campaign.spend)} · {formatMetaNumber(campaign.clicks)} clicks
+                              </Text>
+                            </View>
+                            <View style={[
+                              styles.campaignRowRoas,
+                              { backgroundColor: campaign.roas >= 1 ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)' }
+                            ]}>
+                              <Text style={[
+                                styles.campaignRowRoasText,
+                                { color: campaign.roas >= 1 ? '#10B981' : '#EF4444' }
+                              ]}>
+                                {campaign.roas.toFixed(1)}x
+                              </Text>
+                            </View>
+                          </View>
+                        ))}
+                      </View>
+                    )}
+
+                    {/* Empty State - only show if nothing loaded */}
+                    {!metaInsights?.page && !metaInsights?.instagram && !metaInsights?.summary && (
+                      <View style={styles.insightsEmpty}>
+                        <Ionicons name="analytics-outline" size={48} color={colors.text.quaternary} />
+                        <Text style={styles.insightsEmptyTitle}>No data available</Text>
+                        <Text style={styles.insightsEmptyText}>
+                          Connect your Facebook Page or Instagram account to see insights
+                        </Text>
+                      </View>
+                    )}
+                  </>
                 )}
               </>
             )}
@@ -3962,7 +4309,7 @@ function MarketingScreenComponent() {
             <Pressable onPress={() => setShowAffiliateModal(false)}>
               <Text style={styles.modalCancel}>Cancel</Text>
             </Pressable>
-            <Text style={styles.modalTitle}>Add Affiliate</Text>
+            <Text style={styles.modalHeaderTitle}>Add Affiliate</Text>
             <Pressable
               onPress={async () => {
                 if (!vendor?.id || !affiliateFormData.email || !affiliateFormData.first_name) return
@@ -4104,6 +4451,995 @@ function MarketingScreenComponent() {
         </View>
       </Modal>
 
+      {/* Campaign Creation Modal - Full Screen */}
+      <Modal
+        visible={showCampaignModal}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={() => setShowCampaignModal(false)}
+      >
+        <View style={[styles.creatorContainer, { paddingTop: insets.top }]}>
+          <View style={styles.creatorLayout}>
+            {/* LEFT PANEL - Form */}
+            <View style={styles.creatorSidebar}>
+              <View style={styles.creatorHeader}>
+                <Pressable onPress={() => setShowCampaignModal(false)}>
+                  <Ionicons name="close" size={24} color={colors.text.primary} />
+                </Pressable>
+                <Text style={styles.creatorTitle}>Create Ad Campaign</Text>
+                <View style={{ width: 24 }} />
+              </View>
+
+              <ScrollView
+                style={styles.creatorScroll}
+                contentContainerStyle={styles.creatorContent}
+                showsVerticalScrollIndicator={false}
+              >
+                {/* STEP 1: Campaign Details */}
+                <View style={styles.creatorSection}>
+                  <Text style={styles.stepLabel}>1. CAMPAIGN DETAILS</Text>
+                  <TextInput
+                    style={styles.adInput}
+                    placeholder="Campaign name"
+                    placeholderTextColor={colors.text.placeholder}
+                    value={campaignForm.name}
+                    onChangeText={(text) => setCampaignForm(f => ({ ...f, name: text }))}
+                  />
+                </View>
+
+                {/* STEP 2: Objective */}
+                <View style={styles.creatorSection}>
+                  <Text style={styles.stepLabel}>2. OBJECTIVE</Text>
+                  <Text style={styles.adHelpText}>What do you want to achieve with this campaign?</Text>
+                  <View style={styles.objectiveGrid}>
+                    {[
+                      { value: 'OUTCOME_SALES', label: 'Sales', icon: 'cart', desc: 'Drive purchases on your website' },
+                      { value: 'OUTCOME_TRAFFIC', label: 'Traffic', icon: 'arrow-forward', desc: 'Send people to your website' },
+                      { value: 'OUTCOME_ENGAGEMENT', label: 'Engagement', icon: 'heart', desc: 'Get more likes, comments, shares' },
+                      { value: 'OUTCOME_LEADS', label: 'Leads', icon: 'people', desc: 'Collect contact information' },
+                      { value: 'OUTCOME_AWARENESS', label: 'Awareness', icon: 'eye', desc: 'Reach new audiences' },
+                    ].map((obj) => (
+                      <Pressable
+                        key={obj.value}
+                        style={[
+                          styles.objectiveCard,
+                          campaignForm.objective === obj.value && styles.objectiveCardActive,
+                        ]}
+                        onPress={() => setCampaignForm(f => ({ ...f, objective: obj.value }))}
+                      >
+                        <View style={[
+                          styles.objectiveIconWrap,
+                          campaignForm.objective === obj.value && styles.objectiveIconWrapActive,
+                        ]}>
+                          <Ionicons
+                            name={obj.icon as any}
+                            size={20}
+                            color={campaignForm.objective === obj.value ? '#10B981' : colors.text.tertiary}
+                          />
+                        </View>
+                        <Text style={[
+                          styles.objectiveCardLabel,
+                          campaignForm.objective === obj.value && styles.objectiveCardLabelActive,
+                        ]}>
+                          {obj.label}
+                        </Text>
+                        <Text style={styles.objectiveCardDesc}>{obj.desc}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                </View>
+
+                {/* STEP 3: Budget */}
+                <View style={styles.creatorSection}>
+                  <Text style={styles.stepLabel}>3. DAILY BUDGET</Text>
+
+                  {/* Budget Display */}
+                  <View style={styles.budgetDisplayContainer}>
+                    <Text style={styles.budgetDisplayAmount}>${campaignForm.dailyBudget}</Text>
+                    <Text style={styles.budgetDisplayPeriod}>per day</Text>
+                  </View>
+
+                  {/* Budget Slider */}
+                  <View style={styles.budgetSliderContainer}>
+                    <Slider
+                      style={styles.budgetSlider}
+                      minimumValue={5}
+                      maximumValue={500}
+                      step={5}
+                      value={campaignForm.dailyBudget}
+                      onValueChange={(value) => setCampaignForm(f => ({ ...f, dailyBudget: value }))}
+                      minimumTrackTintColor="#1877F2"
+                      maximumTrackTintColor={colors.border.regular}
+                      thumbTintColor="#1877F2"
+                    />
+                    <View style={styles.budgetSliderLabels}>
+                      <Text style={styles.budgetSliderLabel}>$5</Text>
+                      <Text style={styles.budgetSliderLabel}>$500</Text>
+                    </View>
+                  </View>
+
+                  {/* Quick Presets */}
+                  <View style={styles.budgetPresets}>
+                    {[10, 25, 50, 100, 200].map((amount) => (
+                      <Pressable
+                        key={amount}
+                        style={[
+                          styles.budgetPreset,
+                          campaignForm.dailyBudget === amount && styles.budgetPresetActive,
+                        ]}
+                        onPress={() => setCampaignForm(f => ({ ...f, dailyBudget: amount }))}
+                      >
+                        <Text style={[
+                          styles.budgetPresetText,
+                          campaignForm.dailyBudget === amount && styles.budgetPresetTextActive,
+                        ]}>
+                          ${amount}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
+
+                  {/* Monthly Estimate */}
+                  <View style={styles.budgetEstimateContainer}>
+                    <Ionicons name="calendar-outline" size={16} color={colors.text.tertiary} />
+                    <Text style={styles.budgetEstimate}>
+                      Estimated monthly: <Text style={styles.budgetEstimateValue}>${(campaignForm.dailyBudget * 30).toLocaleString()}</Text>
+                    </Text>
+                  </View>
+                </View>
+
+                {/* STEP 4: Launch Settings */}
+                <View style={styles.creatorSection}>
+                  <Text style={styles.stepLabel}>4. LAUNCH SETTINGS</Text>
+                  <Pressable
+                    style={styles.launchOption}
+                    onPress={() => setCampaignForm(f => ({ ...f, status: 'PAUSED' }))}
+                  >
+                    <View style={[
+                      styles.launchRadio,
+                      campaignForm.status === 'PAUSED' && styles.launchRadioActive,
+                    ]}>
+                      {campaignForm.status === 'PAUSED' && <View style={styles.launchRadioDot} />}
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.launchOptionLabel}>Start Paused</Text>
+                      <Text style={styles.launchOptionDesc}>Review and activate manually in Meta Ads Manager</Text>
+                    </View>
+                  </Pressable>
+                  <Pressable
+                    style={styles.launchOption}
+                    onPress={() => setCampaignForm(f => ({ ...f, status: 'ACTIVE' }))}
+                  >
+                    <View style={[
+                      styles.launchRadio,
+                      campaignForm.status === 'ACTIVE' && styles.launchRadioActive,
+                    ]}>
+                      {campaignForm.status === 'ACTIVE' && <View style={styles.launchRadioDot} />}
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.launchOptionLabel}>Launch Immediately</Text>
+                      <Text style={styles.launchOptionDesc}>Campaign will go live after Meta review</Text>
+                    </View>
+                  </Pressable>
+                </View>
+              </ScrollView>
+
+              {/* Bottom Actions */}
+              <View style={styles.adCreatorActions}>
+                <Pressable
+                  style={styles.adCreatorCancel}
+                  onPress={() => {
+                    setShowCampaignModal(false)
+                    setEditingDraftId(null)
+                  }}
+                >
+                  <Text style={styles.adCreatorCancelText}>Cancel</Text>
+                </Pressable>
+
+                {/* Save Draft Button */}
+                <Pressable
+                  style={[
+                    styles.adCreatorDraft,
+                    (!campaignForm.name || isSavingDraft) && styles.adCreatorDraftDisabled,
+                  ]}
+                  onPress={async () => {
+                    if (!campaignForm.name || !vendor?.id || isSavingDraft) return
+                    setIsSavingDraft(true)
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                    try {
+                      await saveCampaignDraft(vendor.id, {
+                        id: editingDraftId || undefined,
+                        name: campaignForm.name,
+                        objective: campaignForm.objective,
+                        daily_budget: campaignForm.dailyBudget,
+                        status: 'DRAFT',
+                      })
+                      setShowCampaignModal(false)
+                      setCampaignForm({ name: '', objective: 'OUTCOME_SALES', dailyBudget: 25, status: 'PAUSED' })
+                      setEditingDraftId(null)
+                      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+                      syncMetaCampaigns(vendor.id)
+                    } finally {
+                      setIsSavingDraft(false)
+                    }
+                  }}
+                  disabled={!campaignForm.name || isSavingDraft}
+                >
+                  {isSavingDraft ? (
+                    <ActivityIndicator size="small" color={colors.text.secondary} />
+                  ) : (
+                    <>
+                      <Ionicons name="document-outline" size={16} color={colors.text.secondary} />
+                      <Text style={styles.adCreatorDraftText}>
+                        {editingDraftId ? 'Update Draft' : 'Save Draft'}
+                      </Text>
+                    </>
+                  )}
+                </Pressable>
+
+                {/* Create Campaign Button */}
+                <Pressable
+                  style={[
+                    styles.adCreatorSubmit,
+                    (!campaignForm.name || isCreatingCampaign) && styles.adCreatorSubmitDisabled,
+                  ]}
+                  onPress={async () => {
+                    if (!campaignForm.name || !vendor?.id || isCreatingCampaign) return
+                    setIsCreatingCampaign(true)
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+                    try {
+                      const result = await createMetaCampaign(vendor.id, {
+                        name: campaignForm.name,
+                        objective: campaignForm.objective,
+                        status: campaignForm.status,
+                        daily_budget: campaignForm.dailyBudget,
+                      })
+                      if (result) {
+                        // Delete draft if we were editing one
+                        if (editingDraftId) {
+                          await deleteCampaignDraft(editingDraftId)
+                        }
+                        setShowCampaignModal(false)
+                        setCampaignForm({ name: '', objective: 'OUTCOME_SALES', dailyBudget: 25, status: 'PAUSED' })
+                        setEditingDraftId(null)
+                        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+                        syncMetaCampaigns(vendor.id)
+                      } else {
+                        // Show error if no result returned
+                        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
+                        Alert.alert(
+                          'Campaign Creation Failed',
+                          'Could not create the campaign. Please check your Meta permissions and try again.',
+                          [{ text: 'OK' }]
+                        )
+                      }
+                    } catch (err: any) {
+                      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
+                      Alert.alert(
+                        'Campaign Creation Failed',
+                        err?.message || 'An unexpected error occurred. Please try again.',
+                        [{ text: 'OK' }]
+                      )
+                    } finally {
+                      setIsCreatingCampaign(false)
+                    }
+                  }}
+                  disabled={!campaignForm.name || isCreatingCampaign}
+                >
+                  {isCreatingCampaign ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <>
+                      <FontAwesome5 name="rocket" size={14} color="#fff" />
+                      <Text style={styles.adCreatorSubmitText}>Create Campaign</Text>
+                    </>
+                  )}
+                </Pressable>
+              </View>
+            </View>
+
+            {/* RIGHT PANEL - Preview */}
+            <View style={styles.creatorPreview}>
+              <View style={styles.adPreviewHeader}>
+                <Text style={styles.adPreviewTitle}>Campaign Preview</Text>
+              </View>
+              <View style={styles.adPreviewContent}>
+                {campaignForm.name ? (
+                  <View style={styles.adPreviewCard}>
+                    <View style={styles.adPreviewCardHeader}>
+                      <View style={[styles.adPreviewStatus, { backgroundColor: campaignForm.status === 'ACTIVE' ? '#10B981' : '#F59E0B' }]} />
+                      <Text style={styles.adPreviewCardName}>{campaignForm.name}</Text>
+                    </View>
+                    <View style={styles.adPreviewMeta}>
+                      <View style={styles.adPreviewMetaItem}>
+                        <Ionicons name="flag" size={14} color={colors.text.tertiary} />
+                        <Text style={styles.adPreviewMetaText}>
+                          {campaignForm.objective.replace('OUTCOME_', '')}
+                        </Text>
+                      </View>
+                      <View style={styles.adPreviewMetaItem}>
+                        <Ionicons name="wallet" size={14} color={colors.text.tertiary} />
+                        <Text style={styles.adPreviewMetaText}>
+                          ${campaignForm.dailyBudget || '0'}/day
+                        </Text>
+                      </View>
+                      <View style={styles.adPreviewMetaItem}>
+                        <Ionicons name="time" size={14} color={colors.text.tertiary} />
+                        <Text style={styles.adPreviewMetaText}>
+                          {campaignForm.status === 'ACTIVE' ? 'Starts immediately' : 'Starts paused'}
+                        </Text>
+                      </View>
+                    </View>
+                    <View style={styles.adPreviewNote}>
+                      <Ionicons name="information-circle" size={16} color="#3B82F6" />
+                      <Text style={styles.adPreviewNoteText}>
+                        After creating, add Ad Sets and Ads in Meta Ads Manager to complete setup
+                      </Text>
+                    </View>
+                  </View>
+                ) : (
+                  <View style={styles.adPreviewEmpty}>
+                    <FontAwesome5 name="ad" size={48} color={colors.text.quaternary} />
+                    <Text style={styles.adPreviewEmptyText}>Enter campaign details to see preview</Text>
+                  </View>
+                )}
+              </View>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Ad Set Creation Modal - Full Featured */}
+      <Modal
+        visible={showAdSetModal}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={() => setShowAdSetModal(false)}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={{ flex: 1 }}
+        >
+        <View style={[styles.modalContainer, { paddingTop: insets.top, backgroundColor: colors.background.primary }]}>
+          {/* Header */}
+          <View style={[styles.modalHeader, { borderBottomWidth: 1, borderBottomColor: colors.border.light }]}>
+            <Pressable onPress={() => setShowAdSetModal(false)} style={{ padding: 4 }}>
+              <Ionicons name="close" size={24} color={colors.text.primary} />
+            </Pressable>
+            <Text style={styles.modalTitle}>Create Ad Set</Text>
+            <Pressable
+              onPress={async () => {
+                if (!adSetForm.name || !vendor?.id || !selectedMetaCampaign || isCreatingAdSet) return
+                setIsCreatingAdSet(true)
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+                try {
+                  const result = await createMetaAdSet(vendor.id, {
+                    campaignId: selectedMetaCampaign,
+                    name: adSetForm.name,
+                    status: adSetForm.status,
+                    daily_budget: adSetForm.dailyBudget,
+                    optimization_goal: adSetForm.optimization_goal,
+                    billing_event: adSetForm.billing_event,
+                    targeting: {
+                      geo_locations: { countries: adSetForm.countries },
+                      age_min: adSetForm.age_min,
+                      age_max: adSetForm.age_max,
+                      genders: adSetForm.genders.length > 0 ? adSetForm.genders : undefined,
+                      interests: adSetForm.interests.length > 0 ? adSetForm.interests : undefined,
+                      publisher_platforms: adSetForm.publisher_platforms,
+                    },
+                  })
+                  if (result) {
+                    setShowAdSetModal(false)
+                    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+                  }
+                } catch (err: any) {
+                  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
+                  Alert.alert('Error', err?.message || 'Failed to create ad set')
+                } finally {
+                  setIsCreatingAdSet(false)
+                }
+              }}
+              disabled={!adSetForm.name || isCreatingAdSet}
+              style={{ opacity: (!adSetForm.name || isCreatingAdSet) ? 0.5 : 1 }}
+            >
+              {isCreatingAdSet ? (
+                <ActivityIndicator size="small" color="#1877F2" />
+              ) : (
+                <Text style={{ color: '#1877F2', fontWeight: '600', fontSize: 16 }}>Create</Text>
+              )}
+            </Pressable>
+          </View>
+
+          {/* Two Panel Layout */}
+          <View style={{ flex: 1, flexDirection: 'row' }}>
+            {/* LEFT PANEL - Form */}
+            <ScrollView
+              style={{ flex: 1 }}
+              contentContainerStyle={{ padding: spacing.lg, paddingBottom: 100 }}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+            >
+              {/* Ad Set Name */}
+              <View style={{ marginBottom: spacing.lg }}>
+                <Text style={styles.inputLabel}>Ad Set Name</Text>
+                <TextInput
+                  style={styles.adInput}
+                  placeholder="e.g., US Adults 25-55"
+                  placeholderTextColor={colors.text.placeholder}
+                  value={adSetForm.name}
+                  onChangeText={(text) => setAdSetForm(f => ({ ...f, name: text }))}
+                />
+              </View>
+
+              {/* Daily Budget */}
+              <View style={{ marginBottom: spacing.lg }}>
+                <Text style={styles.inputLabel}>Daily Budget</Text>
+                <View style={styles.budgetDisplayContainer}>
+                  <Text style={styles.budgetDisplayAmount}>${adSetForm.dailyBudget}</Text>
+                  <Text style={styles.budgetDisplayPeriod}>per day</Text>
+                </View>
+                <Slider
+                  style={styles.budgetSlider}
+                  minimumValue={5}
+                  maximumValue={500}
+                  step={5}
+                  value={adSetForm.dailyBudget}
+                  onValueChange={(value) => setAdSetForm(f => ({ ...f, dailyBudget: value }))}
+                  minimumTrackTintColor="#1877F2"
+                  maximumTrackTintColor={colors.border.regular}
+                  thumbTintColor="#1877F2"
+                />
+              </View>
+
+              {/* Gender */}
+              <View style={{ marginBottom: spacing.lg }}>
+                <Text style={styles.inputLabel}>Gender</Text>
+                <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+                  {[
+                    { value: [], label: 'All' },
+                    { value: [1], label: 'Men' },
+                    { value: [2], label: 'Women' },
+                  ].map((g) => (
+                    <Pressable
+                      key={g.label}
+                      style={[
+                        styles.budgetPreset,
+                        JSON.stringify(adSetForm.genders) === JSON.stringify(g.value) && styles.budgetPresetActive,
+                        { flex: 1 }
+                      ]}
+                      onPress={() => setAdSetForm(f => ({ ...f, genders: g.value }))}
+                    >
+                      <Text style={[
+                        styles.budgetPresetText,
+                        JSON.stringify(adSetForm.genders) === JSON.stringify(g.value) && styles.budgetPresetTextActive,
+                      ]}>
+                        {g.label}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+
+              {/* Age Range */}
+              <View style={{ marginBottom: spacing.lg }}>
+                <Text style={styles.inputLabel}>Age Range: {adSetForm.age_min} - {adSetForm.age_max}{adSetForm.age_max >= 65 ? '+' : ''}</Text>
+                <View style={{ flexDirection: 'row', gap: spacing.md }}>
+                  <View style={{ flex: 1 }}>
+                    <Slider
+                      minimumValue={18}
+                      maximumValue={65}
+                      step={1}
+                      value={adSetForm.age_min}
+                      onValueChange={(value) => setAdSetForm(f => ({ ...f, age_min: Math.min(value, f.age_max - 1) }))}
+                      minimumTrackTintColor="#1877F2"
+                      maximumTrackTintColor={colors.border.regular}
+                      thumbTintColor="#1877F2"
+                    />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Slider
+                      minimumValue={19}
+                      maximumValue={65}
+                      step={1}
+                      value={adSetForm.age_max}
+                      onValueChange={(value) => setAdSetForm(f => ({ ...f, age_max: Math.max(value, f.age_min + 1) }))}
+                      minimumTrackTintColor="#1877F2"
+                      maximumTrackTintColor={colors.border.regular}
+                      thumbTintColor="#1877F2"
+                    />
+                  </View>
+                </View>
+              </View>
+
+              {/* Interests - Smart Search */}
+              <View style={{ marginBottom: spacing.lg, zIndex: 10 }}>
+                <Text style={styles.inputLabel}>Detailed Targeting</Text>
+                <Text style={{ color: colors.text.tertiary, fontSize: 12, marginBottom: spacing.sm }}>
+                  Add interests, behaviors, or demographics
+                </Text>
+
+                {/* Search Input */}
+                <View style={{ position: 'relative' }}>
+                  <View style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    backgroundColor: colors.glass.regular,
+                    borderRadius: radius.md,
+                    borderWidth: 1,
+                    borderColor: interestSearch ? '#1877F2' : colors.border.light,
+                    paddingHorizontal: spacing.md,
+                  }}>
+                    <Ionicons name="search" size={18} color={colors.text.tertiary} />
+                    <TextInput
+                      style={{
+                        flex: 1,
+                        paddingVertical: spacing.md,
+                        paddingHorizontal: spacing.sm,
+                        fontSize: 15,
+                        color: colors.text.primary,
+                      }}
+                      placeholder="Search interests, behaviors..."
+                      placeholderTextColor={colors.text.placeholder}
+                      value={interestSearch}
+                      onChangeText={(text) => {
+                        setInterestSearch(text)
+                        // Debounced auto-search
+                        if (interestSearchRef.current) {
+                          clearTimeout(interestSearchRef.current)
+                        }
+                        if (text.trim().length >= 2 && vendor?.id) {
+                          interestSearchRef.current = setTimeout(async () => {
+                            setIsSearchingInterests(true)
+                            const results = await searchTargeting(vendor.id, 'interests', text)
+                            setInterestResults(results)
+                            setIsSearchingInterests(false)
+                          }, 300)
+                        } else {
+                          setInterestResults([])
+                        }
+                      }}
+                    />
+                    {isSearchingInterests && <ActivityIndicator size="small" color="#1877F2" />}
+                    {interestSearch && !isSearchingInterests && (
+                      <Pressable onPress={() => { setInterestSearch(''); setInterestResults([]) }}>
+                        <Ionicons name="close-circle" size={18} color={colors.text.tertiary} />
+                      </Pressable>
+                    )}
+                  </View>
+
+                  {/* Smart Search Dropdown */}
+                  {interestResults.length > 0 && (
+                    <View style={{
+                      position: 'absolute',
+                      top: '100%',
+                      left: 0,
+                      right: 0,
+                      backgroundColor: colors.background.primary,
+                      borderRadius: radius.md,
+                      borderWidth: 1,
+                      borderColor: colors.border.light,
+                      shadowColor: '#000',
+                      shadowOffset: { width: 0, height: 4 },
+                      shadowOpacity: 0.15,
+                      shadowRadius: 12,
+                      elevation: 8,
+                      maxHeight: 280,
+                      marginTop: 4,
+                      overflow: 'hidden',
+                    }}>
+                      <ScrollView keyboardShouldPersistTaps="handled" nestedScrollEnabled>
+                        {interestResults.slice(0, 8).map((interest, index) => {
+                          const isSelected = adSetForm.interests.find(i => i.id === interest.id)
+                          return (
+                            <Pressable
+                              key={interest.id}
+                              style={({ pressed }) => ({
+                                flexDirection: 'row',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                paddingVertical: spacing.md,
+                                paddingHorizontal: spacing.md,
+                                backgroundColor: pressed ? colors.glass.regular : isSelected ? 'rgba(24,119,242,0.05)' : 'transparent',
+                                borderBottomWidth: index < interestResults.length - 1 ? 1 : 0,
+                                borderBottomColor: colors.border.light,
+                              })}
+                              onPress={() => {
+                                if (!isSelected) {
+                                  setAdSetForm(f => ({ ...f, interests: [...f.interests, { id: interest.id, name: interest.name }] }))
+                                }
+                                setInterestResults([])
+                                setInterestSearch('')
+                              }}
+                            >
+                              <View style={{ flex: 1, marginRight: spacing.sm }}>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.xs }}>
+                                  <Ionicons name="heart-outline" size={16} color="#1877F2" />
+                                  <Text style={{ color: colors.text.primary, fontSize: 14, fontWeight: '500' }}>
+                                    {interest.name}
+                                  </Text>
+                                </View>
+                                {interest.audience_size && (
+                                  <Text style={{ color: colors.text.tertiary, fontSize: 12, marginTop: 2, marginLeft: 20 }}>
+                                    {formatMetaNumber(interest.audience_size)} people
+                                  </Text>
+                                )}
+                              </View>
+                              {isSelected ? (
+                                <Ionicons name="checkmark-circle" size={20} color="#10B981" />
+                              ) : (
+                                <Ionicons name="add-circle-outline" size={20} color="#1877F2" />
+                              )}
+                            </Pressable>
+                          )
+                        })}
+                      </ScrollView>
+                    </View>
+                  )}
+                </View>
+
+                {/* Selected Interests Tags */}
+                {adSetForm.interests.length > 0 && (
+                  <View style={{ marginTop: spacing.md }}>
+                    <Text style={{ color: colors.text.tertiary, fontSize: 11, marginBottom: spacing.xs, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                      Included ({adSetForm.interests.length})
+                    </Text>
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs }}>
+                      {adSetForm.interests.map((interest) => (
+                        <View
+                          key={interest.id}
+                          style={{
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            backgroundColor: '#1877F2',
+                            paddingLeft: 12,
+                            paddingRight: 8,
+                            paddingVertical: 6,
+                            borderRadius: 20,
+                          }}
+                        >
+                          <Text style={{ color: '#fff', fontSize: 13, fontWeight: '500' }}>{interest.name}</Text>
+                          <Pressable
+                            onPress={() => setAdSetForm(f => ({ ...f, interests: f.interests.filter(i => i.id !== interest.id) }))}
+                            style={{ marginLeft: 6, padding: 2 }}
+                          >
+                            <Ionicons name="close" size={14} color="rgba(255,255,255,0.8)" />
+                          </Pressable>
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                )}
+              </View>
+
+              {/* Platforms */}
+              <View style={{ marginBottom: spacing.lg }}>
+                <Text style={styles.inputLabel}>Platforms</Text>
+                <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+                  {['facebook', 'instagram'].map((platform) => (
+                    <Pressable
+                      key={platform}
+                      style={[
+                        styles.budgetPreset,
+                        adSetForm.publisher_platforms.includes(platform) && styles.budgetPresetActive,
+                        { flex: 1 }
+                      ]}
+                      onPress={() => {
+                        setAdSetForm(f => ({
+                          ...f,
+                          publisher_platforms: f.publisher_platforms.includes(platform)
+                            ? f.publisher_platforms.filter(p => p !== platform)
+                            : [...f.publisher_platforms, platform]
+                        }))
+                      }}
+                    >
+                      <Ionicons
+                        name={platform === 'facebook' ? 'logo-facebook' : 'logo-instagram'}
+                        size={16}
+                        color={adSetForm.publisher_platforms.includes(platform) ? '#fff' : colors.text.secondary}
+                      />
+                      <Text style={[
+                        styles.budgetPresetText,
+                        adSetForm.publisher_platforms.includes(platform) && styles.budgetPresetTextActive,
+                        { marginLeft: 6 }
+                      ]}>
+                        {platform.charAt(0).toUpperCase() + platform.slice(1)}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+
+              {/* Optimization Goal */}
+              <View style={{ marginBottom: spacing.lg }}>
+                <Text style={styles.inputLabel}>Optimization Goal</Text>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
+                  {[
+                    { value: 'LINK_CLICKS', label: 'Clicks' },
+                    { value: 'IMPRESSIONS', label: 'Impressions' },
+                    { value: 'REACH', label: 'Reach' },
+                  ].map((goal) => (
+                    <Pressable
+                      key={goal.value}
+                      style={[
+                        styles.budgetPreset,
+                        adSetForm.optimization_goal === goal.value && styles.budgetPresetActive,
+                      ]}
+                      onPress={() => setAdSetForm(f => ({ ...f, optimization_goal: goal.value }))}
+                    >
+                      <Text style={[
+                        styles.budgetPresetText,
+                        adSetForm.optimization_goal === goal.value && styles.budgetPresetTextActive,
+                      ]}>
+                        {goal.label}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+
+              {/* Status */}
+              <View style={{ marginBottom: spacing.lg }}>
+                <Text style={styles.inputLabel}>Status</Text>
+                <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+                  <Pressable
+                    style={[styles.budgetPreset, adSetForm.status === 'PAUSED' && styles.budgetPresetActive, { flex: 1 }]}
+                    onPress={() => setAdSetForm(f => ({ ...f, status: 'PAUSED' }))}
+                  >
+                    <Ionicons name="pause" size={14} color={adSetForm.status === 'PAUSED' ? '#fff' : colors.text.secondary} />
+                    <Text style={[styles.budgetPresetText, adSetForm.status === 'PAUSED' && styles.budgetPresetTextActive, { marginLeft: 4 }]}>Paused</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.budgetPreset, adSetForm.status === 'ACTIVE' && styles.budgetPresetActive, { flex: 1 }]}
+                    onPress={() => setAdSetForm(f => ({ ...f, status: 'ACTIVE' }))}
+                  >
+                    <Ionicons name="play" size={14} color={adSetForm.status === 'ACTIVE' ? '#fff' : colors.text.secondary} />
+                    <Text style={[styles.budgetPresetText, adSetForm.status === 'ACTIVE' && styles.budgetPresetTextActive, { marginLeft: 4 }]}>Active</Text>
+                  </Pressable>
+                </View>
+              </View>
+            </ScrollView>
+
+            {/* RIGHT PANEL - Live Reach */}
+            <View style={{ width: 280, borderLeftWidth: 1, borderLeftColor: colors.border.light, padding: spacing.lg }}>
+              <Text style={{ fontSize: 13, fontWeight: '600', color: colors.text.tertiary, marginBottom: spacing.md }}>AUDIENCE SIZE</Text>
+
+              <View style={{ alignItems: 'center', paddingVertical: spacing.lg }}>
+                <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: 'rgba(24,119,242,0.1)', justifyContent: 'center', alignItems: 'center', marginBottom: spacing.md }}>
+                  <Ionicons name="people" size={28} color="#1877F2" />
+                </View>
+                <Text style={{ fontSize: 24, fontWeight: '700', color: colors.text.primary }}>
+                  {displayedReach.lower > 0 ? `${formatMetaNumber(displayedReach.lower)} - ${formatMetaNumber(displayedReach.upper)}` : '—'}
+                </Text>
+                <Text style={{ fontSize: 12, color: colors.text.tertiary, marginTop: 4 }}>Potential Reach</Text>
+              </View>
+
+              {/* Targeting Summary */}
+              <View style={{ marginTop: spacing.lg }}>
+                <Text style={{ fontSize: 11, fontWeight: '600', color: colors.text.tertiary, marginBottom: spacing.sm }}>TARGETING</Text>
+                <View style={{ gap: spacing.xs }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
+                    <Ionicons name="location" size={14} color={colors.text.tertiary} />
+                    <Text style={{ color: colors.text.secondary, fontSize: 13 }}>{adSetForm.countries.join(', ')}</Text>
+                  </View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
+                    <Ionicons name="people" size={14} color={colors.text.tertiary} />
+                    <Text style={{ color: colors.text.secondary, fontSize: 13 }}>
+                      {adSetForm.genders.length === 0 ? 'All' : adSetForm.genders.includes(1) ? 'Men' : 'Women'}, {adSetForm.age_min}-{adSetForm.age_max}{adSetForm.age_max >= 65 ? '+' : ''}
+                    </Text>
+                  </View>
+                  {adSetForm.interests.length > 0 && (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
+                      <Ionicons name="heart" size={14} color={colors.text.tertiary} />
+                      <Text style={{ color: colors.text.secondary, fontSize: 13 }} numberOfLines={1}>
+                        {adSetForm.interests.length} interest{adSetForm.interests.length !== 1 ? 's' : ''}
+                      </Text>
+                    </View>
+                  )}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
+                    <Ionicons name="apps" size={14} color={colors.text.tertiary} />
+                    <Text style={{ color: colors.text.secondary, fontSize: 13 }}>
+                      {adSetForm.publisher_platforms.map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(', ')}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+            </View>
+          </View>
+        </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* Ad Creation Modal */}
+      <Modal
+        visible={showAdModal}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowAdModal(false)}
+      >
+        <View style={[styles.modalContainer, { paddingTop: insets.top }]}>
+          <View style={styles.modalHeader}>
+            <Pressable onPress={() => setShowAdModal(false)}>
+              <Ionicons name="close" size={24} color={colors.text.primary} />
+            </Pressable>
+            <Text style={styles.modalTitle}>Create Ad</Text>
+            <View style={{ width: 24 }} />
+          </View>
+
+          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: spacing.lg }}>
+            {/* Ad Name */}
+            <View style={{ marginBottom: spacing.lg }}>
+              <Text style={styles.inputLabel}>Ad Name</Text>
+              <TextInput
+                style={styles.adInput}
+                placeholder="e.g., Summer Sale - Image 1"
+                placeholderTextColor={colors.text.placeholder}
+                value={adForm.name}
+                onChangeText={(text) => setAdForm(f => ({ ...f, name: text }))}
+              />
+            </View>
+
+            {/* Primary Text */}
+            <View style={{ marginBottom: spacing.lg }}>
+              <Text style={styles.inputLabel}>Primary Text</Text>
+              <TextInput
+                style={[styles.adInput, { height: 80, textAlignVertical: 'top' }]}
+                placeholder="The main text that appears above your ad"
+                placeholderTextColor={colors.text.placeholder}
+                value={adForm.primaryText}
+                onChangeText={(text) => setAdForm(f => ({ ...f, primaryText: text }))}
+                multiline
+              />
+            </View>
+
+            {/* Headline */}
+            <View style={{ marginBottom: spacing.lg }}>
+              <Text style={styles.inputLabel}>Headline</Text>
+              <TextInput
+                style={styles.adInput}
+                placeholder="Short, catchy headline"
+                placeholderTextColor={colors.text.placeholder}
+                value={adForm.headline}
+                onChangeText={(text) => setAdForm(f => ({ ...f, headline: text }))}
+              />
+            </View>
+
+            {/* Website URL */}
+            <View style={{ marginBottom: spacing.lg }}>
+              <Text style={styles.inputLabel}>Website URL</Text>
+              <TextInput
+                style={styles.adInput}
+                placeholder="https://example.com/landing-page"
+                placeholderTextColor={colors.text.placeholder}
+                value={adForm.websiteUrl}
+                onChangeText={(text) => setAdForm(f => ({ ...f, websiteUrl: text }))}
+                keyboardType="url"
+                autoCapitalize="none"
+              />
+            </View>
+
+            {/* Call to Action */}
+            <View style={{ marginBottom: spacing.lg }}>
+              <Text style={styles.inputLabel}>Call to Action</Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
+                {[
+                  { value: 'LEARN_MORE', label: 'Learn More' },
+                  { value: 'SHOP_NOW', label: 'Shop Now' },
+                  { value: 'SIGN_UP', label: 'Sign Up' },
+                  { value: 'BOOK_TRAVEL', label: 'Book Now' },
+                  { value: 'CONTACT_US', label: 'Contact Us' },
+                  { value: 'GET_OFFER', label: 'Get Offer' },
+                ].map((cta) => (
+                  <Pressable
+                    key={cta.value}
+                    style={[
+                      styles.budgetPreset,
+                      adForm.callToAction === cta.value && styles.budgetPresetActive,
+                    ]}
+                    onPress={() => setAdForm(f => ({ ...f, callToAction: cta.value }))}
+                  >
+                    <Text style={[
+                      styles.budgetPresetText,
+                      adForm.callToAction === cta.value && styles.budgetPresetTextActive,
+                    ]}>
+                      {cta.label}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+
+            {/* Status */}
+            <View style={{ marginBottom: spacing.lg }}>
+              <Text style={styles.inputLabel}>Status</Text>
+              <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+                <Pressable
+                  style={[
+                    styles.budgetPreset,
+                    adForm.status === 'PAUSED' && styles.budgetPresetActive,
+                    { flex: 1 }
+                  ]}
+                  onPress={() => setAdForm(f => ({ ...f, status: 'PAUSED' }))}
+                >
+                  <Text style={[styles.budgetPresetText, adForm.status === 'PAUSED' && styles.budgetPresetTextActive]}>
+                    Paused
+                  </Text>
+                </Pressable>
+                <Pressable
+                  style={[
+                    styles.budgetPreset,
+                    adForm.status === 'ACTIVE' && styles.budgetPresetActive,
+                    { flex: 1 }
+                  ]}
+                  onPress={() => setAdForm(f => ({ ...f, status: 'ACTIVE' }))}
+                >
+                  <Text style={[styles.budgetPresetText, adForm.status === 'ACTIVE' && styles.budgetPresetTextActive]}>
+                    Active
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+
+            {/* Note about images */}
+            <View style={styles.adPreviewNote}>
+              <Ionicons name="information-circle" size={16} color="#3B82F6" />
+              <Text style={styles.adPreviewNoteText}>
+                Image/video creative can be added in Meta Ads Manager after the ad is created
+              </Text>
+            </View>
+          </ScrollView>
+
+          {/* Actions */}
+          <View style={{ padding: spacing.lg, borderTopWidth: 1, borderTopColor: colors.border.regular }}>
+            <Pressable
+              style={[
+                styles.metaConnectButton,
+                (!adForm.name || !adForm.websiteUrl || isCreatingAd) && { opacity: 0.5 },
+              ]}
+              onPress={async () => {
+                if (!adForm.name || !adForm.websiteUrl || !vendor?.id || !selectedMetaAdSet || isCreatingAd) return
+                setIsCreatingAd(true)
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+                try {
+                  const result = await createMetaAd(vendor.id, {
+                    adSetId: selectedMetaAdSet,
+                    name: adForm.name,
+                    status: adForm.status,
+                    creative: {
+                      name: `Creative - ${adForm.name}`,
+                      link_data: {
+                        link: adForm.websiteUrl,
+                        message: adForm.primaryText,
+                        name: adForm.headline,
+                        call_to_action: {
+                          type: adForm.callToAction,
+                        },
+                      },
+                    },
+                  })
+                  if (result) {
+                    setShowAdModal(false)
+                    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+                  }
+                } catch (err: any) {
+                  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
+                  Alert.alert('Error', err?.message || 'Failed to create ad')
+                } finally {
+                  setIsCreatingAd(false)
+                }
+              }}
+              disabled={!adForm.name || !adForm.websiteUrl || isCreatingAd}
+            >
+              {isCreatingAd ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text style={styles.metaConnectButtonText}>Create Ad</Text>
+              )}
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
       {/* Meta Connect Modal */}
       <Modal
         visible={showMetaConnectModal}
@@ -4118,9 +5454,13 @@ function MarketingScreenComponent() {
           <Pressable style={styles.metaModal} onPress={e => e.stopPropagation()}>
             <View style={styles.metaModalHeader}>
               <Ionicons name="logo-facebook" size={32} color="#1877F2" />
-              <Text style={styles.metaModalTitle}>Connect Meta</Text>
+              <Text style={styles.metaModalTitle}>
+                {isMetaConnected ? 'Update Meta Connection' : 'Connect Meta'}
+              </Text>
               <Text style={styles.metaModalSubtitle}>
-                Manage Facebook & Instagram ads from your dashboard
+                {isMetaConnected
+                  ? 'Update your access token or ad account settings'
+                  : 'Manage Facebook & Instagram ads from your dashboard'}
               </Text>
             </View>
 
@@ -4155,15 +5495,21 @@ function MarketingScreenComponent() {
               />
 
               <Text style={styles.metaHelpText}>
-                Get your access token from the Meta Business Suite or Graph API Explorer.
-                The token needs ads_management and ads_read permissions.
+                {isMetaConnected
+                  ? 'Enter a new access token to update your connection. Leave Ad Account ID unchanged to keep existing settings.'
+                  : 'Get your access token from the Meta Business Suite or Graph API Explorer. The token needs ads_management and ads_read permissions.'}
               </Text>
             </View>
 
             <View style={styles.metaModalActions}>
               <Pressable
                 style={styles.metaModalCancel}
-                onPress={() => setShowMetaConnectModal(false)}
+                onPress={() => {
+                  setShowMetaConnectModal(false)
+                  setMetaAccessToken('')
+                  setMetaAdAccountId('')
+                  setMetaPixelId('')
+                }}
               >
                 <Text style={styles.metaModalCancelText}>Cancel</Text>
               </Pressable>
@@ -4182,8 +5528,13 @@ function MarketingScreenComponent() {
                     setMetaAccessToken('')
                     setMetaAdAccountId('')
                     setMetaPixelId('')
-                    // Sync campaigns after connecting
+                    // Sync campaigns after connecting/updating
                     syncMetaCampaigns(vendor.id)
+                    Alert.alert(
+                      'Success',
+                      isMetaConnected ? 'Meta connection updated successfully!' : 'Meta connected successfully!',
+                      [{ text: 'OK' }]
+                    )
                   }
                 }}
                 disabled={!metaAccessToken || isMetaConnecting}
@@ -4191,7 +5542,9 @@ function MarketingScreenComponent() {
                 {isMetaConnecting ? (
                   <ActivityIndicator size="small" color="#fff" />
                 ) : (
-                  <Text style={styles.metaModalConnectText}>Connect</Text>
+                  <Text style={styles.metaModalConnectText}>
+                    {isMetaConnected ? 'Update Connection' : 'Connect'}
+                  </Text>
                 )}
               </Pressable>
             </View>
@@ -4770,6 +6123,12 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
     color: colors.text.tertiary,
     marginBottom: spacing.sm,
+  },
+  inputLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.text.secondary,
+    marginBottom: spacing.xs,
   },
   promptInput: {
     backgroundColor: colors.glass.regular,
@@ -5355,9 +6714,10 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.xl,
     gap: spacing.sm,
   },
-  noCampaignsText: {
+  emptyStateText: {
     fontSize: 14,
     color: colors.text.tertiary,
+    textAlign: 'center',
   },
   draftBadge: {
     backgroundColor: 'rgba(107, 114, 128, 0.2)',
@@ -5680,7 +7040,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 0.5,
     borderBottomColor: colors.border.subtle,
   },
-  modalTitle: {
+  modalHeaderTitle: {
     fontSize: 17,
     fontWeight: '600',
     color: colors.text.primary,
@@ -5737,23 +7097,12 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: colors.border.regular,
   },
-  emptyState: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: spacing.xxl,
-  },
   emptyStateTitle: {
     fontSize: 18,
     fontWeight: '600',
     color: colors.text.primary,
     marginTop: spacing.md,
     marginBottom: spacing.xs,
-  },
-  emptyStateText: {
-    fontSize: 14,
-    color: colors.text.secondary,
-    textAlign: 'center',
-    maxWidth: 280,
   },
 
   // Wallet Pass Preview Styles
@@ -6191,6 +7540,31 @@ const styles = StyleSheet.create({
     borderRadius: radius.sm,
     backgroundColor: 'rgba(0, 122, 255, 0.1)',
   },
+  metaEditButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: radius.md,
+    backgroundColor: 'rgba(0, 122, 255, 0.1)',
+  },
+  metaEditButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#007AFF',
+  },
+  metaDisconnectButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: radius.md,
+    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+  },
+  metaDisconnectButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#EF4444',
+  },
   metaQuickStats: {
     flexDirection: 'row',
     justifyContent: 'space-around',
@@ -6378,6 +7752,395 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     marginTop: 2,
   },
+  campaignActionButton: {
+    width: 32,
+    height: 32,
+    borderRadius: radius.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: spacing.sm,
+  },
+  // Campaign Modal
+  objectivePill: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.pill,
+    backgroundColor: colors.glass.regular,
+    borderWidth: 1,
+    borderColor: colors.border.subtle,
+  },
+  objectivePillActive: {
+    backgroundColor: 'rgba(16,185,129,0.2)',
+    borderColor: '#10B981',
+  },
+  objectivePillText: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: colors.text.tertiary,
+  },
+  objectivePillTextActive: {
+    color: '#10B981',
+  },
+  statusToggle: {
+    width: 44,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: colors.glass.thick,
+    padding: 2,
+    justifyContent: 'center',
+  },
+  statusToggleActive: {
+    backgroundColor: '#10B981',
+  },
+  statusToggleKnob: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: colors.text.secondary,
+  },
+  statusToggleKnobActive: {
+    backgroundColor: '#fff',
+    alignSelf: 'flex-end',
+  },
+
+  // Ad Creator Styles
+  adInput: {
+    backgroundColor: colors.glass.regular,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border.subtle,
+    padding: spacing.md,
+    fontSize: 16,
+    color: colors.text.primary,
+  },
+  adHelpText: {
+    fontSize: 13,
+    color: colors.text.tertiary,
+    marginBottom: spacing.md,
+  },
+  objectiveGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+  },
+  objectiveCard: {
+    width: '48%',
+    backgroundColor: colors.glass.regular,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border.subtle,
+    padding: spacing.md,
+    marginBottom: spacing.xs,
+  },
+  objectiveCardActive: {
+    backgroundColor: 'rgba(16,185,129,0.1)',
+    borderColor: '#10B981',
+  },
+  objectiveIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.sm,
+    backgroundColor: colors.glass.thick,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.sm,
+  },
+  objectiveIconWrapActive: {
+    backgroundColor: 'rgba(16,185,129,0.2)',
+  },
+  objectiveCardLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.text.primary,
+    marginBottom: 2,
+  },
+  objectiveCardLabelActive: {
+    color: '#10B981',
+  },
+  objectiveCardDesc: {
+    fontSize: 11,
+    color: colors.text.tertiary,
+    lineHeight: 14,
+  },
+  budgetRow: {
+    marginBottom: spacing.md,
+  },
+  budgetInputWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.glass.regular,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border.subtle,
+    paddingHorizontal: spacing.md,
+  },
+  budgetCurrency: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: colors.text.tertiary,
+    marginRight: spacing.xs,
+  },
+  budgetInput: {
+    flex: 1,
+    fontSize: 32,
+    fontWeight: '700',
+    color: colors.text.primary,
+    paddingVertical: spacing.md,
+  },
+  budgetPeriod: {
+    fontSize: 16,
+    color: colors.text.tertiary,
+  },
+  budgetPresets: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  budgetPreset: {
+    flex: 1,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.md,
+    backgroundColor: colors.glass.regular,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.border.subtle,
+  },
+  budgetPresetActive: {
+    backgroundColor: 'rgba(16,185,129,0.15)',
+    borderColor: '#10B981',
+  },
+  budgetPresetText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.text.secondary,
+  },
+  budgetPresetTextActive: {
+    color: '#10B981',
+  },
+  budgetEstimate: {
+    fontSize: 13,
+    color: colors.text.tertiary,
+    marginLeft: spacing.xs,
+  },
+  budgetEstimateValue: {
+    fontWeight: '600',
+    color: colors.text.secondary,
+  },
+  budgetEstimateContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    marginTop: spacing.sm,
+  },
+  budgetDisplayContainer: {
+    alignItems: 'center',
+    paddingVertical: spacing.lg,
+    backgroundColor: colors.glass.regular,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border.subtle,
+    marginBottom: spacing.md,
+  },
+  budgetDisplayAmount: {
+    fontSize: 48,
+    fontWeight: '700',
+    color: colors.text.primary,
+  },
+  budgetDisplayPeriod: {
+    fontSize: 14,
+    color: colors.text.tertiary,
+    marginTop: spacing.xs,
+  },
+  budgetSliderContainer: {
+    marginBottom: spacing.md,
+  },
+  budgetSlider: {
+    width: '100%',
+    height: 40,
+  },
+  budgetSliderLabels: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.xs,
+  },
+  budgetSliderLabel: {
+    fontSize: 12,
+    color: colors.text.quaternary,
+  },
+  launchOption: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: colors.glass.regular,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border.subtle,
+    padding: spacing.md,
+    marginBottom: spacing.sm,
+    gap: spacing.md,
+  },
+  launchRadio: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 2,
+    borderColor: colors.border.emphasis,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 2,
+  },
+  launchRadioActive: {
+    borderColor: '#10B981',
+  },
+  launchRadioDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#10B981',
+  },
+  launchOptionLabel: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.text.primary,
+    marginBottom: 2,
+  },
+  launchOptionDesc: {
+    fontSize: 13,
+    color: colors.text.tertiary,
+  },
+  adCreatorActions: {
+    flexDirection: 'row',
+    padding: spacing.md,
+    gap: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.border.subtle,
+  },
+  adCreatorCancel: {
+    flex: 1,
+    paddingVertical: spacing.md,
+    borderRadius: radius.md,
+    backgroundColor: colors.glass.regular,
+    alignItems: 'center',
+  },
+  adCreatorCancelText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.text.secondary,
+  },
+  adCreatorSubmit: {
+    flex: 2,
+    flexDirection: 'row',
+    paddingVertical: spacing.md,
+    borderRadius: radius.md,
+    backgroundColor: '#10B981',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+  },
+  adCreatorSubmitDisabled: {
+    opacity: 0.5,
+  },
+  adCreatorSubmitText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  adCreatorDraft: {
+    flex: 1,
+    flexDirection: 'row',
+    paddingVertical: spacing.md,
+    borderRadius: radius.md,
+    backgroundColor: colors.glass.regular,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    borderWidth: 1,
+    borderColor: colors.border.regular,
+  },
+  adCreatorDraftDisabled: {
+    opacity: 0.5,
+  },
+  adCreatorDraftText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.text.secondary,
+  },
+  adPreviewHeader: {
+    padding: spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border.subtle,
+  },
+  adPreviewTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.text.primary,
+  },
+  adPreviewContent: {
+    flex: 1,
+    padding: spacing.lg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  adPreviewCard: {
+    width: '100%',
+    maxWidth: 400,
+    backgroundColor: colors.glass.regular,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border.subtle,
+    padding: spacing.lg,
+  },
+  adPreviewCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: spacing.md,
+    gap: spacing.sm,
+  },
+  adPreviewStatus: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  adPreviewCardName: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.text.primary,
+    flex: 1,
+  },
+  adPreviewMeta: {
+    gap: spacing.sm,
+    marginBottom: spacing.lg,
+  },
+  adPreviewMetaItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  adPreviewMetaText: {
+    fontSize: 14,
+    color: colors.text.secondary,
+  },
+  adPreviewNote: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+    padding: spacing.md,
+    backgroundColor: 'rgba(59,130,246,0.1)',
+    borderRadius: radius.md,
+  },
+  adPreviewNoteText: {
+    flex: 1,
+    fontSize: 13,
+    color: '#3B82F6',
+    lineHeight: 18,
+  },
+  adPreviewEmpty: {
+    alignItems: 'center',
+    gap: spacing.md,
+  },
+  adPreviewEmptyText: {
+    fontSize: 14,
+    color: colors.text.quaternary,
+  },
 
   // Meta Posts Filter
   metaFilterButton: {
@@ -6555,71 +8318,67 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
-  // New modern insight styles
-  insightsHeroCard: {
-    borderRadius: radius.lg,
-    padding: spacing.lg,
-    marginBottom: spacing.md,
+  // Insights Header
+  insightsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: spacing.lg,
   },
-  insightsHeroRow: {
+  insightsDatePills: {
+    flexDirection: 'row',
+    gap: spacing.xs,
+  },
+  insightsDatePill: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.round,
+    backgroundColor: colors.glass.thin,
+  },
+  insightsDatePillActive: {
+    backgroundColor: colors.text.primary,
+  },
+  insightsDatePillText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.text.tertiary,
+  },
+  insightsDatePillTextActive: {
+    color: colors.background.primary,
+  },
+  insightsRefreshBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: radius.round,
+    backgroundColor: colors.glass.thin,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  insightsLoading: {
+    padding: spacing.xxl,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  insightsLoadingText: {
+    color: colors.text.tertiary,
+    marginTop: spacing.md,
+    fontSize: 14,
+  },
+  // Platform Cards
+  platformCardsRow: {
     flexDirection: 'row',
     gap: spacing.md,
     marginBottom: spacing.lg,
   },
-  insightsHeroStat: {
+  platformCard: {
     flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: spacing.xl,
-    paddingHorizontal: spacing.md,
-    borderRadius: radius.lg,
-  },
-  insightsHeroValue: {
-    fontSize: 32,
-    fontWeight: '800',
-    color: '#FFFFFF',
-  },
-  insightsHeroLabel: {
-    fontSize: 12,
-    color: 'rgba(255,255,255,0.8)',
-    marginTop: 4,
-    fontWeight: '600',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  insightsMetricGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-  },
-  insightsMetricCard: {
-    width: (SCREEN_WIDTH - spacing.lg * 2 - spacing.sm * 2) / 3,
-    backgroundColor: colors.glass.regular,
-    borderRadius: radius.md,
-    padding: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.border.subtle,
-  },
-  insightsMetricValue: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: colors.text.primary,
-    marginBottom: 2,
-  },
-  insightsMetricLabel: {
-    fontSize: 11,
-    color: colors.text.tertiary,
-    fontWeight: '500',
-  },
-  insightsSectionCard: {
     backgroundColor: colors.glass.regular,
     borderRadius: radius.lg,
     borderWidth: 1,
     borderColor: colors.border.subtle,
     overflow: 'hidden',
-    marginBottom: spacing.md,
   },
-  insightsSectionHeader: {
+  platformCardHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
@@ -6627,46 +8386,155 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: colors.border.subtle,
   },
-  insightsSectionTitle: {
-    fontSize: 16,
+  platformIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: radius.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  platformName: {
+    fontSize: 15,
     fontWeight: '700',
     color: colors.text.primary,
-    flex: 1,
   },
-  insightsSectionBadge: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 4,
-    borderRadius: radius.full,
-    backgroundColor: 'rgba(16,185,129,0.15)',
+  platformStats: {
+    padding: spacing.sm,
   },
-  insightsSectionBadgeText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#10B981',
-  },
-  insightsSectionContent: {
-    padding: spacing.md,
-  },
-  insightsStatRow: {
+  platformStatRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingVertical: spacing.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border.subtle,
+    paddingHorizontal: spacing.xs,
   },
-  insightsStatRowLast: {
-    borderBottomWidth: 0,
+  platformStatLabel: {
+    fontSize: 13,
+    color: colors.text.tertiary,
   },
-  insightsStatLabel: {
-    fontSize: 14,
-    color: colors.text.secondary,
+  platformStatValue: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.text.primary,
+  },
+  // Ads Section
+  adsSection: {
+    backgroundColor: colors.glass.regular,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border.subtle,
+    padding: spacing.md,
+    marginBottom: spacing.lg,
+  },
+  adsSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  adsSectionTitle: {
     flex: 1,
-  },
-  insightsStatValue: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '700',
     color: colors.text.primary,
+  },
+  roasBadge: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+    borderRadius: radius.round,
+  },
+  roasBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  adsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+  },
+  adsGridItem: {
+    width: '33.33%',
+    alignItems: 'center',
+    paddingVertical: spacing.md,
+  },
+  adsGridValue: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.text.primary,
+  },
+  adsGridLabel: {
+    fontSize: 11,
+    color: colors.text.tertiary,
+    marginTop: 2,
+  },
+  // Campaigns Section
+  campaignsSection: {
+    backgroundColor: colors.glass.regular,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border.subtle,
+    padding: spacing.md,
+    marginBottom: spacing.lg,
+  },
+  campaignsSectionTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.text.primary,
+    marginBottom: spacing.md,
+  },
+  campaignRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: colors.border.subtle,
+  },
+  campaignRowInfo: {
+    flex: 1,
+  },
+  campaignRowName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.text.primary,
+    marginBottom: 2,
+  },
+  campaignRowStats: {
+    fontSize: 12,
+    color: colors.text.tertiary,
+  },
+  campaignRowRoas: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+    borderRadius: radius.sm,
+    marginLeft: spacing.sm,
+  },
+  campaignRowRoasText: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  // Empty State
+  insightsEmpty: {
+    padding: spacing.xxl,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  insightsEmptyTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.text.tertiary,
+    marginTop: spacing.md,
+  },
+  insightsEmptyText: {
+    fontSize: 13,
+    color: colors.text.quaternary,
+    textAlign: 'center',
+    marginTop: spacing.xs,
+  },
+  // Legacy styles kept for compatibility
+  roasPositive: {
+    backgroundColor: 'rgba(16,185,129,0.15)',
+  },
+  roasNegative: {
+    backgroundColor: 'rgba(239,68,68,0.15)',
   },
   chartContainer: {
     flexDirection: 'row',
@@ -6699,34 +8567,5 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: colors.border.subtle,
     paddingTop: spacing.sm,
-  },
-  campaignRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: spacing.md,
-  },
-  campaignName: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.text.primary,
-  },
-  campaignStat: {
-    fontSize: 12,
-    color: colors.text.secondary,
-  },
-  roasBadge: {
-    fontSize: 12,
-    fontWeight: '700',
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 4,
-    borderRadius: radius.sm,
-  },
-  roasPositive: {
-    backgroundColor: 'rgba(16, 185, 129, 0.15)',
-    color: '#10B981',
-  },
-  roasNegative: {
-    backgroundColor: 'rgba(239, 68, 68, 0.15)',
-    color: '#EF4444',
   },
 })

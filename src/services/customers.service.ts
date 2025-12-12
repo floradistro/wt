@@ -411,17 +411,58 @@ export async function updateCustomerLoyaltyPoints(
 }
 
 /**
- * Get customer with recent orders
+ * Get customer with their complete order history
  * Only returns active customers (is_active = true)
+ *
+ * Finds orders by BOTH:
+ * 1. customer_id foreign key relationship
+ * 2. metadata.customer_name matching the customer's full name (for legacy orders)
  */
 export async function getCustomerWithOrders(customerId: string): Promise<CustomerWithOrders> {
-  // ✅ APPLE WAY: Single query with proper JOINs
-  const { data, error } = await supabase
+  // First, get the customer details
+  const { data: customer, error: customerError } = await supabase
     .from('customers')
-    .select(
-      `
-      *,
-      orders!customer_id (
+    .select('*')
+    .eq('id', customerId)
+    .eq('is_active', true)
+    .single()
+
+  if (customerError) {
+    throw new Error(`Failed to fetch customer: ${customerError.message}`)
+  }
+
+  // Build the customer's full name for matching legacy orders
+  const fullName = customer.full_name ||
+    `${customer.first_name || ''} ${customer.last_name || ''}`.trim()
+
+  // Query 1: Orders linked by customer_id (with proper JOINs)
+  const { data: linkedOrders, error: linkedError } = await supabase
+    .from('orders')
+    .select(`
+      id,
+      order_number,
+      total_amount,
+      created_at,
+      pickup_location:pickup_location_id (
+        name
+      ),
+      created_by_user:created_by_user_id (
+        first_name,
+        last_name
+      )
+    `)
+    .eq('customer_id', customerId)
+
+  if (linkedError) {
+    console.warn('Error fetching linked orders:', linkedError)
+  }
+
+  // Query 2: Legacy orders matched by metadata.customer_name (where customer_id is null)
+  let legacyOrders: typeof linkedOrders = []
+  if (fullName) {
+    const { data: legacyData, error: legacyError } = await supabase
+      .from('orders')
+      .select(`
         id,
         order_number,
         total_amount,
@@ -433,24 +474,35 @@ export async function getCustomerWithOrders(customerId: string): Promise<Custome
           first_name,
           last_name
         )
-      )
-    `
-    )
-    .eq('id', customerId)
-    .eq('is_active', true) // Only active customers
-    .single()
+      `)
+      .is('customer_id', null)
+      .eq('metadata->>customer_name', fullName)
 
-  if (error) {
-    throw new Error(`Failed to fetch customer with orders: ${error.message}`)
+    if (legacyError) {
+      console.warn('Error fetching legacy orders:', legacyError)
+    } else {
+      legacyOrders = legacyData || []
+    }
   }
 
+  // Combine and dedupe orders by ID
+  const allOrdersMap = new Map<string, (typeof linkedOrders extends (infer T)[] | null ? T : never)>()
+
+  for (const order of (linkedOrders || [])) {
+    allOrdersMap.set(order.id, order)
+  }
+  for (const order of legacyOrders) {
+    if (!allOrdersMap.has(order.id)) {
+      allOrdersMap.set(order.id, order)
+    }
+  }
+
+  const allOrders = Array.from(allOrdersMap.values())
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+
   return {
-    ...data,
-    recent_orders: data.orders
-      ?.sort((a: { created_at: string }, b: { created_at: string }) =>
-        new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-      )
-      .slice(0, 5),
+    ...customer,
+    recent_orders: allOrders,
   }
 }
 
