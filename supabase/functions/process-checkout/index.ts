@@ -1471,9 +1471,10 @@ serve(async (req) => {
         shipping_cost: body.shipping || 0,
       } : {}),
       // Affiliate tracking (if affiliate code was used at checkout)
-      ...(body.affiliate_id ? {
-        affiliate_id: body.affiliate_id,
-        affiliate_code: body.affiliate_code || null,
+      // Use affiliate_code as the condition since it's always present when an affiliate is applied
+      ...(body.affiliate_code ? {
+        affiliate_id: body.affiliate_id || null,
+        affiliate_code: body.affiliate_code,
         affiliate_discount_amount: body.affiliate_discount_amount || 0,
       } : {}),
       metadata: {
