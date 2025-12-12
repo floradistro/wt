@@ -24,6 +24,7 @@ import { POSCartItem } from './POSCartItem'
 import { POSTotalsSection } from './POSTotalsSection'
 import { POSMissingContactBanner } from '../POSMissingContactBanner'
 import { POSUpdateContactModal } from '../POSUpdateContactModal'
+import { POSScannedOrderCard } from '../POSScannedOrderCard'
 import { layout } from '@/theme/layout'
 
 // Stores
@@ -35,6 +36,7 @@ import {
 } from '@/stores/checkout-ui.store'
 import { useCampaigns } from '@/stores/loyalty-campaigns.store'
 import { useSelectedCustomer, customerActions } from '@/stores/customer.store'
+import { useScannedOrder } from '@/stores/scanned-order.store'
 
 interface POSCartProps {
   onEndSession?: () => void
@@ -51,6 +53,11 @@ export function POSCart({ onEndSession }: POSCartProps) {
   // ========================================
   const cart = useCartItems()
   const { subtotal, itemCount } = useCartTotals()
+
+  // ========================================
+  // STORES - Scanned Pickup Order
+  // ========================================
+  const scannedOrder = useScannedOrder()
 
   // ========================================
   // STORES - Customer
@@ -107,6 +114,17 @@ export function POSCart({ onEndSession }: POSCartProps) {
   const handleUpdateContactInfo = useCallback(() => {
     setShowUpdateContactModal(true)
   }, [])
+
+  // ========================================
+  // RENDER - Scanned Order takes precedence
+  // ========================================
+  if (scannedOrder) {
+    return (
+      <View style={styles.cartCard}>
+        <POSScannedOrderCard />
+      </View>
+    )
+  }
 
   return (
     <View style={styles.cartCard}>

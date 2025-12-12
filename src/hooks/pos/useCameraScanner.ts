@@ -14,6 +14,12 @@ import { parseAAMVABarcode, isLegalAge, calculateAge, type AAMVAData } from '@/l
 import { playSuccessBeep, playRejectionTone } from '@/lib/id-scanner/audio'
 import { logger } from '@/utils/logger'
 import { customerActions } from '@/stores/customer.store'
+import { supabase } from '@/lib/supabase/client'
+import { checkoutUIActions } from '@/stores/checkout-ui.store'
+import { scannedOrderActions } from '@/stores/scanned-order.store'
+
+// UUID regex to detect wallet pass QR codes (customer ID or order ID)
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 export function useCameraScanner() {
   // ========================================
@@ -43,7 +49,62 @@ export function useCameraScanner() {
   }, [])
 
   // ========================================
-  // BARCODE SCANNING
+  // WALLET PASS / ORDER QR CODE SCANNING
+  // ========================================
+  const handleUUIDScan = async (uuid: string) => {
+    try {
+      logger.info('[CameraScanner] UUID QR detected:', uuid)
+
+      // First, try to find as customer (loyalty pass)
+      const { data: customer, error: customerError } = await supabase
+        .from('customers')
+        .select('*')
+        .eq('id', uuid)
+        .single()
+
+      if (customer && !customerError) {
+        // Found customer - select them
+        logger.info('[CameraScanner] Customer found from wallet pass:', customer.first_name, customer.last_name)
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+
+        customerActions.selectCustomer(customer)
+        checkoutUIActions.closeModal()
+        return
+      }
+
+      // Not a customer - try as order (pickup order pass)
+      logger.info('[CameraScanner] Not a customer, trying as order...')
+      const orderFound = await scannedOrderActions.loadOrder(uuid)
+
+      if (orderFound) {
+        // Found order - close modal and show order card
+        logger.info('[CameraScanner] Order found from QR code')
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+        checkoutUIActions.closeModal()
+        return
+      }
+
+      // Neither customer nor order found
+      logger.error('[CameraScanner] UUID not found as customer or order')
+      setScanMessage('Not found')
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
+      playRejectionTone()
+
+      setTimeout(() => {
+        setScanMessage('')
+        lastScannedCode.current = null
+        setIsScanning(true)
+        setIsProcessing(false)
+      }, 1500)
+
+    } catch (error) {
+      logger.error('[CameraScanner] Error looking up UUID:', error)
+      resetScanner()
+    }
+  }
+
+  // ========================================
+  // BARCODE SCANNING (ID Cards)
   // ========================================
   const handleBarcodeScan = async (barcodeData: string) => {
     try {
@@ -99,14 +160,20 @@ export function useCameraScanner() {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
       playSuccessBeep()
 
-      // Process instantly
-      handleBarcodeScan(code.value!)
+      // Check if it's a UUID (wallet pass QR code - customer or order)
+      if (UUID_REGEX.test(code.value)) {
+        logger.info('[CameraScanner] QR code detected - UUID (customer or order)')
+        handleUUIDScan(code.value)
+      } else {
+        // Otherwise treat as ID barcode (PDF-417)
+        handleBarcodeScan(code.value!)
+      }
     },
     [isScanning, isProcessing]
   )
 
   const codeScanner = useCodeScanner({
-    codeTypes: ['pdf-417'],
+    codeTypes: ['pdf-417', 'qr'], // Support both ID barcodes and wallet pass QR codes
     onCodeScanned: handleCodeScanned,
   })
 

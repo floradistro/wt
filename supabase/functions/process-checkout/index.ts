@@ -1157,9 +1157,9 @@ serve(async (req) => {
       )
     }
 
-    // Validate total = subtotal - discounts + tax (within 0.01 tolerance)
+    // Validate total = subtotal - discounts + tax + shipping (within 0.01 tolerance)
     const totalDiscounts = (body.loyaltyDiscountAmount || 0) + (body.campaignDiscountAmount || 0)
-    const expectedTotal = body.subtotal - totalDiscounts + body.taxAmount
+    const expectedTotal = body.subtotal - totalDiscounts + body.taxAmount + (body.shipping || 0)
     if (Math.abs(body.total - expectedTotal) > 0.01) {
       Sentry.captureMessage('Total mismatch detected', {
         level: 'warning',
@@ -1170,6 +1170,7 @@ serve(async (req) => {
             loyaltyDiscountAmount: body.loyaltyDiscountAmount || 0,
             campaignDiscountAmount: body.campaignDiscountAmount || 0,
             taxAmount: body.taxAmount,
+            shipping: body.shipping || 0,
             calculatedTotal: expectedTotal,
             requestedTotal: body.total,
             difference: Math.abs(body.total - expectedTotal),
@@ -2821,6 +2822,32 @@ serve(async (req) => {
             pointsRedeemed: body.loyaltyPointsRedeemed || 0,
           },
         })
+
+        // Trigger wallet pass update (fire and forget - don't block checkout)
+        try {
+          const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
+          const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+
+          fetch(`${supabaseUrl}/functions/v1/wallet-pass-push`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${serviceKey}`,
+            },
+            body: JSON.stringify({ customer_id: body.customerId }),
+          }).then(res => {
+            if (res.ok) {
+              console.log(`[${requestId}] Wallet pass push triggered for customer ${body.customerId}`)
+            } else {
+              console.warn(`[${requestId}] Wallet pass push failed: ${res.status}`)
+            }
+          }).catch(err => {
+            console.warn(`[${requestId}] Wallet pass push error:`, err.message)
+          })
+        } catch (walletErr) {
+          // Wallet push failure should never fail checkout
+          console.warn(`[${requestId}] Wallet pass push setup failed:`, walletErr)
+        }
         } // End of else block (customer exists)
       } catch (error) {
         console.error(`[${requestId}] Loyalty points update failed:`, error)
