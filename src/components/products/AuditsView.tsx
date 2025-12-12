@@ -9,7 +9,7 @@
  * - Calls store actions directly for modal opening
  */
 
-import React, { useState, useMemo } from 'react'
+import React, { useState, useMemo, useCallback } from 'react'
 import {
   View,
   Text,
@@ -19,6 +19,7 @@ import {
   ActivityIndicator,
   Modal,
   StatusBar,
+  RefreshControl,
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import * as Haptics from 'expo-haptics'
@@ -141,6 +142,7 @@ export function AuditsView({
 
   const [viewFilter, setViewFilter] = useState<'all' | 'batches' | 'single'>('all')
   const [selectedAuditBatch, setSelectedAuditBatch] = useState<AuditBatch | null>(null)
+  const [refreshing, setRefreshing] = useState(false)
 
   // Location selector modal state
   const [showLocationModal, setShowLocationModal] = useState(false)
@@ -165,7 +167,14 @@ export function AuditsView({
     return undefined
   }, [selectedLocationIds])
 
-  const { adjustments, isLoading } = useInventoryAdjustments(undefined, undefined, filters || {})
+  const { adjustments, isLoading, reload } = useInventoryAdjustments(undefined, undefined, filters || {})
+
+  // Pull to refresh handler
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true)
+    await reload()
+    setRefreshing(false)
+  }, [reload])
 
   // Filter adjustments by location BEFORE grouping (for multiple locations)
   const locationFilteredAdjustments = useMemo(() => {
@@ -345,6 +354,13 @@ export function AuditsView({
         indicatorStyle="white"
         scrollIndicatorInsets={{ right: 2, bottom: layout.dockHeight }}
         contentContainerStyle={{ paddingBottom: layout.dockHeight, paddingRight: 0 }}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor="rgba(255,255,255,0.6)"
+          />
+        }
       >
         {/* Title Section with Location Selector */}
         <TitleSection

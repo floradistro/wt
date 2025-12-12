@@ -52,6 +52,9 @@ interface ProductsScreenState {
   showReceiveTransfer: boolean
   showTransferDetail: boolean
 
+  // Refresh triggers (timestamp-based for live updates)
+  auditRefreshTrigger: number
+
   // Actions
   setActiveNav: (nav: NavSection) => void
   setSearchQuery: (query: string) => void
@@ -67,6 +70,7 @@ interface ProductsScreenState {
   clearSelection: () => void
   openModal: (modal: 'createProduct' | 'createCategory' | 'createPO' | 'receivePO' | 'createAudit' | 'createTransfer' | 'receiveTransfer' | 'transferDetail') => void
   closeAllModals: () => void
+  triggerAuditRefresh: () => void
   reset: () => void
 }
 
@@ -87,6 +91,7 @@ const initialState = {
   showCreateTransfer: false,
   showReceiveTransfer: false,
   showTransferDetail: false,
+  auditRefreshTrigger: 0,
 }
 
 export const useProductsScreenStore = create<ProductsScreenState>()(
@@ -293,6 +298,13 @@ export const useProductsScreenStore = create<ProductsScreenState>()(
       },
 
       /**
+       * Trigger audit data refresh (for live updates)
+       */
+      triggerAuditRefresh: () => {
+        set({ auditRefreshTrigger: Date.now() }, false, 'productsScreen/triggerAuditRefresh')
+      },
+
+      /**
        * Reset entire store
        */
       reset: () => {
@@ -323,6 +335,9 @@ export const useSelectedCategoryId = () =>
 
 export const useSelectedPurchaseOrder = () =>
   useProductsScreenStore((state) => state.selectedPurchaseOrder)
+
+export const useAuditRefreshTrigger = () =>
+  useProductsScreenStore((state) => state.auditRefreshTrigger)
 
 export const useModalStates = () =>
   useProductsScreenStore(
@@ -365,6 +380,7 @@ export const productsScreenActions = {
   get clearSelection() { return useProductsScreenStore.getState().clearSelection },
   get openModal() { return useProductsScreenStore.getState().openModal },
   get closeAllModals() { return useProductsScreenStore.getState().closeAllModals },
+  get triggerAuditRefresh() { return useProductsScreenStore.getState().triggerAuditRefresh },
   get reset() { return useProductsScreenStore.getState().reset },
 }
 

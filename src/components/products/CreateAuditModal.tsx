@@ -737,9 +737,11 @@ export function CreateAuditModal({ visible, onClose, onCreated }: CreateAuditMod
               </Text>
             </View>
           )}
+        </ScrollView>
 
-          {/* ===== ACTION BUTTON ===== */}
-          {selectedLocationId && (
+        {/* ===== STICKY ACTION BUTTON ===== */}
+        {selectedLocationId && (
+          <View style={[styles.stickyButtonContainer, { paddingBottom: Math.max(insets.bottom, 16) }]}>
             <Pressable
               onPress={handleSave}
               style={[styles.saveButton, (!canSave || saving) && styles.saveButtonDisabled]}
@@ -753,8 +755,8 @@ export function CreateAuditModal({ visible, onClose, onCreated }: CreateAuditMod
                 </Text>
               )}
             </Pressable>
-          )}
-        </ScrollView>
+          </View>
+        )}
       </View>
     </Modal>
   )
@@ -806,7 +808,7 @@ const styles = StyleSheet.create({
   },
   contentContainer: {
     paddingHorizontal: 16,
-    paddingBottom: 40,
+    paddingBottom: 100,
   },
   section: {
     marginTop: 20,
@@ -1002,8 +1004,18 @@ const styles = StyleSheet.create({
     color: 'rgba(16,185,129,1)',
     letterSpacing: -0.2,
   },
+  stickyButtonContainer: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: '#1c1c1e',
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    borderTopWidth: 0.5,
+    borderTopColor: 'rgba(255,255,255,0.1)',
+  },
   saveButton: {
-    marginTop: 32,
     backgroundColor: 'rgba(255,255,255,0.1)',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.2)',

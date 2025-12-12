@@ -8,7 +8,7 @@ import React, { useEffect, memo, useState, useCallback, useMemo, useRef } from '
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { WebView } from 'react-native-webview'
 import * as Haptics from 'expo-haptics'
-import { Ionicons } from '@expo/vector-icons'
+import { Ionicons, FontAwesome5 } from '@expo/vector-icons'
 import { colors, spacing, radius } from '@/theme/tokens'
 import { layout } from '@/theme/layout'
 import { NavSidebar, type NavItem } from '@/components/NavSidebar'
@@ -263,6 +263,7 @@ function MarketingScreenComponent() {
 
   // Meta sub-tab state
   const [metaSubTab, setMetaSubTab] = useState<'overview' | 'ads' | 'posts' | 'insights'>('overview')
+  const [insightsDateRange, setInsightsDateRange] = useState<'7d' | '14d' | '30d' | '90d'>('30d')
 
   // Nav items
   const navItems: NavItem[] = useMemo(() => {
@@ -358,11 +359,28 @@ function MarketingScreenComponent() {
   }, [vendor?.id, isMetaConnected])
 
   // Load Meta insights when insights tab is active
-  useEffect(() => {
-    if (vendor?.id && isMetaConnected && metaSubTab === 'insights' && !metaInsights) {
-      loadMetaInsights(vendor.id)
+  // Calculate date range for insights
+  const getInsightsDateRange = useCallback(() => {
+    const end = new Date()
+    const start = new Date()
+    switch (insightsDateRange) {
+      case '7d': start.setDate(end.getDate() - 7); break
+      case '14d': start.setDate(end.getDate() - 14); break
+      case '30d': start.setDate(end.getDate() - 30); break
+      case '90d': start.setDate(end.getDate() - 90); break
     }
-  }, [vendor?.id, isMetaConnected, metaSubTab])
+    return {
+      start: start.toISOString().split('T')[0],
+      end: end.toISOString().split('T')[0],
+    }
+  }, [insightsDateRange])
+
+  useEffect(() => {
+    if (vendor?.id && isMetaConnected && metaSubTab === 'insights') {
+      const { start, end } = getInsightsDateRange()
+      loadMetaInsights(vendor.id, start, end)
+    }
+  }, [vendor?.id, isMetaConnected, metaSubTab, insightsDateRange])
 
   // Load loyalty and discounts data (requires auth user ID)
   useEffect(() => {
@@ -2515,7 +2533,7 @@ function MarketingScreenComponent() {
                 {/* Insights Header with Refresh */}
                 <View style={styles.section}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.md }}>
-                    <Text style={styles.sectionTitle}>Ad Performance</Text>
+                    <Text style={styles.sectionTitle}>Account Overview</Text>
                     <Pressable
                       style={[styles.metaSyncButton, { flexDirection: 'row', alignItems: 'center', gap: 4 }, isLoadingInsights && { opacity: 0.6 }]}
                       onPress={() => vendor?.id && loadMetaInsights(vendor.id)}
@@ -2553,69 +2571,210 @@ function MarketingScreenComponent() {
                       </View>
                     </View>
                   )}
+                </View>
 
-                  {/* Summary Stats */}
-                  {metaInsights?.summary && (
-                    <View style={styles.insightsGrid}>
-                      <View style={styles.insightCard}>
-                        <Text style={styles.insightValue}>{formatMetaSpend(metaInsights.summary.spend)}</Text>
-                        <Text style={styles.insightLabel}>Total Spend</Text>
+                {/* Hero Stats - Followers Overview */}
+                {(metaInsights?.page || metaInsights?.instagram) && (
+                  <View style={styles.insightsHeroRow}>
+                    {/* Facebook Card */}
+                    {metaInsights?.page && (
+                      <View style={[styles.insightsHeroStat, { backgroundColor: '#1877F2' }]}>
+                        <Ionicons name="logo-facebook" size={28} color="rgba(255,255,255,0.9)" style={{ marginBottom: spacing.xs }} />
+                        <Text style={styles.insightsHeroValue}>{formatMetaNumber(metaInsights.page.totalFollowers)}</Text>
+                        <Text style={styles.insightsHeroLabel}>Facebook</Text>
+                        {metaInsights.page.newFollowers > 0 && (
+                          <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: spacing.xs, backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: spacing.sm, paddingVertical: 2, borderRadius: radius.full }}>
+                            <Ionicons name="trending-up" size={12} color="#FFFFFF" />
+                            <Text style={{ color: '#FFFFFF', fontSize: 11, fontWeight: '600', marginLeft: 4 }}>+{metaInsights.page.newFollowers}</Text>
+                          </View>
+                        )}
                       </View>
-                      <View style={styles.insightCard}>
-                        <Text style={styles.insightValue}>{formatMetaNumber(metaInsights.summary.impressions)}</Text>
-                        <Text style={styles.insightLabel}>Impressions</Text>
+                    )}
+                    {/* Instagram Card */}
+                    {metaInsights?.instagram && (
+                      <View style={[styles.insightsHeroStat, { backgroundColor: '#E4405F' }]}>
+                        <Ionicons name="logo-instagram" size={28} color="rgba(255,255,255,0.9)" style={{ marginBottom: spacing.xs }} />
+                        <Text style={styles.insightsHeroValue}>{formatMetaNumber(metaInsights.instagram.followers)}</Text>
+                        <Text style={styles.insightsHeroLabel}>Instagram</Text>
+                        {(metaInsights.instagram.newFollowers || 0) > 0 && (
+                          <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: spacing.xs, backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: spacing.sm, paddingVertical: 2, borderRadius: radius.full }}>
+                            <Ionicons name="trending-up" size={12} color="#FFFFFF" />
+                            <Text style={{ color: '#FFFFFF', fontSize: 11, fontWeight: '600', marginLeft: 4 }}>+{metaInsights.instagram.newFollowers}</Text>
+                          </View>
+                        )}
                       </View>
-                      <View style={styles.insightCard}>
-                        <Text style={styles.insightValue}>{formatMetaNumber(metaInsights.summary.reach)}</Text>
-                        <Text style={styles.insightLabel}>Reach</Text>
-                      </View>
-                      <View style={styles.insightCard}>
-                        <Text style={styles.insightValue}>{formatMetaNumber(metaInsights.summary.clicks)}</Text>
-                        <Text style={styles.insightLabel}>Clicks</Text>
-                      </View>
-                      <View style={styles.insightCard}>
-                        <Text style={styles.insightValue}>{metaInsights.summary.purchases}</Text>
-                        <Text style={styles.insightLabel}>Purchases</Text>
-                      </View>
-                      <View style={styles.insightCard}>
-                        <Text style={[styles.insightValue, metaInsights.summary.roas >= 1 ? { color: '#10B981' } : { color: '#EF4444' }]}>
-                          {metaInsights.summary.roas.toFixed(2)}x
-                        </Text>
-                        <Text style={styles.insightLabel}>ROAS</Text>
-                      </View>
-                      <View style={styles.insightCard}>
-                        <Text style={styles.insightValue}>{formatMetaSpend(metaInsights.summary.cpc)}</Text>
-                        <Text style={styles.insightLabel}>CPC</Text>
-                      </View>
-                      <View style={styles.insightCard}>
-                        <Text style={styles.insightValue}>{metaInsights.summary.ctr.toFixed(2)}%</Text>
-                        <Text style={styles.insightLabel}>CTR</Text>
+                    )}
+                  </View>
+                )}
+
+                {/* Facebook Page Engagement */}
+                {metaInsights?.page && (
+                  <View style={styles.insightsSectionCard}>
+                    <View style={styles.insightsSectionHeader}>
+                      <Ionicons name="logo-facebook" size={20} color="#1877F2" />
+                      <Text style={styles.insightsSectionTitle}>Facebook Engagement</Text>
+                      <View style={styles.insightsSectionBadge}>
+                        <Text style={styles.insightsSectionBadgeText}>{(metaInsights.page as any).postCount || 0} posts</Text>
                       </View>
                     </View>
-                  )}
-                </View>
+                    <View style={styles.insightsSectionContent}>
+                      <View style={styles.insightsStatRow}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
+                          <Ionicons name="heart" size={18} color="#EF4444" />
+                          <Text style={styles.insightsStatLabel}>Total Reactions</Text>
+                        </View>
+                        <Text style={styles.insightsStatValue}>{formatMetaNumber((metaInsights.page as any).totalReactions || metaInsights.page.postEngagements)}</Text>
+                      </View>
+                      <View style={styles.insightsStatRow}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
+                          <Ionicons name="thumbs-up" size={18} color="#1877F2" />
+                          <Text style={styles.insightsStatLabel}>Likes</Text>
+                        </View>
+                        <Text style={styles.insightsStatValue}>{formatMetaNumber((metaInsights.page as any).totalLikes || 0)}</Text>
+                      </View>
+                      <View style={styles.insightsStatRow}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
+                          <Ionicons name="chatbubble" size={18} color="#10B981" />
+                          <Text style={styles.insightsStatLabel}>Comments</Text>
+                        </View>
+                        <Text style={styles.insightsStatValue}>{formatMetaNumber((metaInsights.page as any).totalComments || 0)}</Text>
+                      </View>
+                      <View style={[styles.insightsStatRow, styles.insightsStatRowLast]}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
+                          <Ionicons name="share-social" size={18} color="#8B5CF6" />
+                          <Text style={styles.insightsStatLabel}>Shares</Text>
+                        </View>
+                        <Text style={styles.insightsStatValue}>{formatMetaNumber((metaInsights.page as any).totalShares || 0)}</Text>
+                      </View>
+                    </View>
+                  </View>
+                )}
+
+                {/* Instagram Engagement */}
+                {metaInsights?.instagram && (
+                  <View style={styles.insightsSectionCard}>
+                    <View style={styles.insightsSectionHeader}>
+                      <Ionicons name="logo-instagram" size={20} color="#E4405F" />
+                      <Text style={styles.insightsSectionTitle}>Instagram Activity</Text>
+                      <View style={styles.insightsSectionBadge}>
+                        <Text style={styles.insightsSectionBadgeText}>{(metaInsights.instagram as any).mediaCount || 0} posts</Text>
+                      </View>
+                    </View>
+                    <View style={styles.insightsSectionContent}>
+                      <View style={styles.insightsStatRow}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
+                          <Ionicons name="heart" size={18} color="#EF4444" />
+                          <Text style={styles.insightsStatLabel}>Likes (30d)</Text>
+                        </View>
+                        <Text style={styles.insightsStatValue}>{formatMetaNumber((metaInsights.instagram as any).totalLikes || 0)}</Text>
+                      </View>
+                      <View style={styles.insightsStatRow}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
+                          <Ionicons name="chatbubble" size={18} color="#10B981" />
+                          <Text style={styles.insightsStatLabel}>Comments (30d)</Text>
+                        </View>
+                        <Text style={styles.insightsStatValue}>{formatMetaNumber((metaInsights.instagram as any).totalComments || 0)}</Text>
+                      </View>
+                      <View style={styles.insightsStatRow}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
+                          <Ionicons name="eye" size={18} color="#1877F2" />
+                          <Text style={styles.insightsStatLabel}>Profile Views</Text>
+                        </View>
+                        <Text style={styles.insightsStatValue}>{formatMetaNumber(metaInsights.instagram.profileViews)}</Text>
+                      </View>
+                      <View style={[styles.insightsStatRow, styles.insightsStatRowLast]}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
+                          <Ionicons name="people" size={18} color="#8B5CF6" />
+                          <Text style={styles.insightsStatLabel}>Reach</Text>
+                        </View>
+                        <Text style={styles.insightsStatValue}>{formatMetaNumber(metaInsights.instagram.reach)}</Text>
+                      </View>
+                    </View>
+                  </View>
+                )}
+
+                {/* Paid Ads Performance */}
+                {metaInsights?.summary && (
+                  <View style={styles.insightsSectionCard}>
+                    <View style={styles.insightsSectionHeader}>
+                      <Ionicons name="megaphone" size={20} color="#F59E0B" />
+                      <Text style={styles.insightsSectionTitle}>Paid Ads</Text>
+                      <View style={[styles.insightsSectionBadge, metaInsights.summary.roas >= 1 ? { backgroundColor: 'rgba(16,185,129,0.15)' } : { backgroundColor: 'rgba(239,68,68,0.15)' }]}>
+                        <Text style={[styles.insightsSectionBadgeText, metaInsights.summary.roas >= 1 ? { color: '#10B981' } : { color: '#EF4444' }]}>
+                          {metaInsights.summary.roas.toFixed(2)}x ROAS
+                        </Text>
+                      </View>
+                    </View>
+                    <View style={styles.insightsSectionContent}>
+                      {/* Top row - key metrics */}
+                      <View style={{ flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.md }}>
+                        <View style={{ flex: 1, backgroundColor: 'rgba(245,158,11,0.1)', borderRadius: radius.md, padding: spacing.md, alignItems: 'center' }}>
+                          <Text style={{ fontSize: 20, fontWeight: '700', color: '#F59E0B' }}>{formatMetaSpend(metaInsights.summary.spend)}</Text>
+                          <Text style={{ fontSize: 11, color: colors.text.tertiary, marginTop: 2 }}>Total Spend</Text>
+                        </View>
+                        <View style={{ flex: 1, backgroundColor: 'rgba(16,185,129,0.1)', borderRadius: radius.md, padding: spacing.md, alignItems: 'center' }}>
+                          <Text style={{ fontSize: 20, fontWeight: '700', color: '#10B981' }}>{metaInsights.summary.purchases}</Text>
+                          <Text style={{ fontSize: 11, color: colors.text.tertiary, marginTop: 2 }}>Purchases</Text>
+                        </View>
+                      </View>
+                      {/* Stats rows */}
+                      <View style={styles.insightsStatRow}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
+                          <Ionicons name="eye-outline" size={18} color={colors.text.tertiary} />
+                          <Text style={styles.insightsStatLabel}>Impressions</Text>
+                        </View>
+                        <Text style={styles.insightsStatValue}>{formatMetaNumber(metaInsights.summary.impressions)}</Text>
+                      </View>
+                      <View style={styles.insightsStatRow}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
+                          <Ionicons name="people-outline" size={18} color={colors.text.tertiary} />
+                          <Text style={styles.insightsStatLabel}>Reach</Text>
+                        </View>
+                        <Text style={styles.insightsStatValue}>{formatMetaNumber(metaInsights.summary.reach)}</Text>
+                      </View>
+                      <View style={styles.insightsStatRow}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
+                          <Ionicons name="finger-print-outline" size={18} color={colors.text.tertiary} />
+                          <Text style={styles.insightsStatLabel}>Clicks</Text>
+                        </View>
+                        <Text style={styles.insightsStatValue}>{formatMetaNumber(metaInsights.summary.clicks)}</Text>
+                      </View>
+                      <View style={styles.insightsStatRow}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
+                          <Ionicons name="cash-outline" size={18} color={colors.text.tertiary} />
+                          <Text style={styles.insightsStatLabel}>Cost per Click</Text>
+                        </View>
+                        <Text style={styles.insightsStatValue}>{formatMetaSpend(metaInsights.summary.cpc)}</Text>
+                      </View>
+                      <View style={[styles.insightsStatRow, styles.insightsStatRowLast]}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
+                          <Ionicons name="trending-up-outline" size={18} color={colors.text.tertiary} />
+                          <Text style={styles.insightsStatLabel}>Click-through Rate</Text>
+                        </View>
+                        <Text style={styles.insightsStatValue}>{metaInsights.summary.ctr.toFixed(2)}%</Text>
+                      </View>
+                    </View>
+                  </View>
+                )}
 
                 {/* Daily Spend Chart */}
                 {metaInsights?.daily && metaInsights.daily.length > 0 && (
-                  <View style={styles.section}>
-                    <Text style={styles.sectionTitle}>Daily Spend</Text>
-                    <View style={styles.glassCard}>
+                  <View style={styles.insightsSectionCard}>
+                    <View style={styles.insightsSectionHeader}>
+                      <Ionicons name="bar-chart" size={20} color="#8B5CF6" />
+                      <Text style={styles.insightsSectionTitle}>Daily Trend</Text>
+                    </View>
+                    <View style={{ padding: spacing.md }}>
                       <View style={styles.chartContainer}>
                         {(() => {
                           const maxSpend = Math.max(...metaInsights.daily.map(d => d.spend), 1)
                           return metaInsights.daily.slice(-14).map((day, idx) => (
                             <View key={day.date} style={styles.chartBar}>
-                              <View style={[styles.chartBarFill, { height: `${(day.spend / maxSpend) * 100}%` }]} />
+                              <View style={[styles.chartBarFill, { height: `${(day.spend / maxSpend) * 100}%`, backgroundColor: '#8B5CF6' }]} />
                               <Text style={styles.chartBarLabel}>{day.date.slice(-2)}</Text>
                             </View>
                           ))
                         })()}
-                      </View>
-                      <View style={styles.chartLegend}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                          <View style={{ width: 12, height: 12, backgroundColor: '#1877F2', borderRadius: 2, marginRight: spacing.xs }} />
-                          <Text style={{ color: colors.text.tertiary, fontSize: 12 }}>Daily Spend</Text>
-                        </View>
                       </View>
                     </View>
                   </View>
@@ -2623,10 +2782,16 @@ function MarketingScreenComponent() {
 
                 {/* Campaign Breakdown */}
                 {metaInsights?.campaigns && metaInsights.campaigns.length > 0 && (
-                  <View style={styles.section}>
-                    <Text style={styles.sectionTitle}>Campaign Performance</Text>
-                    <View style={styles.glassCard}>
-                      {metaInsights.campaigns.map((campaign, idx) => (
+                  <View style={styles.insightsSectionCard}>
+                    <View style={styles.insightsSectionHeader}>
+                      <Ionicons name="layers" size={20} color="#06B6D4" />
+                      <Text style={styles.insightsSectionTitle}>Campaigns</Text>
+                      <View style={[styles.insightsSectionBadge, { backgroundColor: 'rgba(6,182,212,0.15)' }]}>
+                        <Text style={[styles.insightsSectionBadgeText, { color: '#06B6D4' }]}>{metaInsights.campaigns.length} active</Text>
+                      </View>
+                    </View>
+                    <View style={{ padding: spacing.sm }}>
+                      {metaInsights.campaigns.slice(0, 5).map((campaign, idx) => (
                         <View key={campaign.campaignId} style={[styles.campaignRow, idx > 0 && { borderTopWidth: 1, borderTopColor: colors.border.subtle }]}>
                           <View style={{ flex: 1 }}>
                             <Text style={styles.campaignName} numberOfLines={1}>{campaign.campaignName}</Text>
@@ -2639,15 +2804,11 @@ function MarketingScreenComponent() {
                                 <Text style={{ color: colors.text.quaternary }}>Clicks: </Text>
                                 {formatMetaNumber(campaign.clicks)}
                               </Text>
-                              <Text style={styles.campaignStat}>
-                                <Text style={{ color: colors.text.quaternary }}>Purchases: </Text>
-                                {campaign.purchases}
-                              </Text>
                             </View>
                           </View>
-                          <View style={{ alignItems: 'flex-end' }}>
-                            <Text style={[styles.roasBadge, campaign.roas >= 1 ? styles.roasPositive : styles.roasNegative]}>
-                              {campaign.roas.toFixed(2)}x ROAS
+                          <View style={[styles.roasBadge, campaign.roas >= 1 ? styles.roasPositive : styles.roasNegative]}>
+                            <Text style={{ fontSize: 12, fontWeight: '700', color: campaign.roas >= 1 ? '#10B981' : '#EF4444' }}>
+                              {campaign.roas.toFixed(1)}x
                             </Text>
                           </View>
                         </View>
@@ -2656,72 +2817,8 @@ function MarketingScreenComponent() {
                   </View>
                 )}
 
-                {/* Page & Instagram Insights */}
-                {(metaInsights?.page || metaInsights?.instagram) && (
-                  <View style={styles.section}>
-                    <Text style={styles.sectionTitle}>Organic Performance</Text>
-                    <View style={{ flexDirection: 'row', gap: spacing.md }}>
-                      {/* Facebook Page */}
-                      {metaInsights.page && (
-                        <View style={[styles.glassCard, { flex: 1 }]}>
-                          <View style={styles.organicHeader}>
-                            <Ionicons name="logo-facebook" size={20} color="#1877F2" />
-                            <Text style={styles.organicTitle}>Facebook Page</Text>
-                          </View>
-                          <View style={styles.organicStats}>
-                            <View style={styles.organicStat}>
-                              <Text style={styles.organicValue}>{formatMetaNumber(metaInsights.page.totalFollowers)}</Text>
-                              <Text style={styles.organicLabel}>Followers</Text>
-                            </View>
-                            <View style={styles.organicStat}>
-                              <Text style={[styles.organicValue, { color: '#10B981' }]}>+{metaInsights.page.newFollowers}</Text>
-                              <Text style={styles.organicLabel}>New</Text>
-                            </View>
-                            <View style={styles.organicStat}>
-                              <Text style={styles.organicValue}>{formatMetaNumber(metaInsights.page.reach)}</Text>
-                              <Text style={styles.organicLabel}>Reach</Text>
-                            </View>
-                            <View style={styles.organicStat}>
-                              <Text style={styles.organicValue}>{formatMetaNumber(metaInsights.page.postEngagements)}</Text>
-                              <Text style={styles.organicLabel}>Engagements</Text>
-                            </View>
-                          </View>
-                        </View>
-                      )}
-
-                      {/* Instagram */}
-                      {metaInsights.instagram && (
-                        <View style={[styles.glassCard, { flex: 1 }]}>
-                          <View style={styles.organicHeader}>
-                            <Ionicons name="logo-instagram" size={20} color="#E4405F" />
-                            <Text style={styles.organicTitle}>Instagram</Text>
-                          </View>
-                          <View style={styles.organicStats}>
-                            <View style={styles.organicStat}>
-                              <Text style={styles.organicValue}>{formatMetaNumber(metaInsights.instagram.followers)}</Text>
-                              <Text style={styles.organicLabel}>Followers</Text>
-                            </View>
-                            <View style={styles.organicStat}>
-                              <Text style={styles.organicValue}>{formatMetaNumber(metaInsights.instagram.reach)}</Text>
-                              <Text style={styles.organicLabel}>Reach</Text>
-                            </View>
-                            <View style={styles.organicStat}>
-                              <Text style={styles.organicValue}>{formatMetaNumber(metaInsights.instagram.profileViews)}</Text>
-                              <Text style={styles.organicLabel}>Profile Views</Text>
-                            </View>
-                            <View style={styles.organicStat}>
-                              <Text style={styles.organicValue}>{formatMetaNumber(metaInsights.instagram.impressions)}</Text>
-                              <Text style={styles.organicLabel}>Impressions</Text>
-                            </View>
-                          </View>
-                        </View>
-                      )}
-                    </View>
-                  </View>
-                )}
-
-                {/* No Data State */}
-                {!isLoadingInsights && !metaInsights?.summary && (
+                {/* No Data State / Debug Info */}
+                {!isLoadingInsights && !metaInsights?.summary && !metaInsights?.page && !metaInsights?.instagram && (
                   <View style={styles.section}>
                     <View style={styles.glassCard}>
                       <View style={{ padding: spacing.xl, alignItems: 'center' }}>
@@ -2730,8 +2827,30 @@ function MarketingScreenComponent() {
                           No Insights Available
                         </Text>
                         <Text style={{ color: colors.text.quaternary, marginTop: spacing.xs, fontSize: 13, textAlign: 'center' }}>
-                          Connect an ad account and run campaigns to see insights
+                          Connect a Facebook Page or Instagram account to see insights
                         </Text>
+
+                        {/* Debug info */}
+                        {(metaInsights as any)?.debug && (
+                          <View style={{ marginTop: spacing.lg, padding: spacing.md, backgroundColor: 'rgba(255,0,0,0.1)', borderRadius: radius.md, width: '100%' }}>
+                            <Text style={{ color: '#EF4444', fontSize: 12, fontWeight: '600', marginBottom: spacing.xs }}>Debug Info:</Text>
+                            {(metaInsights as any).debug.pageError && (
+                              <Text style={{ color: '#EF4444', fontSize: 11, marginBottom: 4 }}>
+                                Page Error: {(metaInsights as any).debug.pageError}
+                              </Text>
+                            )}
+                            {(metaInsights as any).debug.instagramError && (
+                              <Text style={{ color: '#EF4444', fontSize: 11, marginBottom: 4 }}>
+                                Instagram Error: {(metaInsights as any).debug.instagramError}
+                              </Text>
+                            )}
+                            <Text style={{ color: colors.text.quaternary, fontSize: 10, marginTop: spacing.xs }}>
+                              Has Page ID: {(metaInsights as any).debug.hasPageId ? 'Yes' : 'No'} |
+                              Has IG ID: {(metaInsights as any).debug.hasInstagramId ? 'Yes' : 'No'} |
+                              Has Ad Account: {(metaInsights as any).debug.hasAdAccountId ? 'Yes' : 'No'}
+                            </Text>
+                          </View>
+                        )}
                       </View>
                     </View>
                   </View>
@@ -6436,6 +6555,119 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
+  // New modern insight styles
+  insightsHeroCard: {
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    marginBottom: spacing.md,
+  },
+  insightsHeroRow: {
+    flexDirection: 'row',
+    gap: spacing.md,
+    marginBottom: spacing.lg,
+  },
+  insightsHeroStat: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: spacing.xl,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.lg,
+  },
+  insightsHeroValue: {
+    fontSize: 32,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  insightsHeroLabel: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.8)',
+    marginTop: 4,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  insightsMetricGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+  },
+  insightsMetricCard: {
+    width: (SCREEN_WIDTH - spacing.lg * 2 - spacing.sm * 2) / 3,
+    backgroundColor: colors.glass.regular,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border.subtle,
+  },
+  insightsMetricValue: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: colors.text.primary,
+    marginBottom: 2,
+  },
+  insightsMetricLabel: {
+    fontSize: 11,
+    color: colors.text.tertiary,
+    fontWeight: '500',
+  },
+  insightsSectionCard: {
+    backgroundColor: colors.glass.regular,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border.subtle,
+    overflow: 'hidden',
+    marginBottom: spacing.md,
+  },
+  insightsSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    padding: spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border.subtle,
+  },
+  insightsSectionTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.text.primary,
+    flex: 1,
+  },
+  insightsSectionBadge: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+    borderRadius: radius.full,
+    backgroundColor: 'rgba(16,185,129,0.15)',
+  },
+  insightsSectionBadgeText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#10B981',
+  },
+  insightsSectionContent: {
+    padding: spacing.md,
+  },
+  insightsStatRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border.subtle,
+  },
+  insightsStatRowLast: {
+    borderBottomWidth: 0,
+  },
+  insightsStatLabel: {
+    fontSize: 14,
+    color: colors.text.secondary,
+    flex: 1,
+  },
+  insightsStatValue: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.text.primary,
+  },
   chartContainer: {
     flexDirection: 'row',
     alignItems: 'flex-end',
@@ -6496,38 +6728,5 @@ const styles = StyleSheet.create({
   roasNegative: {
     backgroundColor: 'rgba(239, 68, 68, 0.15)',
     color: '#EF4444',
-  },
-  organicHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    padding: spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border.subtle,
-  },
-  organicTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.text.primary,
-  },
-  organicStats: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    padding: spacing.md,
-  },
-  organicStat: {
-    width: '50%',
-    marginBottom: spacing.sm,
-  },
-  organicValue: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: colors.text.primary,
-  },
-  organicLabel: {
-    fontSize: 11,
-    color: colors.text.tertiary,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
   },
 })

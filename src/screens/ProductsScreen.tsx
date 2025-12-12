@@ -544,7 +544,7 @@ function ProductsScreenComponent() {
               ]}
               pointerEvents={selectedProduct || selectedCategory ? 'none' : 'auto'}
             >
-              <ProductsListView products={allProducts} vendorLogo={vendor?.logo_url} isLoading={productsLoading} />
+              <ProductsListView products={allProducts} vendorLogo={vendor?.logo_url} isLoading={productsLoading} onRefresh={reloadProducts} />
             </Animated.View>
           )}
 
@@ -636,8 +636,9 @@ function ProductsScreenComponent() {
         visible={useProductsScreenStore((state) => state.showCreateAudit)}
         onClose={() => productsScreenActions.closeAllModals()}
         onCreated={() => {
-          // Audits will auto-refresh via useInventoryAdjustments hook
-          logger.info('Audit created successfully')
+          // Trigger instant refresh of audits list
+          productsScreenActions.triggerAuditRefresh()
+          logger.info('Audit created successfully - triggering refresh')
         }}
       />
       <LocationSelectorModal

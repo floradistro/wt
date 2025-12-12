@@ -10,7 +10,7 @@
  * Displays inventory transfers in iPad Settings-style glass card layout
  */
 
-import React, { useMemo, useState } from 'react'
+import React, { useMemo, useState, useCallback } from 'react'
 import {
   View,
   Text,
@@ -18,6 +18,7 @@ import {
   Pressable,
   ScrollView,
   ActivityIndicator,
+  RefreshControl,
 } from 'react-native'
 import * as Haptics from 'expo-haptics'
 import { colors, spacing, radius } from '@/theme/tokens'
@@ -133,6 +134,19 @@ export function TransfersList({
 
   // Location selector modal state
   const [showLocationModal, setShowLocationModal] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
+
+  // Pull to refresh handler
+  const onRefresh = useCallback(async () => {
+    if (!vendor?.id) return
+    setRefreshing(true)
+    const filters: { status?: TransferStatus } = {}
+    if (statusFilter !== 'all') {
+      filters.status = statusFilter as TransferStatus
+    }
+    await useTransfersStore.getState().loadTransfers(vendor.id, Object.keys(filters).length > 0 ? filters : undefined)
+    setRefreshing(false)
+  }, [vendor?.id, statusFilter])
 
   // Compute location display text
   const locationDisplayText = useMemo(() => {
@@ -313,6 +327,13 @@ export function TransfersList({
         indicatorStyle="white"
         scrollIndicatorInsets={{ right: 2, bottom: layout.dockHeight }}
         contentContainerStyle={{ paddingBottom: layout.dockHeight, paddingRight: 0 }}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor="rgba(255,255,255,0.6)"
+          />
+        }
       >
         {/* Title Section with Location Selector */}
         <TitleSection

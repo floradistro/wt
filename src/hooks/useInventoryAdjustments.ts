@@ -15,6 +15,7 @@ import {
   type AdjustmentFilters,
   type CreateAdjustmentInput,
 } from '@/services/inventory-adjustments.service'
+import { useAuditRefreshTrigger } from '@/stores/products-list.store'
 
 export interface UseInventoryAdjustmentsResult {
   adjustments: InventoryAdjustment[]
@@ -50,6 +51,9 @@ export function useInventoryAdjustments(
   })
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
+  // Watch for refresh trigger from store (for live updates after audit creation)
+  const refreshTrigger = useAuditRefreshTrigger()
 
   // Merge productId and locationId with additional filters
   const filters = {
@@ -96,9 +100,10 @@ export function useInventoryAdjustments(
     }
   }, [vendor?.id, filters.product_id, filters.location_id, filters.adjustment_type, filters.start_date, filters.end_date])
 
+  // Load adjustments on mount, filter changes, and refresh trigger
   useEffect(() => {
     loadAdjustments()
-  }, [loadAdjustments])
+  }, [loadAdjustments, refreshTrigger])
 
   const createAdjustment = useCallback(async (
     input: Omit<CreateAdjustmentInput, 'product_id' | 'location_id'> & { product_id?: string; location_id?: string }

@@ -12,8 +12,8 @@
  * Displays purchase orders in iPad Settings-style glass card layout
  */
 
-import React, { useMemo, useState } from 'react'
-import { View, Text, StyleSheet, Pressable, ScrollView, ActivityIndicator } from 'react-native'
+import React, { useMemo, useState, useCallback } from 'react'
+import { View, Text, StyleSheet, Pressable, ScrollView, ActivityIndicator, RefreshControl } from 'react-native'
 import * as Haptics from 'expo-haptics'
 import { colors, spacing, radius } from '@/theme/tokens'
 import { layout } from '@/theme/layout'
@@ -119,6 +119,16 @@ export function PurchaseOrdersList({
 
   // Location selector modal state
   const [showLocationModal, setShowLocationModal] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
+
+  // Pull to refresh handler
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true)
+    const locationIds = selectedLocationIds.length > 0 ? selectedLocationIds : undefined
+    const status = statusFilter !== 'all' ? (statusFilter as PurchaseOrderStatus) : undefined
+    await purchaseOrdersActions.loadPurchaseOrders({ locationIds, status })
+    setRefreshing(false)
+  }, [selectedLocationIds, statusFilter])
 
   // Compute location display text
   const locationDisplayText = useMemo(() => {
@@ -234,6 +244,13 @@ export function PurchaseOrdersList({
         indicatorStyle="white"
         scrollIndicatorInsets={{ right: 2, bottom: layout.dockHeight }}
         contentContainerStyle={{ paddingBottom: layout.dockHeight, paddingRight: 0 }}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor="rgba(255,255,255,0.6)"
+          />
+        }
       >
         {/* Title Section with Location Selector */}
         <TitleSection

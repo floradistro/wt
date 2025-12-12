@@ -9,8 +9,8 @@
  * - Calls store actions directly
  */
 
-import React, { useState, useMemo } from 'react'
-import { View, Text, StyleSheet, Pressable, ScrollView, ActivityIndicator, Image } from 'react-native'
+import React, { useState, useMemo, useCallback } from 'react'
+import { View, Text, StyleSheet, Pressable, ScrollView, ActivityIndicator, Image, RefreshControl } from 'react-native'
 import * as Haptics from 'expo-haptics'
 import { layout } from '@/theme/layout'
 import { spacing, radius, colors } from '@/theme/tokens'
@@ -35,10 +35,18 @@ export function CategoriesView() {
   const selectedLocationIds = useLocationFilter((state) => state.selectedLocationIds)
   const searchQuery = useProductsScreenStore((state) => state.searchQuery)
   const selectedCategoryId = useProductsScreenStore((state) => state.selectedCategoryId)
-  const { categories, isLoading } = useCategories({ includeGlobal: true, parentId: null })
+  const { categories, isLoading, reload } = useCategories({ includeGlobal: true, parentId: null })
 
   // Location selector modal state
   const [showLocationModal, setShowLocationModal] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
+
+  // Pull to refresh handler
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true)
+    await reload()
+    setRefreshing(false)
+  }, [reload])
 
   // Compute location display text
   const locationDisplayText = useMemo(() => {
@@ -104,6 +112,13 @@ export function CategoriesView() {
             paddingBottom: layout.dockHeight,
             paddingRight: 0,
           }}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor="rgba(255,255,255,0.6)"
+            />
+          }
         >
           {/* Title Section with Location Selector */}
           <TitleSection
@@ -145,6 +160,13 @@ export function CategoriesView() {
           paddingBottom: layout.dockHeight,
           paddingRight: 0,
         }}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor="rgba(255,255,255,0.6)"
+          />
+        }
       >
         {/* Title Section with Location Selector */}
         <TitleSection

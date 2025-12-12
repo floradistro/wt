@@ -10,7 +10,7 @@
  */
 
 import React, { useRef, useState, useMemo, useCallback } from 'react'
-import { View, Text, StyleSheet, Pressable, ScrollView, ActivityIndicator, Animated, PanResponder } from 'react-native'
+import { View, Text, StyleSheet, Pressable, ScrollView, ActivityIndicator, Animated, PanResponder, RefreshControl } from 'react-native'
 import * as Haptics from 'expo-haptics'
 import { Ionicons } from '@expo/vector-icons'
 import { ProductItem } from '@/components/products/list/ProductItem'
@@ -32,12 +32,14 @@ interface ProductsListViewProps {
   products: Product[]
   vendorLogo?: string | null
   isLoading: boolean
+  onRefresh?: () => Promise<void>
 }
 
 function ProductsListViewComponent({
   products,
   vendorLogo,
   isLoading,
+  onRefresh,
 }: ProductsListViewProps) {
   // Read from stores - only get the ID to avoid re-renders when product object changes
   const selectedProductId = useProductsScreenStore(state => state.selectedProduct?.id)
@@ -50,6 +52,15 @@ function ProductsListViewComponent({
   // Location selector modal state
   const [showLocationModal, setShowLocationModal] = useState(false)
   const [showHealthModal, setShowHealthModal] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
+
+  // Pull to refresh handler
+  const handleRefresh = useCallback(async () => {
+    if (!onRefresh) return
+    setRefreshing(true)
+    await onRefresh()
+    setRefreshing(false)
+  }, [onRefresh])
 
   // Compute location display text
   const locationDisplayText = useMemo(() => {
@@ -426,6 +437,15 @@ function ProductsListViewComponent({
             paddingBottom: layout.dockHeight,
             paddingRight: 0
           }}
+          refreshControl={
+            onRefresh ? (
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={handleRefresh}
+                tintColor="rgba(255,255,255,0.6)"
+              />
+            ) : undefined
+          }
         >
           {/* Title Section with Location Filter & Compliance Button */}
           <TitleSection
