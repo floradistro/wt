@@ -15,11 +15,10 @@ import { logger } from '@/utils/logger'
 // Stores (ZERO PROP DRILLING)
 import { useCartItems, useCartTotals } from '@/stores/cart.store'
 import { useSelectedCustomer } from '@/stores/customer.store'
-import { useLoyaltyProgram, usePointsToRedeem, loyaltyActions } from '@/stores/loyalty.store'
 import { useSelectedDiscountId, checkoutUIActions } from '@/stores/checkout-ui.store'
 import { usePOSSession } from '@/contexts/POSSessionContext'
 import { taxActions } from '@/stores/tax.store'
-import { useCampaigns } from '@/stores/loyalty-campaigns.store'
+import { useCampaigns, useLoyaltyProgram, usePointsToRedeem, loyaltyActions } from '@/stores/loyalty-campaigns.store'
 
 function POSTotalsSection() {
   // ========================================
@@ -49,7 +48,12 @@ function POSTotalsSection() {
   // ========================================
   // CALCULATIONS (from stores) - using store value (no local state)
   // ========================================
-  const loyaltyDiscountAmount = loyaltyActions.getDiscountAmount()
+  // Calculate loyalty discount using correct loyaltyProgram from loyalty-campaigns store
+  const loyaltyDiscountAmount = useMemo(() => {
+    if (!loyaltyPointsToRedeem || !loyaltyProgram) return 0
+    const pointValue = loyaltyProgram.point_value || 0.01
+    return loyaltyPointsToRedeem * pointValue
+  }, [loyaltyPointsToRedeem, loyaltyProgram])
   const subtotalAfterLoyalty = Math.max(0, subtotal - loyaltyDiscountAmount)
 
   const discountAmount = useMemo(() => {

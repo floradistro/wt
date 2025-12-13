@@ -20,9 +20,8 @@
 
 import { useMemo, useEffect } from 'react'
 import { useCartTotals } from '@/stores/cart.store'
-import { useLoyaltyState, loyaltyActions } from '@/stores/loyalty.store'
+import { useLoyaltyState, loyaltyActions, useCampaigns } from '@/stores/loyalty-campaigns.store'
 import { useSelectedDiscountId, checkoutUIActions } from '@/stores/checkout-ui.store'
-import { useCampaigns } from '@/stores/loyalty-campaigns.store'
 import { taxActions } from '@/stores/tax.store'
 import { usePOSSession } from '@/contexts/POSSessionContext'
 

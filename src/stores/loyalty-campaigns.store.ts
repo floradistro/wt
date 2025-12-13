@@ -12,19 +12,9 @@ import { useShallow } from 'zustand/react/shallow'
 import { supabase } from '@/lib/supabase/client'
 import { logger } from '@/utils/logger'
 import { campaignsService, Campaign } from '@/services/campaigns.service'
+import type { LoyaltyProgram } from '@/types/pos'
 
-export interface LoyaltyProgram {
-  id: string
-  vendor_id: string
-  name: string
-  points_per_dollar: number
-  point_value: number
-  min_redemption_points: number
-  points_expiry_days: number | null
-  is_active: boolean
-  created_at: string
-  updated_at: string
-}
+export type { LoyaltyProgram }
 
 interface CampaignStats {
   total_campaigns: number
@@ -39,6 +29,9 @@ interface LoyaltyCampaignsState {
   programLoading: boolean
   programError: string | null
 
+  // POS Redemption State
+  pointsToRedeem: number
+
   // Campaigns
   campaigns: Campaign[]
   campaignStats: CampaignStats
@@ -50,6 +43,10 @@ interface LoyaltyCampaignsState {
   createProgram: (data: any) => Promise<{ success: boolean; error?: string }>
   updateProgram: (data: any) => Promise<{ success: boolean; error?: string }>
   toggleProgramStatus: (active: boolean) => Promise<{ success: boolean; error?: string }>
+
+  // Actions - POS Redemption
+  setPointsToRedeem: (points: number) => void
+  resetLoyalty: () => void
 
   // Actions - Campaigns
   loadCampaigns: (authUserId: string) => Promise<void>
@@ -65,6 +62,7 @@ const initialState = {
   program: null,
   programLoading: false,
   programError: null,
+  pointsToRedeem: 0,
   campaigns: [],
   campaignStats: {
     total_campaigns: 0,
@@ -196,6 +194,15 @@ export const useLoyaltyCampaignsStore = create<LoyaltyCampaignsState>()(
 
       toggleProgramStatus: async (active: boolean) => {
         return get().updateProgram({ is_active: active })
+      },
+
+      // POS Redemption Actions
+      setPointsToRedeem: (points: number) => {
+        set({ pointsToRedeem: points })
+      },
+
+      resetLoyalty: () => {
+        set({ pointsToRedeem: 0 })
       },
 
       loadCampaigns: async (authUserId: string) => {
@@ -362,6 +369,41 @@ export const useLoyaltyProgram = () =>
 
 export const useLoyaltyProgramLoading = () =>
   useLoyaltyCampaignsStore((state) => state.programLoading)
+
+export const usePointsToRedeem = () =>
+  useLoyaltyCampaignsStore((state) => state.pointsToRedeem)
+
+export const useLoyaltyState = () =>
+  useLoyaltyCampaignsStore(
+    useShallow((state) => ({
+      loyaltyProgram: state.program,
+      pointsToRedeem: state.pointsToRedeem,
+      loading: state.programLoading,
+      error: state.programError,
+    }))
+  )
+
+// Actions object for direct access (no hooks)
+export const loyaltyActions = {
+  get setPointsToRedeem() { return useLoyaltyCampaignsStore.getState().setPointsToRedeem },
+  get resetLoyalty() { return useLoyaltyCampaignsStore.getState().resetLoyalty },
+  getDiscountAmount: () => {
+    const { pointsToRedeem, program } = useLoyaltyCampaignsStore.getState()
+    const pointValue = program?.point_value || 0.01
+    return pointsToRedeem * pointValue
+  },
+  getMaxRedeemablePoints: (subtotal: number, customerPoints: number) => {
+    const { program } = useLoyaltyCampaignsStore.getState()
+    const pointValue = program?.point_value || 0.01
+    const maxFromSubtotal = Math.floor(subtotal / pointValue)
+    return Math.min(customerPoints, maxFromSubtotal)
+  },
+  getPointsEarned: (total: number) => {
+    const { program } = useLoyaltyCampaignsStore.getState()
+    const pointsPerDollar = program?.points_per_dollar || 1.0
+    return Math.floor(total * pointsPerDollar)
+  },
+}
 
 export const useCampaigns = () =>
   useLoyaltyCampaignsStore((state) => state.campaigns)

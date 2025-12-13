@@ -18,7 +18,7 @@ import { colors, spacing } from '@/theme/tokens'
 // Stores
 import { useCartTotals } from '@/stores/cart.store'
 import { useSelectedCustomer } from '@/stores/customer.store'
-import { useLoyaltyState, loyaltyActions } from '@/stores/loyalty.store'
+import { useLoyaltyState, loyaltyActions } from '@/stores/loyalty-campaigns.store'
 
 function POSLoyaltySliderComponent() {
   // State from Zustand

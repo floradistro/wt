@@ -25,7 +25,7 @@ import { POSCheckoutModals } from './POSCheckoutModals'
 
 // Hooks
 import { useCustomerSelection } from '@/hooks/pos/useCustomerSelection'
-import { useCampaigns } from '@/stores/loyalty-campaigns.store'
+import { useCampaigns, useLoyaltyState, loyaltyActions } from '@/stores/loyalty-campaigns.store'
 import { useCheckoutTotals } from '@/hooks/useCheckoutTotals'
 import { usePaymentProcessor } from '@/stores/payment-processor.store'
 import { useAuthStore } from '@/stores/auth.store'
@@ -34,7 +34,6 @@ import { useSelectedDiscountId, checkoutUIActions, useActiveModal } from '@/stor
 import { useSelectedCustomer, useScannedDataForNewCustomer, useCustomerMatches, customerActions } from '@/stores/customer.store'
 import { paymentActions } from '@/stores/payment.store'
 import { taxActions } from '@/stores/tax.store'
-import { useLoyaltyState, loyaltyActions } from '@/stores/loyalty.store'
 
 // Context - Zero prop drilling!
 import { useAppAuth } from '@/contexts/AppAuthContext'
