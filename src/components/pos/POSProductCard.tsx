@@ -406,14 +406,18 @@ const POSProductCard = forwardRef<any, POSProductCardProps>(({ product }, ref) =
           <View style={styles.imageContainer}>
             {/* Jobs Principle: Smart fallback hierarchy - Product image → Vendor logo → Placeholder */}
             {product.image_url ? (
-              <Image
-                source={{ uri: getMediumImage(product.image_url) || product.image_url }}
-                style={styles.image}
-                resizeMode="cover"
-                accessible={true}
-                accessibilityLabel={`${product.name} product image`}
-                accessibilityRole="image"
-              />
+              <>
+                <Image
+                  source={{ uri: getMediumImage(product.image_url) || product.image_url }}
+                  style={styles.image}
+                  resizeMode="cover"
+                  accessible={true}
+                  accessibilityLabel={`${product.name} product image`}
+                  accessibilityRole="image"
+                />
+                {/* Jobs Principle: Subtle dimming filter for consistent look (matches shop page) */}
+                <View style={styles.imageDimOverlay} pointerEvents="none" />
+              </>
             ) : product.vendor_logo_url ? (
               <View style={styles.vendorLogoContainer}>
                 <Image
@@ -672,6 +676,11 @@ const styles = StyleSheet.create({
   image: {
     width: '100%',
     height: '100%',
+  },
+  // Jobs Principle: Subtle dimming filter for consistent look (matches shop page brightness-[0.7])
+  imageDimOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.3)', // ~70% brightness to match shop page filter
   },
   // Jobs Principle: Clean vendor logo fallback with subtle opacity
   vendorLogoContainer: {
