@@ -202,6 +202,10 @@ interface OrderItem {
   tierQty?: number // Preferred field: tier quantity to deduct from inventory
   quantity_grams?: number // Alternative field: tier quantity
   tierName?: string // Display name for the tier (e.g., "28g (Ounce)", "1 Unit")
+  // Variant support - required for variant inventory deduction
+  variantTemplateId?: string // The category_variant_templates.id for variant sales
+  variantId?: string // Alias for variantTemplateId (legacy support)
+  variantName?: string // Display name of the variant
   // Multi-location support: which location fulfills this item
   locationId?: string  // POS format (camelCase)
   location_id?: string // E-commerce format (snake_case)
@@ -1443,6 +1447,9 @@ serve(async (req) => {
     const orderType = body.order_type || (body.is_ecommerce ? 'shipping' : 'walk_in')
     const isPickupOrder = orderType === 'pickup'
 
+    // Calculate total discounts for the discount_amount column
+    const totalDiscountAmount = (body.loyaltyDiscountAmount || 0) + (body.campaignDiscountAmount || 0) + (body.affiliate_discount_amount || 0)
+
     // Build order data object (for retry logic and error reporting)
     const orderData = {
       vendor_id: body.vendorId,
@@ -1455,6 +1462,7 @@ serve(async (req) => {
       payment_status: PaymentStatus.PENDING,
       subtotal: body.subtotal,
       tax_amount: body.taxAmount,
+      discount_amount: totalDiscountAmount, // All discounts (loyalty + campaign + affiliate)
       total_amount: body.total,
       payment_method: body.paymentMethod,
       idempotency_key: idempotencyKey,
