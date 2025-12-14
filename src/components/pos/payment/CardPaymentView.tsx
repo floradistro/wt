@@ -25,10 +25,12 @@ import type { PaymentData } from './PaymentTypes'
 
 interface CardPaymentViewProps {
   onComplete: (paymentData: PaymentData) => Promise<import('./PaymentTypes').SaleCompletionData>  // ✅ Coordination callback only
+  onCancel: () => void
 }
 
 export function CardPaymentView({
   onComplete,
+  onCancel,
 }: CardPaymentViewProps) {
   // ========================================
   // SINGLE SOURCE OF TRUTH - Centralized total calculation
@@ -109,49 +111,53 @@ export function CardPaymentView({
       ) : (
         <>
           <View style={styles.cardInfoContainer}>
-            <Ionicons name="card-outline" size={48} color="#10b981" />
-            <Text style={styles.cardInfoTitle}>Card Payment</Text>
+            <Ionicons name="card-outline" size={40} color="#10b981" />
             <Text style={styles.cardInfoSubtext}>
               Terminal: {currentProcessor?.processor_name || 'Not configured'}
             </Text>
-            <Text style={styles.cardInfoAmount}>${total.toFixed(2)}</Text>
           </View>
 
-          <LiquidGlassView
-            effect="regular"
-            colorScheme="dark"
-            style={styles.instructionCard}
-          >
-            <Text style={styles.instructionText}>
-              Click COMPLETE to process card payment on terminal
-            </Text>
-          </LiquidGlassView>
-
-          <TouchableOpacity
-            onPress={handleCardPayment}
-            disabled={!canComplete}
-            activeOpacity={0.7}
-            style={styles.completeButtonWrapper}
-          >
-            <LiquidGlassView
-              effect="regular"
-              colorScheme="dark"
-              tintColor={canComplete ? 'rgba(16,185,129,0.3)' : undefined}
-              style={[
-                styles.completeButton,
-                !canComplete && styles.completeButtonDisabled,
-              ]}
+          {/* Action Buttons Row */}
+          <View style={styles.actionsRow}>
+            <TouchableOpacity
+              onPress={onCancel}
+              activeOpacity={0.7}
+              style={styles.cancelButtonWrapper}
+              accessibilityRole="button"
+              accessibilityLabel="Cancel payment"
             >
-              <Text
+              <View style={styles.cancelButton}>
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </View>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={handleCardPayment}
+              disabled={!canComplete}
+              activeOpacity={0.7}
+              style={styles.completeButtonWrapper}
+              accessibilityRole="button"
+              accessibilityLabel="Complete card payment"
+              accessibilityState={{ disabled: !canComplete }}
+            >
+              <View
                 style={[
-                  styles.completeButtonText,
-                  canComplete && styles.completeButtonTextActive,
+                  styles.completeButton,
+                  canComplete && styles.completeButtonActive,
+                  !canComplete && styles.completeButtonDisabled,
                 ]}
               >
-                Complete
-              </Text>
-            </LiquidGlassView>
-          </TouchableOpacity>
+                <Text
+                  style={[
+                    styles.completeButtonText,
+                    canComplete && styles.completeButtonTextActive,
+                  ]}
+                >
+                  Complete
+                </Text>
+              </View>
+            </TouchableOpacity>
+          </View>
         </>
       )}
     </View>
@@ -221,52 +227,56 @@ const styles = StyleSheet.create({
   },
   cardInfoContainer: {
     alignItems: 'center',
-    paddingVertical: 32,
-  },
-  cardInfoTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#fff',
-    marginTop: 16,
-    marginBottom: 8,
+    paddingVertical: 16,
   },
   cardInfoSubtext: {
-    fontSize: 15,
-    fontWeight: '400',
-    color: 'rgba(255,255,255,0.6)',
-    marginBottom: 16,
-    letterSpacing: -0.2,
+    fontSize: 13,
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.5)',
+    marginTop: 8,
+    letterSpacing: -0.1,
   },
-  cardInfoAmount: {
-    fontSize: 42,
-    fontWeight: '700',
-    color: '#10b981',
-    letterSpacing: -0.4,
+  actionsRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 20,
   },
-  instructionCard: {
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 24,
+  cancelButtonWrapper: {
+    flex: 1,
   },
-  instructionText: {
-    fontSize: 15,
-    fontWeight: '400',
-    color: 'rgba(255,255,255,0.8)',
-    textAlign: 'center',
-    lineHeight: 20,
+  cancelButton: {
+    height: 50,
+    borderRadius: 25,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  cancelButtonText: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.7)',
     letterSpacing: -0.2,
   },
   completeButtonWrapper: {
-    marginTop: 16,
+    flex: 1,
   },
   completeButton: {
     height: 50,
     borderRadius: 25,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  completeButtonActive: {
+    backgroundColor: 'rgba(16,185,129,0.2)',
+    borderColor: '#10b981',
   },
   completeButtonDisabled: {
-    opacity: 0.3,
+    opacity: 0.4,
   },
   completeButtonText: {
     fontSize: 17,

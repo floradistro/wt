@@ -495,8 +495,8 @@ export function CreatePOModal({ visible, onClose }: CreatePOModalProps) {
                       >
                         <View style={styles.productResultInfo}>
                           <Text style={styles.productResultName}>{product.name}</Text>
-                          {product.primary_category && (
-                            <Text style={styles.productResultCategory}>{product.primary_category}</Text>
+                          {product.category && (
+                            <Text style={styles.productResultCategory}>{product.category}</Text>
                           )}
                         </View>
                         <Text style={styles.productResultPrice}>

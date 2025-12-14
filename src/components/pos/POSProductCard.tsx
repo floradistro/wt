@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, Image, TouchableOpacity, Dimensions, Animated, Modal, ScrollView, Pressable, ActivityIndicator } from 'react-native'
+import { View, Text, StyleSheet, Image, TouchableOpacity, Dimensions, Animated, Modal, ScrollView, Pressable, ActivityIndicator, LayoutAnimation, UIManager, Platform, TextInput, Alert } from 'react-native'
 import { BlurView } from 'expo-blur'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import * as Haptics from 'expo-haptics'
@@ -8,15 +8,42 @@ import { useState, useRef, memo, forwardRef, useImperativeHandle, useMemo, useEf
 import { cartActions, useCartItems } from '@/stores/cart.store'
 import { useProductFilters } from '@/stores/product-filter.store'
 import { useTierSelectorProductId, checkoutUIActions } from '@/stores/checkout-ui.store'
+import { posProductsActions } from '@/stores/pos-products.store'
+
+// Context
+import { usePOSSession } from '@/contexts/POSSessionContext'
+import { useAppAuth } from '@/contexts/AppAuthContext'
+import { useAuth } from '@/stores/auth.store'
 
 // Utils
 import { getMatchingFilters } from '@/utils/product-transformers'
 import { supabase } from '@/lib/supabase/client'
 import { logger } from '@/utils/logger'
 import { getMediumImage } from '@/utils/image-transforms'
+import { createInventoryAdjustment } from '@/services/inventory-adjustments.service'
+import { usePricingTemplates, PricingTemplate } from '@/hooks/usePricingTemplates'
 
 import { layout } from '@/theme/layout'
-import type { Product, ProductVariant } from '@/types/pos'
+import type { Product, ProductVariant, InventoryItem } from '@/types/pos'
+
+// Enable LayoutAnimation on Android
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true)
+}
+
+// COA type for lab results
+interface COAData {
+  id: string
+  thc?: number | null
+  cbd?: number | null
+  thca?: number | null
+  cbg?: number | null
+  total_cannabinoids?: number | null
+  lab_name?: string | null
+  test_date?: string | null
+  expiry_date?: string | null
+  batch_number?: string | null
+}
 
 const { width } = Dimensions.get('window')
 // Jobs Principle: 3-column grid accounting for cart sidebar
@@ -46,13 +73,76 @@ const POSProductCard = forwardRef<any, POSProductCardProps>(({ product }, ref) =
   const tierSelectorProductId = useTierSelectorProductId()
   const cartItems = useCartItems()
   const insets = useSafeAreaInsets()
+  const { session } = usePOSSession()
+  const { user } = useAuth()
+  const { vendor } = useAppAuth()
+
+  // Product details state
+  const [locationInventory, setLocationInventory] = useState<InventoryItem | null>(null)
+  const [productCOA, setProductCOA] = useState<COAData | null>(null)
+  const [loadingDetails, setLoadingDetails] = useState(false)
+  const [showDetails, setShowDetails] = useState(true)
+
+  // Edit mode state - invisible editing with long-hold gestures
+  const [isEditing, setIsEditing] = useState(false)
+  const [editedName, setEditedName] = useState('')
+  const [editedDescription, setEditedDescription] = useState('')
+  const [editedStock, setEditedStock] = useState('')
+  const [editedTiers, setEditedTiers] = useState<PricingTier[]>([])
+  const [editedFields, setEditedFields] = useState<Record<string, string>>({})
+  const [saving, setSaving] = useState(false)
+  const [hasChanges, setHasChanges] = useState(false)
+  const [didSaveChanges, setDidSaveChanges] = useState(false)  // Track if we saved, to refresh on close
+  // Saved values to display after exiting edit mode (until modal closes)
+  const [savedName, setSavedName] = useState<string | null>(null)
+  const [savedDescription, setSavedDescription] = useState<string | null>(null)
+  const [savedStock, setSavedStock] = useState<string | null>(null)
+  const [savedFields, setSavedFields] = useState<Record<string, string> | null>(null)
+  const [savedTiers, setSavedTiers] = useState<PricingTier[] | null>(null)
+  const [selectedTemplateIndex, setSelectedTemplateIndex] = useState<number>(-1) // -1 = custom/original pricing
+  const longPressTimer = useRef<NodeJS.Timeout | null>(null)
+  const saveProgressAnim = useRef(new Animated.Value(0)).current
+
+  // Variant inventory conversion state (edit mode only)
+  const [variantInventory, setVariantInventory] = useState<Array<{
+    variant_template_id: string
+    variant_name: string
+    conversion_ratio: number
+    quantity: number
+    available_quantity: number
+  }>>([])
+  const [convertAmount, setConvertAmount] = useState('')
+  const [convertingVariant, setConvertingVariant] = useState<string | null>(null)
+  const [conversionLoading, setConversionLoading] = useState(false)
+  const [showConversionMode, setShowConversionMode] = useState(false) // Replaces pricing tiers with conversion UI
+  const [showPricingModal, setShowPricingModal] = useState(false)
+
+  // Load pricing templates for this product's category
+  const { templates: pricingTemplates, isLoading: loadingTemplates } = usePricingTemplates({
+    categoryId: product.primary_category_id
+  })
+
+  // Debug: Log when templates are loaded
+  useEffect(() => {
+    if (showPricingModal && !loadingTemplates) {
+      logger.info('📋 Pricing templates loaded:', {
+        productName: product.name,
+        categoryId: product.primary_category_id,
+        templatesCount: pricingTemplates.length,
+        templates: pricingTemplates.map(t => ({
+          name: t.name,
+          tiersCount: t.default_tiers?.length || 0,
+          firstTier: t.default_tiers?.[0],
+        })),
+      })
+    }
+  }, [showPricingModal, loadingTemplates, pricingTemplates])
 
   // ✅ ANTI-LOOP: Compute matching filters for this product with useMemo (NOT in selector)
   const matchingFilters = useMemo(() =>
     getMatchingFilters(product, filters),
     [product, filters]
   )
-  const [showPricingModal, setShowPricingModal] = useState(false)
   const [selectedTier, setSelectedTier] = useState<number | null>(null)
   const [selectedVariant, setSelectedVariant] = useState<ProductVariant | null>(null)
   const [availableVariants, setAvailableVariants] = useState<ProductVariant[]>([])
@@ -134,6 +224,84 @@ const POSProductCard = forwardRef<any, POSProductCardProps>(({ product }, ref) =
     return weightLower.includes('3.5') || weightLower.includes('eighth')
   })
 
+  // Load product details (inventory + COA) when modal opens
+  useEffect(() => {
+    const loadProductDetails = async () => {
+      if (!showPricingModal || !session?.locationId) return
+
+      try {
+        setLoadingDetails(true)
+
+        // Parallel fetch: inventory for location AND COA data
+        const [inventoryResult, coaResult] = await Promise.all([
+          // Fetch inventory for current POS location
+          supabase
+            .from('inventory_with_holds')
+            .select(`
+              id,
+              product_id,
+              location_id,
+              total_quantity,
+              held_quantity,
+              available_quantity,
+              locations (name)
+            `)
+            .eq('product_id', product.id)
+            .eq('location_id', session.locationId)
+            .single(),
+
+          // Fetch most recent COA for this product
+          supabase
+            .from('coas')
+            .select(`
+              id,
+              thc,
+              cbd,
+              thca,
+              cbg,
+              total_cannabinoids,
+              lab_name,
+              test_date,
+              expiry_date,
+              batch_number
+            `)
+            .eq('product_id', product.id)
+            .order('test_date', { ascending: false })
+            .limit(1)
+            .maybeSingle()
+        ])
+
+        // Set inventory
+        if (inventoryResult.data && !inventoryResult.error) {
+          setLocationInventory({
+            id: inventoryResult.data.id,
+            location_id: inventoryResult.data.location_id,
+            location_name: (inventoryResult.data.locations as any)?.name || session.locationName,
+            quantity: inventoryResult.data.total_quantity || 0,
+            available_quantity: inventoryResult.data.available_quantity || 0,
+            reserved_quantity: inventoryResult.data.held_quantity || 0,
+          })
+        } else {
+          setLocationInventory(null)
+        }
+
+        // Set COA
+        if (coaResult.data && !coaResult.error) {
+          setProductCOA(coaResult.data as COAData)
+        } else {
+          setProductCOA(null)
+        }
+
+      } catch (error) {
+        logger.error('Failed to load product details:', error)
+      } finally {
+        setLoadingDetails(false)
+      }
+    }
+
+    loadProductDetails()
+  }, [showPricingModal, product.id, session?.locationId])
+
   // Load available variants when modal opens
   useEffect(() => {
     const loadVariants = async () => {
@@ -177,6 +345,176 @@ const POSProductCard = forwardRef<any, POSProductCardProps>(({ product }, ref) =
     loadVariants()
   }, [showPricingModal, product.id])
 
+  // Load variant inventory (for both view and edit mode)
+  useEffect(() => {
+    const loadVariantInventory = async () => {
+      if (!session?.locationId || availableVariants.length === 0) {
+        setVariantInventory([])
+        return
+      }
+
+      try {
+        // Query variant_inventory for this product at this location
+        const { data, error } = await supabase
+          .from('variant_inventory')
+          .select(`
+            variant_template_id,
+            quantity,
+            category_variant_templates (
+              variant_name,
+              conversion_ratio
+            )
+          `)
+          .eq('product_id', product.id)
+          .eq('location_id', session.locationId)
+
+        // If table doesn't exist yet, just use availableVariants with 0 stock
+        if (error && error.code === 'PGRST205') {
+          logger.warn('variant_inventory table not found - using availableVariants with 0 stock')
+          const inventory = availableVariants.map(v => ({
+            variant_template_id: v.variant_template_id,
+            variant_name: v.variant_name,
+            conversion_ratio: v.conversion_ratio,
+            quantity: 0,
+            available_quantity: 0,
+          }))
+          setVariantInventory(inventory)
+          return
+        }
+
+        if (error) throw error
+
+        const inventory = (data || []).map((item: any) => ({
+          variant_template_id: item.variant_template_id,
+          variant_name: item.category_variant_templates?.variant_name || 'Unknown',
+          conversion_ratio: item.category_variant_templates?.conversion_ratio || 1,
+          quantity: item.quantity || 0,
+          available_quantity: item.quantity || 0, // TODO: subtract holds
+        }))
+
+        // Add variants that don't have inventory yet
+        availableVariants.forEach(v => {
+          if (!inventory.find((i: any) => i.variant_template_id === v.variant_template_id)) {
+            inventory.push({
+              variant_template_id: v.variant_template_id,
+              variant_name: v.variant_name,
+              conversion_ratio: v.conversion_ratio,
+              quantity: 0,
+              available_quantity: 0,
+            })
+          }
+        })
+
+        setVariantInventory(inventory)
+      } catch (error) {
+        logger.error('Failed to load variant inventory:', error)
+        // Fallback: show variants with 0 stock so UI still appears
+        const inventory = availableVariants.map(v => ({
+          variant_template_id: v.variant_template_id,
+          variant_name: v.variant_name,
+          conversion_ratio: v.conversion_ratio,
+          quantity: 0,
+          available_quantity: 0,
+        }))
+        setVariantInventory(inventory)
+      }
+    }
+
+    loadVariantInventory()
+  }, [session?.locationId, product.id, availableVariants])
+
+  // Convert parent inventory to variant
+  const handleConvertToVariant = async (variantTemplateId: string) => {
+    const amount = parseFloat(convertAmount)
+    if (!amount || amount <= 0 || !session?.locationId || !user?.id) {
+      Alert.alert('Invalid Amount', 'Please enter a valid amount to convert')
+      return
+    }
+
+    const variant = variantInventory.find(v => v.variant_template_id === variantTemplateId)
+    if (!variant) return
+
+    const parentStock = parseFloat(editedStock || savedStock || String(locationInventory?.quantity ?? product.inventory_quantity ?? 0))
+    if (amount > parentStock) {
+      Alert.alert('Insufficient Stock', `Only ${parentStock}g available to convert`)
+      return
+    }
+
+    try {
+      setConversionLoading(true)
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+
+      const { data, error } = await supabase.rpc('convert_parent_to_variant_inventory', {
+        p_product_id: product.id,
+        p_variant_template_id: variantTemplateId,
+        p_location_id: session.locationId,
+        p_parent_quantity_to_convert: amount,
+        p_notes: `POS conversion by ${(user as any).first_name || 'user'}`,
+        p_performed_by_user_id: user.id,
+      })
+
+      if (error) throw error
+
+      const result = data?.[0]
+      if (!result?.success) {
+        throw new Error(result?.error_message || 'Conversion failed')
+      }
+
+      // Success!
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+
+      // Animate the change
+      LayoutAnimation.configureNext({
+        duration: 300,
+        update: { type: LayoutAnimation.Types.easeInEaseOut },
+      })
+
+      // Update local state immediately
+      const variantQtyCreated = result.variant_quantity_created
+      const newParentQty = result.new_parent_quantity
+
+      // Update parent stock display
+      setEditedStock(String(newParentQty))
+      setSavedStock(String(newParentQty))
+
+      // Update variant inventory display
+      setVariantInventory(prev => prev.map(v =>
+        v.variant_template_id === variantTemplateId
+          ? { ...v, quantity: result.new_variant_quantity, available_quantity: result.new_variant_quantity }
+          : v
+      ))
+
+      // Clear input and close conversion mode
+      setConvertAmount('')
+      setConvertingVariant(null)
+      setShowConversionMode(false)
+      setDidSaveChanges(true)
+
+      // Also update the locationInventory for immediate display
+      if (locationInventory) {
+        setLocationInventory({
+          ...locationInventory,
+          quantity: newParentQty,
+          available_quantity: newParentQty,
+        })
+      }
+
+      logger.info('✅ Conversion successful:', {
+        parentUsed: amount,
+        variantCreated: variantQtyCreated,
+        newParentStock: newParentQty,
+        newVariantStock: result.new_variant_quantity,
+      })
+
+    } catch (error: any) {
+      logger.error('Conversion failed:', error)
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
+      Alert.alert('Conversion Failed', error.message || 'Failed to convert inventory')
+    } finally {
+      setConversionLoading(false)
+    }
+  }
+
   const openPricingModal = () => {
     if (!inStock) return
 
@@ -207,6 +545,9 @@ const POSProductCard = forwardRef<any, POSProductCardProps>(({ product }, ref) =
   const closePricingModal = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
 
+    // Capture if we need to refresh before resetting state
+    const shouldRefresh = didSaveChanges
+
     Animated.parallel([
       Animated.spring(modalSlideAnim, {
         toValue: 600,
@@ -225,8 +566,399 @@ const POSProductCard = forwardRef<any, POSProductCardProps>(({ product }, ref) =
       setSelectedVariant(null)
       setAvailableVariants([])
       setVariantTiers([])
+      setLocationInventory(null)
+      setProductCOA(null)
+      // Reset edit mode
+      setIsEditing(false)
+      setEditedName('')
+      setEditedDescription('')
+      setEditedStock('')
+      setEditedTiers([])
+      setEditedFields({})
+      setHasChanges(false)
+      setDidSaveChanges(false)
+      // Reset saved display values
+      setSavedName(null)
+      setSavedDescription(null)
+      setSavedStock(null)
+      setSavedFields(null)
+      setSavedTiers(null)
+      // Reset template selection
+      setSelectedTemplateIndex(-1)
+      // Reset conversion mode
+      setShowConversionMode(false)
+      setConvertingVariant(null)
+      setConvertAmount('')
+
+      // Refresh products if we saved changes
+      if (shouldRefresh) {
+        posProductsActions.refreshProducts()
+      }
     })
   }
+
+  // ========================================
+  // INVISIBLE EDIT MODE - Long-hold gestures
+  // ========================================
+
+  // Long-hold: Enter edit mode OR save & exit edit mode
+  const handleLongPressIn = () => {
+    if (saving) return
+
+    if (isEditing) {
+      // In edit mode: long-hold to save and exit
+      Animated.timing(saveProgressAnim, {
+        toValue: 1,
+        duration: 800,
+        useNativeDriver: false,
+      }).start()
+
+      longPressTimer.current = setTimeout(() => {
+        if (hasChanges) {
+          performSave()
+        } else {
+          // No changes, just exit edit mode with smooth animation
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+          LayoutAnimation.configureNext({
+            duration: 300,
+            update: { type: LayoutAnimation.Types.easeInEaseOut },
+            create: { type: LayoutAnimation.Types.easeInEaseOut, property: LayoutAnimation.Properties.opacity },
+            delete: { type: LayoutAnimation.Types.easeInEaseOut, property: LayoutAnimation.Properties.opacity },
+          })
+          setIsEditing(false)
+          setEditedName('')
+          setEditedStock('')
+          setEditedTiers([])
+          setEditedFields({})
+          setHasChanges(false)
+        }
+      }, 800)
+    } else {
+      // Not in edit mode: long-hold to enter edit mode
+      longPressTimer.current = setTimeout(() => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy)
+        // Initialize all editable fields - use saved values if available, otherwise original
+        setEditedName(savedName ?? product.name)
+        setEditedDescription(savedDescription ?? product.description ?? '')
+        setEditedStock(savedStock ?? String(locationInventory?.quantity || product.inventory_quantity || 0))
+        setEditedTiers(savedTiers ? [...savedTiers] : [...customTiers])
+        // Initialize custom fields - use saved values if available
+        if (savedFields) {
+          setEditedFields({ ...savedFields })
+        } else {
+          const fields: Record<string, string> = {}
+          product.fields?.forEach(f => {
+            fields[f.label] = f.value || ''
+          })
+          setEditedFields(fields)
+        }
+        setHasChanges(false)
+        // Smooth animation when entering edit mode
+        LayoutAnimation.configureNext({
+          duration: 300,
+          update: { type: LayoutAnimation.Types.easeInEaseOut },
+          create: { type: LayoutAnimation.Types.easeInEaseOut, property: LayoutAnimation.Properties.opacity },
+          delete: { type: LayoutAnimation.Types.easeInEaseOut, property: LayoutAnimation.Properties.opacity },
+        })
+        setIsEditing(true)
+      }, 600)
+    }
+  }
+
+  const handleLongPressOut = () => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current)
+      longPressTimer.current = null
+    }
+    saveProgressAnim.setValue(0)
+  }
+
+  // Track changes
+  const markChanged = () => {
+    if (!hasChanges) setHasChanges(true)
+  }
+
+  const performSave = async () => {
+    if (!user?.id || !vendor?.id) {
+      Alert.alert('Error', 'Authentication required')
+      return
+    }
+
+    logger.info('🔥 performSave called:', {
+      hasChanges,
+      editedTiersCount: editedTiers.length,
+      selectedTemplateIndex,
+      editedTiers: editedTiers.map(t => ({ label: t.label, price: t.price, qty: t.qty })),
+    })
+
+    try {
+      setSaving(true)
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy)
+
+      // Build a single update object for the product
+      const productUpdates: Record<string, any> = {
+        updated_at: new Date().toISOString()
+      }
+
+      // Track what we're updating for logging
+      const changes: string[] = []
+
+      // Name change
+      if (editedName && editedName !== product.name) {
+        productUpdates.name = editedName
+        changes.push('name')
+      }
+
+      // Description change
+      if (editedDescription !== (product.description ?? '')) {
+        productUpdates.description = editedDescription
+        changes.push('description')
+      }
+
+      // Pricing tiers change - ALWAYS save to pricing_data.tiers (website reads this first)
+      // Save if we have edited tiers (don't check hasChanges - always save current tiers)
+      if (editedTiers.length > 0) {
+        // Save tier data to pricing_data (website priority 1)
+        const tiersToSave = editedTiers.map((t, idx) => ({
+          label: t.label || t.weight || '',
+          quantity: t.qty || 1,
+          price: parseFloat(String(t.price)) || 0,
+          unit: 'g',
+          sort_order: idx,
+        }))
+
+        productUpdates.pricing_data = {
+          mode: 'tiered',
+          tiers: tiersToSave,
+        }
+
+        // Also link the template if one was selected (for reference)
+        if (selectedTemplateIndex >= 0 && pricingTemplates[selectedTemplateIndex]) {
+          const selectedTemplate = pricingTemplates[selectedTemplateIndex]
+          productUpdates.pricing_template_id = selectedTemplate.id
+          logger.info('💾 Saving pricing with template:', {
+            templateId: selectedTemplate.id,
+            templateName: selectedTemplate.name,
+            tiersCount: tiersToSave.length,
+            tiers: tiersToSave,
+          })
+        } else {
+          // Custom pricing - clear template link
+          productUpdates.pricing_template_id = null
+          logger.info('💾 Saving custom pricing:', {
+            tiersCount: tiersToSave.length,
+            tiers: tiersToSave,
+          })
+        }
+
+        changes.push('pricing')
+      }
+
+      // Custom fields change - always save if we have edited fields
+      if (Object.keys(editedFields).length > 0) {
+        const customFields: Record<string, any> = {}
+        Object.entries(editedFields).forEach(([label, value]) => {
+          customFields[label] = value || ''
+        })
+        productUpdates.custom_fields = customFields
+        changes.push('fields')
+        logger.info('Saving custom fields:', { customFields })
+      }
+
+      // Perform the product update if there are changes
+      if (changes.length > 0) {
+        logger.info('📤 Sending to Supabase:', {
+          productId: product.id,
+          changes,
+          productUpdates,
+        })
+
+        const { error: productError, data: savedData } = await supabase
+          .from('products')
+          .update(productUpdates)
+          .eq('id', product.id)
+          .eq('vendor_id', vendor.id)
+          .select('pricing_data')
+          .single()
+
+        if (productError) {
+          logger.error('❌ Supabase error:', productError)
+          throw productError
+        }
+
+        logger.info('✅ Saved to database:', { savedPricingData: savedData?.pricing_data })
+      } else {
+        logger.info('⚠️ No changes to save')
+      }
+
+      // Handle inventory separately using the proper service
+      const originalStockNum = locationInventory?.quantity ?? product.inventory_quantity ?? 0
+      const newStock = parseFloat(editedStock)
+
+      if (!isNaN(newStock) && newStock !== originalStockNum && session?.locationId) {
+        const adjustment = newStock - originalStockNum
+
+        logger.info('Adjusting inventory:', { productId: product.id, from: originalStockNum, to: newStock, adjustment })
+
+        const { error: adjustmentError, metadata } = await createInventoryAdjustment(
+          vendor.id,
+          {
+            product_id: product.id,
+            location_id: session.locationId,
+            adjustment_type: 'count_correction',
+            quantity_change: adjustment,
+            reason: 'POS Quick Edit',
+            notes: `Adjusted from ${originalStockNum} to ${newStock}`,
+          }
+        )
+
+        if (adjustmentError) throw adjustmentError
+        changes.push('inventory')
+      }
+
+      // Success!
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+
+      // Save the edited values so they display after exiting edit mode
+      const fieldsCopy = { ...editedFields }
+      logger.info('Setting saved fields:', { editedFields, fieldsCopy })
+      setSavedName(editedName)
+      setSavedDescription(editedDescription)
+      setSavedStock(editedStock)
+      setSavedFields(fieldsCopy)
+      setSavedTiers([...editedTiers])
+
+      // Smooth animation when exiting edit mode after save
+      LayoutAnimation.configureNext({
+        duration: 300,
+        update: { type: LayoutAnimation.Types.easeInEaseOut },
+        create: { type: LayoutAnimation.Types.easeInEaseOut, property: LayoutAnimation.Properties.opacity },
+        delete: { type: LayoutAnimation.Types.easeInEaseOut, property: LayoutAnimation.Properties.opacity },
+      })
+      setIsEditing(false)
+      setHasChanges(false)
+      setDidSaveChanges(true)  // Flag to refresh when modal closes
+
+      logger.info('Product updated successfully', { productId: product.id, changes })
+    } catch (error: any) {
+      logger.error('Failed to save product:', {
+        error,
+        message: error?.message,
+        code: error?.code,
+        details: error?.details,
+        hint: error?.hint,
+        productId: product.id
+      })
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
+      Alert.alert('Error', error?.message || 'Failed to save changes')
+    } finally {
+      setSaving(false)
+      saveProgressAnim.setValue(0)
+    }
+  }
+
+  // Tier editing helpers
+  const updateTierPrice = (index: number, price: string) => {
+    const newTiers = [...editedTiers]
+    newTiers[index] = { ...newTiers[index], price }
+    setEditedTiers(newTiers)
+    markChanged()
+  }
+
+  const updateTierLabel = (index: number, label: string) => {
+    const newTiers = [...editedTiers]
+    newTiers[index] = { ...newTiers[index], label, weight: label }
+    setEditedTiers(newTiers)
+    markChanged()
+  }
+
+  // Field editing helper
+  const updateField = (label: string, value: string) => {
+    setEditedFields(prev => ({ ...prev, [label]: value }))
+    markChanged()
+  }
+
+  // Get display values (editing > saved > original)
+  const displayName = isEditing ? editedName : (savedName ?? product.name)
+  const displayStock = isEditing ? editedStock : (savedStock ?? String(locationInventory?.quantity ?? product.inventory_quantity ?? 0))
+
+  // Cycle to next pricing template (called when tapping selected variant/original in edit mode)
+  const cycleToNextTemplate = () => {
+    if (pricingTemplates.length === 0) {
+      logger.info('No pricing templates available to cycle')
+      return
+    }
+
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+
+    // Smooth animation for height changes when tier count differs
+    LayoutAnimation.configureNext({
+      duration: 250,
+      update: {
+        type: LayoutAnimation.Types.easeInEaseOut,
+        property: LayoutAnimation.Properties.opacity,
+      },
+      create: {
+        type: LayoutAnimation.Types.easeInEaseOut,
+        property: LayoutAnimation.Properties.opacity,
+      },
+      delete: {
+        type: LayoutAnimation.Types.easeInEaseOut,
+        property: LayoutAnimation.Properties.opacity,
+      },
+    })
+
+    // Cycle: -1 (custom) -> 0 -> 1 -> ... -> n-1 -> -1 (back to custom)
+    const nextIndex = selectedTemplateIndex >= pricingTemplates.length - 1 ? -1 : selectedTemplateIndex + 1
+
+    if (nextIndex === -1) {
+      // Back to custom/original pricing
+      setEditedTiers([...customTiers])
+      setSelectedTemplateIndex(-1)
+      logger.info('Cycled back to custom pricing', { tiersCount: customTiers.length })
+    } else {
+      // Apply template
+      const template = pricingTemplates[nextIndex]
+      logger.info('🔄 Cycling to template:', {
+        templateName: template.name,
+        index: nextIndex,
+        rawDefaultTiers: template.default_tiers,
+        hasDefaultTiers: !!template.default_tiers,
+        tiersLength: template.default_tiers?.length || 0,
+      })
+
+      if (!template.default_tiers || template.default_tiers.length === 0) {
+        logger.warn('Template has no default_tiers, skipping')
+        // Skip to next template
+        setSelectedTemplateIndex(nextIndex)
+        return cycleToNextTemplate()
+      }
+
+      const newTiers: PricingTier[] = template.default_tiers
+        .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))
+        .map(tier => ({
+          qty: tier.quantity || 1,
+          price: tier.default_price ?? 0,
+          label: tier.label || '',
+          weight: tier.label || '',
+        }))
+
+      logger.info('✅ Applied template tiers:', {
+        templateName: template.name,
+        newTiers: newTiers.map(t => ({ label: t.label, price: t.price, qty: t.qty })),
+      })
+
+      setEditedTiers(newTiers)
+      setSelectedTemplateIndex(nextIndex)
+    }
+
+    markChanged()
+  }
+
+  // Get current template name for display
+  const currentTemplateName = selectedTemplateIndex >= 0 && pricingTemplates[selectedTemplateIndex]
+    ? pricingTemplates[selectedTemplateIndex].name
+    : null
 
   const handleTierPress = (tier?: PricingTier, index?: number) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
@@ -247,7 +979,18 @@ const POSProductCard = forwardRef<any, POSProductCardProps>(({ product }, ref) =
       checkoutUIActions.setTierSelectorProductId(null)
     } else {
       // Normal mode: Add to cart with optional variant
-      cartActions.addToCart(product, tier, selectedVariant || undefined)
+      // SMART INVENTORY: Pass variant inventory info for proper stock checking
+      if (selectedVariant) {
+        const variantInv = variantInventory.find(v => v.variant_template_id === selectedVariant.variant_template_id)
+        const variantInventoryInfo = variantInv ? {
+          variantQuantity: variantInv.quantity,
+          parentQuantity: parseFloat(displayStock) || 0,
+        } : undefined
+
+        cartActions.addToCart(product, tier, selectedVariant, variantInventoryInfo)
+      } else {
+        cartActions.addToCart(product, tier, undefined, undefined)
+      }
     }
 
     // Jobs Principle: Auto-dismiss after brief visual confirmation
@@ -265,15 +1008,22 @@ const POSProductCard = forwardRef<any, POSProductCardProps>(({ product }, ref) =
       will_load_custom_pricing: !!variant?.pricing_template_id,
       currentSelectedVariant: selectedVariant?.variant_name || 'null',
       currentVariantTiersCount: variantTiers.length,
+      isEditing,
     })
 
     // CRITICAL: Clear variant tiers immediately when switching to Product tab
     if (variant === null) {
       logger.info('🔄 Switching to Product tab - clearing variant pricing NOW')
       setVariantTiers([])
+      // In edit mode, switch editedTiers to product's custom tiers
+      if (isEditing) {
+        setEditedTiers([...customTiers])
+        logger.info('✅ Edit mode: Loaded product tiers for editing')
+      }
       logger.info('✅ Variant tiers cleared - should show product pricing now')
     } else {
       logger.info('🔄 Switching to variant tab - will load variant pricing')
+      // In edit mode, variant tiers will be loaded by useEffect and we update editedTiers there
     }
 
     setSelectedVariant(variant)
@@ -335,6 +1085,11 @@ const POSProductCard = forwardRef<any, POSProductCardProps>(({ product }, ref) =
             }))
 
           setVariantTiers(tiers)
+          // In edit mode, also update editedTiers when variant tiers load
+          if (isEditing) {
+            setEditedTiers([...tiers])
+            logger.info('✅ Edit mode: Loaded variant tiers for editing')
+          }
           logger.info('✅ Loaded variant pricing tiers', {
             variantName: selectedVariant.variant_name,
             templateName: data.name,
@@ -350,17 +1105,23 @@ const POSProductCard = forwardRef<any, POSProductCardProps>(({ product }, ref) =
         } else {
           logger.warn('⚠️ No tiers found in pricing template')
           setVariantTiers([])
+          if (isEditing) {
+            setEditedTiers([])
+          }
         }
       } catch (error) {
         logger.error('❌ Failed to load variant pricing:', error)
         setVariantTiers([])
+        if (isEditing) {
+          setEditedTiers([])
+        }
       } finally {
         setLoadingVariantTiers(false)
       }
     }
 
     loadVariantPricing()
-  }, [selectedVariant])
+  }, [selectedVariant, isEditing])
 
   const handleCardPress = () => {
     Animated.spring(scaleAnim, {
@@ -516,17 +1277,246 @@ const POSProductCard = forwardRef<any, POSProductCardProps>(({ product }, ref) =
               },
             ]}
           >
-            {/* Inner content container with clipped corners */}
-            <View style={styles.modalContent}>
+            {/* Inner content container with clipped corners - Long press to edit */}
+            <Pressable
+              style={styles.modalContent}
+              onPressIn={handleLongPressIn}
+              onPressOut={handleLongPressOut}
+              delayLongPress={600}
+            >
               <BlurView intensity={30} tint="dark" style={StyleSheet.absoluteFill} />
 
-              {/* Pull Handle */}
-              <View style={styles.pullHandle} />
+              {/* Pull Handle - subtle edit mode indicator */}
+              <View style={styles.modalHeaderRow}>
+                <View style={[
+                  styles.pullHandle,
+                  isEditing && styles.pullHandleEditing
+                ]} />
+                {/* Minimal edit mode indicator */}
+                {isEditing && (
+                  <View style={styles.editModeIndicator}>
+                    <View style={styles.editModeDot} />
+                  </View>
+                )}
+              </View>
 
-            {/* JOBS PRINCIPLE: Just the product name, nothing else */}
-            <Text style={styles.modalTitle} numberOfLines={2}>
-              {product.name}
-            </Text>
+              {/* Scrollable content wrapper for edit mode */}
+              <ScrollView
+                style={styles.modalScrollContent}
+                contentContainerStyle={styles.modalScrollContentContainer}
+                showsVerticalScrollIndicator={isEditing}
+                scrollEnabled={isEditing}
+                keyboardShouldPersistTaps="handled"
+              >
+
+              {/* Product Header - Balanced Two Column (stacked in edit mode) */}
+              <View style={styles.productHeaderRow}>
+                {/* Left: Large Image */}
+                <View style={styles.productImageContainer}>
+                  {product.image_url ? (
+                    <Image
+                      source={{ uri: getMediumImage(product.image_url) || product.image_url }}
+                      style={styles.productImage}
+                      resizeMode="cover"
+                    />
+                  ) : product.vendor_logo_url ? (
+                    <Image
+                      source={{ uri: product.vendor_logo_url }}
+                      style={styles.productImageVendor}
+                      resizeMode="contain"
+                    />
+                  ) : (
+                    <View style={styles.productImagePlaceholder}>
+                      <Text style={styles.productImagePlaceholderText}>
+                        {displayName.charAt(0).toUpperCase()}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+
+                {/* Right: Name + Compact Details */}
+                <View style={styles.productInfoColumn}>
+                  {isEditing ? (
+                    <>
+                      {/* Editable Name - subtle styling */}
+                      <TextInput
+                        style={styles.editableNameInput}
+                        value={editedName}
+                        onChangeText={(text) => { setEditedName(text); markChanged() }}
+                        placeholder="Product name"
+                        placeholderTextColor="rgba(255,255,255,0.3)"
+                        autoCapitalize="words"
+                        selectTextOnFocus
+                      />
+                      <Text style={styles.productHeaderMeta}>
+                        {product.category || 'Uncategorized'}
+                      </Text>
+                      {/* Editable Stock - inline */}
+                      <View style={styles.editableStockRow}>
+                        <Text style={styles.editableStockLabel}>Stock:</Text>
+                        <TextInput
+                          style={styles.editableStockInput}
+                          value={editedStock}
+                          onChangeText={(text) => { setEditedStock(text); markChanged() }}
+                          keyboardType="decimal-pad"
+                          placeholder="0"
+                          placeholderTextColor="rgba(255,255,255,0.3)"
+                          selectTextOnFocus
+                        />
+                        <Text style={styles.editableStockUnit}>g</Text>
+                      </View>
+                      {/* Variant Stock Display - tap to open conversion */}
+                      {variantInventory.length > 0 && variantInventory.map((variant) => (
+                        <TouchableOpacity
+                          key={variant.variant_template_id}
+                          style={styles.variantStockEditRow}
+                          onPress={() => {
+                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                            setConvertingVariant(variant.variant_template_id)
+                            setShowConversionMode(true)
+                          }}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={styles.variantStockEditLabel}>{variant.variant_name}:</Text>
+                          <Text style={styles.variantStockEditValue}>{variant.quantity}</Text>
+                          <Text style={styles.variantStockEditHint}>tap to convert</Text>
+                        </TouchableOpacity>
+                      ))}
+                      {/* Editable Description */}
+                      <TextInput
+                        style={styles.editableDescriptionInput}
+                        value={editedDescription}
+                        onChangeText={(text) => { setEditedDescription(text); markChanged() }}
+                        placeholder="Add product description..."
+                        placeholderTextColor="rgba(255,255,255,0.3)"
+                        multiline
+                        numberOfLines={3}
+                        textAlignVertical="top"
+                      />
+                    </>
+                  ) : (
+                    <>
+                      <Text style={styles.productHeaderName} numberOfLines={2}>
+                        {displayName}
+                      </Text>
+                      <Text style={styles.productHeaderMeta}>
+                        {product.category || 'Uncategorized'}
+                      </Text>
+
+                      {/* Stock Bar Graph - Parent */}
+                      {!loadingDetails && (
+                        <View style={styles.stockBarContainer}>
+                          <View style={styles.stockBarTrack}>
+                            <View
+                              style={[
+                                styles.stockBarFill,
+                                {
+                                  width: `${Math.min(100, Math.max(5, (parseFloat(displayStock) / Math.max(parseFloat(displayStock) || 1, 100)) * 100))}%`,
+                                  backgroundColor: parseFloat(displayStock) <= 10 ? '#fbbf24' : '#10b981',
+                                }
+                              ]}
+                            />
+                          </View>
+                          <Text style={[
+                            styles.stockBarText,
+                            parseFloat(displayStock) <= 10 && styles.stockBarTextLow
+                          ]}>
+                            {displayStock}g in stock
+                          </Text>
+                        </View>
+                      )}
+
+                      {/* Variant Stock Bars - Red, shown below parent */}
+                      {variantInventory.length > 0 && variantInventory.map((variant) => (
+                        <View key={variant.variant_template_id} style={styles.variantStockBarContainer}>
+                          <View style={styles.stockBarTrack}>
+                            <View
+                              style={[
+                                styles.stockBarFill,
+                                {
+                                  width: `${Math.min(100, Math.max(variant.quantity > 0 ? 5 : 0, (variant.quantity / Math.max(variant.quantity || 1, 50)) * 100))}%`,
+                                  backgroundColor: variant.quantity > 0 ? '#ef4444' : 'rgba(239,68,68,0.3)',
+                                }
+                              ]}
+                            />
+                          </View>
+                          <Text style={styles.variantStockBarText}>
+                            {variant.quantity} {variant.variant_name}
+                          </Text>
+                        </View>
+                      ))}
+
+                      {/* Description - View Mode */}
+                      {(savedDescription ?? product.description) && (
+                        <Text style={styles.productDescription} numberOfLines={3}>
+                          {savedDescription ?? product.description}
+                        </Text>
+                      )}
+                    </>
+                  )}
+
+                  {/* Compact Details Grid */}
+                  <View style={styles.detailsGrid}>
+                    {/* COA Data */}
+                    {productCOA?.thc != null && productCOA.thc > 0 && (
+                      <View style={styles.detailChip}>
+                        <Text style={styles.detailChipLabel}>THC</Text>
+                        <Text style={styles.detailChipValueGreen}>{productCOA.thc.toFixed(1)}%</Text>
+                      </View>
+                    )}
+                    {productCOA?.thca != null && productCOA.thca > 0 && (
+                      <View style={styles.detailChip}>
+                        <Text style={styles.detailChipLabel}>THCA</Text>
+                        <Text style={styles.detailChipValueGreen}>{productCOA.thca.toFixed(1)}%</Text>
+                      </View>
+                    )}
+                    {productCOA?.cbd != null && productCOA.cbd > 0 && (
+                      <View style={styles.detailChip}>
+                        <Text style={styles.detailChipLabel}>CBD</Text>
+                        <Text style={styles.detailChipValueBlue}>{productCOA.cbd.toFixed(1)}%</Text>
+                      </View>
+                    )}
+                    {productCOA?.cbg != null && productCOA.cbg > 0 && (
+                      <View style={styles.detailChip}>
+                        <Text style={styles.detailChipLabel}>CBG</Text>
+                        <Text style={styles.detailChipValueGreen}>{productCOA.cbg.toFixed(1)}%</Text>
+                      </View>
+                    )}
+                    {/* Product Fields - Editable in place */}
+                    {isEditing ? (
+                      // Edit mode: Show editable chips
+                      Object.entries(editedFields).map(([label, value]) => (
+                        <View key={label} style={[styles.detailChip, styles.detailChipEditing]}>
+                          <Text style={styles.detailChipLabel}>{label}</Text>
+                          <TextInput
+                            style={styles.detailChipInput}
+                            value={value}
+                            onChangeText={(text) => updateField(label, text)}
+                            placeholder="—"
+                            placeholderTextColor="rgba(255,255,255,0.3)"
+                          />
+                        </View>
+                      ))
+                    ) : savedFields ? (
+                      // View mode with saved values: Show updated chips
+                      Object.entries(savedFields).map(([label, value]) => (
+                        <View key={label} style={styles.detailChip}>
+                          <Text style={styles.detailChipLabel}>{label}</Text>
+                          <Text style={styles.detailChipValue} numberOfLines={1}>{value || '—'}</Text>
+                        </View>
+                      ))
+                    ) : (
+                      // View mode: Read-only chips from original product
+                      product.fields?.map((field, idx) => (
+                        <View key={idx} style={styles.detailChip}>
+                          <Text style={styles.detailChipLabel}>{field.label}</Text>
+                          <Text style={styles.detailChipValue} numberOfLines={1}>{field.value}</Text>
+                        </View>
+                      ))
+                    )}
+                  </View>
+                </View>
+              </View>
 
             {/* VARIANT SELECTOR - Show if variants available */}
             {loadingVariants ? (
@@ -535,53 +1525,207 @@ const POSProductCard = forwardRef<any, POSProductCardProps>(({ product }, ref) =
               </View>
             ) : availableVariants.length > 0 ? (
               <View style={styles.variantSelectorContainer}>
-                <Text style={styles.variantSelectorTitle}>VARIANT</Text>
                 <View style={styles.variantOptions}>
-                  {/* Parent product option (no variant) */}
+                  {/* Parent product option (no variant) - shows template name when cycling */}
                   <TouchableOpacity
                     activeOpacity={0.7}
-                    onPress={() => handleVariantSelect(null)}
+                    onPress={() => {
+                      // In edit mode, if already selected, cycle through templates
+                      if (isEditing && !selectedVariant && pricingTemplates.length > 0) {
+                        cycleToNextTemplate()
+                      } else {
+                        handleVariantSelect(null)
+                      }
+                    }}
                     style={[
                       styles.variantOptionButton,
-                      !selectedVariant && styles.variantOptionButtonActive
+                      !selectedVariant && styles.variantOptionButtonActive,
+                      isEditing && !selectedVariant && pricingTemplates.length > 0 && styles.variantOptionButtonCyclable
                     ]}
                   >
                     <Text style={[
                       styles.variantOptionText,
                       !selectedVariant && styles.variantOptionTextActive
                     ]}>
-                      Original
+                      {isEditing && !selectedVariant && currentTemplateName ? currentTemplateName : 'Original'}
                     </Text>
                   </TouchableOpacity>
 
-                  {/* Variant options */}
-                  {availableVariants.map((variant) => (
+                  {/* Convert button - only in edit mode */}
+                  {isEditing && variantInventory.length > 0 && (
                     <TouchableOpacity
-                      key={variant.variant_template_id}
                       activeOpacity={0.7}
-                      onPress={() => handleVariantSelect(variant)}
+                      onPress={() => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                        LayoutAnimation.configureNext({
+                          duration: 250,
+                          update: { type: LayoutAnimation.Types.easeInEaseOut },
+                        })
+                        setShowConversionMode(!showConversionMode)
+                        if (showConversionMode) {
+                          setConvertingVariant(null)
+                          setConvertAmount('')
+                        }
+                      }}
                       style={[
-                        styles.variantOptionButton,
-                        selectedVariant?.variant_template_id === variant.variant_template_id && styles.variantOptionButtonActive
+                        styles.convertIconButton,
+                        showConversionMode && styles.convertIconButtonActive
                       ]}
                     >
-                      <Text style={[
-                        styles.variantOptionText,
-                        selectedVariant?.variant_template_id === variant.variant_template_id && styles.variantOptionTextActive
-                      ]}>
-                        {variant.variant_name}
-                      </Text>
+                      <Text style={styles.convertIconText}>⇄</Text>
                     </TouchableOpacity>
-                  ))}
+                  )}
+
+                  {/* Variant options */}
+                  {availableVariants.map((variant) => {
+                    const isSelected = selectedVariant?.variant_template_id === variant.variant_template_id
+                    return (
+                      <TouchableOpacity
+                        key={variant.variant_template_id}
+                        activeOpacity={0.7}
+                        onPress={() => {
+                          // In edit mode, if already selected, cycle through templates
+                          if (isEditing && isSelected && pricingTemplates.length > 0) {
+                            cycleToNextTemplate()
+                          } else {
+                            handleVariantSelect(variant)
+                          }
+                        }}
+                        style={[
+                          styles.variantOptionButton,
+                          isSelected && styles.variantOptionButtonActive,
+                          isEditing && isSelected && pricingTemplates.length > 0 && styles.variantOptionButtonCyclable
+                        ]}
+                      >
+                        <Text style={[
+                          styles.variantOptionText,
+                          isSelected && styles.variantOptionTextActive
+                        ]}>
+                          {isEditing && isSelected && currentTemplateName ? currentTemplateName : variant.variant_name}
+                        </Text>
+                      </TouchableOpacity>
+                    )
+                  })}
                 </View>
               </View>
             ) : null}
 
-            {/* JOBS PRINCIPLE: Large, scannable pricing options */}
+            {/* Template name indicator - show when cycling in edit mode (no variants) */}
+            {isEditing && availableVariants.length === 0 && pricingTemplates.length > 0 && (
+              <TouchableOpacity
+                onPress={cycleToNextTemplate}
+                style={styles.templateCycleButton}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.templateCycleText}>
+                  {currentTemplateName || 'Original'}
+                </Text>
+                <Text style={styles.templateCycleHint}>tap to change</Text>
+              </TouchableOpacity>
+            )}
+
+            {/* PRICING TIERS OR CONVERSION UI */}
             {loadingVariantTiers ? (
               <View style={styles.tiersLoadingContainer}>
                 <ActivityIndicator size="small" color="rgba(255,255,255,0.5)" />
                 <Text style={styles.tiersLoadingText}>Loading pricing...</Text>
+              </View>
+            ) : showConversionMode && isEditing ? (
+              /* CONVERSION MODE - Replaces pricing tiers */
+              <View style={styles.conversionModeContainer}>
+                <View style={styles.conversionModeHeader}>
+                  <Text style={styles.conversionModeTitle}>Convert Stock</Text>
+                  <Text style={styles.conversionModeSubtitle}>
+                    {displayStock}g available
+                  </Text>
+                </View>
+
+                {variantInventory.map((variant) => {
+                  const isSelected = convertingVariant === variant.variant_template_id
+                  const variantsProduced = convertAmount ? Math.floor(parseFloat(convertAmount) / variant.conversion_ratio) : 0
+
+                  return (
+                    <TouchableOpacity
+                      key={variant.variant_template_id}
+                      activeOpacity={0.7}
+                      onPress={() => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                        if (isSelected) {
+                          setConvertingVariant(null)
+                          setConvertAmount('')
+                        } else {
+                          setConvertingVariant(variant.variant_template_id)
+                          setConvertAmount('')
+                        }
+                      }}
+                      style={[
+                        styles.conversionTierButton,
+                        isSelected && styles.conversionTierButtonActive
+                      ]}
+                    >
+                      <View style={styles.conversionTierContent}>
+                        <View style={styles.conversionTierInfo}>
+                          <Text style={styles.conversionTierName}>{variant.variant_name}</Text>
+                          <Text style={styles.conversionTierRatio}>{variant.conversion_ratio}g each</Text>
+                        </View>
+                        <View style={styles.conversionTierStock}>
+                          <Text style={[
+                            styles.conversionTierQty,
+                            variant.quantity > 0 && styles.conversionTierQtyPositive
+                          ]}>
+                            {variant.quantity}
+                          </Text>
+                        </View>
+                      </View>
+
+                      {/* Expanded conversion input */}
+                      {isSelected && (
+                        <View style={styles.conversionInputSection}>
+                          <View style={styles.conversionInputRow}>
+                            <View style={styles.conversionInputWrapper}>
+                              <TextInput
+                                style={styles.conversionInput}
+                                value={convertAmount}
+                                onChangeText={setConvertAmount}
+                                keyboardType="decimal-pad"
+                                placeholder="0"
+                                placeholderTextColor="rgba(255,255,255,0.3)"
+                                selectTextOnFocus
+                                autoFocus
+                              />
+                              <Text style={styles.conversionInputUnit}>g</Text>
+                            </View>
+                            <Text style={styles.conversionArrow}>→</Text>
+                            <Text style={styles.conversionResult}>
+                              {variantsProduced} units
+                            </Text>
+                          </View>
+
+                          <TouchableOpacity
+                            style={[
+                              styles.conversionConfirmButton,
+                              (!convertAmount || variantsProduced <= 0 || conversionLoading) && styles.conversionConfirmButtonDisabled
+                            ]}
+                            onPress={() => handleConvertToVariant(variant.variant_template_id)}
+                            disabled={!convertAmount || variantsProduced <= 0 || conversionLoading}
+                            activeOpacity={0.7}
+                          >
+                            {conversionLoading ? (
+                              <ActivityIndicator size="small" color="#ef4444" />
+                            ) : (
+                              <Text style={[
+                                styles.conversionConfirmButtonText,
+                                (!convertAmount || variantsProduced <= 0) && styles.conversionConfirmButtonTextDisabled
+                              ]}>
+                                Convert Now
+                              </Text>
+                            )}
+                          </TouchableOpacity>
+                        </View>
+                      )}
+                    </TouchableOpacity>
+                  )
+                })}
               </View>
             ) : (
               <ScrollView
@@ -591,8 +1735,44 @@ const POSProductCard = forwardRef<any, POSProductCardProps>(({ product }, ref) =
               >
                 {/* iOS 26 Grouped List Container */}
                 <View style={styles.tierGroupContainer}>
-                  {customTiers.length > 0 ? (
-                  customTiers.map((tier: PricingTier, index: number) => {
+                  {isEditing ? (
+                    // EDIT MODE: Editable tier inputs
+                    editedTiers.map((tier: PricingTier, index: number) => (
+                      <View
+                        key={`edit-${index}-${tier.label}-${selectedTemplateIndex}`}
+                        style={[
+                          styles.tierButton,
+                          styles.tierButtonEditing,
+                          index === 0 && styles.tierButtonFirst,
+                          index === editedTiers.length - 1 && styles.tierButtonLast,
+                        ]}
+                      >
+                        <View style={styles.tierButtonContent}>
+                          <TextInput
+                            style={styles.tierLabelInput}
+                            value={tier.label || tier.weight || ''}
+                            onChangeText={(text) => updateTierLabel(index, text)}
+                            placeholder="Label"
+                            placeholderTextColor="rgba(255,255,255,0.3)"
+                          />
+                          <View style={styles.tierPriceInputWrapper}>
+                            <Text style={styles.tierPriceCurrency}>$</Text>
+                            <TextInput
+                              style={styles.tierPriceInput}
+                              value={String(tier.price ?? 0)}
+                              onChangeText={(text) => updateTierPrice(index, text)}
+                              keyboardType="decimal-pad"
+                              placeholder="0.00"
+                              placeholderTextColor="rgba(255,255,255,0.3)"
+                            />
+                          </View>
+                        </View>
+                      </View>
+                    ))
+                  ) : (savedTiers ?? customTiers).length > 0 ? (
+                    // VIEW MODE: Tappable tiers (use savedTiers if available, otherwise customTiers)
+                    (savedTiers ?? customTiers).map((tier: PricingTier, index: number) => {
+                      const displayTiers = savedTiers ?? customTiers
                       const price = parseFloat(String(tier.price))
                       const isSelected = selectedTier === index
                       const isSuggested = index === suggestedTierIndex
@@ -605,7 +1785,7 @@ const POSProductCard = forwardRef<any, POSProductCardProps>(({ product }, ref) =
                           style={[
                             styles.tierButton,
                             index === 0 && styles.tierButtonFirst,
-                            index === customTiers.length - 1 && styles.tierButtonLast,
+                            index === displayTiers.length - 1 && styles.tierButtonLast,
                             isSuggested && styles.tierButtonSuggested,
                             isSelected && styles.tierButtonSelected,
                           ]}
@@ -616,34 +1796,36 @@ const POSProductCard = forwardRef<any, POSProductCardProps>(({ product }, ref) =
                         >
                           <View style={styles.tierButtonContent}>
                             <Text style={styles.tierLabel}>{tier.weight || tier.label || 'N/A'}</Text>
-                            {/* JOBS PRINCIPLE: Price is HUGE and prominent */}
                             <Text style={styles.tierPrice}>${price.toFixed(2)}</Text>
                           </View>
                         </TouchableOpacity>
                       )
-                  })
-                ) : (
-                  /* Single Price Product */
-                  <TouchableOpacity
-                    activeOpacity={0.7}
-                    onPress={() => handleTierPress()}
-                    style={[styles.tierButton, styles.tierButtonFirst, styles.tierButtonLast]}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Add to cart for $${(product.regular_price || 0).toFixed(2)}`}
-                    accessibilityHint="Add this product to your cart"
-                  >
-                    <View style={styles.tierButtonContent}>
-                      <Text style={styles.tierLabel}>Add to cart</Text>
-                      <Text style={styles.tierPrice}>
-                        ${(product.regular_price || 0).toFixed(2)}
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
+                    })
+                  ) : (
+                    /* Single Price Product */
+                    <TouchableOpacity
+                      activeOpacity={0.7}
+                      onPress={() => handleTierPress()}
+                      style={[styles.tierButton, styles.tierButtonFirst, styles.tierButtonLast]}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Add to cart for $${(product.regular_price || 0).toFixed(2)}`}
+                      accessibilityHint="Add this product to your cart"
+                    >
+                      <View style={styles.tierButtonContent}>
+                        <Text style={styles.tierLabel}>Add to cart</Text>
+                        <Text style={styles.tierPrice}>
+                          ${(product.regular_price || 0).toFixed(2)}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
                   )}
                 </View>
+
               </ScrollView>
             )}
-          </View>
+
+            </ScrollView>
+          </Pressable>
           </Animated.View>
         </Animated.View>
       </Modal>
@@ -802,7 +1984,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderBottomWidth: 0,
     borderColor: 'rgba(255,255,255,0.1)',
-    maxHeight: '85%',
     overflow: 'hidden',
   },
   modalContent: {
@@ -811,30 +1992,349 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     paddingBottom: 40,
   },
+  modalScrollContent: {
+    // Let content determine size
+  },
+  modalScrollContentContainer: {
+    paddingBottom: 20,
+  },
+  modalHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 12,
+    position: 'relative',
+  },
   pullHandle: {
     width: 40,
     height: 4,
     backgroundColor: 'rgba(255,255,255,0.3)',
     borderRadius: 2,
-    alignSelf: 'center',
-    marginTop: 12,
-    marginBottom: 20,
   },
-  // JOBS: Just product name, no subtitle
-  modalTitle: {
-    fontSize: 22,
+  pullHandleEditing: {
+    backgroundColor: '#10b981',
+    width: 60,
+  },
+  editModeIndicator: {
+    position: 'absolute',
+    right: 20,
+  },
+  editModeDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#10b981',
+  },
+  // Product Header - Balanced Two Column
+  productHeaderRow: {
+    flexDirection: 'row',
+    paddingHorizontal: 24,
+    marginBottom: 16,
+    gap: 16,
+    alignItems: 'flex-start',
+  },
+  productImageContainer: {
+    width: 180,
+    height: 180,
+    borderRadius: 24,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+  },
+  productImage: {
+    width: '100%',
+    height: '100%',
+  },
+  productImageVendor: {
+    width: '100%',
+    height: '100%',
+    opacity: 0.6,
+  },
+  productImagePlaceholder: {
+    width: '100%',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  productImagePlaceholderText: {
+    fontSize: 48,
+    fontWeight: '700',
+    color: 'rgba(255,255,255,0.3)',
+  },
+  productInfoColumn: {
+    flex: 1,
+    paddingTop: 4,
+  },
+  productHeaderName: {
+    fontSize: 20,
     fontWeight: '700',
     color: '#fff',
     letterSpacing: -0.4,
-    paddingHorizontal: 24,
-    marginBottom: 24,
+    marginBottom: 4,
   },
+  productHeaderMeta: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.5)',
+    letterSpacing: -0.1,
+    marginBottom: 8,
+  },
+  // Edit Mode Styles
+  editableNameInput: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#fff',
+    letterSpacing: -0.4,
+    marginBottom: 4,
+    padding: 8,
+    paddingLeft: 12,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(59,130,246,0.5)',
+  },
+  editableStockRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 8,
+    padding: 8,
+    paddingLeft: 12,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(16,185,129,0.5)',
+  },
+  editableStockLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.6)',
+  },
+  editableStockInput: {
+    flex: 1,
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#10b981',
+    padding: 0,
+    minWidth: 60,
+  },
+  editableStockUnit: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.5)',
+  },
+  variantStockEditRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 6,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    backgroundColor: 'rgba(239,68,68,0.1)',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(239,68,68,0.3)',
+  },
+  variantStockEditLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.6)',
+  },
+  variantStockEditValue: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#ef4444',
+  },
+  variantStockEditHint: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.3)',
+    marginLeft: 'auto',
+  },
+  stockBarContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 10,
+  },
+  stockBarTrack: {
+    flex: 1,
+    height: 6,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 3,
+    overflow: 'hidden',
+  },
+  stockBarFill: {
+    height: '100%',
+    borderRadius: 3,
+    minWidth: 4,
+  },
+  stockBarText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#10b981',
+    letterSpacing: -0.2,
+    minWidth: 80,
+    textAlign: 'right',
+  },
+  stockBarTextLow: {
+    color: '#fbbf24',
+  },
+  productDescription: {
+    fontSize: 13,
+    fontWeight: '400',
+    color: 'rgba(255,255,255,0.6)',
+    lineHeight: 18,
+    marginTop: 4,
+    marginBottom: 8,
+  },
+  editableDescriptionInput: {
+    fontSize: 13,
+    fontWeight: '400',
+    color: '#fff',
+    lineHeight: 18,
+    marginTop: 8,
+    padding: 10,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(59,130,246,0.5)',
+    minHeight: 60,
+    maxHeight: 100,
+  },
+  detailsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  detailChip: {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  detailChipLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.5)',
+    letterSpacing: 0.2,
+  },
+  detailChipValue: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#fff',
+    letterSpacing: -0.2,
+  },
+  detailChipValueGreen: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#10b981',
+    letterSpacing: -0.2,
+  },
+  detailChipValueBlue: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#3b82f6',
+    letterSpacing: -0.2,
+  },
+  detailChipEditing: {
+    borderWidth: 1,
+    borderColor: 'rgba(16,185,129,0.4)',
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  detailChipInput: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#fff',
+    letterSpacing: -0.2,
+    padding: 0,
+    minWidth: 40,
+  },
+
   tiersScroll: {
     // Removed flex: 1 - let it size based on content
   },
   tiersContainer: {
     paddingHorizontal: 24,
     paddingBottom: 20,
+  },
+  // Template Picker - Almost invisible, subtle styling
+  templatePickerContainer: {
+    marginBottom: 12,
+  },
+  templatePickerButton: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(16,185,129,0.3)',
+  },
+  templatePickerButtonText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: 'rgba(16,185,129,0.8)',
+    letterSpacing: 0.3,
+  },
+  templatePickerExpanded: {
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 12,
+    padding: 12,
+    gap: 6,
+  },
+  templatePickerLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: 'rgba(255,255,255,0.4)',
+    letterSpacing: 0.5,
+    marginBottom: 4,
+  },
+  templateOption: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  templateOptionActive: {
+    backgroundColor: 'rgba(16,185,129,0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(16,185,129,0.4)',
+  },
+  templateOptionText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.8)',
+  },
+  templateOptionTextActive: {
+    color: '#10b981',
+    fontWeight: '600',
+  },
+  templateOptionTier: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.4)',
+    textTransform: 'capitalize',
+  },
+  templatePickerCancel: {
+    alignSelf: 'center',
+    paddingVertical: 8,
+    marginTop: 4,
+  },
+  templatePickerCancelText: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.5)',
   },
   // iOS 26 Grouped List Container
   tierGroupContainer: {
@@ -920,6 +2420,10 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.15)',
     borderColor: 'rgba(255,255,255,0.3)',
   },
+  variantOptionButtonCyclable: {
+    // Subtle pulse indicator that this button cycles through templates
+    borderColor: 'rgba(16,185,129,0.4)',
+  },
   variantOptionText: {
     fontSize: 14,
     fontWeight: '600',
@@ -928,6 +2432,33 @@ const styles = StyleSheet.create({
   },
   variantOptionTextActive: {
     color: '#fff',
+  },
+
+  // Template cycle button (for products without variants)
+  templateCycleButton: {
+    marginHorizontal: 24,
+    marginBottom: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(16,185,129,0.3)',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  templateCycleText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#10b981',
+    letterSpacing: -0.2,
+  },
+  templateCycleHint: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.4)',
+    letterSpacing: 0.2,
   },
 
   // Tiers Loading
@@ -940,5 +2471,338 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: 'rgba(255,255,255,0.5)',
     letterSpacing: -0.2,
+  },
+
+  // ========================================
+  // EDIT MODE STYLES - Invisible editing
+  // ========================================
+  tierButtonEditing: {
+    borderWidth: 1,
+    borderColor: 'rgba(16,185,129,0.3)',
+  },
+  tierLabelInput: {
+    flex: 1,
+    fontSize: 17,
+    fontWeight: '400',
+    color: '#fff',
+    letterSpacing: -0.4,
+    padding: 0,
+  },
+  tierPriceInputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  tierPriceCurrency: {
+    fontSize: 24,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.5)',
+    marginRight: 2,
+  },
+  tierPriceInput: {
+    fontSize: 28,
+    fontWeight: '700',
+    color: '#10b981',
+    letterSpacing: -0.5,
+    padding: 0,
+    minWidth: 80,
+    textAlign: 'right',
+  },
+
+  // ========================================
+  // VARIANT INVENTORY CONVERSION (Edit Mode)
+  // ========================================
+  variantInventorySection: {
+    paddingHorizontal: 24,
+    marginBottom: 16,
+  },
+  variantInventorySectionTitle: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: 'rgba(255,255,255,0.4)',
+    letterSpacing: 0.8,
+    marginBottom: 10,
+  },
+  variantInventoryRow: {
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 12,
+    marginBottom: 8,
+    overflow: 'hidden',
+  },
+  variantInventoryHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 14,
+  },
+  variantInventoryInfo: {
+    flex: 1,
+  },
+  variantInventoryName: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#fff',
+    marginBottom: 2,
+  },
+  variantInventoryRatio: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.5)',
+  },
+  variantInventoryStock: {
+    alignItems: 'flex-end',
+  },
+  variantInventoryQty: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: 'rgba(255,255,255,0.4)',
+  },
+  variantInventoryQtyPositive: {
+    color: '#10b981',
+  },
+  variantInventoryUnit: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.4)',
+  },
+  variantConversionContainer: {
+    backgroundColor: 'rgba(16,185,129,0.08)',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(16,185,129,0.2)',
+    padding: 14,
+  },
+  variantConversionInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 12,
+  },
+  variantConversionLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.6)',
+  },
+  variantConversionInputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  variantConversionInput: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+    minWidth: 50,
+    textAlign: 'center',
+    padding: 0,
+  },
+  variantConversionInputUnit: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.5)',
+    marginLeft: 4,
+  },
+  variantConversionArrow: {
+    fontSize: 16,
+    color: 'rgba(255,255,255,0.4)',
+  },
+  variantConversionResult: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#10b981',
+    flex: 1,
+    textAlign: 'right',
+  },
+  variantConversionButton: {
+    backgroundColor: 'rgba(16,185,129,0.2)',
+    borderRadius: 8,
+    paddingVertical: 10,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(16,185,129,0.4)',
+  },
+  variantConversionButtonDisabled: {
+    opacity: 0.4,
+  },
+  variantConversionButtonText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#10b981',
+  },
+  variantConversionButtonTextDisabled: {
+    color: 'rgba(255,255,255,0.4)',
+  },
+
+  // ========================================
+  // VARIANT STOCK BARS (Below parent)
+  // ========================================
+  variantStockBarContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 6,
+  },
+  variantStockBarText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#ef4444',
+    letterSpacing: -0.2,
+    minWidth: 80,
+  },
+
+  // ========================================
+  // CONVERT ICON BUTTON (Between Original and Variants)
+  // ========================================
+  convertIconButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(239,68,68,0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(239,68,68,0.3)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  convertIconButtonActive: {
+    backgroundColor: 'rgba(239,68,68,0.3)',
+    borderColor: '#ef4444',
+  },
+  convertIconText: {
+    fontSize: 18,
+    color: '#ef4444',
+    fontWeight: '600',
+  },
+
+  // ========================================
+  // CONVERSION MODE (Replaces pricing tiers)
+  // ========================================
+  conversionModeContainer: {
+    paddingHorizontal: 24,
+    paddingBottom: 20,
+  },
+  conversionModeHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  conversionModeTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#ef4444',
+  },
+  conversionModeSubtitle: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.5)',
+  },
+  conversionTierButton: {
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 16,
+    marginBottom: 10,
+    overflow: 'hidden',
+  },
+  conversionTierButtonActive: {
+    backgroundColor: 'rgba(239,68,68,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(239,68,68,0.3)',
+  },
+  conversionTierContent: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+  },
+  conversionTierInfo: {
+    flex: 1,
+  },
+  conversionTierName: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: '#fff',
+    marginBottom: 2,
+  },
+  conversionTierRatio: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.5)',
+  },
+  conversionTierStock: {
+    alignItems: 'flex-end',
+  },
+  conversionTierQty: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: 'rgba(255,255,255,0.3)',
+  },
+  conversionTierQtyPositive: {
+    color: '#ef4444',
+  },
+  conversionInputSection: {
+    backgroundColor: 'rgba(239,68,68,0.08)',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(239,68,68,0.2)',
+    padding: 16,
+  },
+  conversionInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 14,
+  },
+  conversionInputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    flex: 1,
+  },
+  conversionInput: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#fff',
+    flex: 1,
+    textAlign: 'center',
+    padding: 0,
+  },
+  conversionInputUnit: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.5)',
+    marginLeft: 6,
+  },
+  conversionArrow: {
+    fontSize: 20,
+    color: '#ef4444',
+    fontWeight: '600',
+  },
+  conversionResult: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#ef4444',
+    flex: 1,
+    textAlign: 'right',
+  },
+  conversionConfirmButton: {
+    backgroundColor: 'rgba(239,68,68,0.2)',
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(239,68,68,0.4)',
+  },
+  conversionConfirmButtonDisabled: {
+    opacity: 0.4,
+  },
+  conversionConfirmButtonText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#ef4444',
+  },
+  conversionConfirmButtonTextDisabled: {
+    color: 'rgba(255,255,255,0.4)',
   },
 })

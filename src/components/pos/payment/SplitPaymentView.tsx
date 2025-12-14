@@ -25,10 +25,12 @@ import type { PaymentData, SaleCompletionData } from './PaymentTypes'
 
 interface SplitPaymentViewProps {
   onComplete: (paymentData: PaymentData) => Promise<SaleCompletionData>  // ✅ Coordination callback only
+  onCancel: () => void
 }
 
 export function SplitPaymentView({
   onComplete,
+  onCancel,
 }: SplitPaymentViewProps) {
   // ========================================
   // SINGLE SOURCE OF TRUTH - Centralized total calculation
@@ -128,19 +130,8 @@ export function SplitPaymentView({
         </View>
       ) : (
         <>
-          <View style={styles.splitHeader}>
-            <Ionicons name="swap-horizontal-outline" size={32} color="#10b981" />
-            <Text style={styles.splitTitle}>Split Payment</Text>
-            <Text style={styles.splitSubtext}>Cash + Card</Text>
-          </View>
-
-          <View style={styles.totalDisplay}>
-            <Text style={styles.totalLabel}>Total Due</Text>
-            <Text style={styles.totalAmount}>${total.toFixed(2)}</Text>
-          </View>
-
           {/* Cash Input */}
-          <LiquidGlassView effect="regular" colorScheme="dark" style={styles.inputCard}>
+          <View style={styles.inputCard}>
             <View style={styles.inputRow}>
               <Text style={styles.inputLabel}>Cash Amount</Text>
               <TouchableOpacity onPress={fillSplitCash} style={styles.fillButton}>
@@ -159,10 +150,10 @@ export function SplitPaymentView({
                 selectTextOnFocus
               />
             </View>
-          </LiquidGlassView>
+          </View>
 
           {/* Card Input */}
-          <LiquidGlassView effect="regular" colorScheme="dark" style={styles.inputCard}>
+          <View style={styles.inputCard}>
             <View style={styles.inputRow}>
               <Text style={styles.inputLabel}>Card Amount</Text>
               <TouchableOpacity onPress={fillSplitCard} style={styles.fillButton}>
@@ -181,7 +172,7 @@ export function SplitPaymentView({
                 selectTextOnFocus
               />
             </View>
-          </LiquidGlassView>
+          </View>
 
           {/* Split Total Display */}
           <View style={styles.splitTotalRow}>
@@ -194,30 +185,45 @@ export function SplitPaymentView({
             </Text>
           </View>
 
-          {/* Complete Button */}
-          <TouchableOpacity
-            onPress={handleSplitPayment}
-            disabled={!canComplete}
-            activeOpacity={0.7}
-            style={styles.completeButtonWrapper}
-          >
-            <LiquidGlassView
-              effect="regular"
-              colorScheme="dark"
-              tintColor={canComplete ? 'rgba(16,185,129,0.3)' : undefined}
-              style={[
-                styles.completeButton,
-                !canComplete && styles.completeButtonDisabled,
-              ]}
+          {/* Action Buttons Row */}
+          <View style={styles.actionsRow}>
+            <TouchableOpacity
+              onPress={onCancel}
+              activeOpacity={0.7}
+              style={styles.cancelButtonWrapper}
+              accessibilityRole="button"
+              accessibilityLabel="Cancel payment"
             >
-              <Text style={[
-                styles.completeButtonText,
-                canComplete && styles.completeButtonTextActive
-              ]}>
-                Complete Split Payment
-              </Text>
-            </LiquidGlassView>
-          </TouchableOpacity>
+              <View style={styles.cancelButton}>
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </View>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={handleSplitPayment}
+              disabled={!canComplete}
+              activeOpacity={0.7}
+              style={styles.completeButtonWrapper}
+              accessibilityRole="button"
+              accessibilityLabel="Complete split payment"
+              accessibilityState={{ disabled: !canComplete }}
+            >
+              <View
+                style={[
+                  styles.completeButton,
+                  canComplete && styles.completeButtonActive,
+                  !canComplete && styles.completeButtonDisabled,
+                ]}
+              >
+                <Text style={[
+                  styles.completeButtonText,
+                  canComplete && styles.completeButtonTextActive
+                ]}>
+                  Complete
+                </Text>
+              </View>
+            </TouchableOpacity>
+          </View>
         </>
       )}
     </View>
@@ -313,46 +319,13 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.7)',
     textAlign: 'center',
   },
-  splitHeader: {
-    alignItems: 'center',
-    paddingVertical: 24,
-  },
-  splitTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#fff',
-    marginTop: 12,
-  },
-  splitSubtext: {
-    fontSize: 13,
-    fontWeight: '400',
-    color: 'rgba(255,255,255,0.6)',
-    marginTop: 4,
-  },
-  totalDisplay: {
-    alignItems: 'center',
-    marginBottom: 24,
-    paddingVertical: 16,
-    backgroundColor: 'rgba(16,185,129,0.08)',
-    borderRadius: 12,
-  },
-  totalLabel: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.6)',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  totalAmount: {
-    fontSize: 36,
-    fontWeight: '700',
-    color: '#10b981',
-    marginTop: 4,
-  },
   inputCard: {
     borderRadius: 16,
     padding: 16,
     marginBottom: 16,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
   },
   inputRow: {
     flexDirection: 'row',
@@ -394,6 +367,7 @@ const styles = StyleSheet.create({
     fontWeight: '400',
     color: '#fff',
     padding: 0,
+    minHeight: 44,
   },
   splitTotalRow: {
     flexDirection: 'row',
@@ -420,17 +394,47 @@ const styles = StyleSheet.create({
   splitTotalInvalid: {
     color: '#ef4444',
   },
+  actionsRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 20,
+  },
+  cancelButtonWrapper: {
+    flex: 1,
+  },
+  cancelButton: {
+    height: 50,
+    borderRadius: 25,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  cancelButtonText: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.7)',
+    letterSpacing: -0.2,
+  },
   completeButtonWrapper: {
-    marginTop: 16,
+    flex: 1,
   },
   completeButton: {
     height: 50,
     borderRadius: 25,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  completeButtonActive: {
+    backgroundColor: 'rgba(16,185,129,0.2)',
+    borderColor: '#10b981',
   },
   completeButtonDisabled: {
-    opacity: 0.3,
+    opacity: 0.4,
   },
   completeButtonText: {
     fontSize: 17,

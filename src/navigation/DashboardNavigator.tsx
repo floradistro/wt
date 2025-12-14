@@ -7,7 +7,6 @@ import { ProductsScreen } from '@/screens/ProductsScreen'
 import { OrdersScreen } from '@/screens/OrdersScreen'
 import { CustomersScreen } from '@/screens/CustomersScreen'
 import { MarketingScreen } from '@/screens/MarketingScreen'
-import { SettingsScreen } from '@/screens/SettingsScreen'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { DockOffsetContext } from './DockOffsetContext'
 import { layout } from '@/theme/layout'
@@ -16,7 +15,8 @@ import { useOrderNotifications, setNotificationNavigator, clearNotificationNavig
 import { useBadgeCounts } from '@/stores/order-filter.store'
 import { navigationActions } from '@/stores/navigation.store'
 
-const screens = [POSScreen, ProductsScreen, OrdersScreen, CustomersScreen, MarketingScreen, SettingsScreen]
+// Settings moved to Analytics Dashboard
+const screens = [POSScreen, ProductsScreen, OrdersScreen, CustomersScreen, MarketingScreen]
 
 export function DashboardNavigator() {
   // Enable location-aware order notifications globally
@@ -50,7 +50,6 @@ export function DashboardNavigator() {
     layout.sidebarWidth, // Orders - has sidebar
     layout.sidebarWidth, // Customers - has sidebar
     layout.sidebarWidth, // Marketing - has sidebar
-    layout.sidebarWidth, // Settings - has sidebar
   ]
 
   // Calculate: if full width override is set, use 0, otherwise use screen default

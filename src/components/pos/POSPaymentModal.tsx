@@ -4,12 +4,17 @@
  * Apple Standard: Component < 300 lines
  */
 
-import { View, Text, StyleSheet, Modal, TouchableOpacity, Animated, useWindowDimensions, ScrollView } from 'react-native'
+import { View, Text, StyleSheet, Modal, TouchableOpacity, Animated, useWindowDimensions, ScrollView, LayoutAnimation, Platform, UIManager, KeyboardAvoidingView } from 'react-native'
 import { LiquidGlassView } from '@callstack/liquid-glass'
-import { useState, useRef, useEffect, memo } from 'react'
+import { useState, useRef, useEffect, memo, useMemo, useCallback } from 'react'
 import { Ionicons } from '@expo/vector-icons'
+import Slider from '@react-native-community/slider'
 import * as Haptics from 'expo-haptics'
 import { usePaymentProcessor } from '@/stores/payment-processor.store'
+import { useSelectedCustomer } from '@/stores/customer.store'
+import { useCartTotals } from '@/stores/cart.store'
+import { useLoyaltyProgram, usePointsToRedeem, loyaltyActions, useCampaigns } from '@/stores/loyalty-campaigns.store'
+import { useSelectedDiscountId, checkoutUIActions } from '@/stores/checkout-ui.store'
 import { CashPaymentView } from './payment/CashPaymentView'
 import { CardPaymentView } from './payment/CardPaymentView'
 import { SplitPaymentView } from './payment/SplitPaymentView'
@@ -41,6 +46,104 @@ function POSPaymentModal({
 
   const currentProcessor = usePaymentProcessor((state) => state.currentProcessor)
   const processorStatus = usePaymentProcessor((state) => state.status)
+
+  // Loyalty state from stores (ZERO PROP DRILLING)
+  const selectedCustomer = useSelectedCustomer()
+  const loyaltyProgram = useLoyaltyProgram()
+  const pointsToRedeem = usePointsToRedeem()
+  const { subtotal: cartSubtotal } = useCartTotals()
+
+  // Calculate loyalty discount for display (total prop already has it applied)
+  const pointValue = loyaltyProgram?.point_value || 0.05
+  const loyaltyDiscount = pointsToRedeem * pointValue
+
+  // Calculate max redeemable points
+  const maxRedeemablePoints = useMemo(() => {
+    if (!selectedCustomer || !loyaltyProgram?.is_active) return 0
+    const customerPoints = selectedCustomer.loyalty_points || 0
+    const maxFromSubtotal = Math.floor(cartSubtotal / pointValue)
+    return Math.min(customerPoints, maxFromSubtotal)
+  }, [selectedCustomer, loyaltyProgram, cartSubtotal, pointValue])
+
+  // NOTE: `total` prop already includes loyalty discount from useCheckoutTotals
+  // No need to calculate adjustedTotal - use total directly
+
+  // Show loyalty section if customer has points
+  const showLoyaltySection = selectedCustomer &&
+    (selectedCustomer.loyalty_points || 0) > 0 &&
+    maxRedeemablePoints > 0
+
+  // Discount state from stores
+  const campaigns = useCampaigns()
+  const selectedDiscountId = useSelectedDiscountId()
+  const [showDiscountPicker, setShowDiscountPicker] = useState(false)
+
+  // Get active POS discounts (in_store or both)
+  const activeDiscounts = useMemo(() => {
+    return campaigns.filter(d => {
+      if (!d.is_active) return false
+      const salesChannel = (d as any).sales_channel || 'both'
+      return salesChannel === 'in_store' || salesChannel === 'both'
+    })
+  }, [campaigns])
+
+  // Get selected discount
+  const selectedDiscount = useMemo(() =>
+    activeDiscounts.find(d => d.id === selectedDiscountId) || null,
+    [activeDiscounts, selectedDiscountId]
+  )
+
+  // Calculate discount amount for display
+  const discountAmount = useMemo(() => {
+    if (!selectedDiscount) return 0
+    const subtotalAfterLoyalty = Math.max(0, cartSubtotal - loyaltyDiscount)
+    if (selectedDiscount.discount_type === 'percentage') {
+      return subtotalAfterLoyalty * (selectedDiscount.discount_value / 100)
+    }
+    return Math.min(selectedDiscount.discount_value, subtotalAfterLoyalty)
+  }, [selectedDiscount, cartSubtotal, loyaltyDiscount])
+
+  // Discount handlers
+  const handleSelectDiscount = useCallback((discountId: string) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+    LayoutAnimation.configureNext(LayoutAnimation.create(
+      200,
+      LayoutAnimation.Types.easeInEaseOut,
+      LayoutAnimation.Properties.opacity
+    ))
+    checkoutUIActions.setSelectedDiscountId(discountId)
+    setShowDiscountPicker(false)
+  }, [])
+
+  const handleClearDiscount = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    checkoutUIActions.setSelectedDiscountId(null)
+  }, [])
+
+  const handleToggleDiscountPicker = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    LayoutAnimation.configureNext(LayoutAnimation.create(
+      200,
+      LayoutAnimation.Types.easeInEaseOut,
+      LayoutAnimation.Properties.opacity
+    ))
+    setShowDiscountPicker(prev => !prev)
+  }, [])
+
+  // Loyalty slider handlers
+  const handleSliderChange = useCallback((value: number) => {
+    const roundedValue = Math.round(value)
+    loyaltyActions.setPointsToRedeem(roundedValue)
+  }, [])
+
+  const handleSliderComplete = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+  }, [])
+
+  const handleUseAllPoints = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    loyaltyActions.setPointsToRedeem(pointsToRedeem === maxRedeemablePoints ? 0 : maxRedeemablePoints)
+  }, [pointsToRedeem, maxRedeemablePoints])
 
   const hasActiveProcessor = !!currentProcessor
   const canCompleteCard = hasActiveProcessor
@@ -152,10 +255,7 @@ function POSPaymentModal({
           ]}
           accessible={false}
         >
-          {/* Handle - only show in portrait */}
-          {!isLandscape && (
-            <View style={styles.handle} accessibilityElementsHidden={true} importantForAccessibility="no" />
-          )}
+          {/* Handle removed - full screen modal */}
 
           {/* Header */}
           <View style={styles.header} accessible={false}>
@@ -168,7 +268,113 @@ function POSPaymentModal({
             >
               ${total.toFixed(2)}
             </Text>
+            {loyaltyDiscount > 0 && (
+              <Text style={styles.loyaltySavings}>
+                Saving ${loyaltyDiscount.toFixed(2)} with {pointsToRedeem} points
+              </Text>
+            )}
           </View>
+
+          {/* Loyalty Points Redemption */}
+          {showLoyaltySection && (
+            <View style={styles.loyaltySection}>
+              <View style={styles.loyaltyHeader}>
+                <Text style={styles.loyaltyTitle}>Redeem Points</Text>
+                <Text style={styles.loyaltyAvailable}>
+                  {(selectedCustomer?.loyalty_points || 0).toLocaleString()} available
+                </Text>
+              </View>
+              <View style={styles.loyaltySliderRow}>
+                <Text style={styles.loyaltyPointsText}>
+                  {pointsToRedeem} pts
+                </Text>
+                <Slider
+                  style={styles.loyaltySlider}
+                  minimumValue={0}
+                  maximumValue={maxRedeemablePoints}
+                  step={1}
+                  value={pointsToRedeem}
+                  onValueChange={handleSliderChange}
+                  onSlidingComplete={handleSliderComplete}
+                  minimumTrackTintColor="#10b981"
+                  maximumTrackTintColor="rgba(255,255,255,0.15)"
+                  thumbTintColor="#10b981"
+                />
+                <TouchableOpacity onPress={handleUseAllPoints} style={styles.useAllButton}>
+                  <Text style={styles.useAllText}>
+                    {pointsToRedeem === maxRedeemablePoints ? 'Clear' : 'Max'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+              {pointsToRedeem > 0 && (
+                <Text style={styles.loyaltyDiscountText}>
+                  -${loyaltyDiscount.toFixed(2)} discount
+                </Text>
+              )}
+            </View>
+          )}
+
+          {/* Discount Section */}
+          {activeDiscounts.length > 0 && (
+            <TouchableOpacity
+              style={styles.discountSection}
+              onPress={selectedDiscount ? undefined : handleToggleDiscountPicker}
+              activeOpacity={selectedDiscount ? 1 : 0.7}
+              disabled={!!selectedDiscount}
+            >
+              <View style={styles.discountHeader}>
+                <View style={styles.discountTitleRow}>
+                  <Ionicons
+                    name="pricetag-outline"
+                    size={16}
+                    color={selectedDiscount ? '#10b981' : 'rgba(255,255,255,0.6)'}
+                    style={styles.discountIcon}
+                  />
+                  <Text style={[styles.discountTitle, selectedDiscount && styles.discountTitleActive]}>
+                    {selectedDiscount ? selectedDiscount.name : 'Apply Discount'}
+                  </Text>
+                </View>
+                {selectedDiscount ? (
+                  <TouchableOpacity onPress={handleClearDiscount} style={styles.discountClearButton}>
+                    <Ionicons name="close-circle" size={20} color="rgba(255,255,255,0.5)" />
+                  </TouchableOpacity>
+                ) : (
+                  <Ionicons
+                    name={showDiscountPicker ? 'chevron-up' : 'chevron-down'}
+                    size={18}
+                    color="rgba(255,255,255,0.5)"
+                  />
+                )}
+              </View>
+              {selectedDiscount && discountAmount > 0 && (
+                <Text style={styles.discountAmountText}>
+                  -{selectedDiscount.discount_type === 'percentage'
+                    ? `${selectedDiscount.discount_value}%`
+                    : `$${selectedDiscount.discount_value.toFixed(2)}`}
+                  {' '}· saves ${discountAmount.toFixed(2)}
+                </Text>
+              )}
+              {showDiscountPicker && !selectedDiscount && (
+                <View style={styles.discountPickerList}>
+                  {activeDiscounts.map(discount => (
+                    <TouchableOpacity
+                      key={discount.id}
+                      onPress={() => handleSelectDiscount(discount.id)}
+                      style={styles.discountPickerItem}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.discountPickerItemName}>{discount.name}</Text>
+                      <Text style={styles.discountPickerItemBadge}>
+                        {discount.discount_type === 'percentage'
+                          ? `${discount.discount_value}% off`
+                          : `$${discount.discount_value.toFixed(2)} off`}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+            </TouchableOpacity>
+          )}
 
           {/* Payment Method Tabs */}
           <View style={styles.tabs} accessibilityRole="tablist" accessible={false}>
@@ -236,100 +442,43 @@ function POSPaymentModal({
             </TouchableOpacity>
           </View>
 
-          <ScrollView
-            style={[styles.content, { maxHeight: height * (isLandscape ? 0.5 : 0.75) }]}
-            showsVerticalScrollIndicator={true}
-            indicatorStyle="white"
-            scrollIndicatorInsets={{ right: 2 }}
-            bounces={false}
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            style={{ flex: 1 }}
           >
-            {/* Payment Views */}
-            {paymentMethod === 'cash' && (
-              <CashPaymentView
-                total={total}
-                subtotal={subtotal}
-                taxAmount={taxAmount}
-                taxRate={taxRate}
-                taxName={taxName}
-                itemCount={itemCount}
-                onComplete={handlePaymentComplete}
-              />
-            )}
-
-            {paymentMethod === 'card' && (
-              <CardPaymentView
-                total={total}
-                subtotal={subtotal}
-                taxAmount={taxAmount}
-                taxRate={taxRate}
-                taxName={taxName}
-                itemCount={itemCount}
-                currentProcessor={currentProcessor}
-                processorStatus={processorStatus}
-                locationId={locationId}
-                registerId={registerId}
-                onComplete={handlePaymentComplete}
-              />
-            )}
-
-            {paymentMethod === 'split' && (
-              <SplitPaymentView
-                total={total}
-                subtotal={subtotal}
-                taxAmount={taxAmount}
-                taxRate={taxRate}
-                taxName={taxName}
-                itemCount={itemCount}
-                currentProcessor={currentProcessor}
-                locationId={locationId}
-                registerId={registerId}
-                onComplete={handlePaymentComplete}
-              />
-            )}
-
-            {/* Summary */}
-            <View
-              style={styles.summary}
-              accessible={true}
-              accessibilityRole="summary"
-              accessibilityLabel={`Order summary. ${itemCount} items. Subtotal: ${subtotal.toFixed(2)} dollars. ${taxName || 'Tax'} at ${(taxRate * 100).toFixed(2)} percent: ${taxAmount.toFixed(2)} dollars.`}
+            <ScrollView
+              style={[styles.content, { maxHeight: height * (isLandscape ? 0.5 : 0.75) }]}
+              showsVerticalScrollIndicator={true}
+              indicatorStyle="white"
+              scrollIndicatorInsets={{ right: 2 }}
+              bounces={false}
+              keyboardShouldPersistTaps="always"
+              keyboardDismissMode="interactive"
+              contentContainerStyle={{ flexGrow: 1 }}
             >
-              <View style={styles.summaryRow} accessible={false}>
-                <Text style={styles.summaryLabel}>Items</Text>
-                <Text style={styles.summaryValue}>{itemCount}</Text>
-              </View>
-              <View style={styles.summaryRow} accessible={false}>
-                <Text style={styles.summaryLabel}>Subtotal</Text>
-                <Text style={styles.summaryValue}>${subtotal.toFixed(2)}</Text>
-              </View>
-              <View style={styles.summaryRow} accessible={false}>
-                <Text style={styles.summaryLabel}>
-                  {taxName || 'Tax'} ({(taxRate * 100).toFixed(2)}%)
-                </Text>
-                <Text style={styles.summaryValue}>${taxAmount.toFixed(2)}</Text>
-              </View>
-            </View>
-          </ScrollView>
+              {/* Payment Views - total already includes loyalty discount */}
+              {paymentMethod === 'cash' && (
+                <CashPaymentView
+                  onComplete={handlePaymentComplete}
+                  onCancel={handleClose}
+                />
+              )}
 
-          {/* Actions */}
-          <View style={styles.actions}>
-            <TouchableOpacity
-              onPress={handleClose}
-              activeOpacity={0.7}
-              style={styles.actionButtonWrapper}
-              accessibilityRole="button"
-              accessibilityLabel="Cancel payment"
-              accessibilityHint="Close checkout and return to cart"
-            >
-              <LiquidGlassView
-                effect="regular"
-                colorScheme="dark"
-                style={styles.cancelButton}
-              >
-                <Text style={styles.cancelButtonText}>Cancel</Text>
-              </LiquidGlassView>
-            </TouchableOpacity>
-          </View>
+              {paymentMethod === 'card' && (
+                <CardPaymentView
+                  onComplete={handlePaymentComplete}
+                  onCancel={handleClose}
+                />
+              )}
+
+              {paymentMethod === 'split' && (
+                <SplitPaymentView
+                  onComplete={handlePaymentComplete}
+                  onCancel={handleClose}
+                />
+              )}
+            </ScrollView>
+          </KeyboardAvoidingView>
         </LiquidGlassView>
       </Animated.View>
 
@@ -352,41 +501,29 @@ const styles = StyleSheet.create({
     position: 'absolute',
   },
   containerPortrait: {
+    top: 0,
     bottom: 0,
     left: 0,
     right: 0,
-    top: '15%',
   },
   containerLandscape: {
-    // FIXED: Responsive modal for iPad Pro 11" and all landscape sizes
-    // Uses smaller percentages to ensure it fits on smaller iPads
-    top: '5%',
-    bottom: '5%',
-    left: '10%',
-    right: '10%',
-    maxHeight: '90%', // Prevent overflow on smaller screens
+    top: 0,
+    bottom: 0,
+    left: 0,
+    right: 0,
   },
   modalCard: {
     flex: 1,
     overflow: 'hidden',
-    paddingTop: 12,
+    paddingTop: 48,
     paddingHorizontal: 24,
     paddingBottom: 24,
   },
   modalCardPortrait: {
-    borderTopLeftRadius: 32,
-    borderTopRightRadius: 32,
+    borderRadius: 0,
   },
   modalCardLandscape: {
-    borderRadius: 24,
-  },
-  handle: {
-    width: 40,
-    height: 4,
-    backgroundColor: 'rgba(255,255,255,0.3)',
-    borderRadius: 2,
-    alignSelf: 'center',
-    marginBottom: 20,
+    borderRadius: 0,
   },
   header: {
     alignItems: 'center',
@@ -413,6 +550,149 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#fff',
     letterSpacing: -1,
+  },
+  loyaltySavings: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: '#10b981',
+    marginTop: 4,
+  },
+  // Loyalty Section
+  loyaltySection: {
+    backgroundColor: 'rgba(16,185,129,0.1)',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(16,185,129,0.2)',
+  },
+  loyaltyHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  loyaltyTitle: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#10b981',
+    letterSpacing: 0.3,
+  },
+  loyaltyAvailable: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.5)',
+  },
+  loyaltySliderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  loyaltyPointsText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.7)',
+    width: 55,
+    textAlign: 'right',
+  },
+  loyaltySlider: {
+    flex: 1,
+    height: 36,
+  },
+  useAllButton: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 6,
+  },
+  useAllText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.7)',
+  },
+  loyaltyDiscountText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#10b981',
+    textAlign: 'center',
+    marginTop: 8,
+  },
+  loyaltyLabel: {
+    color: '#10b981',
+  },
+  loyaltyValue: {
+    color: '#10b981',
+  },
+  discountLabel: {
+    color: '#10b981',
+  },
+  discountValue: {
+    color: '#10b981',
+  },
+  // Discount Section - matches modal theme
+  discountSection: {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  discountHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  discountTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  discountIcon: {
+    marginRight: 8,
+  },
+  discountTitle: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.7)',
+    letterSpacing: 0.2,
+  },
+  discountTitleActive: {
+    color: '#10b981',
+    fontWeight: '600',
+  },
+  discountClearButton: {
+    padding: 4,
+  },
+  discountAmountText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#10b981',
+    marginTop: 8,
+  },
+  discountPickerList: {
+    marginTop: 10,
+    gap: 6,
+  },
+  discountPickerItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  discountPickerItemName: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: '#fff',
+    flex: 1,
+  },
+  discountPickerItemBadge: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#10b981',
   },
   tabs: {
     flexDirection: 'row',
@@ -447,49 +727,6 @@ const styles = StyleSheet.create({
   },
   content: {
     // maxHeight is applied inline based on orientation
-  },
-  summary: {
-    gap: 8,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.1)',
-    marginBottom: 12,
-  },
-  summaryRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  summaryLabel: {
-    fontSize: 12,
-    fontWeight: '400',
-    color: 'rgba(255,255,255,0.5)',
-    letterSpacing: 0,
-  },
-  summaryValue: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#fff',
-    letterSpacing: 0,
-  },
-  actions: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  actionButtonWrapper: {
-    flex: 1,
-  },
-  cancelButton: {
-    height: 50,
-    borderRadius: 25,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  cancelButtonText: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.9)',
-    letterSpacing: -0.4,
   },
 })
 

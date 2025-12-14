@@ -6,8 +6,7 @@
  */
 
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native'
-import React, { memo, useMemo, useRef, useCallback } from 'react'
-import Slider from '@react-native-community/slider'
+import React, { memo, useMemo } from 'react'
 import * as Haptics from 'expo-haptics'
 import { Button } from '@/theme'
 import { logger } from '@/utils/logger'
@@ -18,7 +17,7 @@ import { useSelectedCustomer } from '@/stores/customer.store'
 import { useSelectedDiscountId, checkoutUIActions } from '@/stores/checkout-ui.store'
 import { usePOSSession } from '@/contexts/POSSessionContext'
 import { taxActions } from '@/stores/tax.store'
-import { useCampaigns, useLoyaltyProgram, usePointsToRedeem, loyaltyActions } from '@/stores/loyalty-campaigns.store'
+import { useCampaigns, useLoyaltyProgram, usePointsToRedeem } from '@/stores/loyalty-campaigns.store'
 
 function POSTotalsSection() {
   // ========================================
@@ -80,57 +79,6 @@ function POSTotalsSection() {
 
   const total = subtotalAfterDiscount + taxAmount
 
-  const maxRedeemablePoints = useMemo(() => {
-    if (!selectedCustomer) return 0
-
-    const customerPoints = selectedCustomer.loyalty_points || 0
-    let pointValue = loyaltyProgram?.point_value || 0.01
-
-    // TEMPORARY FIX: If point_value seems wrong (too high), use 0.05
-    // This happens when the loyalty program is misconfigured in the database
-    if (pointValue > 1) {
-      logger.error('❌ LOYALTY CONFIG ERROR: point_value is too high!', {
-        configuredValue: pointValue,
-        expectedValue: 0.05,
-        fixing: true,
-      })
-      pointValue = 0.05 // Override with sensible default
-    }
-
-    // Calculate max from subtotal (how many points worth of discount can be applied)
-    const maxFromSubtotal = Math.floor(subtotal / pointValue)
-    const maxPoints = Math.min(customerPoints, maxFromSubtotal)
-
-    // Debug logging - only log in development to reduce Sentry noise
-    if (__DEV__) {
-      logger.debug('🎯 LOYALTY CALCULATION:', {
-        customerName: `${selectedCustomer.first_name} ${selectedCustomer.last_name}`,
-        customerPoints,
-        subtotal,
-        pointValue,
-        pointValueFromDB: loyaltyProgram?.point_value,
-        wasFixed: (loyaltyProgram?.point_value || 0) > 1,
-        calculation: `${subtotal} / ${pointValue} = ${maxFromSubtotal}`,
-        maxFromSubtotal,
-        finalMaxPoints: maxPoints,
-      })
-    }
-
-    return maxPoints
-  }, [selectedCustomer, subtotal, loyaltyProgram])
-
-  // ========================================
-  // SLIDER - INSTANT UPDATES
-  // ========================================
-  const handleSliderChange = useCallback((value: number) => {
-    const roundedValue = Math.round(value)
-    loyaltyActions.setPointsToRedeem(roundedValue)
-  }, [])
-
-  const handleSliderComplete = useCallback(() => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-  }, [])
-
   // ========================================
   // HANDLERS
   // ========================================
@@ -141,45 +89,8 @@ function POSTotalsSection() {
     checkoutUIActions.openModal('payment')
   }
 
-  const showLoyaltyRedemption =
-    selectedCustomer &&
-    selectedCustomer.loyalty_points > 0 &&
-    maxRedeemablePoints > 0
-
-  // Debug: Log why loyalty slider might not be showing
-  logger.debug('🔍 LOYALTY SLIDER VISIBILITY:', {
-    showLoyaltyRedemption,
-    hasSelectedCustomer: !!selectedCustomer,
-    customerPoints: selectedCustomer?.loyalty_points || 0,
-    hasLoyaltyProgram: !!loyaltyProgram,
-    programIsActive: loyaltyProgram?.is_active,
-    maxRedeemablePoints,
-  })
-
   return (
     <View style={styles.container}>
-
-      {/* Loyalty Points Slider - Minimal, inline */}
-      {showLoyaltyRedemption && (
-        <View style={styles.loyaltyInline}>
-          <Text style={styles.loyaltyInlineText}>
-            {loyaltyPointsToRedeem} pts
-          </Text>
-          <Slider
-            style={styles.loyaltySlider}
-            minimumValue={0}
-            maximumValue={maxRedeemablePoints}
-            step={1}
-            value={loyaltyPointsToRedeem}
-            onValueChange={handleSliderChange}
-            onSlidingComplete={handleSliderComplete}
-            minimumTrackTintColor="rgba(255,255,255,0.3)"
-            maximumTrackTintColor="rgba(255,255,255,0.1)"
-            thumbTintColor="#fff"
-          />
-        </View>
-      )}
-
       {/* Totals */}
       <View
         style={styles.totals}
@@ -300,25 +211,5 @@ const styles = StyleSheet.create({
   checkoutButtonContainer: {
     marginHorizontal: 16,
     marginBottom: 16, // ✅ Bottom padding - lift off bottom edge
-  },
-  // Loyalty Points - Minimal inline
-  loyaltyInline: {
-    paddingHorizontal: 20,
-    paddingTop: 12,
-    paddingBottom: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  loyaltyInlineText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.6)',
-    width: 60,
-    textAlign: 'right',
-  },
-  loyaltySlider: {
-    flex: 1,
-    height: 40,
   },
 })

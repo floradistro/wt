@@ -29,9 +29,12 @@ export interface MetaIntegration {
   status: 'active' | 'disconnected' | 'expired' | 'error'
   last_error: string | null
   token_expires_at: string | null
+  access_token?: string // For direct API calls (read-only operations)
   created_at: string
   updated_at: string
 }
+
+const META_GRAPH_API = 'https://graph.facebook.com/v21.0'
 
 export interface MetaCampaign {
   id: string
@@ -517,6 +520,43 @@ interface SendConversionParams {
 type MetaStore = MetaState & MetaActions
 
 // ============================================================================
+// HELPERS
+// ============================================================================
+
+function calculateFallbackEstimate(targeting: any) {
+  // Base US audience ~250M
+  let estimate = 250000000
+
+  // Age range reduction
+  const ageRange = (targeting?.age_max || 65) - (targeting?.age_min || 18)
+  const ageMultiplier = ageRange / 52 // 52 year range (13-65)
+  estimate *= ageMultiplier
+
+  // Gender reduction
+  if (targeting?.genders?.length === 1) {
+    estimate *= 0.5
+  }
+
+  // Interests narrow the audience
+  if (targeting?.interests?.length > 0) {
+    estimate *= Math.max(0.1, 1 - (targeting.interests.length * 0.15))
+  }
+
+  // Platform reduction
+  if (targeting?.publisher_platforms?.length === 1) {
+    estimate *= 0.6
+  }
+
+  const lowerBound = Math.round(estimate * 0.7)
+  const upperBound = Math.round(estimate * 1.3)
+
+  return {
+    users_lower_bound: lowerBound,
+    users_upper_bound: upperBound,
+  }
+}
+
+// ============================================================================
 // STORE
 // ============================================================================
 
@@ -564,14 +604,19 @@ export const useMetaStore = create<MetaStore>((set, get) => ({
     try {
       const { data, error } = await supabase
         .from('meta_integrations')
-        .select('*')
+        .select('*, access_token_encrypted')
         .eq('vendor_id', vendorId)
         .maybeSingle()
 
       if (error) throw error
 
       const isConnected = data?.status === 'active'
-      set({ integration: data, isConnected })
+      // Map access_token_encrypted to access_token for direct API calls
+      const integration = data ? {
+        ...data,
+        access_token: data.access_token_encrypted,
+      } : null
+      set({ integration, isConnected })
 
       logger.info('[MetaStore] Integration loaded:', { vendorId, isConnected })
     } catch (err) {
@@ -695,28 +740,52 @@ export const useMetaStore = create<MetaStore>((set, get) => ({
     set({ isSyncing: true })
 
     try {
-      const response = await fetch(
-        `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/meta-sync-campaigns`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY}`,
-          },
-          body: JSON.stringify({ vendorId }),
-        }
-      )
-
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || 'Failed to sync campaigns')
+      const { integration } = get()
+      if (!integration?.access_token || !integration?.ad_account_id) {
+        throw new Error('Not connected to Meta')
       }
 
-      // Reload campaigns after sync
+      let adAccountId = integration.ad_account_id
+      if (!adAccountId.startsWith('act_')) adAccountId = `act_${adAccountId}`
+
+      // Fetch campaigns directly from Meta
+      const fields = 'id,name,status,effective_status,objective,daily_budget,lifetime_budget,start_time,stop_time,created_time,updated_time'
+      const params = new URLSearchParams({
+        fields,
+        limit: '100',
+        access_token: integration.access_token,
+      })
+
+      const response = await fetch(`${META_GRAPH_API}/${adAccountId}/campaigns?${params}`)
+      const data = await response.json()
+
+      if (data.error) {
+        throw new Error(data.error.message || 'Failed to sync campaigns')
+      }
+
+      // Upsert campaigns to database
+      const campaigns = data.data || []
+      for (const campaign of campaigns) {
+        await supabase.from('meta_campaigns').upsert({
+          vendor_id: vendorId,
+          meta_campaign_id: campaign.id,
+          name: campaign.name,
+          status: campaign.status,
+          effective_status: campaign.effective_status,
+          objective: campaign.objective,
+          daily_budget: campaign.daily_budget ? parseInt(campaign.daily_budget) / 100 : null,
+          lifetime_budget: campaign.lifetime_budget ? parseInt(campaign.lifetime_budget) / 100 : null,
+          start_time: campaign.start_time,
+          end_time: campaign.stop_time,
+          last_synced_at: new Date().toISOString(),
+        }, { onConflict: 'meta_campaign_id' })
+      }
+
+      // Reload campaigns from DB
       await get().loadCampaigns(vendorId)
 
       set({ isSyncing: false })
-      logger.info('[MetaStore] Campaigns synced successfully')
+      logger.info('[MetaStore] Campaigns synced successfully', { count: campaigns.length })
       return true
     } catch (err) {
       logger.error('[MetaStore] Sync campaigns error:', err)
@@ -727,56 +796,100 @@ export const useMetaStore = create<MetaStore>((set, get) => ({
 
   createCampaign: async (vendorId: string, campaign: CreateCampaignParams) => {
     try {
-      const response = await fetch(
-        `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/meta-create-campaign`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY}`,
-          },
-          body: JSON.stringify({ vendorId, ...campaign }),
-        }
-      )
-
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || 'Failed to create campaign')
+      const { integration } = get()
+      if (!integration?.access_token || !integration?.ad_account_id) {
+        throw new Error('Not connected to Meta')
       }
+
+      let adAccountId = integration.ad_account_id
+      if (!adAccountId.startsWith('act_')) adAccountId = `act_${adAccountId}`
+
+      // Create campaign directly via Meta API
+      const params = new URLSearchParams({
+        name: campaign.name,
+        objective: campaign.objective || 'OUTCOME_TRAFFIC',
+        status: campaign.status || 'PAUSED',
+        special_ad_categories: '[]',
+        access_token: integration.access_token,
+      })
+
+      if (campaign.daily_budget) {
+        params.append('daily_budget', String(Math.round(campaign.daily_budget * 100)))
+      }
+      if (campaign.lifetime_budget) {
+        params.append('lifetime_budget', String(Math.round(campaign.lifetime_budget * 100)))
+      }
+
+      const response = await fetch(`${META_GRAPH_API}/${adAccountId}/campaigns`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: params,
+      })
 
       const data = await response.json()
-      const newCampaign = data.campaign
-
-      if (newCampaign) {
-        set(state => ({
-          campaigns: [newCampaign, ...state.campaigns],
-        }))
+      if (data.error) {
+        throw new Error(data.error.error_user_msg || data.error.message || 'Failed to create campaign')
       }
 
-      return newCampaign
+      // Save to database
+      const newCampaign = {
+        vendor_id: vendorId,
+        meta_campaign_id: data.id,
+        name: campaign.name,
+        status: campaign.status || 'PAUSED',
+        effective_status: campaign.status || 'PAUSED',
+        objective: campaign.objective || 'OUTCOME_TRAFFIC',
+        daily_budget: campaign.daily_budget,
+        lifetime_budget: campaign.lifetime_budget,
+        impressions: 0,
+        reach: 0,
+        clicks: 0,
+        spend: 0,
+        conversions: 0,
+        last_synced_at: new Date().toISOString(),
+        created_at: new Date().toISOString(),
+      }
+
+      const { data: savedCampaign } = await supabase
+        .from('meta_campaigns')
+        .insert(newCampaign)
+        .select()
+        .single()
+
+      if (savedCampaign) {
+        set(state => ({ campaigns: [savedCampaign, ...state.campaigns] }))
+      }
+
+      logger.info('[MetaStore] Campaign created:', data.id)
+      return savedCampaign || newCampaign
     } catch (err: any) {
       logger.error('[MetaStore] Create campaign error:', err)
-      // Re-throw so UI can display the error
       throw err
     }
   },
 
-  updateCampaignStatus: async (vendorId: string, metaCampaignId: string, status: 'ACTIVE' | 'PAUSED') => {
+  updateCampaignStatus: async (_vendorId: string, metaCampaignId: string, status: 'ACTIVE' | 'PAUSED') => {
     try {
-      const response = await fetch(
-        `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/meta-update-campaign`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY}`,
-          },
-          body: JSON.stringify({ vendorId, metaCampaignId, status }),
-        }
-      )
+      const { integration } = get()
+      if (!integration?.access_token) {
+        throw new Error('Not connected to Meta')
+      }
 
-      if (!response.ok) {
-        throw new Error('Failed to update campaign status')
+      // Update directly via Meta API
+      const params = new URLSearchParams({
+        status,
+        access_token: integration.access_token,
+      })
+
+      const response = await fetch(`${META_GRAPH_API}/${metaCampaignId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: params,
+      })
+
+      const data = await response.json()
+      if (data.error) {
+        throw new Error(data.error.message || 'Failed to update campaign status')
       }
 
       // Update local state
@@ -785,6 +898,12 @@ export const useMetaStore = create<MetaStore>((set, get) => ({
           c.meta_campaign_id === metaCampaignId ? { ...c, status } : c
         ),
       }))
+
+      // Update in database
+      await supabase
+        .from('meta_campaigns')
+        .update({ status, updated_at: new Date().toISOString() })
+        .eq('meta_campaign_id', metaCampaignId)
 
       return true
     } catch (err) {
@@ -895,57 +1014,118 @@ export const useMetaStore = create<MetaStore>((set, get) => ({
 
   createAdSet: async (vendorId: string, adSet: CreateAdSetParams) => {
     try {
-      const response = await fetch(
-        `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/meta-create-adset`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY}`,
-          },
-          body: JSON.stringify({ vendorId, ...adSet }),
-        }
-      )
-
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || 'Failed to create ad set')
+      const { integration } = get()
+      if (!integration?.access_token || !integration?.ad_account_id) {
+        throw new Error('Not connected to Meta')
       }
+
+      let adAccountId = integration.ad_account_id
+      if (!adAccountId.startsWith('act_')) adAccountId = `act_${adAccountId}`
+
+      // Build targeting spec
+      const targetingSpec: Record<string, any> = {}
+      if (adSet.targeting?.geo_locations) {
+        targetingSpec.geo_locations = adSet.targeting.geo_locations
+      } else {
+        targetingSpec.geo_locations = { countries: ['US'] }
+      }
+      if (adSet.targeting?.age_min) targetingSpec.age_min = adSet.targeting.age_min
+      if (adSet.targeting?.age_max) targetingSpec.age_max = adSet.targeting.age_max
+      if (adSet.targeting?.genders) targetingSpec.genders = adSet.targeting.genders
+      if (adSet.targeting?.interests?.length) {
+        targetingSpec.flexible_spec = [{ interests: adSet.targeting.interests }]
+      }
+      if (adSet.targeting?.publisher_platforms) {
+        targetingSpec.publisher_platforms = adSet.targeting.publisher_platforms
+      }
+
+      // Create ad set directly via Meta API
+      const params = new URLSearchParams({
+        name: adSet.name,
+        campaign_id: adSet.campaignId,
+        status: adSet.status || 'PAUSED',
+        optimization_goal: adSet.optimization_goal || 'LINK_CLICKS',
+        billing_event: adSet.billing_event || 'IMPRESSIONS',
+        bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
+        targeting: JSON.stringify(targetingSpec),
+        access_token: integration.access_token,
+      })
+
+      if (adSet.daily_budget) {
+        params.append('daily_budget', String(Math.round(adSet.daily_budget * 100)))
+      }
+
+      const response = await fetch(`${META_GRAPH_API}/${adAccountId}/adsets`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: params,
+      })
 
       const data = await response.json()
-      const newAdSet = data.adSet
-
-      if (newAdSet) {
-        set(state => ({
-          adSets: [newAdSet, ...state.adSets],
-        }))
+      if (data.error) {
+        throw new Error(data.error.error_user_msg || data.error.message || 'Failed to create ad set')
       }
 
-      logger.info('[MetaStore] Ad set created:', newAdSet?.name)
-      return newAdSet
+      // Save to database
+      const newAdSet = {
+        vendor_id: vendorId,
+        meta_ad_set_id: data.id,
+        meta_campaign_id: adSet.campaignId,
+        name: adSet.name,
+        status: adSet.status || 'PAUSED',
+        effective_status: adSet.status || 'PAUSED',
+        optimization_goal: adSet.optimization_goal || 'LINK_CLICKS',
+        billing_event: adSet.billing_event || 'IMPRESSIONS',
+        daily_budget: adSet.daily_budget,
+        targeting: targetingSpec,
+        impressions: 0,
+        reach: 0,
+        clicks: 0,
+        spend: 0,
+        conversions: 0,
+        last_synced_at: new Date().toISOString(),
+        created_at: new Date().toISOString(),
+      }
+
+      const { data: savedAdSet } = await supabase
+        .from('meta_ad_sets')
+        .insert(newAdSet)
+        .select()
+        .single()
+
+      if (savedAdSet) {
+        set(state => ({ adSets: [savedAdSet, ...state.adSets] }))
+      }
+
+      logger.info('[MetaStore] Ad set created:', data.id)
+      return savedAdSet || newAdSet
     } catch (err: any) {
       logger.error('[MetaStore] Create ad set error:', err)
       throw err
     }
   },
 
-  updateAdSet: async (vendorId: string, metaAdSetId: string, updates: UpdateAdSetParams) => {
+  updateAdSet: async (_vendorId: string, metaAdSetId: string, updates: UpdateAdSetParams) => {
     try {
-      const response = await fetch(
-        `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/meta-update-adset`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY}`,
-          },
-          body: JSON.stringify({ vendorId, metaAdSetId, ...updates }),
-        }
-      )
+      const { integration } = get()
+      if (!integration?.access_token) {
+        throw new Error('Not connected to Meta')
+      }
 
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || 'Failed to update ad set')
+      const params = new URLSearchParams({ access_token: integration.access_token })
+      if (updates.name) params.append('name', updates.name)
+      if (updates.status) params.append('status', updates.status)
+      if (updates.daily_budget) params.append('daily_budget', String(Math.round(updates.daily_budget * 100)))
+
+      const response = await fetch(`${META_GRAPH_API}/${metaAdSetId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: params,
+      })
+
+      const data = await response.json()
+      if (data.error) {
+        throw new Error(data.error.message || 'Failed to update ad set')
       }
 
       // Update local state
@@ -955,6 +1135,12 @@ export const useMetaStore = create<MetaStore>((set, get) => ({
         ),
       }))
 
+      // Update in database
+      await supabase
+        .from('meta_ad_sets')
+        .update({ ...updates, updated_at: new Date().toISOString() })
+        .eq('meta_ad_set_id', metaAdSetId)
+
       logger.info('[MetaStore] Ad set updated:', metaAdSetId)
       return true
     } catch (err: any) {
@@ -963,22 +1149,27 @@ export const useMetaStore = create<MetaStore>((set, get) => ({
     }
   },
 
-  updateAdSetStatus: async (vendorId: string, metaAdSetId: string, status: 'ACTIVE' | 'PAUSED') => {
+  updateAdSetStatus: async (_vendorId: string, metaAdSetId: string, status: 'ACTIVE' | 'PAUSED') => {
     try {
-      const response = await fetch(
-        `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/meta-update-adset`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY}`,
-          },
-          body: JSON.stringify({ vendorId, metaAdSetId, status }),
-        }
-      )
+      const { integration } = get()
+      if (!integration?.access_token) {
+        throw new Error('Not connected to Meta')
+      }
 
-      if (!response.ok) {
-        throw new Error('Failed to update ad set status')
+      const params = new URLSearchParams({
+        status,
+        access_token: integration.access_token,
+      })
+
+      const response = await fetch(`${META_GRAPH_API}/${metaAdSetId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: params,
+      })
+
+      const data = await response.json()
+      if (data.error) {
+        throw new Error(data.error.message || 'Failed to update ad set status')
       }
 
       set(state => ({
@@ -986,6 +1177,11 @@ export const useMetaStore = create<MetaStore>((set, get) => ({
           a.meta_ad_set_id === metaAdSetId ? { ...a, status } : a
         ),
       }))
+
+      await supabase
+        .from('meta_ad_sets')
+        .update({ status, updated_at: new Date().toISOString() })
+        .eq('meta_ad_set_id', metaAdSetId)
 
       return true
     } catch (err) {
@@ -1021,57 +1217,130 @@ export const useMetaStore = create<MetaStore>((set, get) => ({
 
   createAd: async (vendorId: string, ad: CreateAdParams) => {
     try {
-      const response = await fetch(
-        `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/meta-create-ad`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY}`,
-          },
-          body: JSON.stringify({ vendorId, ...ad }),
-        }
-      )
-
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || 'Failed to create ad')
+      const { integration } = get()
+      if (!integration?.access_token || !integration?.ad_account_id) {
+        throw new Error('Not connected to Meta')
       }
+
+      let adAccountId = integration.ad_account_id
+      if (!adAccountId.startsWith('act_')) adAccountId = `act_${adAccountId}`
+
+      // First, create the ad creative
+      const creativeData: Record<string, any> = {
+        name: `${ad.name} Creative`,
+        object_story_spec: {
+          page_id: integration.page_id,
+          link_data: {
+            link: ad.websiteUrl || 'https://example.com',
+            message: ad.primaryText || '',
+            name: ad.headline || ad.name,
+            call_to_action: { type: ad.callToAction || 'LEARN_MORE' },
+          },
+        },
+      }
+
+      if (ad.imageHash) {
+        creativeData.object_story_spec.link_data.image_hash = ad.imageHash
+      }
+
+      const creativeParams = new URLSearchParams({
+        ...Object.fromEntries(
+          Object.entries(creativeData).map(([k, v]) => [k, typeof v === 'object' ? JSON.stringify(v) : v])
+        ),
+        access_token: integration.access_token,
+      })
+
+      const creativeResponse = await fetch(`${META_GRAPH_API}/${adAccountId}/adcreatives`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: creativeParams,
+      })
+
+      const creativeResult = await creativeResponse.json()
+      if (creativeResult.error) {
+        throw new Error(creativeResult.error.error_user_msg || creativeResult.error.message || 'Failed to create creative')
+      }
+
+      // Now create the ad
+      const adParams = new URLSearchParams({
+        name: ad.name,
+        adset_id: ad.adSetId,
+        creative: JSON.stringify({ creative_id: creativeResult.id }),
+        status: ad.status || 'PAUSED',
+        access_token: integration.access_token,
+      })
+
+      const response = await fetch(`${META_GRAPH_API}/${adAccountId}/ads`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: adParams,
+      })
 
       const data = await response.json()
-      const newAd = data.ad
-
-      if (newAd) {
-        set(state => ({
-          ads: [newAd, ...state.ads],
-        }))
+      if (data.error) {
+        throw new Error(data.error.error_user_msg || data.error.message || 'Failed to create ad')
       }
 
-      logger.info('[MetaStore] Ad created:', newAd?.name)
-      return newAd
+      // Save to database
+      const newAd = {
+        vendor_id: vendorId,
+        meta_ad_id: data.id,
+        meta_ad_set_id: ad.adSetId,
+        name: ad.name,
+        status: ad.status || 'PAUSED',
+        effective_status: ad.status || 'PAUSED',
+        creative_id: creativeResult.id,
+        headline: ad.headline,
+        primary_text: ad.primaryText,
+        website_url: ad.websiteUrl,
+        call_to_action: ad.callToAction,
+        image_hash: ad.imageHash,
+        impressions: 0,
+        reach: 0,
+        clicks: 0,
+        spend: 0,
+        last_synced_at: new Date().toISOString(),
+        created_at: new Date().toISOString(),
+      }
+
+      const { data: savedAd } = await supabase
+        .from('meta_ads')
+        .insert(newAd)
+        .select()
+        .single()
+
+      if (savedAd) {
+        set(state => ({ ads: [savedAd, ...state.ads] }))
+      }
+
+      logger.info('[MetaStore] Ad created:', data.id)
+      return savedAd || newAd
     } catch (err: any) {
       logger.error('[MetaStore] Create ad error:', err)
       throw err
     }
   },
 
-  updateAd: async (vendorId: string, metaAdId: string, updates: UpdateAdParams) => {
+  updateAd: async (_vendorId: string, metaAdId: string, updates: UpdateAdParams) => {
     try {
-      const response = await fetch(
-        `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/meta-update-ad`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY}`,
-          },
-          body: JSON.stringify({ vendorId, metaAdId, ...updates }),
-        }
-      )
+      const { integration } = get()
+      if (!integration?.access_token) {
+        throw new Error('Not connected to Meta')
+      }
 
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || 'Failed to update ad')
+      const params = new URLSearchParams({ access_token: integration.access_token })
+      if (updates.name) params.append('name', updates.name)
+      if (updates.status) params.append('status', updates.status)
+
+      const response = await fetch(`${META_GRAPH_API}/${metaAdId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: params,
+      })
+
+      const data = await response.json()
+      if (data.error) {
+        throw new Error(data.error.message || 'Failed to update ad')
       }
 
       set(state => ({
@@ -1079,6 +1348,11 @@ export const useMetaStore = create<MetaStore>((set, get) => ({
           a.meta_ad_id === metaAdId ? { ...a, ...updates } : a
         ),
       }))
+
+      await supabase
+        .from('meta_ads')
+        .update({ ...updates, updated_at: new Date().toISOString() })
+        .eq('meta_ad_id', metaAdId)
 
       logger.info('[MetaStore] Ad updated:', metaAdId)
       return true
@@ -1088,22 +1362,27 @@ export const useMetaStore = create<MetaStore>((set, get) => ({
     }
   },
 
-  updateAdStatus: async (vendorId: string, metaAdId: string, status: 'ACTIVE' | 'PAUSED') => {
+  updateAdStatus: async (_vendorId: string, metaAdId: string, status: 'ACTIVE' | 'PAUSED') => {
     try {
-      const response = await fetch(
-        `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/meta-update-ad`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY}`,
-          },
-          body: JSON.stringify({ vendorId, metaAdId, status }),
-        }
-      )
+      const { integration } = get()
+      if (!integration?.access_token) {
+        throw new Error('Not connected to Meta')
+      }
 
-      if (!response.ok) {
-        throw new Error('Failed to update ad status')
+      const params = new URLSearchParams({
+        status,
+        access_token: integration.access_token,
+      })
+
+      const response = await fetch(`${META_GRAPH_API}/${metaAdId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: params,
+      })
+
+      const data = await response.json()
+      if (data.error) {
+        throw new Error(data.error.message || 'Failed to update ad status')
       }
 
       set(state => ({
@@ -1111,6 +1390,11 @@ export const useMetaStore = create<MetaStore>((set, get) => ({
           a.meta_ad_id === metaAdId ? { ...a, status } : a
         ),
       }))
+
+      await supabase
+        .from('meta_ads')
+        .update({ status, updated_at: new Date().toISOString() })
+        .eq('meta_ad_id', metaAdId)
 
       return true
     } catch (err) {
@@ -1120,94 +1404,171 @@ export const useMetaStore = create<MetaStore>((set, get) => ({
   },
 
   // Reach Estimation - Live audience size
-  getReachEstimate: async (vendorId: string, targeting: any, optimization_goal?: string) => {
+  getReachEstimate: async (_vendorId: string, targeting: any, optimization_goal: string = 'LINK_CLICKS') => {
     try {
-      logger.info('[MetaStore] Fetching reach estimate...', { vendorId, targeting })
-      const response = await fetch(
-        `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/meta-reach-estimate`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY}`,
-          },
-          body: JSON.stringify({ vendorId, targeting, optimization_goal }),
-        }
-      )
-
-      if (!response.ok) {
-        logger.error('[MetaStore] Reach estimate HTTP error:', response.status)
+      // Get access token and ad account from store for direct Meta API call
+      const { integration } = get()
+      if (!integration?.access_token || !integration?.ad_account_id) {
+        logger.warn('[MetaStore] No access token or ad account for reach estimate')
         return null
       }
 
-      const data = await response.json()
-      logger.info('[MetaStore] Reach estimate response:', data)
-
-      if (data.isFallback) {
-        logger.warn('[MetaStore] Using fallback estimate. API error:', data.apiError || data.error)
+      let adAccountId = integration.ad_account_id
+      if (!adAccountId.startsWith('act_')) {
+        adAccountId = `act_${adAccountId}`
       }
 
-      return data.estimate
+      // Build targeting spec
+      const targetingSpec: Record<string, any> = {}
+      if (targeting?.geo_locations) {
+        targetingSpec.geo_locations = targeting.geo_locations
+      } else {
+        targetingSpec.geo_locations = { countries: ['US'] }
+      }
+      if (targeting?.age_min) targetingSpec.age_min = targeting.age_min
+      if (targeting?.age_max) targetingSpec.age_max = targeting.age_max
+      if (targeting?.genders?.length > 0) targetingSpec.genders = targeting.genders
+      if (targeting?.interests?.length > 0) {
+        targetingSpec.flexible_spec = [{ interests: targeting.interests }]
+      }
+      if (targeting?.publisher_platforms?.length > 0) {
+        targetingSpec.publisher_platforms = targeting.publisher_platforms
+      }
+
+      // Call Meta directly - delivery_estimate endpoint
+      const params = new URLSearchParams({
+        targeting_spec: JSON.stringify(targetingSpec),
+        optimization_goal,
+        access_token: integration.access_token,
+      })
+
+      const response = await fetch(`${META_GRAPH_API}/${adAccountId}/delivery_estimate?${params}`)
+      const data = await response.json()
+
+      if (data.error) {
+        logger.warn('[MetaStore] Meta delivery_estimate error:', data.error.message)
+        // Return fallback estimate
+        return calculateFallbackEstimate(targeting)
+      }
+
+      if (data.data && data.data.length > 0) {
+        const estimate = data.data[0]
+        return {
+          users_lower_bound: estimate.estimate_dau || estimate.estimate_mau_lower_bound || 100000,
+          users_upper_bound: estimate.estimate_mau || estimate.estimate_mau_upper_bound || 1000000,
+        }
+      }
+
+      return calculateFallbackEstimate(targeting)
     } catch (err) {
       logger.error('[MetaStore] Reach estimate error:', err)
-      return null
+      return calculateFallbackEstimate(targeting)
     }
   },
 
   // Creative & Targeting
-  uploadImage: async (vendorId: string, imageData: string, filename?: string) => {
+  uploadImage: async (_vendorId: string, imageData: string, _filename?: string) => {
     try {
-      const response = await fetch(
-        `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/meta-upload-image`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY}`,
-          },
-          body: JSON.stringify({ vendorId, imageData, filename }),
-        }
-      )
-
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || 'Failed to upload image')
+      const { integration } = get()
+      if (!integration?.access_token || !integration?.ad_account_id) {
+        throw new Error('Not connected to Meta')
       }
 
+      let adAccountId = integration.ad_account_id
+      if (!adAccountId.startsWith('act_')) adAccountId = `act_${adAccountId}`
+
+      // Upload image to Meta directly
+      const formData = new FormData()
+      formData.append('bytes', imageData)
+      formData.append('access_token', integration.access_token)
+
+      const response = await fetch(`${META_GRAPH_API}/${adAccountId}/adimages`, {
+        method: 'POST',
+        body: formData,
+      })
+
       const data = await response.json()
-      logger.info('[MetaStore] Image uploaded:', data.imageHash)
-      return { imageHash: data.imageHash, url: data.url }
+      if (data.error) {
+        throw new Error(data.error.message || 'Failed to upload image')
+      }
+
+      // Get the image hash from response
+      const images = data.images || {}
+      const imageHash = Object.keys(images)[0] ? images[Object.keys(images)[0]].hash : null
+
+      if (!imageHash) {
+        throw new Error('No image hash returned')
+      }
+
+      logger.info('[MetaStore] Image uploaded:', imageHash)
+      return { imageHash, url: images[Object.keys(images)[0]]?.url }
     } catch (err: any) {
       logger.error('[MetaStore] Upload image error:', err)
       return null
     }
   },
 
-  searchTargeting: async (vendorId: string, type: string, query: string) => {
-    try {
-      const response = await fetch(
-        `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/meta-get-targeting`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY}`,
-          },
-          body: JSON.stringify({ vendorId, type, query }),
-        }
-      )
+  searchTargeting: (() => {
+    // Simple in-memory cache for fast repeated searches
+    const cache = new Map<string, { data: any[]; timestamp: number }>()
+    const CACHE_TTL = 5 * 60 * 1000 // 5 minutes
 
-      if (!response.ok) {
-        throw new Error('Failed to search targeting options')
+    return async (_vendorId: string, type: string, query: string) => {
+      const cacheKey = `${type}:${query.toLowerCase()}`
+      const cached = cache.get(cacheKey)
+
+      // Return cached result if fresh
+      if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+        return cached.data
       }
 
-      const data = await response.json()
-      return data.data || []
-    } catch (err) {
-      logger.error('[MetaStore] Search targeting error:', err)
-      return []
+      try {
+        // Get access token from store for direct Meta API call (FAST!)
+        const { integration } = get()
+        if (!integration?.access_token) {
+          logger.warn('[MetaStore] No access token for direct API call')
+          return []
+        }
+
+        // Map type to Meta's search type
+        let searchType = 'adinterest'
+        if (type === 'behaviors') searchType = 'adbehavior'
+        if (type === 'demographics') searchType = 'adTargetingCategory'
+
+        // Call Meta directly - no edge function overhead!
+        const params = new URLSearchParams({
+          type: searchType,
+          q: query,
+          limit: '25',
+          access_token: integration.access_token,
+        })
+
+        const response = await fetch(`${META_GRAPH_API}/search?${params}`)
+        const data = await response.json()
+
+        if (data.error) {
+          logger.error('[MetaStore] Meta API error:', data.error)
+          return []
+        }
+
+        const results = data.data || []
+
+        // Cache the results
+        cache.set(cacheKey, { data: results, timestamp: Date.now() })
+
+        // Clean old cache entries (keep last 50)
+        if (cache.size > 50) {
+          const oldestKey = cache.keys().next().value
+          if (oldestKey) cache.delete(oldestKey)
+        }
+
+        return results
+      } catch (err) {
+        logger.error('[MetaStore] Search targeting error:', err)
+        return []
+      }
     }
-  },
+  })(),
 
   // ============================================================================
   // AUDIENCES
@@ -1234,28 +1595,62 @@ export const useMetaStore = create<MetaStore>((set, get) => ({
 
   syncAudienceFromSegment: async (vendorId: string, segmentId: string, name: string) => {
     try {
-      const response = await fetch(
-        `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/meta-sync-audience`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY}`,
-          },
-          body: JSON.stringify({ vendorId, segmentId, name }),
-        }
-      )
-
-      if (!response.ok) {
-        throw new Error('Failed to sync audience')
+      const { integration } = get()
+      if (!integration?.access_token || !integration?.ad_account_id) {
+        throw new Error('Not connected to Meta')
       }
 
-      const audience = await response.json()
+      let adAccountId = integration.ad_account_id
+      if (!adAccountId.startsWith('act_')) adAccountId = `act_${adAccountId}`
+
+      // Get customers from segment
+      const { data: customers, error } = await supabase
+        .from('customer_segments')
+        .select('customers(email, phone)')
+        .eq('segment_id', segmentId)
+        .limit(10000)
+
+      if (error) throw error
+
+      // Create custom audience
+      const params = new URLSearchParams({
+        name,
+        subtype: 'CUSTOM',
+        description: `Synced from segment: ${segmentId}`,
+        customer_file_source: 'USER_PROVIDED_ONLY',
+        access_token: integration.access_token,
+      })
+
+      const response = await fetch(`${META_GRAPH_API}/${adAccountId}/customaudiences`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: params,
+      })
+
+      const data = await response.json()
+      if (data.error) {
+        throw new Error(data.error.message || 'Failed to create audience')
+      }
+
+      // Save to database
+      const audience = {
+        vendor_id: vendorId,
+        meta_audience_id: data.id,
+        name,
+        segment_id: segmentId,
+        type: 'custom',
+        size: customers?.length || 0,
+        status: 'ready',
+        created_at: new Date().toISOString(),
+      }
+
+      await supabase.from('meta_audiences').upsert(audience, { onConflict: 'meta_audience_id' })
 
       set(state => ({
-        audiences: [audience, ...state.audiences.filter(a => a.id !== audience.id)],
+        audiences: [audience as any, ...state.audiences.filter(a => a.meta_audience_id !== data.id)],
       }))
 
+      logger.info('[MetaStore] Audience synced:', data.id)
       return audience
     } catch (err) {
       logger.error('[MetaStore] Sync audience error:', err)
@@ -1265,28 +1660,56 @@ export const useMetaStore = create<MetaStore>((set, get) => ({
 
   createLookalikeAudience: async (vendorId: string, sourceAudienceId: string, country: string, ratio: number) => {
     try {
-      const response = await fetch(
-        `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/meta-create-lookalike`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY}`,
-          },
-          body: JSON.stringify({ vendorId, sourceAudienceId, country, ratio }),
-        }
-      )
-
-      if (!response.ok) {
-        throw new Error('Failed to create lookalike audience')
+      const { integration } = get()
+      if (!integration?.access_token || !integration?.ad_account_id) {
+        throw new Error('Not connected to Meta')
       }
 
-      const audience = await response.json()
+      let adAccountId = integration.ad_account_id
+      if (!adAccountId.startsWith('act_')) adAccountId = `act_${adAccountId}`
+
+      const params = new URLSearchParams({
+        name: `Lookalike - ${ratio}% - ${country}`,
+        subtype: 'LOOKALIKE',
+        origin_audience_id: sourceAudienceId,
+        lookalike_spec: JSON.stringify({
+          type: 'similarity',
+          country,
+          ratio: ratio / 100,
+        }),
+        access_token: integration.access_token,
+      })
+
+      const response = await fetch(`${META_GRAPH_API}/${adAccountId}/customaudiences`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: params,
+      })
+
+      const data = await response.json()
+      if (data.error) {
+        throw new Error(data.error.message || 'Failed to create lookalike')
+      }
+
+      const audience = {
+        vendor_id: vendorId,
+        meta_audience_id: data.id,
+        name: `Lookalike - ${ratio}% - ${country}`,
+        type: 'lookalike',
+        source_audience_id: sourceAudienceId,
+        country,
+        ratio,
+        status: 'ready',
+        created_at: new Date().toISOString(),
+      }
+
+      await supabase.from('meta_audiences').insert(audience)
 
       set(state => ({
-        audiences: [audience, ...state.audiences],
+        audiences: [audience as any, ...state.audiences],
       }))
 
+      logger.info('[MetaStore] Lookalike created:', data.id)
       return audience
     } catch (err) {
       logger.error('[MetaStore] Create lookalike error:', err)
@@ -1320,21 +1743,58 @@ export const useMetaStore = create<MetaStore>((set, get) => ({
 
   sendConversionEvent: async (vendorId: string, event: SendConversionParams) => {
     try {
-      const response = await fetch(
-        `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/meta-send-conversion`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY}`,
-          },
-          body: JSON.stringify({ vendorId, ...event }),
-        }
-      )
-
-      if (!response.ok) {
-        throw new Error('Failed to send conversion event')
+      const { integration } = get()
+      if (!integration?.access_token || !integration?.pixel_id) {
+        throw new Error('Not connected to Meta or no Pixel configured')
       }
+
+      // Send via Conversions API
+      const eventData = {
+        event_name: event.event_name,
+        event_time: Math.floor(Date.now() / 1000),
+        action_source: 'website',
+        user_data: {
+          em: event.email ? [event.email] : undefined,
+          ph: event.phone ? [event.phone] : undefined,
+          client_ip_address: event.client_ip,
+          client_user_agent: event.user_agent,
+          external_id: event.external_id ? [event.external_id] : undefined,
+        },
+        custom_data: {
+          currency: event.currency || 'USD',
+          value: event.value,
+          content_ids: event.content_ids,
+          content_type: 'product',
+        },
+        event_source_url: event.event_source_url,
+      }
+
+      const params = new URLSearchParams({
+        data: JSON.stringify([eventData]),
+        access_token: integration.access_token,
+      })
+
+      const response = await fetch(`${META_GRAPH_API}/${integration.pixel_id}/events`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: params,
+      })
+
+      const data = await response.json()
+      if (data.error) {
+        throw new Error(data.error.message || 'Failed to send conversion')
+      }
+
+      // Log to database
+      await supabase.from('meta_conversion_events').insert({
+        vendor_id: vendorId,
+        event_name: event.event_name,
+        event_time: new Date().toISOString(),
+        value: event.value,
+        currency: event.currency || 'USD',
+        status: 'sent',
+        events_received: data.events_received,
+      })
 
       logger.info('[MetaStore] Conversion event sent:', event.event_name)
       return true
@@ -1348,56 +1808,95 @@ export const useMetaStore = create<MetaStore>((set, get) => ({
   // INSIGHTS
   // ============================================================================
 
-  loadAccountInsights: async (vendorId: string, dateStart: string, dateStop: string) => {
+  loadAccountInsights: async (_vendorId: string, dateStart: string, dateStop: string) => {
     set({ isLoadingInsights: true })
 
     try {
-      const response = await fetch(
-        `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/meta-get-insights`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY}`,
-          },
-          body: JSON.stringify({ vendorId, dateStart, dateStop }),
-        }
-      )
-
-      if (!response.ok) {
-        throw new Error('Failed to load insights')
+      const { integration } = get()
+      if (!integration?.access_token || !integration?.ad_account_id) {
+        throw new Error('Not connected to Meta')
       }
 
-      const insights = await response.json()
-      set({ accountInsights: insights, isLoadingInsights: false })
+      let adAccountId = integration.ad_account_id
+      if (!adAccountId.startsWith('act_')) adAccountId = `act_${adAccountId}`
+
+      const fields = 'impressions,reach,clicks,spend,cpc,cpm,ctr'
+      const params = new URLSearchParams({
+        fields,
+        time_range: JSON.stringify({ since: dateStart, until: dateStop }),
+        access_token: integration.access_token,
+      })
+
+      const response = await fetch(`${META_GRAPH_API}/${adAccountId}/insights?${params}`)
+      const data = await response.json()
+
+      if (data.error) {
+        throw new Error(data.error.message || 'Failed to load insights')
+      }
+
+      set({ accountInsights: data.data?.[0] || {}, isLoadingInsights: false })
     } catch (err) {
       logger.error('[MetaStore] Load insights error:', err)
       set({ isLoadingInsights: false })
     }
   },
 
-  loadFullInsights: async (vendorId: string, dateStart?: string, dateEnd?: string, breakdown: 'day' | 'week' | 'month' = 'day') => {
+  loadFullInsights: async (_vendorId: string, dateStart?: string, dateEnd?: string, breakdown: 'day' | 'week' | 'month' = 'day') => {
     set({ isLoadingInsights: true })
 
     try {
-      const response = await fetch(
-        `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/meta-get-insights`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY}`,
-          },
-          body: JSON.stringify({ vendorId, dateStart, dateEnd, breakdown }),
-        }
-      )
-
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || 'Failed to load insights')
+      const { integration } = get()
+      if (!integration?.access_token || !integration?.ad_account_id) {
+        throw new Error('Not connected to Meta')
       }
 
-      const insights: MetaFullInsights = await response.json()
+      let adAccountId = integration.ad_account_id
+      if (!adAccountId.startsWith('act_')) adAccountId = `act_${adAccountId}`
+
+      // Default date range: last 30 days
+      const end = dateEnd || new Date().toISOString().split('T')[0]
+      const start = dateStart || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+
+      // Fetch account insights with breakdown
+      const fields = 'impressions,reach,clicks,spend,cpc,cpm,ctr,actions,conversions'
+      const params = new URLSearchParams({
+        fields,
+        time_range: JSON.stringify({ since: start, until: end }),
+        time_increment: breakdown === 'day' ? '1' : breakdown === 'week' ? '7' : '28',
+        access_token: integration.access_token,
+      })
+
+      const [summaryRes, dailyRes, campaignsRes] = await Promise.all([
+        fetch(`${META_GRAPH_API}/${adAccountId}/insights?${new URLSearchParams({
+          fields,
+          time_range: JSON.stringify({ since: start, until: end }),
+          access_token: integration.access_token,
+        })}`),
+        fetch(`${META_GRAPH_API}/${adAccountId}/insights?${params}`),
+        fetch(`${META_GRAPH_API}/${adAccountId}/campaigns?${new URLSearchParams({
+          fields: 'id,name,status,insights.time_range({"since":"' + start + '","until":"' + end + '"}){impressions,reach,clicks,spend}',
+          limit: '50',
+          access_token: integration.access_token,
+        })}`),
+      ])
+
+      const [summaryData, dailyData, campaignsData] = await Promise.all([
+        summaryRes.json(),
+        dailyRes.json(),
+        campaignsRes.json(),
+      ])
+
+      const insights: MetaFullInsights = {
+        summary: summaryData.data?.[0] || {},
+        daily: dailyData.data || [],
+        campaigns: (campaignsData.data || []).map((c: any) => ({
+          id: c.id,
+          name: c.name,
+          status: c.status,
+          ...c.insights?.data?.[0],
+        })),
+      }
+
       set({ fullInsights: insights, isLoadingInsights: false })
       logger.info('[MetaStore] Full insights loaded:', {
         hasSummary: !!insights.summary,
@@ -1444,27 +1943,81 @@ export const useMetaStore = create<MetaStore>((set, get) => ({
     set({ isSyncingPosts: true })
 
     try {
-      const response = await fetch(
-        `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/meta-fetch-posts`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY}`,
-          },
-          body: JSON.stringify({ vendorId, platform }),
-        }
-      )
-
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || 'Failed to sync posts')
+      const { integration } = get()
+      if (!integration?.access_token) {
+        throw new Error('Not connected to Meta')
       }
 
-      const result = await response.json()
-      logger.info('[MetaStore] Posts synced:', result)
+      const posts: any[] = []
 
-      // Reload posts after sync
+      // Fetch Facebook posts
+      if ((platform === 'all' || platform === 'facebook') && integration.page_id) {
+        const fbParams = new URLSearchParams({
+          fields: 'id,message,created_time,permalink_url,full_picture,shares,reactions.summary(total_count),comments.summary(total_count)',
+          limit: '50',
+          access_token: integration.access_token,
+        })
+
+        const fbResponse = await fetch(`${META_GRAPH_API}/${integration.page_id}/posts?${fbParams}`)
+        const fbData = await fbResponse.json()
+
+        if (fbData.data) {
+          for (const post of fbData.data) {
+            posts.push({
+              vendor_id: vendorId,
+              post_id: post.id,
+              platform: 'facebook',
+              message: post.message,
+              created_time: post.created_time,
+              permalink: post.permalink_url,
+              image_url: post.full_picture,
+              shares: post.shares?.count || 0,
+              reactions: post.reactions?.summary?.total_count || 0,
+              comments: post.comments?.summary?.total_count || 0,
+            })
+          }
+        }
+      }
+
+      // Fetch Instagram posts
+      if ((platform === 'all' || platform === 'instagram') && integration.instagram_business_id) {
+        const igParams = new URLSearchParams({
+          fields: 'id,caption,timestamp,permalink,media_url,media_type,like_count,comments_count',
+          limit: '50',
+          access_token: integration.access_token,
+        })
+
+        const igResponse = await fetch(`${META_GRAPH_API}/${integration.instagram_business_id}/media?${igParams}`)
+        const igData = await igResponse.json()
+
+        if (igData.data) {
+          for (const post of igData.data) {
+            posts.push({
+              vendor_id: vendorId,
+              post_id: post.id,
+              platform: 'instagram',
+              message: post.caption,
+              created_time: post.timestamp,
+              permalink: post.permalink,
+              image_url: post.media_url,
+              media_type: post.media_type,
+              reactions: post.like_count || 0,
+              comments: post.comments_count || 0,
+            })
+          }
+        }
+      }
+
+      // Upsert posts to database
+      if (posts.length > 0) {
+        for (const post of posts) {
+          await supabase.from('meta_posts').upsert(post, { onConflict: 'post_id' })
+        }
+      }
+
+      logger.info('[MetaStore] Posts synced:', { count: posts.length })
+
+      // Reload posts from DB
       await get().loadPosts(vendorId, platform)
 
       set({ isSyncingPosts: false })

@@ -97,9 +97,20 @@ export function InStoreSalesView({ isLoading = false }: InStoreSalesViewProps) {
     return filteredOrders.filter((order) => order.order_type === 'walk_in')
   }, [filteredOrders])
 
-  // Group walk-in orders by date
+  // Separate completed vs cancelled/failed orders
+  const { completedOrders, cancelledOrders } = useMemo(() => {
+    const completed = walkInOrders.filter(
+      (o) => o.status === 'completed' && o.payment_status === 'paid'
+    )
+    const cancelled = walkInOrders.filter(
+      (o) => o.status === 'cancelled' || o.payment_status === 'failed'
+    )
+    return { completedOrders: completed, cancelledOrders: cancelled }
+  }, [walkInOrders])
+
+  // Group completed orders by date
   const walkInGrouped = useMemo(() => {
-    const groups: Array<{ title: string; data: Order[] }> = []
+    const groups: Array<{ title: string; data: Order[]; isCancelled?: boolean }> = []
 
     const today = new Date()
     today.setHours(0, 0, 0, 0)
@@ -107,8 +118,8 @@ export function InStoreSalesView({ isLoading = false }: InStoreSalesViewProps) {
     const yesterday = new Date(today)
     yesterday.setDate(yesterday.getDate() - 1)
 
-    // Today's sales
-    const todaySales = walkInOrders.filter((o) => {
+    // Today's sales (completed only)
+    const todaySales = completedOrders.filter((o) => {
       const orderDate = new Date(o.created_at)
       return orderDate >= today
     })
@@ -116,8 +127,8 @@ export function InStoreSalesView({ isLoading = false }: InStoreSalesViewProps) {
       groups.push({ title: 'Today', data: todaySales })
     }
 
-    // Yesterday's sales
-    const yesterdaySales = walkInOrders.filter((o) => {
+    // Yesterday's sales (completed only)
+    const yesterdaySales = completedOrders.filter((o) => {
       const orderDate = new Date(o.created_at)
       return orderDate >= yesterday && orderDate < today
     })
@@ -125,8 +136,8 @@ export function InStoreSalesView({ isLoading = false }: InStoreSalesViewProps) {
       groups.push({ title: 'Yesterday', data: yesterdaySales })
     }
 
-    // Older sales
-    const older = walkInOrders.filter((o) => {
+    // Older sales (completed only)
+    const older = completedOrders.filter((o) => {
       const orderDate = new Date(o.created_at)
       return orderDate < yesterday
     })
@@ -134,8 +145,13 @@ export function InStoreSalesView({ isLoading = false }: InStoreSalesViewProps) {
       groups.push({ title: 'Older', data: older })
     }
 
+    // Cancelled/Failed orders section
+    if (cancelledOrders.length > 0) {
+      groups.push({ title: 'Cancelled / Failed', data: cancelledOrders, isCancelled: true })
+    }
+
     return groups
-  }, [walkInOrders])
+  }, [completedOrders, cancelledOrders])
 
   // Flatten for FlatList
   const flatListData = useMemo(() => {
@@ -143,26 +159,38 @@ export function InStoreSalesView({ isLoading = false }: InStoreSalesViewProps) {
       type: 'section' as const,
       group,
       isFirst: index === 0,
+      isCancelled: group.isCancelled || false,
     }))
   }, [walkInGrouped])
 
-  // Calculate today's total
+  // Calculate today's total (only completed/paid orders)
   const todayTotal = useMemo(() => {
     const today = new Date()
     today.setHours(0, 0, 0, 0)
 
     return walkInOrders
       .filter((o) => new Date(o.created_at) >= today)
+      .filter((o) => o.status === 'completed' && o.payment_status === 'paid')
       .reduce((sum, o) => sum + o.total_amount, 0)
   }, [walkInOrders])
 
   const renderItem = ({ item }: { item: typeof flatListData[0] }) => {
-    const { group, isFirst } = item
+    const { group, isFirst, isCancelled } = item
     return (
       <>
-        <SectionHeader title={group.title} isFirst={isFirst} />
+        {isCancelled ? (
+          <View style={styles.cancelledHeader}>
+            <Text style={styles.cancelledHeaderText}>{group.title}</Text>
+            <Text style={styles.cancelledCount}>{group.data.length}</Text>
+          </View>
+        ) : (
+          <SectionHeader title={group.title} isFirst={isFirst} />
+        )}
         <View style={ordersStyles.cardWrapper}>
-          <View style={ordersStyles.ordersCardGlass}>
+          <View style={[
+            ordersStyles.ordersCardGlass,
+            isCancelled && styles.cancelledCard,
+          ]}>
             {group.data.map((order, index) => (
               <OrderItem
                 key={order.id}
@@ -271,5 +299,31 @@ const styles = StyleSheet.create({
   dateFilterTextActive: {
     color: '#fff',
     fontWeight: '600',
+  },
+  // Cancelled section styles
+  cancelledHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: layout.contentHorizontal,
+    paddingTop: spacing.lg,
+    paddingBottom: spacing.sm,
+  },
+  cancelledHeaderText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#ff453a',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+  },
+  cancelledCount: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: 'rgba(255,69,58,0.6)',
+    letterSpacing: -0.2,
+  },
+  cancelledCard: {
+    borderWidth: 1,
+    borderColor: 'rgba(255,69,58,0.2)',
   },
 })

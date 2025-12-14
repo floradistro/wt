@@ -21,6 +21,8 @@ import {
   Pressable,
   Alert,
   Switch,
+  Linking,
+  ActivityIndicator,
 } from 'react-native'
 import { useState, useEffect } from 'react'
 import * as Haptics from 'expo-haptics'
@@ -33,6 +35,8 @@ import { useAppAuth } from '@/contexts/AppAuthContext'
 import { useLocationFilter } from '@/stores/location-filter.store'
 import { ordersService, type OrderLocation } from '@/services/orders.service'
 import { logger } from '@/utils/logger'
+
+const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL
 
 // Carrier tracking URL templates
 const CARRIER_URLS: Record<string, string> = {
@@ -87,6 +91,11 @@ export function ShipOrderModal({
   const [loadingLocations, setLoadingLocations] = useState(false)
   const [showLocationPicker, setShowLocationPicker] = useState(false)
 
+  // EasyPost label state
+  const [buyingLabel, setBuyingLabel] = useState(false)
+  const [labelUrl, setLabelUrl] = useState<string | null>(null)
+  const [labelCost, setLabelCost] = useState<number | null>(null)
+
   // Load order locations when modal opens
   useEffect(() => {
     if (!visible || !orderId) {
@@ -94,6 +103,8 @@ export function ShipOrderModal({
       setSelectedLocationId(null)
       setTrackingNumber('')  // Reset form to prevent cross-order contamination
       setShippingCost('')    // Reset form to prevent cross-order contamination
+      setLabelUrl(null)      // Reset label state
+      setLabelCost(null)
       return
     }
 
@@ -147,6 +158,81 @@ export function ShipOrderModal({
   const isMultiLocation = orderLocations.length > 1
   const unshippedLocations = orderLocations.filter((l) => !l.isShipped)
   const selectedLocation = orderLocations.find((l) => l.locationId === selectedLocationId)
+
+  // Buy USPS label via EasyPost
+  const handleBuyLabel = async () => {
+    if (!orderId || !selectedLocationId) {
+      Alert.alert('Select Location', 'Please select a shipping location first')
+      return
+    }
+
+    try {
+      setBuyingLabel(true)
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+
+      logger.info('[ShipOrderModal] Buying label via EasyPost...', { orderId, locationId: selectedLocationId })
+
+      // Get auth token
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session?.access_token) {
+        throw new Error('Not authenticated')
+      }
+
+      const response = await fetch(`${SUPABASE_URL}/functions/v1/easypost-create-label`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          orderId,
+          locationId: selectedLocationId,
+        }),
+      })
+
+      const result = await response.json()
+
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || 'Failed to create label')
+      }
+
+      logger.info('[ShipOrderModal] Label created!', {
+        trackingNumber: result.trackingNumber,
+        cost: result.cost,
+      })
+
+      // Update state with label info
+      setTrackingNumber(result.trackingNumber)
+      setShippingCost(result.cost.toFixed(2))
+      setLabelUrl(result.labelUrl)
+      setLabelCost(result.cost)
+      setCarrier('USPS')
+
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+
+      // Open label URL for printing
+      if (result.labelUrl) {
+        Alert.alert(
+          'Label Created!',
+          `Tracking: ${result.trackingNumber}\nCost: $${result.cost.toFixed(2)}\n\nOpen label to print?`,
+          [
+            { text: 'Later', style: 'cancel' },
+            {
+              text: 'Print Label',
+              onPress: () => Linking.openURL(result.labelUrl),
+            },
+          ]
+        )
+      }
+
+    } catch (error: any) {
+      logger.error('[ShipOrderModal] Failed to buy label:', error)
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
+      Alert.alert('Label Error', error.message || 'Failed to create shipping label')
+    } finally {
+      setBuyingLabel(false)
+    }
+  }
 
   const handleShip = async () => {
     if (!orderId) return
@@ -407,6 +493,66 @@ export function ShipOrderModal({
           )}
         </View>
       )}
+
+      {/* Buy USPS Label Button */}
+      <View style={modalStyles.section}>
+        <Text style={modalStyles.sectionLabel}>SHIPPING LABEL</Text>
+        <Pressable
+          style={[
+            modalStyles.card,
+            {
+              backgroundColor: labelUrl ? 'rgba(52,199,89,0.15)' : 'rgba(10,132,255,0.15)',
+              borderWidth: 1,
+              borderColor: labelUrl ? 'rgba(52,199,89,0.3)' : 'rgba(10,132,255,0.3)',
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 10,
+            },
+          ]}
+          onPress={labelUrl ? () => Linking.openURL(labelUrl) : handleBuyLabel}
+          disabled={buyingLabel || !selectedLocationId}
+        >
+          {buyingLabel ? (
+            <>
+              <ActivityIndicator size="small" color="#0a84ff" />
+              <Text style={{ color: '#0a84ff', fontSize: 16, fontWeight: '600' }}>
+                Creating Label...
+              </Text>
+            </>
+          ) : labelUrl ? (
+            <>
+              <Ionicons name="print-outline" size={20} color="#34c759" />
+              <Text style={{ color: '#34c759', fontSize: 16, fontWeight: '600' }}>
+                Print Label (${labelCost?.toFixed(2)})
+              </Text>
+            </>
+          ) : (
+            <>
+              <Ionicons name="mail-outline" size={20} color="#0a84ff" />
+              <Text style={{ color: '#0a84ff', fontSize: 16, fontWeight: '600' }}>
+                Buy USPS Label
+              </Text>
+            </>
+          )}
+        </Pressable>
+        {!selectedLocationId && !isMultiLocation && orderLocations.length === 0 && (
+          <Text style={{ color: 'rgba(235,235,245,0.5)', fontSize: 12, marginTop: 8, textAlign: 'center' }}>
+            Loading location...
+          </Text>
+        )}
+        {labelUrl && (
+          <Text style={{ color: 'rgba(52,199,89,0.8)', fontSize: 12, marginTop: 8, textAlign: 'center' }}>
+            Label purchased! Tracking number auto-filled below.
+          </Text>
+        )}
+      </View>
+
+      {/* Divider */}
+      <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.1)', marginVertical: 8 }} />
+      <Text style={{ color: 'rgba(235,235,245,0.4)', fontSize: 12, textAlign: 'center', marginBottom: 8 }}>
+        Or enter tracking manually
+      </Text>
 
       {/* Carrier Selection */}
       <View style={modalStyles.section}>

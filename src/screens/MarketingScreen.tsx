@@ -333,8 +333,69 @@ function MarketingScreenComponent() {
   // Reach estimation state
   const [reachEstimate, setReachEstimate] = useState<{ users_lower_bound: number; users_upper_bound: number } | null>(null)
   const [displayedReach, setDisplayedReach] = useState({ lower: 0, upper: 0 })
+  const [isLoadingReach, setIsLoadingReach] = useState(false)
   const reachDebounceRef = useRef<NodeJS.Timeout | null>(null)
   const interestSearchRef = useRef<NodeJS.Timeout | null>(null)
+
+  // Animated values for smooth reach transitions
+  const reachAnimatedLower = useRef(new Animated.Value(0)).current
+  const reachAnimatedUpper = useRef(new Animated.Value(0)).current
+  const reachPulseAnim = useRef(new Animated.Value(1)).current
+  const reachGaugeAnim = useRef(new Animated.Value(0)).current
+
+  // Animate reach numbers when they change
+  useEffect(() => {
+    if (reachEstimate) {
+      // Animate the numbers counting up/down
+      Animated.parallel([
+        Animated.timing(reachAnimatedLower, {
+          toValue: reachEstimate.users_lower_bound,
+          duration: 600,
+          useNativeDriver: false,
+        }),
+        Animated.timing(reachAnimatedUpper, {
+          toValue: reachEstimate.users_upper_bound,
+          duration: 600,
+          useNativeDriver: false,
+        }),
+        // Animate the gauge (0-1 based on audience size, max at 50M)
+        Animated.timing(reachGaugeAnim, {
+          toValue: Math.min(1, (reachEstimate.users_lower_bound + reachEstimate.users_upper_bound) / 2 / 50000000),
+          duration: 800,
+          useNativeDriver: false,
+        }),
+      ]).start()
+
+      // Update displayed values via listener
+      const listenerId = reachAnimatedLower.addListener(({ value }) => {
+        setDisplayedReach(prev => ({ ...prev, lower: Math.round(value) }))
+      })
+      const listenerIdUpper = reachAnimatedUpper.addListener(({ value }) => {
+        setDisplayedReach(prev => ({ ...prev, upper: Math.round(value) }))
+      })
+
+      return () => {
+        reachAnimatedLower.removeListener(listenerId)
+        reachAnimatedUpper.removeListener(listenerIdUpper)
+      }
+    }
+  }, [reachEstimate])
+
+  // Pulse animation for loading state
+  useEffect(() => {
+    if (isLoadingReach) {
+      const pulse = Animated.loop(
+        Animated.sequence([
+          Animated.timing(reachPulseAnim, { toValue: 0.5, duration: 600, useNativeDriver: true }),
+          Animated.timing(reachPulseAnim, { toValue: 1, duration: 600, useNativeDriver: true }),
+        ])
+      )
+      pulse.start()
+      return () => pulse.stop()
+    } else {
+      reachPulseAnim.setValue(1)
+    }
+  }, [isLoadingReach])
 
   // Nav items
   const navItems: NavItem[] = useMemo(() => {
@@ -452,7 +513,10 @@ function MarketingScreenComponent() {
       clearTimeout(reachDebounceRef.current)
     }
 
-    // Debounce the API call
+    // Show loading immediately
+    setIsLoadingReach(true)
+
+    // Debounce the API call (fast 100ms debounce)
     reachDebounceRef.current = setTimeout(async () => {
       const targeting: any = {
         geo_locations: { countries: adSetForm.countries },
@@ -463,10 +527,14 @@ function MarketingScreenComponent() {
       if (adSetForm.interests.length > 0) targeting.interests = adSetForm.interests
       if (adSetForm.publisher_platforms.length > 0) targeting.publisher_platforms = adSetForm.publisher_platforms
 
-      const estimate = await getReachEstimate(vendor.id, targeting, adSetForm.optimization_goal)
-      if (estimate) {
-        setReachEstimate(estimate)
-        setDisplayedReach({ lower: estimate.users_lower_bound, upper: estimate.users_upper_bound })
+      try {
+        const estimate = await getReachEstimate(vendor.id, targeting, adSetForm.optimization_goal)
+        if (estimate) {
+          setReachEstimate(estimate)
+          // Animation handles displayedReach update now
+        }
+      } finally {
+        setIsLoadingReach(false)
       }
     }, 100)
 
@@ -4984,19 +5052,20 @@ function MarketingScreenComponent() {
                       value={interestSearch}
                       onChangeText={(text) => {
                         setInterestSearch(text)
-                        // Debounced auto-search
+                        // Debounced auto-search (150ms for snappy feel)
                         if (interestSearchRef.current) {
                           clearTimeout(interestSearchRef.current)
                         }
                         if (text.trim().length >= 2 && vendor?.id) {
+                          setIsSearchingInterests(true) // Show loading immediately
                           interestSearchRef.current = setTimeout(async () => {
-                            setIsSearchingInterests(true)
                             const results = await searchTargeting(vendor.id, 'interests', text)
                             setInterestResults(results)
                             setIsSearchingInterests(false)
-                          }, 300)
+                          }, 150)
                         } else {
                           setInterestResults([])
+                          setIsSearchingInterests(false)
                         }
                       }}
                     />
@@ -5200,19 +5269,125 @@ function MarketingScreenComponent() {
               </View>
             </ScrollView>
 
-            {/* RIGHT PANEL - Live Reach */}
+            {/* RIGHT PANEL - Live Reach (Meta-style) */}
             <View style={{ width: 280, borderLeftWidth: 1, borderLeftColor: colors.border.light, padding: spacing.lg }}>
-              <Text style={{ fontSize: 13, fontWeight: '600', color: colors.text.tertiary, marginBottom: spacing.md }}>AUDIENCE SIZE</Text>
-
-              <View style={{ alignItems: 'center', paddingVertical: spacing.lg }}>
-                <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: 'rgba(24,119,242,0.1)', justifyContent: 'center', alignItems: 'center', marginBottom: spacing.md }}>
-                  <Ionicons name="people" size={28} color="#1877F2" />
-                </View>
-                <Text style={{ fontSize: 24, fontWeight: '700', color: colors.text.primary }}>
-                  {displayedReach.lower > 0 ? `${formatMetaNumber(displayedReach.lower)} - ${formatMetaNumber(displayedReach.upper)}` : '—'}
-                </Text>
-                <Text style={{ fontSize: 12, color: colors.text.tertiary, marginTop: 4 }}>Potential Reach</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.md }}>
+                <Text style={{ fontSize: 13, fontWeight: '600', color: colors.text.tertiary }}>AUDIENCE SIZE</Text>
+                {isLoadingReach && (
+                  <Animated.View style={{ opacity: reachPulseAnim }}>
+                    <ActivityIndicator size="small" color="#1877F2" />
+                  </Animated.View>
+                )}
               </View>
+
+              {/* Animated Gauge Meter */}
+              <Animated.View style={{ alignItems: 'center', paddingVertical: spacing.md, opacity: reachPulseAnim }}>
+                {/* Semi-circular gauge */}
+                <View style={{ width: 180, height: 100, marginBottom: spacing.sm, position: 'relative' }}>
+                  {/* Background arc */}
+                  <View style={{
+                    position: 'absolute',
+                    width: 180,
+                    height: 90,
+                    borderTopLeftRadius: 90,
+                    borderTopRightRadius: 90,
+                    borderWidth: 12,
+                    borderBottomWidth: 0,
+                    borderColor: colors.border.light,
+                  }} />
+                  {/* Colored progress arc - animated */}
+                  <Animated.View style={{
+                    position: 'absolute',
+                    width: 180,
+                    height: 90,
+                    borderTopLeftRadius: 90,
+                    borderTopRightRadius: 90,
+                    borderWidth: 12,
+                    borderBottomWidth: 0,
+                    borderColor: reachGaugeAnim.interpolate({
+                      inputRange: [0, 0.3, 0.6, 1],
+                      outputRange: ['#EF4444', '#F59E0B', '#10B981', '#10B981'],
+                    }),
+                    transform: [{
+                      rotate: reachGaugeAnim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: ['-90deg', '0deg'],
+                      }),
+                    }],
+                    transformOrigin: 'bottom center',
+                    opacity: reachGaugeAnim.interpolate({
+                      inputRange: [0, 0.01, 1],
+                      outputRange: [0, 1, 1],
+                    }),
+                  }} />
+                  {/* Center icon */}
+                  <View style={{
+                    position: 'absolute',
+                    bottom: 0,
+                    left: '50%',
+                    marginLeft: -24,
+                    width: 48,
+                    height: 48,
+                    borderRadius: 24,
+                    backgroundColor: displayedReach.lower > 0
+                      ? displayedReach.lower < 1000000 ? 'rgba(239,68,68,0.1)'
+                        : displayedReach.lower < 10000000 ? 'rgba(245,158,11,0.1)'
+                        : 'rgba(16,185,129,0.1)'
+                      : 'rgba(24,119,242,0.1)',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                  }}>
+                    <Ionicons
+                      name="people"
+                      size={22}
+                      color={displayedReach.lower > 0
+                        ? displayedReach.lower < 1000000 ? '#EF4444'
+                          : displayedReach.lower < 10000000 ? '#F59E0B'
+                          : '#10B981'
+                        : '#1877F2'}
+                    />
+                  </View>
+                </View>
+
+                {/* Reach Numbers - Animated */}
+                <View style={{ alignItems: 'center' }}>
+                  <Text style={{
+                    fontSize: 26,
+                    fontWeight: '700',
+                    color: colors.text.primary,
+                    fontVariant: ['tabular-nums'],
+                  }}>
+                    {displayedReach.lower > 0
+                      ? `${formatMetaNumber(displayedReach.lower)} - ${formatMetaNumber(displayedReach.upper)}`
+                      : '—'}
+                  </Text>
+                  <Text style={{ fontSize: 12, color: colors.text.tertiary, marginTop: 2 }}>
+                    Potential Reach
+                  </Text>
+                </View>
+
+                {/* Size indicator labels */}
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', width: '100%', marginTop: spacing.sm, paddingHorizontal: spacing.xs }}>
+                  <Text style={{ fontSize: 10, color: '#EF4444', fontWeight: '500' }}>Narrow</Text>
+                  <Text style={{ fontSize: 10, color: '#F59E0B', fontWeight: '500' }}>Specific</Text>
+                  <Text style={{ fontSize: 10, color: '#10B981', fontWeight: '500' }}>Broad</Text>
+                </View>
+              </Animated.View>
+
+              {/* Daily Results Estimate */}
+              {displayedReach.lower > 0 && (
+                <View style={{
+                  backgroundColor: 'rgba(24,119,242,0.05)',
+                  borderRadius: 8,
+                  padding: spacing.sm,
+                  marginTop: spacing.sm,
+                }}>
+                  <Text style={{ fontSize: 11, color: colors.text.tertiary, marginBottom: 4 }}>Estimated daily results</Text>
+                  <Text style={{ fontSize: 14, fontWeight: '600', color: '#1877F2' }}>
+                    {formatMetaNumber(Math.round(displayedReach.lower * 0.001))} - {formatMetaNumber(Math.round(displayedReach.upper * 0.003))} clicks
+                  </Text>
+                </View>
+              )}
 
               {/* Targeting Summary */}
               <View style={{ marginTop: spacing.lg }}>

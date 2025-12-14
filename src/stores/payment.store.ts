@@ -215,6 +215,8 @@ export const usePaymentStore = create<PaymentState>()(
               lineTotal: (item.adjustedPrice !== undefined ? item.adjustedPrice : item.price) * item.quantity,
               inventoryId: item.inventoryId,
               gramsToDeduct, // Pass actual quantity to deduct (e.g., 28 for "28g (Ounce)")
+              tierQty: gramsToDeduct, // Preferred field for reserve_inventory variant handling
+              locationId: sessionInfo?.locationId, // Location for variant inventory lookup
               // Variant fields - passed to reserve_inventory() for automatic conversion
               variantTemplateId: item.variantTemplateId,
               variantName: item.variantName,

@@ -11,7 +11,6 @@ import * as Haptics from "expo-haptics"
 import { colors, typography, spacing, radius } from "@/theme/tokens"
 import type { Campaign } from "@/types/campaigns"
 import { campaignsStyles as styles } from "./campaigns.styles"
-import { CampaignDetail } from "./CampaignDetail"
 
 function CampaignsDetail({
   campaigns,
@@ -111,21 +110,6 @@ function CampaignsDetail({
     setSelectedCampaign(campaign)
   }
 
-  // If a campaign is selected, show the detail view
-  if (selectedCampaign) {
-    // Find the latest version of the campaign from the list (in case it was updated)
-    const latestCampaign = campaigns.find(c => c.id === selectedCampaign.id) || selectedCampaign
-
-    return (
-      <CampaignDetail
-        campaign={latestCampaign as any}
-        onBack={() => setSelectedCampaign(null)}
-        onUpdate={onUpdate}
-        onDelete={onDelete}
-        onToggleStatus={onToggleStatus}
-      />
-    )
-  }
 
   if (isLoading) {
     return (

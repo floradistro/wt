@@ -111,6 +111,7 @@ export const usePOSProductsStore = create<POSProductsState>()(
         .select(`
           id,
           name,
+          description,
           sku,
           regular_price,
           sale_price,

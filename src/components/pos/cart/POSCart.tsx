@@ -1,23 +1,17 @@
 /**
- * POSCart Component - ZERO PROPS ARCHITECTURE ✨
+ * POSCart Component - ZERO PROPS ARCHITECTURE
  * Apple Engineering Standard: Complete store-based architecture
- *
- * BEFORE: 25+ props (15+ callback handlers)
- * AFTER: 0 props (100% store-based)
  *
  * Store usage:
  * - cart.store: Cart data and actions
- * - checkout-ui.store: UI state (discounting, tier selector, discount selector, modals)
+ * - checkout-ui.store: UI state (modals)
  * - customer.store: Customer selection and actions
- * - loyalty-campaigns.store: Discounts/campaigns
- * - products.store: Products (zero prop drilling!)
- * - posSession.store: Session management
  *
  * All state and actions read/dispatched through stores = zero prop drilling!
  */
 
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native'
-import { useMemo, useCallback, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { LiquidGlassView, isLiquidGlassSupported } from '@callstack/liquid-glass'
 import * as Haptics from 'expo-haptics'
 import { POSCartItem } from './POSCartItem'
@@ -29,12 +23,7 @@ import { layout } from '@/theme/layout'
 
 // Stores
 import { useCartItems, cartActions, useCartTotals } from '@/stores/cart.store'
-import {
-  useSelectedDiscountId,
-  useShowDiscountSelector,
-  checkoutUIActions,
-} from '@/stores/checkout-ui.store'
-import { useCampaigns } from '@/stores/loyalty-campaigns.store'
+import { checkoutUIActions } from '@/stores/checkout-ui.store'
 import { useSelectedCustomer, customerActions } from '@/stores/customer.store'
 import { useScannedOrder } from '@/stores/scanned-order.store'
 
@@ -65,26 +54,6 @@ export function POSCart({ onEndSession }: POSCartProps) {
   const selectedCustomer = useSelectedCustomer()
 
   // ========================================
-  // STORES - Checkout UI State
-  // ========================================
-  const selectedDiscountId = useSelectedDiscountId()
-  const showDiscountSelector = useShowDiscountSelector()
-
-  // ========================================
-  // STORES - Discounts
-  // ========================================
-  const campaigns = useCampaigns()
-  const activeDiscounts = useMemo(() => campaigns.filter(d => d.is_active), [campaigns])
-
-  // ========================================
-  // COMPUTED VALUES
-  // ========================================
-  const selectedDiscount = useMemo(
-    () => activeDiscounts.find(d => d.id === selectedDiscountId) || null,
-    [activeDiscounts, selectedDiscountId]
-  )
-
-  // ========================================
   // HANDLERS (MEMOIZED to prevent re-render loops)
   // ========================================
   const handleSelectCustomer = useCallback(() => {
@@ -106,9 +75,6 @@ export function POSCart({ onEndSession }: POSCartProps) {
   const handleClearCart = useCallback(() => {
     cartActions.clearCart()
     cartActions.setDiscountingItemId(null)
-    checkoutUIActions.setSelectedDiscountId(null)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    // Store actions are stable from zustand, safe to omit from deps
   }, [])
 
   const handleUpdateContactInfo = useCallback(() => {
@@ -215,98 +181,6 @@ export function POSCart({ onEndSession }: POSCartProps) {
           <POSMissingContactBanner onUpdateCustomer={handleUpdateContactInfo} />
         )}
 
-        {/* Discount Selector - Pill Style */}
-        {cart.length > 0 && (
-          <>
-            {!selectedDiscount ? (
-              <LiquidGlassView
-                key="discount-pill-empty"
-                effect="regular"
-                colorScheme="dark"
-                tintColor="rgba(255,255,255,0.05)"
-                interactive
-                style={[
-                  styles.customerPillButton,
-                  !isLiquidGlassSupported && styles.customerPillButtonFallback
-                ]}
-              >
-                <TouchableOpacity
-                  onPress={() => {
-                    if (activeDiscounts.length > 0) {
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                      checkoutUIActions.setShowDiscountSelector(!showDiscountSelector)
-                    }
-                  }}
-                  style={styles.customerPillButtonPressable}
-                  activeOpacity={activeDiscounts.length > 0 ? 0.7 : 1}
-                  accessibilityRole="button"
-                  accessibilityLabel="Apply discount"
-                  accessibilityHint={activeDiscounts.length > 0 ? "Opens discount selection" : "No discounts available"}
-                  disabled={activeDiscounts.length === 0}
-                >
-                  <Text style={[
-                    styles.customerPillText,
-                    activeDiscounts.length === 0 && styles.customerPillTextDisabled
-                  ]}>
-                    {activeDiscounts.length === 0
-                      ? 'No Discounts Available'
-                      : showDiscountSelector ? 'Hide Discounts' : 'Apply Discount'}
-                  </Text>
-                </TouchableOpacity>
-              </LiquidGlassView>
-            ) : (
-              <LiquidGlassView
-                key={`discount-pill-${selectedDiscount.id}`}
-                effect="regular"
-                colorScheme="dark"
-                interactive
-                style={[
-                  styles.customerPill,
-                  !isLiquidGlassSupported && styles.customerPillFallback
-                ]}
-              >
-                <TouchableOpacity
-                  onPress={() => {
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                    checkoutUIActions.setShowDiscountSelector(!showDiscountSelector)
-                  }}
-                  style={styles.customerPillPressable}
-                  activeOpacity={0.8}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Selected discount: ${selectedDiscount.name}`}
-                  accessibilityHint="Tap to change or remove discount"
-                >
-                  <View style={styles.customerPillContent}>
-                    <View style={styles.customerPillTextContainer}>
-                      <Text style={styles.customerPillName} numberOfLines={1}>
-                        {selectedDiscount.name}
-                      </Text>
-                      <Text style={styles.customerPillPoints}>
-                        {selectedDiscount.badge_text}
-                      </Text>
-                    </View>
-                    <TouchableOpacity
-                      onPress={(e) => {
-                        e.stopPropagation()
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                        checkoutUIActions.setSelectedDiscountId(null)
-                        checkoutUIActions.setShowDiscountSelector(false)
-                      }}
-                      style={styles.customerPillClearButton}
-                      activeOpacity={0.6}
-                      accessibilityRole="button"
-                      accessibilityLabel="Clear discount selection"
-                      accessibilityHint="Removes discount from transaction"
-                    >
-                      <Text style={styles.customerPillClearText}>×</Text>
-                    </TouchableOpacity>
-                  </View>
-                </TouchableOpacity>
-              </LiquidGlassView>
-            )}
-          </>
-        )}
-
         {/* Clear Cart Button - Pill Style */}
         {cart.length > 0 && (
           <LiquidGlassView
@@ -334,42 +208,6 @@ export function POSCart({ onEndSession }: POSCartProps) {
               <Text style={styles.customerPillText}>Clear Cart</Text>
             </TouchableOpacity>
           </LiquidGlassView>
-        )}
-
-        {/* Discount List */}
-        {showDiscountSelector && activeDiscounts.length > 0 && (
-          <View style={styles.discountList}>
-            {activeDiscounts.map(discount => (
-              <LiquidGlassView
-                key={discount.id}
-                effect="regular"
-                colorScheme="dark"
-                interactive
-                style={[
-                  styles.discountItem,
-                  !isLiquidGlassSupported && styles.discountItemFallback
-                ]}
-              >
-                <TouchableOpacity
-                  onPress={() => {
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                    checkoutUIActions.setSelectedDiscountId(discount.id)
-                    checkoutUIActions.setShowDiscountSelector(false)
-                  }}
-                  style={styles.discountItemPressable}
-                  activeOpacity={0.8}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Apply ${discount.name} discount`}
-                  accessibilityHint={`Applies ${discount.badge_text} discount to transaction`}
-                >
-                  <View style={styles.discountItemContent}>
-                    <Text style={styles.discountItemName}>{discount.name}</Text>
-                    <Text style={styles.discountItemBadge}>{discount.badge_text}</Text>
-                  </View>
-                </TouchableOpacity>
-              </LiquidGlassView>
-            ))}
-          </View>
         )}
       </View>
 
@@ -448,9 +286,6 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.9)',
     textAlign: 'center',
   },
-  customerPillTextDisabled: {
-    color: 'rgba(255,255,255,0.3)',
-  },
   customerPill: {
     borderRadius: 20,
     overflow: 'hidden',
@@ -501,41 +336,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: 'rgba(255,255,255,0.6)',
     lineHeight: 20,
-  },
-  discountList: {
-    gap: 6,
-    marginTop: 4,
-  },
-  discountItem: {
-    borderRadius: 16,
-    overflow: 'hidden',
-    minHeight: 40,
-  },
-  discountItemFallback: {
-    backgroundColor: 'rgba(255,255,255,0.05)',
-  },
-  discountItemPressable: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    minHeight: 40,
-    justifyContent: 'center',
-  },
-  discountItemContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
-  },
-  discountItemName: {
-    fontSize: 13,
-    fontWeight: '500',
-    color: '#fff',
-    flex: 1,
-  },
-  discountItemBadge: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.6)',
   },
   cartItems: {
     flex: 1,

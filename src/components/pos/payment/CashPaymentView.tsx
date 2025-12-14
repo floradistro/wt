@@ -22,10 +22,12 @@ import type { PaymentData, SaleCompletionData, PaymentStage } from './PaymentTyp
 
 interface CashPaymentViewProps {
   onComplete: (paymentData: PaymentData) => Promise<SaleCompletionData>  // ✅ Coordination callback only
+  onCancel: () => void
 }
 
 export function CashPaymentView({
   onComplete,
+  onCancel,
 }: CashPaymentViewProps) {
   // ========================================
   // SINGLE SOURCE OF TRUTH - Centralized total calculation
@@ -244,11 +246,7 @@ export function CashPaymentView({
       <Text style={styles.orLabel}>OR ENTER AMOUNT</Text>
 
       {/* Cash Input */}
-      <LiquidGlassView
-        effect="regular"
-        colorScheme="dark"
-        style={styles.inputCard}
-      >
+      <View style={styles.inputCard}>
         <TextInput
           style={styles.input}
           value={cashTendered}
@@ -261,7 +259,7 @@ export function CashPaymentView({
           accessibilityHint={`Enter cash amount, minimum ${total.toFixed(2)} dollars`}
           accessibilityRole="text"
         />
-      </LiquidGlassView>
+      </View>
 
       {/* Change Display */}
       {cashTendered && parseFloat(cashTendered) > 0 && (
@@ -288,34 +286,46 @@ export function CashPaymentView({
         </LiquidGlassView>
       )}
 
-      {/* Complete Button */}
-      <TouchableOpacity
-        onPress={handleComplete}
-        disabled={!canComplete}
-        activeOpacity={0.7}
-        style={styles.completeButtonWrapper}
-        accessibilityRole="button"
-        accessibilityLabel="Complete cash payment"
-        accessibilityHint={canComplete ? `Give customer $${changeAmount.toFixed(2)} in change` : `Enter at least $${total.toFixed(2)}`}
-        accessibilityState={{ disabled: !canComplete }}
-      >
-        <LiquidGlassView
-          effect="regular"
-          colorScheme="dark"
-          tintColor={canComplete ? 'rgba(16,185,129,0.3)' : undefined}
-          style={[
-            styles.completeButton,
-            !canComplete && styles.completeButtonDisabled,
-          ]}
+      {/* Action Buttons Row */}
+      <View style={styles.actionsRow}>
+        <TouchableOpacity
+          onPress={onCancel}
+          activeOpacity={0.7}
+          style={styles.cancelButtonWrapper}
+          accessibilityRole="button"
+          accessibilityLabel="Cancel payment"
         >
-          <Text style={[
-            styles.completeButtonText,
-            canComplete && styles.completeButtonTextActive
-          ]}>
-            Complete
-          </Text>
-        </LiquidGlassView>
-      </TouchableOpacity>
+          <View style={styles.cancelButton}>
+            <Text style={styles.cancelButtonText}>Cancel</Text>
+          </View>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          onPress={handleComplete}
+          disabled={!canComplete}
+          activeOpacity={0.7}
+          style={styles.completeButtonWrapper}
+          accessibilityRole="button"
+          accessibilityLabel="Complete cash payment"
+          accessibilityHint={canComplete ? `Give customer $${changeAmount.toFixed(2)} in change` : `Enter at least $${total.toFixed(2)}`}
+          accessibilityState={{ disabled: !canComplete }}
+        >
+          <View
+            style={[
+              styles.completeButton,
+              canComplete && styles.completeButtonActive,
+              !canComplete && styles.completeButtonDisabled,
+            ]}
+          >
+            <Text style={[
+              styles.completeButtonText,
+              canComplete && styles.completeButtonTextActive
+            ]}>
+              Complete
+            </Text>
+          </View>
+        </TouchableOpacity>
+      </View>
         </>
       )}
     </View>
@@ -425,6 +435,9 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     padding: 12,
     marginBottom: 12,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
   },
   input: {
     fontSize: 34,
@@ -433,6 +446,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     padding: 0,
     letterSpacing: -0.3,
+    minHeight: 50,
   },
   changeCard: {
     borderRadius: 14,
@@ -470,17 +484,47 @@ const styles = StyleSheet.create({
   changeSubtextError: {
     color: 'rgba(239,68,68,0.7)',
   },
+  actionsRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 20,
+  },
+  cancelButtonWrapper: {
+    flex: 1,
+  },
+  cancelButton: {
+    height: 50,
+    borderRadius: 25,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  cancelButtonText: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.7)',
+    letterSpacing: -0.2,
+  },
   completeButtonWrapper: {
-    marginTop: 16,
+    flex: 1,
   },
   completeButton: {
     height: 50,
     borderRadius: 25,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  completeButtonActive: {
+    backgroundColor: 'rgba(16,185,129,0.2)',
+    borderColor: '#10b981',
   },
   completeButtonDisabled: {
-    opacity: 0.3,
+    opacity: 0.4,
   },
   completeButtonText: {
     fontSize: 17,

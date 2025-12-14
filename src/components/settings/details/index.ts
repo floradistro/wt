@@ -1,16 +1,7 @@
 /**
  * Settings Detail Components
- * Apple-inspired split-view detail panels
+ * Only CampaignsDetail remains - used by MarketingScreen
+ * All other settings moved to Analytics Dashboard
  */
 
-export { AccountDetail } from './AccountDetail'
-export { DeveloperToolsDetail } from './DeveloperToolsDetail'
-export { LocationsDetail } from './LocationsDetail'
-export { LocationConfigurationDetail } from './LocationConfigurationDetail'
-export { UserManagementDetail } from './UserManagementDetail'
-export { SupplierManagementDetail } from './SupplierManagementDetail'
-export { LoyaltyManagementDetail } from './LoyaltyManagementDetail'
 export { CampaignsDetail } from './CampaignsDetail'
-export { EmailSettingsDetail } from './EmailSettingsDetail'
-export { ShippingSettingsDetail } from './ShippingSettingsDetail'
-export { DetailRow } from './DetailRow'

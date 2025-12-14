@@ -65,15 +65,7 @@ function MarketingIcon({ color }: { color: string }) {
   )
 }
 
-function SettingsIcon({ color }: { color: string }) {
-  return (
-    <View style={styles.dotsIcon}>
-      <View style={[styles.dot, { backgroundColor: color }]} />
-      <View style={[styles.dot, { backgroundColor: color }]} />
-      <View style={[styles.dot, { backgroundColor: color }]} />
-    </View>
-  )
-}
+// Settings moved to Analytics Dashboard
 
 const tabs = [
   { Icon: POSIcon, name: 'POS' },
@@ -81,7 +73,6 @@ const tabs = [
   { Icon: OrdersIcon, name: 'Orders' },
   { Icon: CustomersIcon, name: 'Customers' },
   { Icon: MarketingIcon, name: 'Marketing' },
-  { Icon: SettingsIcon, name: 'Settings' },
 ]
 
 type IconComponent = (props: { color: string }) => React.JSX.Element

@@ -39,13 +39,19 @@ function assertTierQuantityExists(item: Partial<CartItem>, context: string): voi
   logger.debug(`[Cart Validation] ✅ tierQuantity OK for ${item.name}: ${item.tierQuantity}`)
 }
 
+// Variant inventory info passed when selling variant products
+interface VariantInventoryInfo {
+  variantQuantity: number // Available variant stock
+  parentQuantity: number // Available parent stock (for auto-convert)
+}
+
 interface CartState {
   // State
   items: CartItem[]
   discountingItemId: string | null
 
   // Actions
-  addToCart: (product: Product, tier?: PricingTier, variant?: ProductVariant) => void
+  addToCart: (product: Product, tier?: PricingTier, variant?: ProductVariant, variantInventory?: VariantInventoryInfo) => void
   updateQuantity: (itemId: string, delta: number) => void
   changeTier: (oldItemId: string, product: Product, newTier: PricingTier) => void
   applyManualDiscount: (itemId: string, type: 'percentage' | 'amount', value: number) => void
@@ -69,8 +75,11 @@ export const useCartStore = create<CartState>()(
       /**
        * Add product to cart (with optional pricing tier and/or variant)
        * STEVE JOBS PRINCIPLE: Never let them add more than we have in stock
+       *
+       * For VARIANT sales: Pass variantInventory to check against variant stock
+       * Smart auto-convert will happen at checkout if variant stock insufficient
        */
-      addToCart: (product: Product, tier?: PricingTier, variant?: ProductVariant) => {
+      addToCart: (product: Product, tier?: PricingTier, variant?: ProductVariant, variantInventory?: VariantInventoryInfo) => {
         // 🔍 DEBUG: Log what we're receiving
         logger.debug('[Cart] addToCart called with:', {
           productId: product.id,
@@ -78,6 +87,7 @@ export const useCartStore = create<CartState>()(
           tier: tier ? JSON.stringify(tier) : 'undefined',
           tierQty: tier?.qty,
           variant: variant?.variant_name,
+          variantInventory: variantInventory ? JSON.stringify(variantInventory) : 'undefined',
         })
 
         const price = tier
@@ -91,7 +101,31 @@ export const useCartStore = create<CartState>()(
           ? `${product.id}_${tier.weight || tier.label}${variantSuffix}`
           : `${product.id}${variantSuffix}`
 
-        const availableInventory = product.inventory_quantity || 0
+        // SMART INVENTORY CHECK:
+        // For variants: Check variant stock + potential auto-convert from parent
+        // For regular products: Check parent inventory
+        let availableInventory: number
+        let canAutoConvert = false
+
+        if (variant && variantInventory) {
+          // Variant sale: Check combined availability (variant + convertible parent)
+          const conversionRatio = variant.conversion_ratio || 1
+          const convertibleFromParent = Math.floor(variantInventory.parentQuantity / conversionRatio)
+          availableInventory = variantInventory.variantQuantity + convertibleFromParent
+          canAutoConvert = variantInventory.variantQuantity === 0 && convertibleFromParent > 0
+
+          logger.debug('[Cart] Variant inventory check:', {
+            variantStock: variantInventory.variantQuantity,
+            parentStock: variantInventory.parentQuantity,
+            conversionRatio,
+            convertibleFromParent,
+            totalAvailable: availableInventory,
+            canAutoConvert,
+          })
+        } else {
+          // Regular product: Check parent inventory
+          availableInventory = product.inventory_quantity || 0
+        }
 
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
 
@@ -104,6 +138,7 @@ export const useCartStore = create<CartState>()(
             if (existing.quantity + 1 > availableInventory) {
               logger.warn('Cannot add more to cart - inventory limit', {
                 product: product.name,
+                variant: variant?.variant_name,
                 availableInventory,
                 currentQuantity: existing.quantity
               })
@@ -119,7 +154,10 @@ export const useCartStore = create<CartState>()(
 
           // New item - check if we have at least 1 in stock
           if (availableInventory < 1) {
-            logger.warn('Cannot add product - out of stock', { product: product.name })
+            logger.warn('Cannot add product - out of stock', {
+              product: product.name,
+              variant: variant?.variant_name,
+            })
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning)
             return state // Don't add
           }
