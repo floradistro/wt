@@ -85,9 +85,9 @@ export const useOrderFilterStore = create<OrderFilterState>()(
 
               if (order.order_type === 'shipping') {
                 // For shipping orders without fulfillment_locations,
-                // check if there's any location indicator we can use
-                // If none, exclude (we can't determine which location ships it)
-                return false
+                // INCLUDE them - these are legacy orders from before multi-location
+                // They should still be visible to fulfill
+                // (continue to other filters)
               } else if (order.order_type === 'pickup') {
                 // Check pickup_location_id
                 if (order.pickup_location_id) {
@@ -219,9 +219,10 @@ export const useOrderFilterStore = create<OrderFilterState>()(
 
           // No fulfillment_locations - fall back to other location checks
           if (order.order_type === 'shipping') {
-            // Shipping orders without fulfillment_locations - exclude
-            // (we can't determine which location ships it)
-            return false
+            // Shipping orders without fulfillment_locations - INCLUDE them
+            // These are legacy orders from before multi-location system
+            // They should still be visible to fulfill
+            return true
           }
 
           if (order.order_type === 'pickup') {

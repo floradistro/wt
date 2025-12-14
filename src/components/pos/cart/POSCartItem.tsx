@@ -1,11 +1,19 @@
-import { View, Text, StyleSheet, TextInput, TouchableOpacity } from 'react-native'
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, Animated, PanResponder, LayoutAnimation, Platform, UIManager } from 'react-native'
 import * as Haptics from 'expo-haptics'
-import { useState, memo } from 'react'
+import { useState, memo, useCallback, useRef, useEffect } from 'react'
+
+// Enable LayoutAnimation on Android
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true)
+}
 import type { CartItem } from '@/types/pos'
 
 // ✅ ZERO PROP DRILLING - Read from stores
 import { cartActions, useDiscountingItemId } from '@/stores/cart.store'
 import { checkoutUIActions } from '@/stores/checkout-ui.store'
+
+const DELETE_WIDTH = 80
+const SWIPE_THRESHOLD = 25 // How far to swipe before it triggers (lower = easier)
 
 interface POSCartItemProps {
   item: CartItem  // ✅ ONLY visual data - no callbacks, no state
@@ -17,13 +25,16 @@ function POSCartItem({ item }: POSCartItemProps) {
   const [discountType, setDiscountType] = useState<'percentage' | 'amount'>('percentage')
   const [discountValue, setDiscountValue] = useState('')
 
+  // Swipe state
+  const [isOpen, setIsOpen] = useState(false)
+  const translateX = useRef(new Animated.Value(0)).current
+
   // ✅ ZERO PROP DRILLING: Derived state from store
   const isDiscounting = discountingItemId === item.id
 
   const handleApplyDiscount = () => {
     const value = parseFloat(discountValue)
     if (value > 0) {
-      // ✅ ZERO PROP DRILLING: Call store action directly
       cartActions.applyManualDiscount(item.id, discountType, value)
       setDiscountValue('')
     }
@@ -33,231 +44,239 @@ function POSCartItem({ item }: POSCartItemProps) {
   const displayPrice = item.adjustedPrice !== undefined ? item.adjustedPrice : item.price
   const hasDiscount = item.manualDiscountValue && item.manualDiscountValue > 0
 
+  const handleItemPress = () => {
+    if (isOpen) {
+      // Close if open
+      closeSwipe()
+      return
+    }
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    checkoutUIActions.setTierSelectorProductId(item.productId)
+  }
+
+  const handleLongPress = useCallback(() => {
+    if (isOpen) return
+    if (!hasDiscount) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut)
+      cartActions.setDiscountingItemId(item.id)
+    }
+  }, [hasDiscount, item.id, isOpen])
+
+  const handleDelete = useCallback(() => {
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+    // Animate out
+    Animated.timing(translateX, {
+      toValue: -300,
+      duration: 200,
+      useNativeDriver: true,
+    }).start(() => {
+      cartActions.removeItem(item.id)
+    })
+  }, [item.id, translateX])
+
+  const openSwipe = useCallback(() => {
+    Animated.spring(translateX, {
+      toValue: -DELETE_WIDTH,
+      friction: 10,
+      tension: 100,
+      useNativeDriver: true,
+    }).start()
+    setIsOpen(true)
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+  }, [translateX])
+
+  const closeSwipe = useCallback(() => {
+    Animated.spring(translateX, {
+      toValue: 0,
+      friction: 10,
+      tension: 100,
+      useNativeDriver: true,
+    }).start()
+    setIsOpen(false)
+  }, [translateX])
+
+  // Pan responder - captures horizontal swipes and blocks vertical scroll
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (_, gesture) => {
+        // Capture ANY horizontal movement early - blocks scroll immediately
+        const isHorizontal = Math.abs(gesture.dx) > Math.abs(gesture.dy)
+        return isHorizontal && Math.abs(gesture.dx) > 5
+      },
+      onMoveShouldSetPanResponderCapture: (_, gesture) => {
+        // CAPTURE immediately if horizontal - this BLOCKS ScrollView
+        const isHorizontal = Math.abs(gesture.dx) > Math.abs(gesture.dy)
+        return isHorizontal && Math.abs(gesture.dx) > 5
+      },
+      onPanResponderTerminationRequest: () => false, // Don't let ScrollView steal the gesture
+      onPanResponderMove: (_, gesture) => {
+        // Only allow swiping left (negative dx)
+        if (gesture.dx < 0) {
+          // Clamp to DELETE_WIDTH
+          const newX = Math.max(-DELETE_WIDTH, gesture.dx)
+          translateX.setValue(newX)
+        } else if (isOpen) {
+          // If already open, allow swiping right to close
+          const newX = Math.min(0, -DELETE_WIDTH + gesture.dx)
+          translateX.setValue(newX)
+        }
+      },
+      onPanResponderRelease: (_, gesture) => {
+        // Decide whether to open or close based on velocity and position
+        // Lower velocity threshold (0.3) = easier to trigger with slower swipes
+        if (gesture.vx < -0.3 || gesture.dx < -SWIPE_THRESHOLD) {
+          // Swipe left or past threshold - open
+          openSwipe()
+        } else if (gesture.vx > 0.3 || gesture.dx > SWIPE_THRESHOLD) {
+          // Swipe right or past threshold - close
+          closeSwipe()
+        } else if (isOpen) {
+          // Already open and didn't swipe enough - stay open
+          openSwipe()
+        } else {
+          // Not open and didn't swipe enough - close
+          closeSwipe()
+        }
+      },
+      onPanResponderTerminate: () => {
+        // If gesture is interrupted, snap to nearest state
+        if (isOpen) {
+          openSwipe()
+        } else {
+          closeSwipe()
+        }
+      },
+    })
+  ).current
+
   return (
-    <View>
-      {/* iOS 26 Cart Item - Beautiful, spacious layout */}
-      <View style={styles.cartItem}>
-        {/* Left: Product Info (70% width) */}
-        <View style={styles.cartItemInfo}>
-          {/* Product Name - NEVER truncated */}
-          <View style={styles.cartItemNameRow}>
+    <View style={styles.container}>
+      {/* Swipe row wrapper - contains both delete zone and swipeable row */}
+      <View style={styles.swipeWrapper}>
+        {/* Delete button - sits behind the row */}
+        <View style={styles.deleteContainer}>
+          <TouchableOpacity
+            style={styles.deleteButton}
+            onPress={handleDelete}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.deleteButtonText}>Delete</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Swipeable row */}
+        <Animated.View
+          style={[styles.rowContainer, { transform: [{ translateX }] }]}
+          {...panResponder.panHandlers}
+        >
+        <TouchableOpacity
+          style={styles.cartItemContainer}
+          onPress={handleItemPress}
+          onLongPress={handleLongPress}
+          delayLongPress={400}
+          activeOpacity={0.7}
+          disabled={isDiscounting}
+        >
+          {/* Left: Product Info */}
+          <View style={styles.cartItemInfo}>
             <Text style={styles.cartItemName} numberOfLines={2}>
               {item.productName || item.name}
             </Text>
-            {item.tierLabel && (
-              <TouchableOpacity
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                  // ✅ ZERO PROP DRILLING: Call store action directly
-                  checkoutUIActions.setTierSelectorProductId(item.productId)
-                }}
-                style={styles.tierBadge}
-                accessibilityRole="button"
-                accessibilityLabel={`Change tier from ${item.tierLabel}`}
-                accessibilityHint="Opens tier selection options"
-              >
-                <Text style={styles.tierBadgeText}>{item.tierLabel}</Text>
-                <Text style={styles.tierBadgeChevron}>›</Text>
-              </TouchableOpacity>
-            )}
-          </View>
 
-          {/* Price Info Row */}
-          <View style={styles.cartItemPriceRow}>
-            {hasDiscount && item.originalPrice && (
-              <Text style={styles.cartItemOriginalPrice}>${item.originalPrice.toFixed(2)}</Text>
-            )}
-            <Text style={[styles.cartItemPrice, hasDiscount ? styles.cartItemDiscountedPrice : undefined]}>
-              ${displayPrice.toFixed(2)}
-            </Text>
-            <Text style={styles.cartItemPriceLabel}>each</Text>
-          </View>
-
-          {/* Staff Discount Badge */}
-          {hasDiscount && (
-            <TouchableOpacity
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                // ✅ ZERO PROP DRILLING: Call store action directly
-                cartActions.removeManualDiscount(item.id)
-              }}
-              style={styles.discountAppliedBadge}
-              accessibilityRole="button"
-              accessibilityLabel={`Remove ${item.manualDiscountType === 'percentage' ? `${item.manualDiscountValue}%` : `$${item.manualDiscountValue?.toFixed(2)}`} staff discount`}
-              accessibilityHint="Tap to remove discount"
-            >
-              <Text style={styles.discountAppliedText}>
-                {item.manualDiscountType === 'percentage'
-                  ? `${item.manualDiscountValue}% Off`
-                  : `$${item.manualDiscountValue?.toFixed(2)} Off`}
+            <View style={styles.cartItemPriceRow}>
+              {hasDiscount && item.originalPrice && (
+                <Text style={styles.cartItemOriginalPrice}>${item.originalPrice.toFixed(2)}</Text>
+              )}
+              <Text style={[styles.cartItemPrice, hasDiscount ? styles.cartItemDiscountedPrice : undefined]}>
+                ${displayPrice.toFixed(2)}
               </Text>
-              <Text style={styles.discountRemoveIcon}>×</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-
-        {/* Right: Quantity Controls OR Tier Info + Total (30% width) */}
-        <View style={styles.cartItemRight}>
-          {!item.tierLabel ? (
-            // Single-price product: Show -/+ controls
-            <View style={styles.cartItemControls}>
-              <TouchableOpacity
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                  // ✅ ZERO PROP DRILLING: Call store action directly
-                  cartActions.updateQuantity(item.id, -1)
-                }}
-                style={styles.cartButton}
-                accessibilityRole="button"
-                accessibilityLabel="Decrease quantity"
-                accessibilityHint={`Remove one ${item.productName || item.name}`}
-              >
-                <Text style={styles.cartButtonText}>−</Text>
-              </TouchableOpacity>
-
-              <Text
-                style={styles.cartItemQuantity}
-                accessibilityLabel={`Quantity: ${item.quantity}`}
-                accessibilityRole="text"
-              >
-                {item.quantity}
-              </Text>
-
-              <TouchableOpacity
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                  // ✅ ZERO PROP DRILLING: Call store action directly
-                  cartActions.updateQuantity(item.id, 1)
-                }}
-                style={styles.cartButton}
-                accessibilityRole="button"
-                accessibilityLabel="Increase quantity"
-                accessibilityHint={`Add one more ${item.productName || item.name}`}
-              >
-                <Text style={styles.cartButtonText}>+</Text>
-              </TouchableOpacity>
+              <Text style={styles.cartItemPriceLabel}>each</Text>
             </View>
-          ) : (
-            // Tiered product: Show remove button only
-            <TouchableOpacity
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                // ✅ ZERO PROP DRILLING: Call store action directly
-                cartActions.updateQuantity(item.id, -1)
-              }}
-              style={styles.cartRemoveButton}
-              accessibilityRole="button"
-              accessibilityLabel="Remove item"
-              accessibilityHint={`Remove ${item.productName || item.name} from cart`}
-            >
-              <Text style={styles.cartRemoveButtonText}>×</Text>
-            </TouchableOpacity>
-          )}
 
-          <Text style={styles.cartItemTotal}>${(displayPrice * item.quantity).toFixed(2)}</Text>
-        </View>
-      </View>
+            {hasDiscount && (
+              <TouchableOpacity
+                onPress={(e) => {
+                  e.stopPropagation()
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                  cartActions.removeManualDiscount(item.id)
+                }}
+                style={styles.discountAppliedBadge}
+              >
+                <Text style={styles.discountAppliedText}>
+                  {item.manualDiscountType === 'percentage'
+                    ? `${item.manualDiscountValue}% Off`
+                    : `$${item.manualDiscountValue?.toFixed(2)} Off`}
+                </Text>
+                <Text style={styles.discountRemoveIcon}>×</Text>
+              </TouchableOpacity>
+            )}
+          </View>
 
-      {/* Staff Discount Link - Only show when NOT discounting and NO discount */}
-      {!hasDiscount && !isDiscounting && (
-        <TouchableOpacity
-          onPress={() => {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-            // ✅ ZERO PROP DRILLING: Call store action directly
-            cartActions.setDiscountingItemId(item.id)
-          }}
-          style={styles.addDiscountLink}
-          accessibilityRole="button"
-          accessibilityLabel="Add staff discount"
-          accessibilityHint="Opens discount input form"
-        >
-          <Text style={styles.addDiscountLinkText}>+ Add Staff Discount</Text>
+          {/* Right: Tier/Quantity + Total */}
+          <View style={styles.cartItemRight}>
+            <Text style={styles.cartItemQuantity}>
+              {item.tierLabel || `×${item.quantity}`}
+            </Text>
+            <Text style={styles.cartItemTotal}>${(displayPrice * item.quantity).toFixed(2)}</Text>
+          </View>
         </TouchableOpacity>
-      )}
 
-      {/* JOBS PRINCIPLE: Discount input - minimal inline form */}
-      {isDiscounting && (
-        <View style={styles.discountInputContainer}>
-          <View style={styles.discountTypeRow}>
+        {/* Discount input - expands inside product row */}
+        {isDiscounting && (
+          <View style={styles.discountSection}>
             <TouchableOpacity
               onPress={() => {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                setDiscountType('percentage')
+                setDiscountType(discountType === 'percentage' ? 'amount' : 'percentage')
               }}
-              style={[
-                styles.discountTypeBtn,
-                discountType === 'percentage' && styles.discountTypeBtnActive
-              ]}
-              accessibilityRole="button"
-              accessibilityLabel="Percentage discount"
-              accessibilityState={{ selected: discountType === 'percentage' }}
+              style={styles.discountTypeToggle}
+              activeOpacity={0.7}
             >
-              <Text style={[
-                styles.discountTypeBtnText,
-                discountType === 'percentage' && styles.discountTypeBtnTextActive
-              ]}>%</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                setDiscountType('amount')
-              }}
-              style={[
-                styles.discountTypeBtn,
-                discountType === 'amount' && styles.discountTypeBtnActive
-              ]}
-              accessibilityRole="button"
-              accessibilityLabel="Dollar amount discount"
-              accessibilityState={{ selected: discountType === 'amount' }}
-            >
-              <Text style={[
-                styles.discountTypeBtnText,
-                discountType === 'amount' && styles.discountTypeBtnTextActive
-              ]}>$</Text>
+              <Text style={styles.discountTypeText}>
+                {discountType === 'percentage' ? '%' : '$'}
+              </Text>
             </TouchableOpacity>
             <TextInput
               style={styles.discountInput}
               placeholder={discountType === 'percentage' ? '10' : '5.00'}
               placeholderTextColor="rgba(255,255,255,0.3)"
-              keyboardType="numeric"
+              keyboardType="decimal-pad"
               value={discountValue}
               onChangeText={setDiscountValue}
               autoFocus
-              accessibilityLabel="Discount amount"
-              accessibilityHint={discountType === 'percentage' ? 'Enter percentage to discount' : 'Enter dollar amount to discount'}
-              accessibilityRole="text"
             />
-            <TouchableOpacity
-              onPress={handleApplyDiscount}
-              disabled={!discountValue || parseFloat(discountValue) <= 0}
-              style={[
-                styles.discountApplyBtn,
-                (!discountValue || parseFloat(discountValue) <= 0) && styles.discountApplyBtnDisabled
-              ]}
-              accessibilityRole="button"
-              accessibilityLabel="Apply discount"
-              accessibilityHint="Confirm and apply this discount"
-              accessibilityState={{ disabled: !discountValue || parseFloat(discountValue) <= 0 }}
-            >
-              <Text style={styles.discountApplyBtnText}>✓</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                // ✅ ZERO PROP DRILLING: Call store action directly
-                cartActions.setDiscountingItemId(null)
-                setDiscountValue('')
-              }}
-              style={styles.discountCancelBtn}
-              accessibilityRole="button"
-              accessibilityLabel="Cancel discount"
-              accessibilityHint="Close discount form without applying"
-            >
-              <Text style={styles.discountCancelBtnText}>×</Text>
-            </TouchableOpacity>
+            {/* Single button: Cancel when empty, Apply when has value */}
+            {(!discountValue || parseFloat(discountValue) <= 0) ? (
+              <TouchableOpacity
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                  LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut)
+                  cartActions.setDiscountingItemId(null)
+                  setDiscountValue('')
+                }}
+                style={styles.discountCancelBtn}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.discountCancelText}>Cancel</Text>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity
+                onPress={() => {
+                  LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut)
+                  handleApplyDiscount()
+                }}
+                style={styles.discountApplyBtn}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.discountApplyText}>Apply</Text>
+              </TouchableOpacity>
+            )}
           </View>
-        </View>
-      )}
+        )}
+        </Animated.View>
+      </View>
     </View>
   )
 }
@@ -266,15 +285,49 @@ const POSCartItemMemo = memo(POSCartItem)
 export { POSCartItemMemo as POSCartItem }
 
 const styles = StyleSheet.create({
-  // iOS 26 Cart Item - Clean, spacious
-  cartItem: {
+  container: {
+    marginBottom: 6, // Spacing between items
+  },
+  // Wrapper for swipe area - clips the delete button
+  swipeWrapper: {
+    position: 'relative',
+    overflow: 'hidden',
+    borderRadius: 16,
+  },
+  // Delete button container - only on right, hidden until swiped
+  deleteContainer: {
+    position: 'absolute',
+    right: 8,
+    top: 8,
+    bottom: 8,
+    width: DELETE_WIDTH - 16, // Account for padding
+    backgroundColor: '#ef4444',
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  deleteButton: {
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  deleteButtonText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  // Row that slides to reveal delete - needs solid background to cover delete zone
+  rowContainer: {
+    backgroundColor: '#000', // Solid black to fully cover delete button
+    borderRadius: 16, // Rounded corners
+  },
+  cartItemContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 16,
     paddingHorizontal: 16,
     gap: 12,
-    borderBottomWidth: 0.33,
-    borderBottomColor: 'rgba(255,255,255,0.06)',
     minHeight: 60,
   },
   cartItemInfo: {
@@ -284,43 +337,13 @@ const styles = StyleSheet.create({
   },
   cartItemRight: {
     alignItems: 'flex-end',
-    gap: 8,
-    justifyContent: 'space-between',
-  },
-  cartItemNameRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    flexWrap: 'wrap',
+    gap: 2,
   },
   cartItemName: {
     fontSize: 15,
     fontWeight: '600',
     color: '#fff',
     letterSpacing: -0.2,
-    flex: 1,
-  },
-  tierBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    borderRadius: 8,
-  },
-  tierBadgeText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.8)',
-    letterSpacing: 0.6,
-    textTransform: 'uppercase',
-  },
-  tierBadgeChevron: {
-    fontSize: 14,
-    fontWeight: '400',
-    color: 'rgba(255,255,255,0.6)',
-    marginTop: -1,
   },
   cartItemPriceRow: {
     flexDirection: 'row',
@@ -348,7 +371,6 @@ const styles = StyleSheet.create({
     fontWeight: '400',
     color: 'rgba(255,255,255,0.5)',
   },
-  // Staff Discount UI
   discountAppliedBadge: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -373,61 +395,10 @@ const styles = StyleSheet.create({
     fontWeight: '300',
     color: '#10b981',
   },
-  addDiscountLink: {
-    alignSelf: 'flex-start',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-  },
-  addDiscountLinkText: {
-    fontSize: 13,
-    fontWeight: '400',
-    color: 'rgba(255,255,255,0.5)',
-    letterSpacing: -0.1,
-  },
-  // iOS 26 Quantity Controls - Circular buttons
-  cartItemControls: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  cartButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: 'rgba(255,255,255,0.10)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 0,
-  },
-  cartButtonText: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.95)',
-    letterSpacing: -0.3,
-    marginTop: -1,
-  },
   cartItemQuantity: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#fff',
-    minWidth: 24,
-    textAlign: 'center',
-  },
-  cartRemoveButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: 'rgba(255,60,60,0.15)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 0,
-  },
-  cartRemoveButtonText: {
-    fontSize: 20,
-    fontWeight: '400',
-    color: 'rgba(255,60,60,0.95)',
-    letterSpacing: -0.3,
-    marginTop: -1,
+    fontSize: 13,
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.6)',
   },
   cartItemTotal: {
     fontSize: 15,
@@ -436,84 +407,60 @@ const styles = StyleSheet.create({
     minWidth: 70,
     textAlign: 'right',
   },
-  // iOS 26 Discount Input Form
-  discountInputContainer: {
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 16,
-    backgroundColor: 'rgba(255,255,255,0.04)',
-    borderBottomWidth: 0.33,
-    borderBottomColor: 'rgba(255,255,255,0.06)',
-  },
-  discountTypeRow: {
+  // Discount section - expands inside product row with animation
+  discountSection: {
     flexDirection: 'row',
-    gap: 8,
     alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+    gap: 12,
   },
-  discountTypeBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderWidth: 0,
+  discountTypeToggle: {
+    width: 44,
+    height: 44,
+    borderRadius: 22, // Pill
+    backgroundColor: 'rgba(255,255,255,0.1)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  discountTypeBtnActive: {
-    backgroundColor: 'rgba(255,255,255,0.15)',
-  },
-  discountTypeBtnText: {
-    fontSize: 15,
+  discountTypeText: {
+    fontSize: 18,
     fontWeight: '600',
-    color: 'rgba(255,255,255,0.5)',
-  },
-  discountTypeBtnTextActive: {
-    color: 'rgba(255,255,255,0.95)',
+    color: '#fff',
   },
   discountInput: {
     flex: 1,
-    height: 36,
-    paddingHorizontal: 14,
-    fontSize: 15,
+    height: 44,
+    fontSize: 16,
     fontWeight: '600',
     color: '#fff',
-    letterSpacing: -0.2,
     backgroundColor: 'rgba(255,255,255,0.08)',
-    borderWidth: 0,
-    borderRadius: 18,
-  },
-  discountApplyBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(16,185,129,0.2)',
-    borderWidth: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  discountApplyBtnDisabled: {
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    opacity: 0.4,
-  },
-  discountApplyBtnText: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: '#10b981',
-    letterSpacing: -0.4,
+    borderRadius: 22, // Pill
+    paddingHorizontal: 14,
+    textAlign: 'center',
   },
   discountCancelBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255,60,60,0.15)',
-    borderWidth: 0,
-    alignItems: 'center',
+    height: 44,
+    paddingHorizontal: 16,
+    borderRadius: 22, // Pill
+    backgroundColor: 'rgba(255,255,255,0.1)',
     justifyContent: 'center',
   },
-  discountCancelBtnText: {
-    fontSize: 20,
-    fontWeight: '400',
-    color: 'rgba(255,60,60,0.95)',
-    marginTop: -2,
+  discountCancelText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.6)',
+  },
+  discountApplyBtn: {
+    height: 44,
+    paddingHorizontal: 16,
+    borderRadius: 22, // Pill
+    backgroundColor: '#10b981',
+    justifyContent: 'center',
+  },
+  discountApplyText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#fff',
   },
 })

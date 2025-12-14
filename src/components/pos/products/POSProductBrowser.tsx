@@ -20,8 +20,8 @@ import { LiquidGlassView, isLiquidGlassSupported } from '@callstack/liquid-glass
 import { layout } from '@/theme/layout'
 
 // POS Components
-import { POSSearchBar } from '../search/POSSearchBar'
 import { POSProductGrid } from './POSProductGrid'
+import { POSProductCard } from '../POSProductCard'
 
 // Context - Zero prop drilling!
 import { usePOSSession } from '@/contexts/POSSessionContext'
@@ -35,6 +35,7 @@ import {
   useActiveFilterCount,
   productFilterActions,
 } from '@/stores/product-filter.store'
+import { useTierSelectorProductId } from '@/stores/checkout-ui.store'
 
 // Utils
 import { applyFilters, extractFieldValues } from '@/utils/product-transformers'
@@ -58,6 +59,13 @@ export function POSProductBrowser() {
   const products = usePOSProductsStore((state) => state.products)
   const filters = useProductFilters()
   const activeFilterCount = useActiveFilterCount()
+  const tierSelectorProductId = useTierSelectorProductId()
+
+  // Find the product for cart item editing (when tierSelectorProductId is set)
+  const tierSelectorProduct = useMemo(() => {
+    if (!tierSelectorProductId) return null
+    return products.find(p => p.id === tierSelectorProductId) || null
+  }, [tierSelectorProductId, products])
 
   // ✅ ANTI-LOOP: Compute filtered/derived data with useMemo (NOT in selectors)
   const filteredProducts = useMemo(() =>
@@ -399,12 +407,17 @@ export function POSProductBrowser() {
       {/* Product Grid - ZERO PROPS ✅ */}
       <POSProductGrid />
 
-      {/* Search Bar with Filters - ZERO PROPS ✅ */}
-      <POSSearchBar
-        onSearchChange={productFilterActions.setSearchQuery}
-        onFilterPress={handleFilterPress}
-        onClearFilters={handleClearFilters}
-      />
+      {/* Search bar removed - unified search bar lives in POSSwipeableBrowser */}
+
+      {/* Hidden Product Card for Cart Item Editing
+          When user taps a cart item, tierSelectorProductId is set.
+          This renders an invisible card that auto-opens its pricing modal.
+          Apple Pattern: Modal lives at browser level, not tied to virtualized grid */}
+      {tierSelectorProduct && (
+        <View style={styles.hiddenCardContainer} pointerEvents="none">
+          <POSProductCard product={tierSelectorProduct} />
+        </View>
+      )}
     </View>
   )
 }
@@ -416,6 +429,14 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     position: 'relative',
+  },
+  // Hidden container for cart item editing - card is invisible but modal shows
+  hiddenCardContainer: {
+    position: 'absolute',
+    width: 0,
+    height: 0,
+    overflow: 'hidden',
+    opacity: 0,
   },
   // Filter Dropdown - Dock style with liquid glass transparency
   filterOverlay: {

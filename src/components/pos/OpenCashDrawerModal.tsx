@@ -1,11 +1,18 @@
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, Modal, Dimensions, ScrollView, KeyboardAvoidingView, Platform } from 'react-native'
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, Modal, Dimensions, ScrollView, KeyboardAvoidingView, Platform, Animated } from 'react-native'
 import { LiquidGlassView, isLiquidGlassSupported } from '@callstack/liquid-glass'
 import * as Haptics from 'expo-haptics'
-import { memo, useState } from 'react'
+import { memo, useState, useRef, useEffect, useCallback } from 'react'
 import { logger } from '@/utils/logger'
 
 const { width } = Dimensions.get('window')
 const isTablet = width > 600
+
+// Apple-standard spring config
+const SPRING_CONFIG = {
+  tension: 300,
+  friction: 26,
+  useNativeDriver: true,
+}
 
 interface OpenCashDrawerModalProps {
   visible: boolean
@@ -17,9 +24,33 @@ function OpenCashDrawerModal({ visible, onSubmit, onCancel }: OpenCashDrawerModa
   const [openingCash, setOpeningCash] = useState('')
   const [notes, setNotes] = useState('')
 
+  // Animation refs
+  const fadeAnim = useRef(new Animated.Value(0)).current
+  const scaleAnim = useRef(new Animated.Value(0.92)).current
+
   logger.debug('[OpenCashDrawerModal] Rendering - visible:', visible)
 
-  const handleSubmit = () => {
+  // Apple-standard 60fps animations
+  useEffect(() => {
+    if (visible) {
+      fadeAnim.setValue(0)
+      scaleAnim.setValue(0.92)
+
+      Animated.parallel([
+        Animated.timing(fadeAnim, {
+          toValue: 1,
+          duration: 180,
+          useNativeDriver: true,
+        }),
+        Animated.spring(scaleAnim, {
+          toValue: 1,
+          ...SPRING_CONFIG,
+        }),
+      ]).start()
+    }
+  }, [visible, fadeAnim, scaleAnim])
+
+  const handleSubmit = useCallback(() => {
     const amount = parseFloat(openingCash || '0')
     if (amount < 0) return
 
@@ -27,31 +58,45 @@ function OpenCashDrawerModal({ visible, onSubmit, onCancel }: OpenCashDrawerModa
     onSubmit(amount, notes)
     setOpeningCash('')
     setNotes('')
-  }
+  }, [openingCash, notes, onSubmit])
 
-  const handleQuickAmount = (amount: number) => {
+  const handleQuickAmount = useCallback((amount: number) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
     setOpeningCash(amount.toString())
-  }
+  }, [])
 
-  const handleCancel = () => {
+  const handleCancel = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-    setOpeningCash('')
-    setNotes('')
-    onCancel()
-  }
+    // Quick exit animation
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 0,
+        duration: 120,
+        useNativeDriver: true,
+      }),
+      Animated.timing(scaleAnim, {
+        toValue: 0.92,
+        duration: 120,
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      setOpeningCash('')
+      setNotes('')
+      onCancel()
+    })
+  }, [fadeAnim, scaleAnim, onCancel])
 
   return (
     <Modal
       visible={visible}
       transparent
-      animationType="fade"
+      animationType="none"
       supportedOrientations={['portrait', 'landscape', 'landscape-left', 'landscape-right']}
       onRequestClose={handleCancel}
       accessibilityViewIsModal={true}
     >
-      {/* Background Overlay */}
-      <View style={styles.overlay}>
+      {/* Background Overlay - Native driver animated */}
+      <Animated.View style={[styles.overlay, { opacity: fadeAnim }]}>
         <LiquidGlassView
           effect="regular"
           colorScheme="dark"
@@ -70,9 +115,9 @@ function OpenCashDrawerModal({ visible, onSubmit, onCancel }: OpenCashDrawerModa
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
           >
-            {/* Modal Content Card */}
-            <View
-              style={styles.modalCard}
+            {/* Modal Content Card - Native driver animated */}
+            <Animated.View
+              style={[styles.modalCard, { transform: [{ scale: scaleAnim }] }]}
               accessible={true}
               accessibilityRole="none"
               accessibilityLabel="Count cash drawer dialog"
@@ -223,10 +268,10 @@ function OpenCashDrawerModal({ visible, onSubmit, onCancel }: OpenCashDrawerModa
                   </LiquidGlassView>
                 </View>
               </LiquidGlassView>
-            </View>
+            </Animated.View>
           </ScrollView>
         </KeyboardAvoidingView>
-      </View>
+      </Animated.View>
     </Modal>
   )
 }
@@ -237,6 +282,7 @@ export { OpenCashDrawerModalMemo as OpenCashDrawerModal }
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
   },
   overlayFallback: {
     backgroundColor: 'rgba(0,0,0,0.85)',

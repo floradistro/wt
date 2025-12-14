@@ -4,7 +4,6 @@ import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { Dock } from '../components/Dock'
 import { POSScreen } from '@/screens/POSScreen'
 import { ProductsScreen } from '@/screens/ProductsScreen'
-import { OrdersScreen } from '@/screens/OrdersScreen'
 import { CustomersScreen } from '@/screens/CustomersScreen'
 import { MarketingScreen } from '@/screens/MarketingScreen'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
@@ -16,7 +15,8 @@ import { useBadgeCounts } from '@/stores/order-filter.store'
 import { navigationActions } from '@/stores/navigation.store'
 
 // Settings moved to Analytics Dashboard
-const screens = [POSScreen, ProductsScreen, OrdersScreen, CustomersScreen, MarketingScreen]
+// Orders removed - now handled inside POS swipeable browser
+const screens = [POSScreen, ProductsScreen, CustomersScreen, MarketingScreen]
 
 export function DashboardNavigator() {
   // Enable location-aware order notifications globally
@@ -47,7 +47,6 @@ export function DashboardNavigator() {
   const screenSidebarWidths = [
     posCartWidth,        // POS - cart on left, center dock on product grid
     layout.sidebarWidth, // Products - has sidebar
-    layout.sidebarWidth, // Orders - has sidebar
     layout.sidebarWidth, // Customers - has sidebar
     layout.sidebarWidth, // Marketing - has sidebar
   ]

@@ -20,7 +20,7 @@
 import { View, Text, StyleSheet, FlatList, ActivityIndicator } from 'react-native'
 import { useCallback, useMemo } from 'react'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import type { Product, PricingTier } from '@/types/pos'
+import type { Product } from '@/types/pos'
 import { POSProductCard } from '../POSProductCard'
 import { layout } from '@/theme/layout'
 
@@ -100,14 +100,16 @@ export function POSProductGrid() {
   // CRITICAL: All edges use 8px for perfect alignment
   // - paddingLeft: 8px (aligns with cart right edge) + safe area
   // - paddingRight: 8px (aligns with search bar right edge) + safe area
-  // - paddingTop: 72px (space for floating search bar)
+  // - paddingTop: insets.top + search bar height + gap (content starts below floating search bar)
   // Apple Engineering: Accounts for safe area insets (notch, rounded corners)
   const contentContainerStyle = useMemo(() => ({
-    paddingTop: layout.pos.productGridPaddingTop,  // 72px - space for search bar
+    // paddingTop = safe area inset + search bar height + gap
+    // Search bar is positioned at insets.top, so content starts below it
+    paddingTop: insets.top + layout.pos.searchBarHeight + 16,  // insets.top + 48px search bar + 16px gap
     paddingBottom: Math.max(layout.dockHeight, insets.bottom + 16),
     paddingLeft: Math.max(layout.pos.productGridPaddingLeft, insets.left),    // 8px + safe area
     paddingRight: Math.max(layout.pos.productGridPaddingRight, insets.right), // 8px + safe area - BULLETPROOF!
-  }), [insets.bottom, insets.left, insets.right])
+  }), [insets.top, insets.bottom, insets.left, insets.right])
 
   // ========================================
   // GRID KEY - Must be before conditional return (Rules of Hooks)
@@ -154,8 +156,8 @@ export function POSProductGrid() {
       renderItem={renderItem}
       keyExtractor={keyExtractor}
 
-      // Grid Layout (3 columns)
-      numColumns={3}
+      // Grid Layout (4 columns - Apple Music style)
+      numColumns={4}
       columnWrapperStyle={styles.columnWrapper}
 
       // Empty State
@@ -179,8 +181,8 @@ export function POSProductGrid() {
       // Keep 7 screens worth of items in memory for smoother scrolling
       windowSize={7}
 
-      // Show 12 items immediately on mount (4 rows x 3 columns)
-      initialNumToRender={12}
+      // Show 16 items immediately on mount (4 rows x 4 columns)
+      initialNumToRender={16}
 
       // Accessibility
       accessible={false}
@@ -225,14 +227,14 @@ const styles = StyleSheet.create({
   productsScrollBehind: {
     flex: 1,
   },
-  // Column wrapper for 3-column grid (Apple 8px Design System)
+  // Column wrapper for 4-column grid (Apple Music style)
   columnWrapper: {
-    gap: layout.pos.productGridGap, // 16px horizontal spacing
+    gap: 12, // Tighter horizontal spacing like Apple Music
     paddingHorizontal: 0,
   },
   // Wrapper for each product card (flex: 1 for equal width)
   productCardWrapper: {
     flex: 1,
-    marginBottom: layout.pos.productGridGap, // 16px vertical spacing
+    marginBottom: 20, // More vertical spacing for text below cards
   },
 })

@@ -17,12 +17,12 @@ import { customersUIActions } from './customers-ui.store'
 import { logger } from '@/utils/logger'
 
 // Tab indices in DashboardNavigator
+// Updated: Orders removed (now inside POS), Settings moved to Analytics
 export const TAB_INDICES = {
   POS: 0,
   PRODUCTS: 1,
-  ORDERS: 2,
-  CUSTOMERS: 3,
-  SETTINGS: 4,
+  CUSTOMERS: 2,
+  MARKETING: 3,
 } as const
 
 type TabIndex = (typeof TAB_INDICES)[keyof typeof TAB_INDICES]

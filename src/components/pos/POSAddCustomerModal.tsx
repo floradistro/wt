@@ -17,10 +17,11 @@ import {
   TouchableOpacity,
   Dimensions,
   Modal,
+  Animated,
 } from 'react-native'
 import { LiquidGlassView, isLiquidGlassSupported } from '@callstack/liquid-glass'
 import * as Haptics from 'expo-haptics'
-import { memo, useState, useEffect } from 'react'
+import { memo, useState, useEffect, useRef, useCallback } from 'react'
 import DateTimePicker from '@react-native-community/datetimepicker'
 import { colors, spacing, radius, borderWidth } from '@/theme/tokens'
 import type { Customer } from '@/types/pos'
@@ -30,7 +31,7 @@ import { logger } from '@/utils/logger'
 import { createCustomer } from '@/services/customers.service'
 import { useAppAuth } from '@/contexts/AppAuthContext'
 import { useCustomerState, customerActions } from '@/stores/customer.store'
-import { useActiveModal, checkoutUIActions } from '@/stores/checkout-ui.store'
+import { useActiveModal, useHasModalHistory, checkoutUIActions } from '@/stores/checkout-ui.store'
 
 const { width } = Dimensions.get('window')
 const isTablet = width > 600
@@ -48,18 +49,35 @@ const isTablet = width > 600
  * - onCustomerCreated → checkoutUIActions.handleCustomerCreated
  * - onClose → checkoutUIActions.closeModal + customerActions.clearScannedData
  */
+// Apple-standard spring config
+const DATE_PICKER_SPRING = {
+  tension: 300,
+  friction: 26,
+  useNativeDriver: true,
+}
+
 function POSAddCustomerModal() {
   // ========================================
   // STORES - TRUE ZERO PROPS (read from environment)
   // ========================================
   const activeModal = useActiveModal()
   const visible = activeModal === 'addCustomer'
+  const hasModalHistory = useHasModalHistory()
   // ========================================
   // STORES - Apple Engineering Standard (READ FROM ENVIRONMENT)
   // ========================================
   const { vendor } = useAppAuth()
   const { scannedData: prefilledData } = useCustomerState()
   const vendorId = vendor?.id || ''
+
+  // Lazy content rendering - don't render heavy form until first visible
+  const [hasBeenVisible, setHasBeenVisible] = useState(false)
+
+  useEffect(() => {
+    if (visible && !hasBeenVisible) {
+      setHasBeenVisible(true)
+    }
+  }, [visible, hasBeenVisible])
 
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -77,6 +95,10 @@ function POSAddCustomerModal() {
   const [city, setCity] = useState('')
   const [state, setState] = useState('')
   const [postalCode, setPostalCode] = useState('')
+
+  // Date picker animation refs
+  const datePickerSlideAnim = useRef(new Animated.Value(300)).current
+  const datePickerFadeAnim = useRef(new Animated.Value(0)).current
 
   // Pre-fill form when modal opens with scanned data
   useEffect(() => {
@@ -115,11 +137,48 @@ function POSAddCustomerModal() {
     setError(null)
   }
 
-  const handleDateFieldPress = () => {
+  // Animate date picker in
+  const animateDatePickerIn = useCallback(() => {
+    datePickerSlideAnim.setValue(300)
+    datePickerFadeAnim.setValue(0)
+    setShowDatePicker(true)
+
+    Animated.parallel([
+      Animated.spring(datePickerSlideAnim, {
+        toValue: 0,
+        ...DATE_PICKER_SPRING,
+      }),
+      Animated.timing(datePickerFadeAnim, {
+        toValue: 1,
+        duration: 180,
+        useNativeDriver: true,
+      }),
+    ]).start()
+  }, [datePickerSlideAnim, datePickerFadeAnim])
+
+  // Animate date picker out
+  const animateDatePickerOut = useCallback(() => {
+    Animated.parallel([
+      Animated.timing(datePickerSlideAnim, {
+        toValue: 300,
+        duration: 150,
+        useNativeDriver: true,
+      }),
+      Animated.timing(datePickerFadeAnim, {
+        toValue: 0,
+        duration: 120,
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      setShowDatePicker(false)
+    })
+  }, [datePickerSlideAnim, datePickerFadeAnim])
+
+  const handleDateFieldPress = useCallback(() => {
     logger.debug('[DATE PICKER] Field pressed, showing picker')
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-    setShowDatePicker(true)
-  }
+    animateDatePickerIn()
+  }, [animateDatePickerIn])
 
   const handleDateChange = (event: any, selectedDate?: Date) => {
     if (selectedDate) {
@@ -133,16 +192,20 @@ function POSAddCustomerModal() {
     }
   }
 
-  const handleDateConfirm = () => {
-    setShowDatePicker(false)
+  const handleDateConfirm = useCallback(() => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
-  }
+    animateDatePickerOut()
+  }, [animateDatePickerOut])
 
   const handleClose = () => {
     if (creating) return
     resetForm()
-    // TRUE ZERO PROPS: Call store action instead of prop callback
-    checkoutUIActions.closeModal()
+    // Use popModal to return to previous modal if there's history
+    if (hasModalHistory) {
+      checkoutUIActions.popModal()
+    } else {
+      checkoutUIActions.closeModal()
+    }
   }
 
   const handleCreate = async () => {
@@ -208,6 +271,11 @@ function POSAddCustomerModal() {
     } finally {
       setCreating(false) // ALWAYS reset creating state
     }
+  }
+
+  // Lazy rendering: Don't mount heavy form content until first visible
+  if (!hasBeenVisible) {
+    return null
   }
 
   return (
@@ -505,39 +573,44 @@ function POSAddCustomerModal() {
         </LiquidGlassView>
       </View>
 
-      {/* iOS-Style Date Picker Modal */}
+      {/* iOS-Style Date Picker Modal - Native driver animations */}
       <Modal
         visible={showDatePicker}
         transparent={true}
-        animationType="slide"
+        animationType="none"
         supportedOrientations={['portrait', 'landscape', 'landscape-left', 'landscape-right']}
         onRequestClose={() => {
-          setShowDatePicker(false)
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+          animateDatePickerOut()
         }}
         accessibilityViewIsModal={true}
       >
-        <TouchableOpacity
-          style={styles.dateModalOverlay}
-          activeOpacity={1}
-          onPress={() => {
-            setShowDatePicker(false)
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-          }}
-          accessible={true}
-          accessibilityRole="button"
-          accessibilityLabel="Close date picker"
-          accessibilityHint="Double tap to dismiss date selection"
+        <Animated.View
+          style={[styles.dateModalOverlay, { opacity: datePickerFadeAnim }]}
         >
           <TouchableOpacity
+            style={StyleSheet.absoluteFill}
             activeOpacity={1}
-            style={styles.dateModalContent}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+              animateDatePickerOut()
+            }}
+            accessible={true}
+            accessibilityRole="button"
+            accessibilityLabel="Close date picker"
+            accessibilityHint="Double tap to dismiss date selection"
+          />
+          <Animated.View
+            style={[
+              styles.dateModalContent,
+              { transform: [{ translateY: datePickerSlideAnim }] }
+            ]}
             accessible={true}
             accessibilityRole="none"
             accessibilityLabel="Date picker dialog. Select date of birth"
             onAccessibilityEscape={() => {
-              setShowDatePicker(false)
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+              animateDatePickerOut()
             }}
           >
             <LiquidGlassView
@@ -554,8 +627,8 @@ function POSAddCustomerModal() {
                 <Text style={styles.datePickerTitle} accessibilityRole="header">SELECT DATE OF BIRTH</Text>
                 <TouchableOpacity
                   onPress={() => {
-                    setShowDatePicker(false)
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                    animateDatePickerOut()
                   }}
                   style={styles.datePickerCloseButton}
                   accessible={true}
@@ -608,8 +681,8 @@ function POSAddCustomerModal() {
                 </TouchableOpacity>
               </LiquidGlassView>
             </LiquidGlassView>
-          </TouchableOpacity>
-        </TouchableOpacity>
+          </Animated.View>
+        </Animated.View>
       </Modal>
     </POSModal>
   )
@@ -701,6 +774,7 @@ const styles = StyleSheet.create({
   dateModalContent: {
     paddingHorizontal: spacing.xl,
     paddingBottom: spacing.xxxl,
+    width: '100%',
   },
   datePickerCard: {
     borderRadius: radius.xxl,

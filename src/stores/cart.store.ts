@@ -53,6 +53,7 @@ interface CartState {
   // Actions
   addToCart: (product: Product, tier?: PricingTier, variant?: ProductVariant, variantInventory?: VariantInventoryInfo) => void
   updateQuantity: (itemId: string, delta: number) => void
+  removeItem: (itemId: string) => void
   changeTier: (oldItemId: string, product: Product, newTier: PricingTier) => void
   applyManualDiscount: (itemId: string, type: 'percentage' | 'amount', value: number) => void
   removeManualDiscount: (itemId: string) => void
@@ -241,6 +242,15 @@ export const useCartStore = create<CartState>()(
       },
 
       /**
+       * Remove item from cart (swipe-to-delete)
+       */
+      removeItem: (itemId: string) => {
+        set((state) => ({
+          items: state.items.filter((item) => item.id !== itemId)
+        }), false, 'cart/removeItem')
+      },
+
+      /**
        * Change tier for a cart item (remove old, add new)
        */
       changeTier: (oldItemId: string, product: Product, newTier: PricingTier) => {
@@ -425,6 +435,7 @@ export const useResetCart = () => useCartStore((state) => state.reset)
 export const cartActions = {
   get addToCart() { return useCartStore.getState().addToCart },
   get updateQuantity() { return useCartStore.getState().updateQuantity },
+  get removeItem() { return useCartStore.getState().removeItem },
   get changeTier() { return useCartStore.getState().changeTier },
   get applyManualDiscount() { return useCartStore.getState().applyManualDiscount },
   get removeManualDiscount() { return useCartStore.getState().removeManualDiscount },

@@ -67,10 +67,10 @@ function MarketingIcon({ color }: { color: string }) {
 
 // Settings moved to Analytics Dashboard
 
+// Orders removed - now handled inside POS swipeable browser
 const tabs = [
   { Icon: POSIcon, name: 'POS' },
   { Icon: ProductsIcon, name: 'Products' },
-  { Icon: OrdersIcon, name: 'Orders' },
   { Icon: CustomersIcon, name: 'Customers' },
   { Icon: MarketingIcon, name: 'Marketing' },
 ]
@@ -158,8 +158,8 @@ function Dock({ activeTab, onTabChange, centerX, ordersBadgeCount }: DockProps) 
           {tabs.map((tab, index) => {
             const isActive = activeTab === index
             const isCenter = false // No center icon with 4 items
-            // Orders tab is index 2
-            const badgeCount = index === 2 ? ordersBadgeCount : undefined
+            // Orders removed - badge now shows on POS tab (index 0) since orders are in POS
+            const badgeCount = index === 0 ? ordersBadgeCount : undefined
 
             return (
               <DockButton

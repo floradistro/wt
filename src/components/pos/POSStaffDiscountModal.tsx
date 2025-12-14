@@ -32,6 +32,13 @@ import { BlurView } from 'expo-blur'
 import { useCheckoutUIStore, checkoutUIActions } from '@/stores/checkout-ui.store'
 import { cartActions } from '@/stores/cart.store'
 
+// Apple-standard spring config
+const SPRING_CONFIG = {
+  tension: 300,
+  friction: 26,
+  useNativeDriver: true,
+}
+
 type DiscountType = 'percentage' | 'amount'
 
 export function POSStaffDiscountModal() {
@@ -52,47 +59,31 @@ export function POSStaffDiscountModal() {
   const inputRef = useRef<TextInput>(null)
 
   // ========================================
-  // EFFECTS
+  // EFFECTS - Apple-standard 60fps animations
   // ========================================
   useEffect(() => {
     if (visible) {
-      // Reset state
+      // Reset state and position
       setDiscountType('percentage')
       setValue('')
+      fadeAnim.setValue(0)
+      slideAnim.setValue(50)
 
-      // Animate in
+      // Animate in with optimized spring
       Animated.parallel([
         Animated.timing(fadeAnim, {
           toValue: 1,
-          duration: 200,
+          duration: 180,
           useNativeDriver: true,
         }),
         Animated.spring(slideAnim, {
           toValue: 0,
-          tension: 65,
-          friction: 10,
-          useNativeDriver: true,
+          ...SPRING_CONFIG,
         }),
-      ]).start()
-
-      // Focus input after animation
-      setTimeout(() => {
+      ]).start(() => {
+        // Focus input after animation completes
         inputRef.current?.focus()
-      }, 250)
-    } else {
-      // Animate out
-      Animated.parallel([
-        Animated.timing(fadeAnim, {
-          toValue: 0,
-          duration: 150,
-          useNativeDriver: true,
-        }),
-        Animated.timing(slideAnim, {
-          toValue: 50,
-          duration: 150,
-          useNativeDriver: true,
-        }),
-      ]).start()
+      })
     }
   }, [visible, fadeAnim, slideAnim])
 

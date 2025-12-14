@@ -168,6 +168,12 @@ export interface CreateOrderParams {
 
 /**
  * Get orders for current vendor/user
+ *
+ * ⚠️ CRITICAL: This function uses pagination to fetch ALL orders.
+ * Supabase PostgREST has a hard limit of 1000 rows per request.
+ * DO NOT remove pagination - it will silently cap results at 1000!
+ *
+ * @see https://supabase.com/docs/guides/api#pagination
  */
 export async function getOrders(params?: {
   limit?: number
@@ -175,47 +181,95 @@ export async function getOrders(params?: {
   customerId?: string
   locationIds?: string[]
 }): Promise<Order[]> {
-  let query = supabase
-    .from('orders')
-    .select(`
-      *,
-      customers (
-        first_name,
-        last_name,
-        email,
-        phone
-      ),
-      locations:pickup_location_id (
-        name
-      ),
-      created_by_user:created_by_user_id (
-        first_name,
-        last_name
-      )
-    `)
-    .order('created_at', { ascending: false })
+  const PAGE_SIZE = 1000 // Supabase max is 1000 - DO NOT CHANGE
+  const MAX_PAGES = 100 // Safety limit: 100,000 orders max
+  let allData: any[] = []
+  let page = 0
+  let hasMore = true
 
-  if (params?.status) {
-    query = query.eq('status', params.status)
+  console.log('[getOrders] Starting paginated fetch (bypassing Supabase 1000 row limit)')
+
+  // Paginate through all orders - NEVER use a single query for orders
+  while (hasMore && page < MAX_PAGES) {
+    const from = page * PAGE_SIZE
+    const to = from + PAGE_SIZE - 1
+
+    let query = supabase
+      .from('orders')
+      .select(`
+        *,
+        customers (
+          first_name,
+          last_name,
+          email,
+          phone
+        ),
+        locations:pickup_location_id (
+          name
+        ),
+        created_by_user:created_by_user_id (
+          first_name,
+          last_name
+        )
+      `)
+      .order('created_at', { ascending: false })
+      .range(from, to)
+
+    if (params?.status) {
+      query = query.eq('status', params.status)
+    }
+
+    if (params?.customerId) {
+      query = query.eq('customer_id', params.customerId)
+    }
+
+    if (params?.locationIds && params.locationIds.length > 0) {
+      query = query.in('pickup_location_id', params.locationIds)
+    }
+
+    // If user requested a specific limit, apply it
+    if (params?.limit && allData.length + PAGE_SIZE > params.limit) {
+      const remaining = params.limit - allData.length
+      if (remaining <= 0) break
+      query = query.limit(remaining)
+    }
+
+    const { data, error } = await query
+
+    if (error) {
+      throw new Error(`Failed to fetch orders: ${error.message}`)
+    }
+
+    if (data && data.length > 0) {
+      allData = allData.concat(data)
+      console.log(`[getOrders] Page ${page + 1}: fetched ${data.length} orders (total: ${allData.length})`)
+
+      // ⚠️ SANITY CHECK: Warn if we're hitting the Supabase limit
+      if (page === 0 && data.length === PAGE_SIZE) {
+        console.warn('[getOrders] ⚠️ First page returned exactly 1000 rows - pagination is working correctly')
+      }
+    }
+
+    // If we got less than PAGE_SIZE, we've reached the end
+    if (!data || data.length < PAGE_SIZE) {
+      hasMore = false
+    }
+
+    // Safety: warn if we're hitting max pages
+    if (page >= MAX_PAGES - 1) {
+      console.error(`[getOrders] 🚨 CRITICAL: Hit max pages limit (${MAX_PAGES}). Some orders may be missing!`)
+    }
+
+    // If user requested a limit and we've reached it, stop
+    if (params?.limit && allData.length >= params.limit) {
+      hasMore = false
+    }
+
+    page++
   }
 
-  if (params?.customerId) {
-    query = query.eq('customer_id', params.customerId)
-  }
-
-  if (params?.locationIds && params.locationIds.length > 0) {
-    query = query.in('pickup_location_id', params.locationIds)
-  }
-
-  if (params?.limit) {
-    query = query.limit(params.limit)
-  }
-
-  const { data, error } = await query
-
-  if (error) {
-    throw new Error(`Failed to fetch orders: ${error.message}`)
-  }
+  console.log('[getOrders] Total orders fetched:', allData.length)
+  const data = allData
 
   // Batch fetch order_locations for ALL orders (no limits - orders must never have orphaned data)
   const allOrders = data || []
@@ -248,6 +302,7 @@ export async function getOrders(params?: {
           locations:location_id (name)
         `)
         .in('order_id', batchIds)
+        .range(0, 49999) // NO LIMIT - fetch all order locations
 
       if (!locError && locationsData) {
         allLocationsData = allLocationsData.concat(locationsData)

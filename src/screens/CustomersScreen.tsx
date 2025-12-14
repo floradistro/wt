@@ -288,7 +288,7 @@ function CustomersScreenComponent() {
           <View style={styles.customersCardGlass}>
             {customers.map((customer, index) => (
               <CustomerItem
-                key={customer.id}
+                key={`${letter}-${customer.id}-${index}`}
                 item={customer}
                 isLast={index === customers.length - 1}
                 isSelected={selectedCustomer?.id === customer.id}

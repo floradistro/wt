@@ -61,6 +61,10 @@ export interface CustomerWithOrders extends Customer {
  * Smart search across ALL fields with NO LIMITS
  * Searches: first_name, last_name, middle_name, display_name, email, phone
  * Only returns active customers by default (is_active = true)
+ *
+ * ⚠️ CRITICAL: This function uses pagination to fetch ALL customers.
+ * Supabase PostgREST has a hard limit of 1000 rows per request.
+ * DO NOT remove pagination - it will silently cap results at 1000!
  */
 export async function getCustomers(params?: {
   limit?: number
@@ -68,54 +72,93 @@ export async function getCustomers(params?: {
   vendorId?: string
   includeInactive?: boolean
 }): Promise<Customer[]> {
-  let query = supabase
-    .from('customers')
-    .select('*', { count: 'exact' }) // Add count to bypass max-rows limit
-    .order('created_at', { ascending: false })
+  const PAGE_SIZE = 1000 // Supabase max is 1000 - DO NOT CHANGE
+  const MAX_PAGES = 100 // Safety limit: 100,000 customers max
+  let allData: Customer[] = []
+  let page = 0
+  let hasMore = true
 
-  // Filter active customers only (unless explicitly requested)
-  if (!params?.includeInactive) {
-    query = query.eq('is_active', true)
-  }
+  logger.info('[getCustomers] Starting paginated fetch (bypassing Supabase 1000 row limit)')
 
-  if (params?.vendorId) {
-    query = query.eq('vendor_id', params.vendorId)
-  }
+  // Paginate through all customers - NEVER use a single query for lists
+  while (hasMore && page < MAX_PAGES) {
+    const from = page * PAGE_SIZE
+    const to = from + PAGE_SIZE - 1
 
-  if (params?.searchTerm) {
-    const term = params.searchTerm.trim()
-    // Normalize phone number for better search matching
-    const normalizedPhone = normalizePhone(term)
+    let query = supabase
+      .from('customers')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .range(from, to)
 
-    // Build search conditions
-    const searchConditions = [
-      `first_name.ilike.%${term}%`,
-      `last_name.ilike.%${term}%`,
-      `middle_name.ilike.%${term}%`,
-      `display_name.ilike.%${term}%`,
-      `email.ilike.%${term}%`,
-      `phone.ilike.%${term}%`,
-    ]
-
-    // Add normalized phone search if applicable
-    if (normalizedPhone && normalizedPhone !== term) {
-      searchConditions.push(`phone.ilike.%${normalizedPhone}%`)
+    // Filter active customers only (unless explicitly requested)
+    if (!params?.includeInactive) {
+      query = query.eq('is_active', true)
     }
 
-    query = query.or(searchConditions.join(','))
+    if (params?.vendorId) {
+      query = query.eq('vendor_id', params.vendorId)
+    }
+
+    if (params?.searchTerm) {
+      const term = params.searchTerm.trim()
+      // Normalize phone number for better search matching
+      const normalizedPhone = normalizePhone(term)
+
+      // Build search conditions
+      const searchConditions = [
+        `first_name.ilike.%${term}%`,
+        `last_name.ilike.%${term}%`,
+        `middle_name.ilike.%${term}%`,
+        `display_name.ilike.%${term}%`,
+        `email.ilike.%${term}%`,
+        `phone.ilike.%${term}%`,
+      ]
+
+      // Add normalized phone search if applicable
+      if (normalizedPhone && normalizedPhone !== term) {
+        searchConditions.push(`phone.ilike.%${normalizedPhone}%`)
+      }
+
+      query = query.or(searchConditions.join(','))
+    }
+
+    const { data, error } = await query
+
+    if (error) {
+      throw new Error(`Failed to fetch customers: ${error.message}`)
+    }
+
+    if (data && data.length > 0) {
+      allData = allData.concat(data)
+      logger.info(`[getCustomers] Page ${page + 1}: fetched ${data.length} customers (total: ${allData.length})`)
+
+      // ⚠️ SANITY CHECK: Warn if we're hitting the Supabase limit
+      if (page === 0 && data.length === PAGE_SIZE) {
+        logger.warn('[getCustomers] ⚠️ First page returned exactly 1000 rows - pagination is working correctly')
+      }
+    }
+
+    // If we got less than PAGE_SIZE, we've reached the end
+    if (!data || data.length < PAGE_SIZE) {
+      hasMore = false
+    }
+
+    // Safety: warn if we're hitting max pages
+    if (page >= MAX_PAGES - 1) {
+      logger.error(`[getCustomers] 🚨 CRITICAL: Hit max pages limit (${MAX_PAGES}). Some customers may be missing!`)
+    }
+
+    // If user requested a limit and we've reached it, stop
+    if (params?.limit && allData.length >= params.limit) {
+      hasMore = false
+    }
+
+    page++
   }
 
-  // CRITICAL: Use range() to override Supabase max-rows limit (defaults to 1000)
-  // This allows us to fetch ALL customers (7000+)
-  query = query.range(0, 99999)
-
-  const { data, error } = await query
-
-  if (error) {
-    throw new Error(`Failed to fetch customers: ${error.message}`)
-  }
-
-  return data || []
+  logger.info('[getCustomers] Total customers fetched:', allData.length)
+  return allData
 }
 
 /**
@@ -203,10 +246,14 @@ export async function getCustomerByEmail(email: string, vendorId?: string): Prom
 
 /**
  * Search customers (for POS and Customer Screen)
- * Smart search across ALL fields with NO LIMITS
+ * Smart search across ALL fields
  * Searches: first_name, last_name, middle_name, display_name, email, phone
  * Phone numbers are normalized (formatting removed) for better matching
  * Only returns active customers (is_active = true)
+ *
+ * NOTE: This uses a single query (no pagination) because search results
+ * are filtered and unlikely to exceed 1000. If you're seeing exactly 1000
+ * results, this function needs pagination like getCustomers().
  */
 export async function searchCustomers(
   searchTerm: string,
@@ -238,7 +285,7 @@ export async function searchCustomers(
 
   let query = supabase
     .from('customers')
-    .select('*', { count: 'exact' })
+    .select('*')
     .eq('is_active', true) // Only active customers
 
   if (vendorId) {
@@ -248,12 +295,17 @@ export async function searchCustomers(
   query = query
     .or(searchConditions.join(','))
     .order('total_spent', { ascending: false }) // Sort by best customers first
-    .range(0, 99999) // Override Supabase max-rows limit
+    .limit(1000) // Explicit limit - search results shouldn't exceed this
 
   const { data, error } = await query
 
   if (error) {
     throw new Error(`Failed to search customers: ${error.message}`)
+  }
+
+  // ⚠️ SANITY CHECK: Warn if we hit exactly 1000 results
+  if (data && data.length === 1000) {
+    logger.warn('[searchCustomers] ⚠️ Search returned exactly 1000 results - some may be missing!')
   }
 
   return data || []
@@ -655,6 +707,60 @@ export async function getWalletPassStats(vendorId: string): Promise<{
 }
 
 /**
+ * Merge two customers into one
+ * - Keeps the "target" customer (the one with better/more data)
+ * - Merges contact info (fills in missing fields from source)
+ * - Sums loyalty points
+ * - Transfers all orders from source to target
+ * - Soft-deletes the source customer
+ *
+ * Uses atomic database function with SECURITY DEFINER to bypass RLS
+ *
+ * @param targetId - ID of customer to keep (will receive merged data)
+ * @param sourceId - ID of customer to merge from (will be deleted)
+ * @param vendorId - Vendor ID for security
+ */
+export async function mergeCustomers(
+  targetId: string,
+  sourceId: string,
+  vendorId: string
+): Promise<Customer> {
+  logger.info('[mergeCustomers] Starting merge', { targetId, sourceId, vendorId })
+
+  // Call atomic database function
+  const { data, error } = await supabase.rpc('merge_customers_safe', {
+    p_target_id: targetId,
+    p_source_id: sourceId,
+    p_vendor_id: vendorId,
+  })
+
+  if (error) {
+    throw new Error(`Failed to merge customers: ${error.message}`)
+  }
+
+  // Verify function returned data
+  if (!data || data.length === 0) {
+    throw new Error('Failed to merge customers: no data returned')
+  }
+
+  const result = data[0]
+
+  if (!result.success) {
+    throw new Error('Failed to merge customers: operation did not complete')
+  }
+
+  logger.info('[mergeCustomers] Merge complete', {
+    targetId: result.target_id,
+    sourceId: result.source_id,
+    mergedPoints: result.merged_loyalty_points,
+    ordersTransferred: result.orders_transferred,
+  })
+
+  // Return the updated target customer
+  return getCustomerById(targetId)
+}
+
+/**
  * Export service object
  */
 export const customersService = {
@@ -669,6 +775,7 @@ export const customersService = {
   getCustomerWithOrders,
   getTopCustomers,
   deleteCustomer,
+  mergeCustomers,
   // Wallet pass functions
   getCustomerWalletPass,
   hasWalletPass,

@@ -33,13 +33,17 @@ export function clearNotificationNavigator() {
 }
 
 // Configure notification handler
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-  }),
-})
+try {
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowAlert: true,
+      shouldPlaySound: true,
+      shouldSetBadge: true,
+    }),
+  })
+} catch (error) {
+  console.error('[OrderNotifications] Failed to set notification handler:', error)
+}
 
 /**
  * Request notification permissions

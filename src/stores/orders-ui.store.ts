@@ -288,5 +288,24 @@ export const useOrdersUIState = () => useOrdersUIStore(
   }))
 )
 
+// Export actions for non-hook usage (like checkoutUIActions pattern)
+export const ordersUIActions = {
+  get setActiveNav() { return useOrdersUIStore.getState().setActiveNav },
+  get setActiveNavWithOrder() { return useOrdersUIStore.getState().setActiveNavWithOrder },
+  get selectOrder() { return useOrdersUIStore.getState().selectOrder },
+  get setSearchQuery() { return useOrdersUIStore.getState().setSearchQuery },
+  get setDateRange() { return useOrdersUIStore.getState().setDateRange },
+  get setCustomDateRange() { return useOrdersUIStore.getState().setCustomDateRange },
+  get toggleLocationSelector() { return useOrdersUIStore.getState().toggleLocationSelector },
+  get openLocationSelector() { return useOrdersUIStore.getState().openLocationSelector },
+  get closeLocationSelector() { return useOrdersUIStore.getState().closeLocationSelector },
+  get openCustomDatePicker() { return useOrdersUIStore.getState().openCustomDatePicker },
+  get closeCustomDatePicker() { return useOrdersUIStore.getState().closeCustomDatePicker },
+  get openShipModal() { return useOrdersUIStore.getState().openShipModal },
+  get closeShipModal() { return useOrdersUIStore.getState().closeShipModal },
+  get markShipmentComplete() { return useOrdersUIStore.getState().markShipmentComplete },
+  get reset() { return useOrdersUIStore.getState().reset },
+}
+
 // Export types for external use
 export type { NavSection, DateRange }

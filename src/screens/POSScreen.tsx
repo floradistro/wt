@@ -30,7 +30,7 @@ import { useAppAuth } from '@/contexts/AppAuthContext'
 // New Refactored Components
 import {
   POSSessionSetup,
-  POSProductBrowser,
+  POSSwipeableBrowser,
   POSCheckout,
 } from '@/components/pos'
 
@@ -122,18 +122,16 @@ export function POSScreen({ isActive = true }: { isActive?: boolean }) {
 
   // PHASE 2: Main POS interface (products + checkout)
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+    <SafeAreaView style={styles.container} edges={['left', 'right']}>
       <Animated.View style={[styles.mainLayout, { opacity: fadeAnim }]}>
-        {/* Left Column - Checkout (same container as NavSidebar) */}
+        {/* Left Column - Checkout (full height, no padding) */}
         <View style={styles.leftColumn}>
-          <View style={styles.cartContainer}>
-            <POSCheckout key={`pos-checkout-${session?.sessionId}-${refreshKey}`} />
-          </View>
+          <POSCheckout key={`pos-checkout-${session?.sessionId}-${refreshKey}`} />
         </View>
 
-        {/* Right Column - Products */}
+        {/* Right Column - Products/Orders */}
         <View style={styles.rightColumn}>
-          <POSProductBrowser key={`pos-products-${session?.sessionId}-${refreshKey}`} />
+          <POSSwipeableBrowser key={`pos-browser-${session?.sessionId}-${refreshKey}`} />
         </View>
       </Animated.View>
     </SafeAreaView>
@@ -155,17 +153,6 @@ const styles = StyleSheet.create({
   leftColumn: {
     width: layout.sidebarWidth, // Match nav sidebar exactly (375px)
     backgroundColor: '#000',
-  },
-  cartContainer: {
-    flex: 1,
-    marginLeft: 8, // Ultra-minimal iOS-style padding
-    marginRight: 8, // Match left - ultra-minimal
-    marginTop: 8, // Match left - ultra-minimal
-    marginBottom: 8, // Match left - ultra-minimal
-    borderRadius: layout.containerRadius,
-    borderCurve: 'continuous',
-    overflow: 'hidden',
-    backgroundColor: 'rgba(255,255,255,0.05)', // Match product list - borderless
   },
   rightColumn: {
     flex: 1,

@@ -8,8 +8,8 @@
  */
 
 export const layout = {
-  // Sidebar Navigation (Settings-style) - ✅ FIXED: Apple iPadOS spec is 320px
-  sidebarWidth: 320, // iPad Settings sidebar standard (was 375px - too wide!)
+  // Sidebar Navigation (Settings-style) - Compact cart width
+  sidebarWidth: 280, // Compact cart width for POS
 
   // ==========================================
   // APPLE 8PX DESIGN SYSTEM

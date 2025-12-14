@@ -41,7 +41,7 @@ import { useCustomerSelectorAnimations } from '@/hooks/pos/useCustomerSelectorAn
 import { useRecentCustomers, type RecentCustomer } from '@/hooks/pos/useRecentCustomers'
 import { formatRelativeTime } from '@/utils/time'
 import { useAppAuth } from '@/contexts/AppAuthContext'
-import { useActiveModal, checkoutUIActions } from '@/stores/checkout-ui.store'
+import { useActiveModal, useHasModalHistory, checkoutUIActions } from '@/stores/checkout-ui.store'
 import { customerActions } from '@/stores/customer.store'
 import { logger } from '@/utils/logger'
 
@@ -57,7 +57,7 @@ import { logger } from '@/utils/logger'
  * - onCustomerSelected → checkoutUIActions.handleCustomerSelected
  * - onNoMatchFoundWithData → checkoutUIActions.handleNoMatchFoundWithData
  * - onAddCustomer → checkoutUIActions.handleAddCustomer
- * - onClose → checkoutUIActions.closeModal
+ * - onClose → checkoutUIActions.closeModal / popModal
  */
 function POSUnifiedCustomerSelector() {
   // ========================================
@@ -65,6 +65,7 @@ function POSUnifiedCustomerSelector() {
   // ========================================
   const activeModal = useActiveModal()
   const visible = activeModal === 'customerSelector'
+  const hasModalHistory = useHasModalHistory()
   const insets = useSafeAreaInsets()
   const device = useCameraDevice('back')
   const cameraRef = useRef<Camera>(null)
@@ -165,33 +166,39 @@ function POSUnifiedCustomerSelector() {
       dob: parsedData.dateOfBirth,
     })
 
-    // Automatically match and select customer
+    // Find ALL matching customers to prevent duplicates
     const processScannedData = async () => {
       try {
-        const { customer, matchType } = await customerActions.findMatchingCustomer(parsedData)
+        // Use findAllMatchingCustomers to get ALL potential matches
+        // This prevents duplicate creation by showing staff all matches
+        const matches = await customerActions.findAllMatchingCustomers(parsedData)
 
-        if (customer && matchType) {
-          logger.info('[POSUnifiedCustomerSelector] Found matching customer:', {
-            matchType,
-            customerId: customer.id,
-            name: `${customer.first_name} ${customer.last_name}`,
+        if (matches.length > 0) {
+          logger.info('[POSUnifiedCustomerSelector] Found matching customers:', {
+            count: matches.length,
+            customers: matches.map(m => ({
+              id: m.customer.id,
+              name: `${m.customer.first_name} ${m.customer.last_name}`,
+              confidence: m.confidence,
+              score: m.confidenceScore,
+            })),
           })
 
-          // Create match object
-          const match = customerActions.createCustomerMatch(customer, matchType)
+          // Fetch pending orders for all matched customers
+          const matchesWithOrders = await Promise.all(
+            matches.map(async (match) => {
+              const pendingOrders = await customerActions.fetchPendingOrders(match.customer.id)
+              return { ...match, pendingOrders }
+            })
+          )
 
-          if (matchType === 'exact') {
-            // Exact match - auto-select customer immediately
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
-            addRecentCustomer(customer)
-            customerActions.selectCustomer(customer)
-            checkoutUIActions.closeModal()
-          } else {
-            // High confidence - show confirmation modal
-            customerActions.setCustomerMatches([match])
-            checkoutUIActions.closeModal()
-            checkoutUIActions.openModal('customerMatch')
-          }
+          // ALWAYS show match modal when there are matches
+          // This prevents accidental duplicate creation and lets staff choose
+          // Even for single exact match - staff should confirm
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+          customerActions.setCustomerMatches(matchesWithOrders)
+          checkoutUIActions.closeModal()
+          checkoutUIActions.openModal('customerMatch')
         } else {
           // No match found - go to add customer with pre-filled data
           logger.info('[POSUnifiedCustomerSelector] No matching customer found, opening add customer modal')

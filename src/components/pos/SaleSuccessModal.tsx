@@ -11,13 +11,26 @@
  * - iOS native payment confirmation
  */
 
-import { useEffect, useRef, useState } from 'react'
-import { View, Text, StyleSheet, Modal, Animated, Dimensions } from 'react-native'
+import { useEffect, useRef, useState, useCallback } from 'react'
+import { View, Text, StyleSheet, Modal, Animated, Dimensions, Easing } from 'react-native'
 import { BlurView } from 'expo-blur'
 import * as Haptics from 'expo-haptics'
 import { Ionicons } from '@expo/vector-icons'
 import { playSaleCompletionSound } from '@/lib/id-scanner/audio'
 import type { SaleCompletionData } from './payment'
+
+// Apple-standard spring configs
+const SPRING_BOUNCE = {
+  tension: 200,
+  friction: 6,
+  useNativeDriver: true,
+}
+
+const SPRING_SMOOTH = {
+  tension: 300,
+  friction: 20,
+  useNativeDriver: true,
+}
 
 interface SaleSuccessModalProps {
   visible: boolean
@@ -46,7 +59,7 @@ export function SaleSuccessModal({
 
   useEffect(() => {
     if (visible && completionData) {
-      // Reset all animations
+      // Reset all animations immediately
       checkmarkScale.setValue(0)
       checkmarkRotate.setValue(0)
       contentOpacity.setValue(0)
@@ -56,99 +69,102 @@ export function SaleSuccessModal({
       setShowContent(false)
 
       // ========================================
-      // ANIMATION SEQUENCE (Apple choreography)
+      // ANIMATION SEQUENCE - Optimized with Animated.sequence
+      // No setTimeout - pure native driver animation chain
       // ========================================
 
-      // Step 1: Ring pulse (0-300ms)
-      Animated.sequence([
+      // Success haptic and sound at start
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+      playSaleCompletionSound()
+
+      // Ring pulse animation
+      const ringAnimation = Animated.sequence([
         Animated.parallel([
           Animated.spring(ringScale, {
             toValue: 1.2,
-            tension: 50,
-            friction: 3,
-            useNativeDriver: true,
+            ...SPRING_BOUNCE,
           }),
           Animated.timing(ringOpacity, {
-            toValue: 0.3,
-            duration: 150,
+            toValue: 0.4,
+            duration: 120,
             useNativeDriver: true,
           }),
         ]),
         Animated.parallel([
           Animated.spring(ringScale, {
             toValue: 1,
-            tension: 100,
-            friction: 5,
-            useNativeDriver: true,
+            ...SPRING_SMOOTH,
           }),
           Animated.timing(ringOpacity, {
             toValue: 0,
-            duration: 150,
+            duration: 120,
             useNativeDriver: true,
           }),
         ]),
-      ]).start()
+      ])
 
-      // Step 2: Checkmark bounce with rotation (200-600ms)
-      setTimeout(() => {
-        // Success haptic (like Apple Pay)
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+      // Checkmark bounce animation
+      const checkmarkAnimation = Animated.parallel([
+        Animated.spring(checkmarkScale, {
+          toValue: 1,
+          ...SPRING_BOUNCE,
+        }),
+        Animated.timing(checkmarkRotate, {
+          toValue: 1,
+          duration: 350,
+          easing: Easing.out(Easing.back(1.5)),
+          useNativeDriver: true,
+        }),
+      ])
 
-        // Satisfying success sound (subtle but rewarding)
-        playSaleCompletionSound()
+      // Content reveal animation
+      const contentAnimation = Animated.parallel([
+        Animated.timing(contentOpacity, {
+          toValue: 1,
+          duration: 250,
+          useNativeDriver: true,
+        }),
+        Animated.spring(contentTranslateY, {
+          toValue: 0,
+          ...SPRING_SMOOTH,
+        }),
+      ])
 
-        Animated.parallel([
-          Animated.spring(checkmarkScale, {
-            toValue: 1,
-            tension: 40,
-            friction: 4,
-            useNativeDriver: true,
-          }),
-          Animated.timing(checkmarkRotate, {
-            toValue: 1,
-            duration: 400,
-            useNativeDriver: true,
-          }),
-        ]).start()
-      }, 200)
+      // Exit animation
+      const exitAnimation = Animated.parallel([
+        Animated.timing(checkmarkScale, {
+          toValue: 0.85,
+          duration: 180,
+          useNativeDriver: true,
+        }),
+        Animated.timing(contentOpacity, {
+          toValue: 0,
+          duration: 180,
+          useNativeDriver: true,
+        }),
+      ])
 
-      // Step 3: Content fade in (600-900ms)
-      setTimeout(() => {
+      // Run the full sequence
+      Animated.sequence([
+        // Phase 1: Ring + checkmark together (0-400ms)
+        Animated.stagger(100, [ringAnimation, checkmarkAnimation]),
+        // Phase 2: Content reveal (400-700ms)
+        Animated.delay(50),
+      ]).start(() => {
         setShowContent(true)
-        Animated.parallel([
-          Animated.timing(contentOpacity, {
-            toValue: 1,
-            duration: 300,
-            useNativeDriver: true,
-          }),
-          Animated.spring(contentTranslateY, {
-            toValue: 0,
-            tension: 60,
-            friction: 8,
-            useNativeDriver: true,
-          }),
-        ]).start()
-      }, 600)
+        contentAnimation.start()
+      })
 
-      // Step 4: Auto-dismiss with fade out (1.8s total - faster)
-      setTimeout(() => {
-        Animated.parallel([
-          Animated.timing(checkmarkScale, {
-            toValue: 0.8,
-            duration: 200,
-            useNativeDriver: true,
-          }),
-          Animated.timing(contentOpacity, {
-            toValue: 0,
-            duration: 200,
-            useNativeDriver: true,
-          }),
-        ]).start(() => {
+      // Auto-dismiss after 1.6s (faster for better UX)
+      const dismissTimer = setTimeout(() => {
+        exitAnimation.start(() => {
           onDismiss()
         })
-      }, 1800)
+      }, 1600)
+
+      return () => clearTimeout(dismissTimer)
     }
-  }, [visible, completionData])
+  }, [visible, completionData, onDismiss, checkmarkScale, checkmarkRotate, contentOpacity, contentTranslateY, ringScale, ringOpacity])
 
   if (!visible || !completionData) return null
 

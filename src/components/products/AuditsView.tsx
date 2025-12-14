@@ -464,8 +464,13 @@ export function AuditsView({
                   <View style={styles.modalInfoRow}>
                     <Text style={styles.modalInfoLabel}>Staff:</Text>
                     <Text style={styles.modalInfoValue}>
-                      {selectedAuditBatch.adjustments[0]?.created_by_user?.first_name}{' '}
-                      {selectedAuditBatch.adjustments[0]?.created_by_user?.last_name}
+                      {(() => {
+                        const user = selectedAuditBatch.adjustments[0]?.created_by_user
+                        if (user?.first_name && user?.last_name) {
+                          return `${user.first_name} ${user.last_name}`
+                        }
+                        return user?.email?.split('@')[0] || 'Unknown'
+                      })()}
                     </Text>
                   </View>
                   <View style={styles.modalInfoRow}>
@@ -524,12 +529,12 @@ export function AuditsView({
                               ]}
                             >
                               {adj.quantity_change > 0 ? '+' : ''}
-                              {adj.quantity_change}
+                              {Number(adj.quantity_change.toFixed(2))}
                               {unit}
                             </Text>
                             <Text style={styles.modalProductBeforeAfter}>
-                              {adj.quantity_before}
-                              {unit} → {adj.quantity_after}
+                              {Number(adj.quantity_before.toFixed(2))}
+                              {unit} → {Number(adj.quantity_after.toFixed(2))}
                               {unit}
                             </Text>
                             {adj.notes && (

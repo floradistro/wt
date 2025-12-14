@@ -22,6 +22,15 @@ import type { AAMVAData } from '@/lib/id-scanner/aamva-parser'
 import type { PaymentData, SaleCompletionData } from '@/components/pos/payment'
 import { logger } from '@/utils/logger'
 
+// Modal stack entry for navigation history
+interface ModalStackEntry {
+  id: string
+  data?: Record<string, any>
+}
+
+// Safety limit for modal stack depth (prevents memory leaks from infinite navigation)
+const MAX_MODAL_STACK_DEPTH = 5
+
 interface CheckoutUIState {
   // Campaign discount selection
   selectedDiscountId: string | null
@@ -36,8 +45,11 @@ interface CheckoutUIState {
   showDiscountSelector: boolean
 
   // Modal state (ANTI-LOOP: Simple state, no circular dependencies)
+  // Now with stack for navigation history
   activeModal: string | null
   modalData: Record<string, any> | null
+  modalStack: ModalStackEntry[]  // Stack for modal history
+  modalSuspended: boolean  // True when modal is temporarily hidden (e.g., viewing order)
 
   // Error modal state
   errorModal: {
@@ -52,7 +64,11 @@ interface CheckoutUIState {
   setStaffDiscountItemId: (itemId: string | null) => void
   setShowDiscountSelector: (show: boolean) => void
   openModal: (id: string, data?: any) => void
+  pushModal: (id: string, data?: any) => void  // Push to stack, keep history
   closeModal: () => void
+  popModal: () => void  // Pop from stack, return to previous
+  suspendModal: () => void  // Temporarily hide modal (keeps state)
+  resumeModal: () => void  // Show modal again after suspend
   isModalOpen: (id: string) => boolean
   setErrorModal: (visible: boolean, title?: string, message?: string) => void
   reset: () => void
@@ -66,6 +82,8 @@ const initialState = {
   showDiscountSelector: false,
   activeModal: null,
   modalData: null,
+  modalStack: [] as ModalStackEntry[],
+  modalSuspended: false,
   errorModal: {
     visible: false,
     title: '',
@@ -107,19 +125,82 @@ export const useCheckoutUIStore = create<CheckoutUIState>()(
       },
 
       /**
-       * Open a modal with optional data
+       * Open a modal with optional data (clears stack - fresh start)
        * ANTI-LOOP: Simple setState - no side effects
        */
       openModal: (id: string, data?: any) => {
-        set({ activeModal: id, modalData: data || null }, false, 'checkoutUI/openModal')
+        set({ activeModal: id, modalData: data || null, modalStack: [] }, false, 'checkoutUI/openModal')
       },
 
       /**
-       * Close the active modal
+       * Push a modal onto stack (saves current to history, opens new)
+       * Modal visually closes then new one opens - no stacking
+       * Use when opening a new modal FROM another modal
+       *
+       * Safety: Enforces MAX_MODAL_STACK_DEPTH to prevent memory issues
+       */
+      pushModal: (id: string, data?: any) => {
+        const { activeModal, modalData, modalStack } = get()
+
+        // Safety check: prevent infinite stack growth
+        if (modalStack.length >= MAX_MODAL_STACK_DEPTH) {
+          logger.warn(`[CheckoutUI] Modal stack depth limit reached (${MAX_MODAL_STACK_DEPTH}). Clearing stack.`)
+          // Clear stack and open fresh - prevents memory issues
+          set({ activeModal: id, modalData: data || null, modalStack: [] }, false, 'checkoutUI/pushModal')
+          return
+        }
+
+        // Save current modal to stack for back navigation
+        const newStack = activeModal
+          ? [...modalStack, { id: activeModal, data: modalData || undefined }]
+          : modalStack
+        // Set new modal (old one closes, new one opens)
+        set({ activeModal: id, modalData: data || null, modalStack: newStack }, false, 'checkoutUI/pushModal')
+      },
+
+      /**
+       * Close the active modal (clears everything)
        * ANTI-LOOP: Simple setState - no side effects
        */
       closeModal: () => {
-        set({ activeModal: null, modalData: null }, false, 'checkoutUI/closeModal')
+        set({ activeModal: null, modalData: null, modalStack: [] }, false, 'checkoutUI/closeModal')
+      },
+
+      /**
+       * Pop modal from stack (return to previous modal)
+       * Use when closing a modal that was pushed from another modal
+       */
+      popModal: () => {
+        const { modalStack } = get()
+        if (modalStack.length === 0) {
+          // No stack - just close
+          set({ activeModal: null, modalData: null, modalSuspended: false }, false, 'checkoutUI/popModal')
+          return
+        }
+        // Pop last modal from stack
+        const newStack = [...modalStack]
+        const previousModal = newStack.pop()
+        set({
+          activeModal: previousModal?.id || null,
+          modalData: previousModal?.data || null,
+          modalStack: newStack,
+          modalSuspended: false,
+        }, false, 'checkoutUI/popModal')
+      },
+
+      /**
+       * Temporarily hide the current modal (keeps state for resume)
+       * Use when opening an external modal (like order detail)
+       */
+      suspendModal: () => {
+        set({ modalSuspended: true }, false, 'checkoutUI/suspendModal')
+      },
+
+      /**
+       * Show the modal again after suspend
+       */
+      resumeModal: () => {
+        set({ modalSuspended: false }, false, 'checkoutUI/resumeModal')
       },
 
       /**
@@ -186,6 +267,18 @@ export const useModalData = () =>
 export const useErrorModal = () =>
   useCheckoutUIStore((state) => state.errorModal)
 
+// Get modal stack (for checking if we can go back)
+export const useModalStack = () =>
+  useCheckoutUIStore((state) => state.modalStack)
+
+// Check if there's modal history (can go back)
+export const useHasModalHistory = () =>
+  useCheckoutUIStore((state) => state.modalStack.length > 0)
+
+// Check if modal is suspended (temporarily hidden)
+export const useModalSuspended = () =>
+  useCheckoutUIStore((state) => state.modalSuspended)
+
 // Export checkout UI actions as plain object (not a hook!)
 export const checkoutUIActions = {
   get setSelectedDiscountId() { return useCheckoutUIStore.getState().setSelectedDiscountId },
@@ -193,10 +286,16 @@ export const checkoutUIActions = {
   get setStaffDiscountItemId() { return useCheckoutUIStore.getState().setStaffDiscountItemId },
   get setShowDiscountSelector() { return useCheckoutUIStore.getState().setShowDiscountSelector },
   get openModal() { return useCheckoutUIStore.getState().openModal },
+  get pushModal() { return useCheckoutUIStore.getState().pushModal },
   get closeModal() { return useCheckoutUIStore.getState().closeModal },
+  get popModal() { return useCheckoutUIStore.getState().popModal },
+  get suspendModal() { return useCheckoutUIStore.getState().suspendModal },
+  get resumeModal() { return useCheckoutUIStore.getState().resumeModal },
   get setErrorModal() { return useCheckoutUIStore.getState().setErrorModal },
   // isModalOpen is still available for non-reactive checks if needed
   isModalOpen: (id: string) => useCheckoutUIStore.getState().activeModal === id,
+  hasModalHistory: () => useCheckoutUIStore.getState().modalStack.length > 0,
+  isModalSuspended: () => useCheckoutUIStore.getState().modalSuspended,
   get reset() { return useCheckoutUIStore.getState().reset },
 }
 

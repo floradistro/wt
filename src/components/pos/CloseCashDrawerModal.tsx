@@ -1,10 +1,17 @@
-import {  View, Text, StyleSheet, TextInput, TouchableOpacity, Modal, Animated, Dimensions, ScrollView, KeyboardAvoidingView, Platform } from 'react-native'
-import {  BlurView } from 'expo-blur'
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, Modal, Animated, Dimensions, ScrollView, KeyboardAvoidingView, Platform } from 'react-native'
+import { BlurView } from 'expo-blur'
 import * as Haptics from 'expo-haptics'
-import { memo,  useRef, useEffect, useState } from 'react'
+import { memo, useRef, useEffect, useState, useCallback } from 'react'
 
 const { width } = Dimensions.get('window')
 const isTablet = width > 600
+
+// Apple-standard spring config
+const SPRING_CONFIG = {
+  tension: 300,
+  friction: 26,
+  useNativeDriver: true,
+}
 
 interface CloseCashDrawerModalProps {
   visible: boolean
@@ -28,43 +35,33 @@ function CloseCashDrawerModal({
   const [closingCash, setClosingCash] = useState('')
   const [notes, setNotes] = useState('')
   const fadeAnim = useRef(new Animated.Value(0)).current
-  const scaleAnim = useRef(new Animated.Value(0.9)).current
+  const scaleAnim = useRef(new Animated.Value(0.92)).current
 
   const expectedCash = openingCash + totalCash
   const cashDifference = closingCash ? parseFloat(closingCash) - expectedCash : 0
 
+  // Apple-standard 60fps animations
   useEffect(() => {
     if (visible) {
+      // Reset to start position
+      fadeAnim.setValue(0)
+      scaleAnim.setValue(0.92)
+
       Animated.parallel([
         Animated.timing(fadeAnim, {
           toValue: 1,
-          duration: 200,
+          duration: 180,
           useNativeDriver: true,
         }),
         Animated.spring(scaleAnim, {
           toValue: 1,
-          tension: 50,
-          friction: 10,
-          useNativeDriver: true,
-        }),
-      ]).start()
-    } else {
-      Animated.parallel([
-        Animated.timing(fadeAnim, {
-          toValue: 0,
-          duration: 150,
-          useNativeDriver: true,
-        }),
-        Animated.timing(scaleAnim, {
-          toValue: 0.9,
-          duration: 150,
-          useNativeDriver: true,
+          ...SPRING_CONFIG,
         }),
       ]).start()
     }
-  }, [visible])
+  }, [visible, fadeAnim, scaleAnim])
 
-  const handleSubmit = () => {
+  const handleSubmit = useCallback(() => {
     const amount = parseFloat(closingCash || '0')
     if (amount < 0) return
 
@@ -72,14 +69,28 @@ function CloseCashDrawerModal({
     onSubmit(amount, notes)
     setClosingCash('')
     setNotes('')
-  }
+  }, [closingCash, notes, onSubmit])
 
-  const handleCancel = () => {
+  const handleCancel = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-    setClosingCash('')
-    setNotes('')
-    onCancel()
-  }
+    // Quick exit animation
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 0,
+        duration: 120,
+        useNativeDriver: true,
+      }),
+      Animated.timing(scaleAnim, {
+        toValue: 0.92,
+        duration: 120,
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      setClosingCash('')
+      setNotes('')
+      onCancel()
+    })
+  }, [fadeAnim, scaleAnim, onCancel])
 
   return (
     <Modal

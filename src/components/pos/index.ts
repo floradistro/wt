@@ -10,7 +10,7 @@ export { POSRegisterSelector } from './POSRegisterSelector'
 export { POSUnifiedCustomerSelector } from './POSUnifiedCustomerSelector'
 export { POSAddCustomerModal } from './POSAddCustomerModal'
 export { POSCustomerMatchModal } from './POSCustomerMatchModal'
-export type { CustomerMatch, MatchConfidence } from './POSCustomerMatchModal'
+// CustomerMatch and PendingOrder types are now exported from @/stores/customer.store
 
 // Customer Contact Info
 export { POSMissingContactBanner } from './POSMissingContactBanner'
@@ -26,6 +26,12 @@ export { PaymentProcessorStatus } from './PaymentProcessorStatus'
 // Products (Legacy - maintained for grid compatibility)
 export { POSProductCard } from './POSProductCard'
 
+// Orders
+export { POSOrderCard } from './POSOrderCard'
+
+// Swipeable Browser (Products + Orders)
+export { POSSwipeableBrowser } from './POSSwipeableBrowser'
+
 // Cart Components
 export * from './cart'
 
@@ -40,3 +46,6 @@ export * from './session'
 
 // Checkout Components
 export * from './checkout'
+
+// Order Components
+export * from './orders'

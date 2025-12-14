@@ -4,7 +4,7 @@
  * Apple Standard: Component < 300 lines
  */
 
-import { View, Text, StyleSheet, Modal, TouchableOpacity, Animated, useWindowDimensions, ScrollView, LayoutAnimation, Platform, UIManager, KeyboardAvoidingView } from 'react-native'
+import { View, Text, StyleSheet, Modal, TouchableOpacity, Animated, useWindowDimensions, ScrollView, Platform, KeyboardAvoidingView, InteractionManager } from 'react-native'
 import { LiquidGlassView } from '@callstack/liquid-glass'
 import { useState, useRef, useEffect, memo, useMemo, useCallback } from 'react'
 import { Ionicons } from '@expo/vector-icons'
@@ -21,6 +21,18 @@ import { SplitPaymentView } from './payment/SplitPaymentView'
 import { SaleSuccessModal } from './SaleSuccessModal'
 import type { PaymentModalProps, PaymentData, SaleCompletionData } from './payment/PaymentTypes'
 
+// Apple-standard spring config for buttery 60fps animations
+const SPRING_CONFIG = {
+  tension: 300,
+  friction: 26,
+  useNativeDriver: true,
+}
+
+const FADE_CONFIG = {
+  duration: 200,
+  useNativeDriver: true,
+}
+
 function POSPaymentModal({
   visible,
   total,
@@ -34,11 +46,21 @@ function POSPaymentModal({
   locationId,
   registerId,
 }: PaymentModalProps) {
+  // Lazy content rendering - don't render heavy content until first visible
+  const [hasBeenVisible, setHasBeenVisible] = useState(false)
+
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card' | 'split'>('cash')
   const [showSuccessModal, setShowSuccessModal] = useState(false)
   const [completionData, setCompletionData] = useState<SaleCompletionData | null>(null)
   const { width, height } = useWindowDimensions()
   const isLandscape = width > height
+
+  // Track first visibility for lazy loading
+  useEffect(() => {
+    if (visible && !hasBeenVisible) {
+      setHasBeenVisible(true)
+    }
+  }, [visible, hasBeenVisible])
 
   // Use current height for animations
   const slideAnim = useRef(new Animated.Value(height)).current
@@ -103,14 +125,9 @@ function POSPaymentModal({
     return Math.min(selectedDiscount.discount_value, subtotalAfterLoyalty)
   }, [selectedDiscount, cartSubtotal, loyaltyDiscount])
 
-  // Discount handlers
+  // Discount handlers - Direct state updates for instant response
   const handleSelectDiscount = useCallback((discountId: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
-    LayoutAnimation.configureNext(LayoutAnimation.create(
-      200,
-      LayoutAnimation.Types.easeInEaseOut,
-      LayoutAnimation.Properties.opacity
-    ))
     checkoutUIActions.setSelectedDiscountId(discountId)
     setShowDiscountPicker(false)
   }, [])
@@ -122,11 +139,6 @@ function POSPaymentModal({
 
   const handleToggleDiscountPicker = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-    LayoutAnimation.configureNext(LayoutAnimation.create(
-      200,
-      LayoutAnimation.Types.easeInEaseOut,
-      LayoutAnimation.Properties.opacity
-    ))
     setShowDiscountPicker(prev => !prev)
   }, [])
 
@@ -148,31 +160,45 @@ function POSPaymentModal({
   const hasActiveProcessor = !!currentProcessor
   const canCompleteCard = hasActiveProcessor
 
-  // Animation - update when visibility or dimensions change
+  // Animation - Apple-standard 60fps smooth transitions
   useEffect(() => {
     if (visible) {
+      // Reset to start position
+      slideAnim.setValue(height)
+      fadeAnim.setValue(0)
+
+      // Staggered animation for perceived smoothness
       Animated.parallel([
         Animated.spring(slideAnim, {
           toValue: 0,
-          useNativeDriver: true,
-          tension: 50,
-          friction: 10,
+          ...SPRING_CONFIG,
         }),
         Animated.timing(fadeAnim, {
           toValue: 1,
-          duration: 300,
-          useNativeDriver: true,
+          ...FADE_CONFIG,
         }),
       ]).start()
     } else {
-      slideAnim.setValue(height)
-      fadeAnim.setValue(0)
-      setPaymentMethod('cash')
-      // Reset success modal state when payment modal closes
-      setShowSuccessModal(false)
-      setCompletionData(null)
+      // Quick exit animation
+      Animated.parallel([
+        Animated.timing(slideAnim, {
+          toValue: height,
+          duration: 180,
+          useNativeDriver: true,
+        }),
+        Animated.timing(fadeAnim, {
+          toValue: 0,
+          duration: 150,
+          useNativeDriver: true,
+        }),
+      ]).start(() => {
+        // Reset state after animation completes
+        setPaymentMethod('cash')
+        setShowSuccessModal(false)
+        setCompletionData(null)
+      })
     }
-  }, [visible, height])
+  }, [visible, height, slideAnim, fadeAnim])
 
   const handleClose = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
@@ -205,6 +231,12 @@ function POSPaymentModal({
       setCompletionData(null)
       onCancel()
     }, 300) // Give 300ms for any exit animations
+  }
+
+  // Lazy rendering: Don't mount heavy content until first visible
+  // This prevents payment modal from slowing down initial checkout load
+  if (!hasBeenVisible) {
+    return <Modal visible={false} transparent><View /></Modal>
   }
 
   return (

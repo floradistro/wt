@@ -119,23 +119,30 @@ export async function fetchInventoryAdjustments(
     }
 
     // Fetch user data separately for adjustments that have created_by
+    // NOTE: created_by stores auth.uid() (auth_user_id), not users.id
+    // The users table RLS policy only allows: auth_user_id = auth.uid()
+    // So we query by auth_user_id to find the matching user records
     if (data && data.length > 0) {
-      const userIds = [...new Set(data.map(adj => adj.created_by).filter(Boolean))] as string[]
+      const authUserIds = [...new Set(data.map(adj => adj.created_by).filter(Boolean))] as string[]
 
-      if (userIds.length > 0) {
+      if (authUserIds.length > 0) {
         const { data: users, error: usersError } = await supabase
           .from('users')
-          .select('id, email, first_name, last_name')
-          .in('id', userIds)
+          .select('id, email, first_name, last_name, auth_user_id')
+          .in('auth_user_id', authUserIds)
 
         if (!usersError && users) {
-          // Map users to adjustments
-          const usersMap = new Map(users.map(u => [u.id, u]))
+          // Map users by auth_user_id to adjustments
+          logger.info('Users found for adjustments:', JSON.stringify(users, null, 2))
+          const usersMap = new Map(users.map(u => [u.auth_user_id, u]))
           data.forEach(adj => {
             if (adj.created_by) {
               adj.created_by_user = usersMap.get(adj.created_by)
+              logger.info(`Mapped user for adjustment ${adj.id}:`, JSON.stringify(adj.created_by_user, null, 2))
             }
           })
+        } else if (usersError) {
+          logger.error('Error fetching users for adjustments:', usersError)
         }
       }
     }
@@ -170,26 +177,41 @@ export async function createInventoryAdjustment(
     // Generate idempotency key for safe retries
     const idempotencyKey = `adj-${input.product_id}-${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
 
+    // Build params object - only include reference_id if it's a valid UUID
+    const rpcParams: Record<string, any> = {
+      p_vendor_id: vendorId,
+      p_product_id: input.product_id,
+      p_location_id: input.location_id,
+      p_adjustment_type: input.adjustment_type,
+      p_quantity_change: input.quantity_change,
+      p_reason: input.reason,
+      p_notes: input.notes || null,
+      p_reference_type: input.reference_type || null,
+      p_created_by: user?.id || null,
+      p_idempotency_key: idempotencyKey,
+    };
+
+    // Only pass reference_id if it's a valid UUID string
+    if (input.reference_id && input.reference_id.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)) {
+      rpcParams.p_reference_id = input.reference_id;
+    }
+
+    logger.info('RPC params:', JSON.stringify(rpcParams, null, 2));
+
     // Call atomic database function
     const { data: result, error: rpcError } = await supabase.rpc(
       'process_inventory_adjustment',
-      {
-        p_vendor_id: vendorId,
-        p_product_id: input.product_id,
-        p_location_id: input.location_id,
-        p_adjustment_type: input.adjustment_type,
-        p_quantity_change: input.quantity_change,
-        p_reason: input.reason,
-        p_notes: input.notes || null,
-        p_reference_id: input.reference_id || null,
-        p_reference_type: input.reference_type || null,
-        p_created_by: user?.id || null,
-        p_idempotency_key: idempotencyKey,
-      }
+      rpcParams
     );
 
     if (rpcError) {
       logger.error('Error creating adjustment:', rpcError);
+      logger.error('RPC Error Details:', JSON.stringify({
+        message: rpcError.message,
+        code: rpcError.code,
+        details: rpcError.details,
+        hint: rpcError.hint,
+      }, null, 2));
       return { data: null, error: rpcError };
     }
 
@@ -261,6 +283,7 @@ export async function createBulkInventoryAdjustments(
       quantity_change: adj.quantity_change,
       reason: adj.reason,
       notes: adj.notes || null,
+      created_by: user?.id || null, // Track which staff member made the adjustment
       idempotency_key: `${idempotencyKey}-${adj.product_id}-${adj.location_id}`,
     }));
 

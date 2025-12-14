@@ -13,6 +13,7 @@
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native'
 import { useCallback, useState } from 'react'
 import { LiquidGlassView, isLiquidGlassSupported } from '@callstack/liquid-glass'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import * as Haptics from 'expo-haptics'
 import { POSCartItem } from './POSCartItem'
 import { POSTotalsSection } from './POSTotalsSection'
@@ -32,6 +33,11 @@ interface POSCartProps {
 }
 
 export function POSCart({ onEndSession }: POSCartProps) {
+  // ========================================
+  // SAFE AREA - For iOS status bar
+  // ========================================
+  const insets = useSafeAreaInsets()
+
   // ========================================
   // LOCAL STATE
   // ========================================
@@ -86,14 +92,14 @@ export function POSCart({ onEndSession }: POSCartProps) {
   // ========================================
   if (scannedOrder) {
     return (
-      <View style={styles.cartCard}>
+      <View style={[styles.cartCard, { paddingTop: insets.top }]}>
         <POSScannedOrderCard />
       </View>
     )
   }
 
   return (
-    <View style={styles.cartCard}>
+    <View style={[styles.cartCard, { paddingTop: insets.top }]}>
       {/* Update Contact Modal */}
       <POSUpdateContactModal
         visible={showUpdateContactModal}
@@ -211,28 +217,30 @@ export function POSCart({ onEndSession }: POSCartProps) {
         )}
       </View>
 
-      {/* Cart Items */}
-      <ScrollView
-        style={styles.cartItems}
-        showsVerticalScrollIndicator={true}
-        indicatorStyle="white"
-        scrollIndicatorInsets={{ right: 2, bottom: layout.dockHeight }}
-        contentContainerStyle={{ paddingBottom: layout.dockHeight }}
-      >
-        {cart.length === 0 ? (
-          <View style={styles.emptyCart}>
-            <Text style={styles.emptyCartText}>Cart is empty</Text>
-            <Text style={styles.emptyCartSubtext}>Add items to get started</Text>
-          </View>
-        ) : (
-          cart.map((item) => (
-            <POSCartItem
-              key={item.id}
-              item={item}
-            />
-          ))
-        )}
-      </ScrollView>
+      {/* Cart Items - Rounded container */}
+      <View style={styles.cartItemsContainer}>
+        <ScrollView
+          style={styles.cartItems}
+          showsVerticalScrollIndicator={true}
+          indicatorStyle="white"
+          scrollIndicatorInsets={{ right: 2, bottom: layout.dockHeight }}
+          contentContainerStyle={{ paddingBottom: layout.dockHeight }}
+        >
+          {cart.length === 0 ? (
+            <View style={styles.emptyCart}>
+              <Text style={styles.emptyCartText}>Cart is empty</Text>
+              <Text style={styles.emptyCartSubtext}>Add items to get started</Text>
+            </View>
+          ) : (
+            cart.map((item) => (
+              <POSCartItem
+                key={item.id}
+                item={item}
+              />
+            ))
+          )}
+        </ScrollView>
+      </View>
 
       {cart.length > 0 && (
         <>
@@ -260,10 +268,12 @@ export function POSCart({ onEndSession }: POSCartProps) {
 const styles = StyleSheet.create({
   cartCard: {
     flex: 1,
-    // No background - let LiquidGlassView container handle it
+    backgroundColor: 'rgba(255,255,255,0.03)', // Match product card glass tint
   },
   cartHeader: {
-    padding: 12,
+    paddingHorizontal: 8,
+    paddingTop: 0,  // No extra padding - safe area is enough
+    paddingBottom: 8,
     gap: 8,
   },
   customerPillButton: {
@@ -272,7 +282,7 @@ const styles = StyleSheet.create({
     minHeight: 44,
   },
   customerPillButtonFallback: {
-    backgroundColor: 'rgba(255,255,255,0.05)',
+    backgroundColor: 'rgba(255,255,255,0.08)', // Match pricing modal tier buttons
   },
   customerPillButtonPressable: {
     paddingHorizontal: 20,
@@ -292,7 +302,7 @@ const styles = StyleSheet.create({
     minHeight: 44,
   },
   customerPillFallback: {
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: 'rgba(255,255,255,0.10)', // Slightly brighter for selected state
   },
   customerPillPressable: {
     paddingHorizontal: 20,
@@ -337,6 +347,13 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.6)',
     lineHeight: 20,
   },
+  cartItemsContainer: {
+    flex: 1,
+    marginHorizontal: 8,
+    borderRadius: 20,
+    overflow: 'hidden',
+    // No background - transparent
+  },
   cartItems: {
     flex: 1,
   },
@@ -357,14 +374,14 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.25)',
   },
   cartDivider: {
-    height: 1,
+    height: 0.33, // Match modal border thickness
     backgroundColor: 'rgba(255,255,255,0.06)',
     marginHorizontal: 12,
   },
   endSessionFooter: {
     paddingVertical: 12,
     alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.2)',
+    backgroundColor: 'rgba(255,255,255,0.03)', // Subtle glass tint matching modal theme
   },
   endSessionFooterText: {
     fontSize: 12,

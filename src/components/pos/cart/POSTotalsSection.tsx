@@ -193,7 +193,7 @@ const styles = StyleSheet.create({
     paddingTop: 14,
     marginTop: 10,
     borderTopWidth: 0.33,
-    borderTopColor: 'rgba(255,255,255,0.15)',
+    borderTopColor: 'rgba(255,255,255,0.06)', // Match modal border styling
   },
   finalTotalLabel: {
     fontSize: 11,

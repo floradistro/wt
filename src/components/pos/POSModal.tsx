@@ -35,11 +35,28 @@ import {
 import { BlurView } from 'expo-blur'
 import { LiquidGlassView, isLiquidGlassSupported } from '@callstack/liquid-glass'
 import * as Haptics from 'expo-haptics'
-import { memo, useRef, useEffect, ReactNode } from 'react'
+import { memo, useRef, useEffect, useCallback, ReactNode } from 'react'
 import { colors, spacing, radius } from '@/theme/tokens'
 
 const { width } = Dimensions.get('window')
 const isTablet = width > 600
+
+// Apple-standard spring config for buttery smooth animations
+const SPRING_CONFIG = {
+  tension: 300,
+  friction: 30,
+  useNativeDriver: true,
+}
+
+const FADE_IN_CONFIG = {
+  duration: 180,
+  useNativeDriver: true,
+}
+
+const FADE_OUT_CONFIG = {
+  duration: 120,
+  useNativeDriver: true,
+}
 
 interface POSModalProps {
   visible: boolean
@@ -61,43 +78,53 @@ function POSModal({
   showCloseButton = false,
 }: POSModalProps) {
   const fadeAnim = useRef(new Animated.Value(0)).current
-  const scaleAnim = useRef(new Animated.Value(0.9)).current
+  const scaleAnim = useRef(new Animated.Value(0.92)).current
+  const isAnimatingRef = useRef(false)
 
   useEffect(() => {
+    if (isAnimatingRef.current) return
+    isAnimatingRef.current = true
+
     if (visible) {
+      // Reset to start position immediately
+      fadeAnim.setValue(0)
+      scaleAnim.setValue(0.92)
+
+      // Apple-style spring animation - fast attack, smooth settle
       Animated.parallel([
         Animated.timing(fadeAnim, {
           toValue: 1,
-          duration: 200,
-          useNativeDriver: true,
+          ...FADE_IN_CONFIG,
         }),
         Animated.spring(scaleAnim, {
           toValue: 1,
-          tension: 50,
-          friction: 10,
-          useNativeDriver: true,
+          ...SPRING_CONFIG,
         }),
-      ]).start()
+      ]).start(() => {
+        isAnimatingRef.current = false
+      })
     } else {
+      // Quick fade out - no spring on exit (Apple pattern)
       Animated.parallel([
         Animated.timing(fadeAnim, {
           toValue: 0,
-          duration: 150,
-          useNativeDriver: true,
+          ...FADE_OUT_CONFIG,
         }),
         Animated.timing(scaleAnim, {
-          toValue: 0.9,
-          duration: 150,
+          toValue: 0.92,
+          duration: 120,
           useNativeDriver: true,
         }),
-      ]).start()
+      ]).start(() => {
+        isAnimatingRef.current = false
+      })
     }
-  }, [visible])
+  }, [visible, fadeAnim, scaleAnim])
 
-  const handleClose = () => {
+  const handleClose = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
     onClose()
-  }
+  }, [onClose])
 
   return (
     <Modal
@@ -115,9 +142,9 @@ function POSModal({
         accessibilityLabel={`${title}${subtitle ? `. ${subtitle}` : ''}`}
         onAccessibilityEscape={handleClose}
       >
-        {/* Blurred background overlay */}
+        {/* Blurred background overlay - reduced intensity for performance */}
         <BlurView
-          intensity={40}
+          intensity={25}
           tint="dark"
           style={StyleSheet.absoluteFill}
           accessible={false}
