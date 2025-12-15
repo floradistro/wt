@@ -29,12 +29,12 @@ import { BlurView } from 'expo-blur'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import * as Haptics from 'expo-haptics'
 import { memo, useRef, useEffect, useState, useMemo, useCallback } from 'react'
+import DateTimePicker from '@react-native-community/datetimepicker'
 import type { Customer } from '@/types/pos'
 import { useCustomerState, customerActions, type PendingOrder, type CustomerMatch } from '@/stores/customer.store'
 import { useActiveModal, useHasModalHistory, useModalSuspended, useModalData, checkoutUIActions } from '@/stores/checkout-ui.store'
-import { scannedOrderActions } from '@/stores/scanned-order.store'
 import { ordersUIActions } from '@/stores/orders-ui.store'
-import { mergeCustomers, customersService, type CustomerWithOrders } from '@/services/customers.service'
+import { mergeCustomers, customersService, createCustomer, type CustomerWithOrders } from '@/services/customers.service'
 import { useAppAuth } from '@/contexts/AppAuthContext'
 import { logger } from '@/utils/logger'
 
@@ -84,10 +84,14 @@ function POSCustomerMatchModal() {
   // Check if we're opening directly to view a profile (from customer button)
   const directProfileCustomer = modalData?.viewProfile as Customer | undefined
 
-  // Only show if we have matches OR scanned data OR direct profile view - prevent random popups
+  // Show when:
+  // - We have matches (after ID scan found potential duplicates)
+  // - We have scanned data (to create new from ID scan)
+  // - Direct profile view (from customer pill click)
+  // - Just opened the modal (manual add customer)
   // Hide when suspended (e.g., viewing order detail)
-  const hasContentToShow = matches.length > 0 || scannedData !== null || directProfileCustomer
-  const visible = activeModal === 'customerMatch' && hasContentToShow && !modalSuspended
+  const hasContentToShow = matches.length > 0 || scannedData !== null || directProfileCustomer || activeModal === 'customerMatch'
+  const visible = activeModal === 'customerMatch' && !modalSuspended
 
   // Lazy content rendering - don't render heavy content until first visible
   const [hasBeenVisible, setHasBeenVisible] = useState(false)
@@ -152,6 +156,25 @@ function POSCustomerMatchModal() {
   const saveProgressAnim = useRef(new Animated.Value(0)).current
   const justActivatedEditMode = useRef(false)
 
+  // Create New Customer mode state
+  const [isCreatingNew, setIsCreatingNew] = useState(false)
+  const [isCreating, setIsCreating] = useState(false)
+  const [createError, setCreateError] = useState<string | null>(null)
+  const [newFirstName, setNewFirstName] = useState('')
+  const [newMiddleName, setNewMiddleName] = useState('')
+  const [newLastName, setNewLastName] = useState('')
+  const [newEmail, setNewEmail] = useState('')
+  const [newPhone, setNewPhone] = useState('')
+  const [newDateOfBirth, setNewDateOfBirth] = useState('')
+  const [newDobDate, setNewDobDate] = useState<Date>(new Date(2000, 0, 1))
+  const [showDatePicker, setShowDatePicker] = useState(false)
+  const [newAddress, setNewAddress] = useState('')
+  const [newCity, setNewCity] = useState('')
+  const [newState, setNewState] = useState('')
+  const [newPostalCode, setNewPostalCode] = useState('')
+  const datePickerSlideAnim = useRef(new Animated.Value(300)).current
+  const datePickerFadeAnim = useRef(new Animated.Value(0)).current
+
   // ✅ Profile cache for instant re-visits (Apple pattern)
   const profileCache = useRef<Map<string, CustomerWithOrders>>(new Map())
 
@@ -176,6 +199,30 @@ function POSCustomerMatchModal() {
       ...order,
     }))
   }, [profileOrders?.recent_orders])
+
+  // Auto-show Create New view when:
+  // 1. No matches but scannedData exists (from ID scan - pre-fill form)
+  // 2. No matches, no scannedData, no profile view (manual add customer button)
+  useEffect(() => {
+    if (visible && matches.length === 0 && !directProfileCustomer && !isCreatingNew && !viewingProfile) {
+      if (scannedData) {
+        // Pre-fill form with scanned data
+        setNewFirstName(scannedData.firstName || '')
+        setNewMiddleName(scannedData.middleName || '')
+        setNewLastName(scannedData.lastName || '')
+        const dob = scannedData.dateOfBirth || ''
+        setNewDateOfBirth(dob)
+        if (dob && /^\d{4}-\d{2}-\d{2}$/.test(dob)) {
+          setNewDobDate(new Date(dob))
+        }
+        setNewAddress(scannedData.streetAddress || '')
+        setNewCity(scannedData.city || '')
+        setNewState(scannedData.state || '')
+        setNewPostalCode(scannedData.zipCode || '')
+      }
+      setIsCreatingNew(true)
+    }
+  }, [visible, scannedData, matches.length, directProfileCustomer, isCreatingNew, viewingProfile])
 
   // PanResponder for drag-to-dismiss - optimized for 60fps
   const panResponder = useMemo(
@@ -292,8 +339,29 @@ function POSCustomerMatchModal() {
       // Reset profile state
       setViewingProfile(null)
       setProfileOrders(null)
+      // Reset create new state
+      setIsCreatingNew(false)
+      resetCreateNewForm()
     })
   }, [hasModalHistory, height, modalSlideAnim, modalOpacity])
+
+  // Reset create new form
+  const resetCreateNewForm = useCallback(() => {
+    setNewFirstName('')
+    setNewMiddleName('')
+    setNewLastName('')
+    setNewEmail('')
+    setNewPhone('')
+    setNewDateOfBirth('')
+    setNewDobDate(new Date(2000, 0, 1))
+    setShowDatePicker(false)
+    setNewAddress('')
+    setNewCity('')
+    setNewState('')
+    setNewPostalCode('')
+    setCreateError(null)
+    setIsCreating(false)
+  }, [])
 
   const handleSelectMatch = useCallback((match: CustomerMatch) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
@@ -305,10 +373,145 @@ function POSCustomerMatchModal() {
 
   const handleCreateNew = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-    customerActions.clearCustomerMatches()
-    // Push to keep history, so closing addCustomer returns here
-    checkoutUIActions.pushModal('addCustomer')
+    // Pre-fill form with scanned data if available
+    if (scannedData) {
+      setNewFirstName(scannedData.firstName || '')
+      setNewMiddleName(scannedData.middleName || '')
+      setNewLastName(scannedData.lastName || '')
+      const dob = scannedData.dateOfBirth || ''
+      setNewDateOfBirth(dob)
+      if (dob && /^\d{4}-\d{2}-\d{2}$/.test(dob)) {
+        setNewDobDate(new Date(dob))
+      }
+      setNewAddress(scannedData.streetAddress || '')
+      setNewCity(scannedData.city || '')
+      setNewState(scannedData.state || '')
+      setNewPostalCode(scannedData.zipCode || '')
+    }
+    setIsCreatingNew(true)
+  }, [scannedData])
+
+  const handleBackFromCreate = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    setIsCreatingNew(false)
+    resetCreateNewForm()
+  }, [resetCreateNewForm])
+
+  // Date picker animations
+  const animateDatePickerIn = useCallback(() => {
+    datePickerSlideAnim.setValue(300)
+    datePickerFadeAnim.setValue(0)
+    setShowDatePicker(true)
+    Animated.parallel([
+      Animated.spring(datePickerSlideAnim, {
+        toValue: 0,
+        tension: 300,
+        friction: 26,
+        useNativeDriver: true,
+      }),
+      Animated.timing(datePickerFadeAnim, {
+        toValue: 1,
+        duration: 180,
+        useNativeDriver: true,
+      }),
+    ]).start()
+  }, [datePickerSlideAnim, datePickerFadeAnim])
+
+  const animateDatePickerOut = useCallback(() => {
+    Animated.parallel([
+      Animated.timing(datePickerSlideAnim, {
+        toValue: 300,
+        duration: 150,
+        useNativeDriver: true,
+      }),
+      Animated.timing(datePickerFadeAnim, {
+        toValue: 0,
+        duration: 120,
+        useNativeDriver: true,
+      }),
+    ]).start(() => setShowDatePicker(false))
+  }, [datePickerSlideAnim, datePickerFadeAnim])
+
+  const handleDateFieldPress = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    animateDatePickerIn()
+  }, [animateDatePickerIn])
+
+  const handleDateChange = useCallback((event: any, selectedDate?: Date) => {
+    if (selectedDate) {
+      setNewDobDate(selectedDate)
+      const year = selectedDate.getFullYear()
+      const month = String(selectedDate.getMonth() + 1).padStart(2, '0')
+      const day = String(selectedDate.getDate()).padStart(2, '0')
+      setNewDateOfBirth(`${year}-${month}-${day}`)
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    }
   }, [])
+
+  const handleDateConfirm = useCallback(() => {
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+    animateDatePickerOut()
+  }, [animateDatePickerOut])
+
+  const handleCreateCustomer = useCallback(async () => {
+    // Validation
+    if (!newFirstName.trim() || !newLastName.trim()) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
+      setCreateError('First name and last name are required')
+      return
+    }
+
+    const dobTrimmed = newDateOfBirth.trim()
+    if (dobTrimmed && !/^\d{4}-\d{2}-\d{2}$/.test(dobTrimmed)) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
+      setCreateError('Date of birth must be in format YYYY-MM-DD')
+      return
+    }
+
+    setIsCreating(true)
+    setCreateError(null)
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+
+    try {
+      const serviceCustomer = await createCustomer({
+        first_name: newFirstName.trim(),
+        middle_name: newMiddleName.trim() || undefined,
+        last_name: newLastName.trim(),
+        email: newEmail.trim() || undefined,
+        phone: newPhone.trim() || undefined,
+        date_of_birth: dobTrimmed || undefined,
+        street_address: newAddress.trim() || undefined,
+        city: newCity.trim() || undefined,
+        state: newState.trim() || undefined,
+        postal_code: newPostalCode.trim() || undefined,
+        vendor_id: vendor?.id || '',
+      })
+
+      const posCustomer: Customer = {
+        id: serviceCustomer.id,
+        first_name: serviceCustomer.first_name || '',
+        last_name: serviceCustomer.last_name || '',
+        email: serviceCustomer.email || '',
+        phone: serviceCustomer.phone || null,
+        display_name: serviceCustomer.full_name || `${serviceCustomer.first_name} ${serviceCustomer.last_name}`,
+        date_of_birth: dobTrimmed || null,
+        loyalty_points: serviceCustomer.loyalty_points || 0,
+        loyalty_tier: 'bronze',
+        vendor_customer_number: serviceCustomer.id.slice(0, 8).toUpperCase(),
+      }
+
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+      customerActions.selectCustomer(posCustomer)
+      customerActions.clearScannedData()
+      handleClose()
+    } catch (error) {
+      logger.error('Create customer error:', error)
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
+      setCreateError(error instanceof Error ? error.message : 'Failed to create customer')
+    } finally {
+      setIsCreating(false)
+    }
+  }, [newFirstName, newLastName, newMiddleName, newEmail, newPhone, newDateOfBirth, newAddress, newCity, newState, newPostalCode, vendor?.id, handleClose])
 
   const handleSearchManually = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
@@ -852,8 +1055,230 @@ function POSCustomerMatchModal() {
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
             >
-              {/* PROFILE VIEW */}
-              {viewingProfile ? (
+              {/* CREATE NEW CUSTOMER VIEW */}
+              {isCreatingNew ? (
+                <>
+                  {/* Breadcrumb Header */}
+                  <View style={styles.profileBreadcrumb}>
+                    <TouchableOpacity
+                      style={styles.breadcrumbBack}
+                      onPress={handleBackFromCreate}
+                      activeOpacity={0.7}
+                      disabled={isCreating}
+                    >
+                      <Text style={styles.breadcrumbBackText}>← Back</Text>
+                    </TouchableOpacity>
+                    <Text style={styles.doubleTapHint}>
+                      {scannedData ? 'From scanned ID' : 'Manual entry'}
+                    </Text>
+                  </View>
+
+                  {/* Header */}
+                  <View style={styles.headerSection}>
+                    <Text style={styles.title}>New Customer</Text>
+                    <Text style={styles.subtitle}>
+                      {scannedData ? 'Review scanned info and add details' : 'Enter customer information'}
+                    </Text>
+                  </View>
+
+                  {/* Personal Information Section */}
+                  <View style={styles.sectionContainer}>
+                    <Text style={styles.sectionTitle}>PERSONAL INFORMATION</Text>
+                    <View style={styles.createFormCard}>
+                      {/* Name Row */}
+                      <View style={styles.createFormRow}>
+                        <View style={styles.createFormField}>
+                          <Text style={styles.createFormLabel}>FIRST NAME *</Text>
+                          <TextInput
+                            style={styles.createFormInput}
+                            value={newFirstName}
+                            onChangeText={setNewFirstName}
+                            placeholder="First name"
+                            placeholderTextColor="rgba(255,255,255,0.3)"
+                            autoCapitalize="words"
+                            editable={!isCreating}
+                          />
+                        </View>
+                        <View style={styles.createFormField}>
+                          <Text style={styles.createFormLabel}>MIDDLE</Text>
+                          <TextInput
+                            style={styles.createFormInput}
+                            value={newMiddleName}
+                            onChangeText={setNewMiddleName}
+                            placeholder="Middle"
+                            placeholderTextColor="rgba(255,255,255,0.3)"
+                            autoCapitalize="words"
+                            editable={!isCreating}
+                          />
+                        </View>
+                      </View>
+
+                      {/* Last Name */}
+                      <View style={styles.createFormFieldFull}>
+                        <Text style={styles.createFormLabel}>LAST NAME *</Text>
+                        <TextInput
+                          style={styles.createFormInput}
+                          value={newLastName}
+                          onChangeText={setNewLastName}
+                          placeholder="Last name"
+                          placeholderTextColor="rgba(255,255,255,0.3)"
+                          autoCapitalize="words"
+                          editable={!isCreating}
+                        />
+                      </View>
+
+                      {/* Date of Birth */}
+                      <View style={styles.createFormFieldFull}>
+                        <Text style={styles.createFormLabel}>
+                          DATE OF BIRTH {scannedData?.dateOfBirth && '(FROM ID)'}
+                        </Text>
+                        <TouchableOpacity
+                          onPress={handleDateFieldPress}
+                          disabled={isCreating}
+                          activeOpacity={0.7}
+                          style={[styles.createFormInput, styles.createFormDateInput]}
+                        >
+                          <Text style={newDateOfBirth ? styles.createFormDateText : styles.createFormDatePlaceholder}>
+                            {newDateOfBirth || 'Tap to select date'}
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  </View>
+
+                  {/* Contact & Address Section */}
+                  <View style={styles.sectionContainer}>
+                    <Text style={styles.sectionTitle}>CONTACT & ADDRESS</Text>
+                    <View style={styles.createFormCard}>
+                      {/* Phone */}
+                      <View style={styles.createFormFieldFull}>
+                        <Text style={styles.createFormLabel}>PHONE</Text>
+                        <TextInput
+                          style={styles.createFormInput}
+                          value={newPhone}
+                          onChangeText={setNewPhone}
+                          placeholder="(704) 555-0100"
+                          placeholderTextColor="rgba(255,255,255,0.3)"
+                          keyboardType="phone-pad"
+                          editable={!isCreating}
+                        />
+                      </View>
+
+                      {/* Email */}
+                      <View style={styles.createFormFieldFull}>
+                        <Text style={styles.createFormLabel}>EMAIL (OPTIONAL)</Text>
+                        <TextInput
+                          style={styles.createFormInput}
+                          value={newEmail}
+                          onChangeText={setNewEmail}
+                          placeholder="customer@email.com"
+                          placeholderTextColor="rgba(255,255,255,0.3)"
+                          keyboardType="email-address"
+                          autoCapitalize="none"
+                          editable={!isCreating}
+                        />
+                        <Text style={styles.createFormHelper}>Auto-generated if empty</Text>
+                      </View>
+
+                      {/* Address */}
+                      <View style={styles.createFormFieldFull}>
+                        <Text style={styles.createFormLabel}>
+                          ADDRESS {scannedData?.streetAddress && '(FROM ID)'}
+                        </Text>
+                        <TextInput
+                          style={styles.createFormInput}
+                          value={newAddress}
+                          onChangeText={setNewAddress}
+                          placeholder="Street address"
+                          placeholderTextColor="rgba(255,255,255,0.3)"
+                          autoCapitalize="words"
+                          editable={!isCreating}
+                        />
+                      </View>
+
+                      {/* City, State */}
+                      <View style={styles.createFormRow}>
+                        <View style={[styles.createFormField, { flex: 2 }]}>
+                          <Text style={styles.createFormLabel}>
+                            CITY {scannedData?.city && '(FROM ID)'}
+                          </Text>
+                          <TextInput
+                            style={styles.createFormInput}
+                            value={newCity}
+                            onChangeText={setNewCity}
+                            placeholder="City"
+                            placeholderTextColor="rgba(255,255,255,0.3)"
+                            autoCapitalize="words"
+                            editable={!isCreating}
+                          />
+                        </View>
+                        <View style={styles.createFormField}>
+                          <Text style={styles.createFormLabel}>
+                            STATE {scannedData?.state && '(FROM ID)'}
+                          </Text>
+                          <TextInput
+                            style={styles.createFormInput}
+                            value={newState}
+                            onChangeText={(text) => setNewState(text.toUpperCase())}
+                            placeholder="ST"
+                            placeholderTextColor="rgba(255,255,255,0.3)"
+                            autoCapitalize="characters"
+                            maxLength={2}
+                            editable={!isCreating}
+                          />
+                        </View>
+                      </View>
+
+                      {/* Postal Code */}
+                      <View style={styles.createFormFieldFull}>
+                        <Text style={styles.createFormLabel}>
+                          POSTAL CODE {scannedData?.zipCode && '(FROM ID)'}
+                        </Text>
+                        <TextInput
+                          style={styles.createFormInput}
+                          value={newPostalCode}
+                          onChangeText={setNewPostalCode}
+                          placeholder="ZIP code"
+                          placeholderTextColor="rgba(255,255,255,0.3)"
+                          keyboardType="number-pad"
+                          editable={!isCreating}
+                        />
+                      </View>
+                    </View>
+                  </View>
+
+                  {/* Error Display */}
+                  {createError && (
+                    <View style={styles.createErrorCard}>
+                      <Text style={styles.createErrorTitle}>❌ ERROR</Text>
+                      <Text style={styles.createErrorText}>{createError}</Text>
+                    </View>
+                  )}
+
+                  {/* Action Buttons */}
+                  <View style={styles.actionsContainer}>
+                    <TouchableOpacity
+                      style={[styles.actionBtn, isCreating && styles.actionBtnDisabled]}
+                      onPress={handleCreateCustomer}
+                      activeOpacity={0.7}
+                      disabled={isCreating}
+                    >
+                      <Text style={styles.actionBtnText}>
+                        {isCreating ? 'Creating...' : 'Create Customer'}
+                      </Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={[styles.actionBtn, styles.actionBtnSecondary]}
+                      onPress={handleBackFromCreate}
+                      activeOpacity={0.7}
+                      disabled={isCreating}
+                    >
+                      <Text style={styles.actionBtnTextSecondary}>Cancel</Text>
+                    </TouchableOpacity>
+                  </View>
+                </>
+              ) : viewingProfile ? (
                 <>
                   {/* Breadcrumb Header */}
                   <View style={styles.profileBreadcrumb}>
@@ -1218,6 +1643,49 @@ function POSCustomerMatchModal() {
           </View>
         </Animated.View>
       </Animated.View>
+
+      {/* Date Picker Modal */}
+      {showDatePicker && (
+        <Modal
+          visible={showDatePicker}
+          transparent
+          animationType="none"
+          onRequestClose={animateDatePickerOut}
+        >
+          <Pressable style={styles.datePickerOverlay} onPress={animateDatePickerOut}>
+            <Animated.View style={{ opacity: datePickerFadeAnim }}>
+              <BlurView intensity={25} tint="dark" style={StyleSheet.absoluteFill} />
+            </Animated.View>
+          </Pressable>
+          <Animated.View
+            style={[
+              styles.datePickerContainer,
+              { transform: [{ translateY: datePickerSlideAnim }] },
+            ]}
+          >
+            <BlurView intensity={30} tint="dark" style={StyleSheet.absoluteFill} />
+            <View style={styles.datePickerPullHandle} />
+            <Text style={styles.datePickerTitle}>Date of Birth</Text>
+            <DateTimePicker
+              value={newDobDate}
+              mode="date"
+              display="spinner"
+              onChange={handleDateChange}
+              maximumDate={new Date()}
+              minimumDate={new Date(1920, 0, 1)}
+              style={styles.datePicker}
+              textColor="#fff"
+            />
+            <TouchableOpacity
+              style={styles.datePickerConfirmBtn}
+              onPress={handleDateConfirm}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.datePickerConfirmBtnText}>Done</Text>
+            </TouchableOpacity>
+          </Animated.View>
+        </Modal>
+      )}
     </Modal>
   )
 }
@@ -1932,6 +2400,132 @@ const styles = StyleSheet.create({
   editSaveButtonText: {
     fontSize: 16,
     fontWeight: '700',
+    color: '#10b981',
+  },
+
+  // Create New Customer Styles
+  createFormCard: {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 16,
+    padding: 16,
+  },
+  createFormRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 16,
+  },
+  createFormField: {
+    flex: 1,
+  },
+  createFormFieldFull: {
+    marginBottom: 16,
+  },
+  createFormLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.4)',
+    letterSpacing: 0.8,
+    marginBottom: 6,
+  },
+  createFormInput: {
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#fff',
+  },
+  createFormDateInput: {
+    justifyContent: 'center',
+  },
+  createFormDateText: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#fff',
+  },
+  createFormDatePlaceholder: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.3)',
+  },
+  createFormHelper: {
+    fontSize: 11,
+    fontWeight: '400',
+    color: 'rgba(255,255,255,0.35)',
+    marginTop: 4,
+    marginLeft: 4,
+  },
+  createErrorCard: {
+    backgroundColor: 'rgba(239,68,68,0.15)',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(239,68,68,0.3)',
+  },
+  createErrorTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: 'rgba(239,68,68,0.9)',
+    letterSpacing: 0.5,
+    marginBottom: 4,
+  },
+  createErrorText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: 'rgba(239,68,68,0.9)',
+  },
+  actionBtnDisabled: {
+    opacity: 0.6,
+  },
+
+  // Date Picker Styles
+  datePickerOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'flex-end',
+  },
+  datePickerContainer: {
+    backgroundColor: 'rgba(30,30,30,0.95)',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingTop: 12,
+    paddingBottom: 40,
+    paddingHorizontal: 20,
+    overflow: 'hidden',
+  },
+  datePickerPullHandle: {
+    width: 36,
+    height: 4,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    borderRadius: 2,
+    alignSelf: 'center',
+    marginBottom: 16,
+  },
+  datePickerTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#fff',
+    textAlign: 'center',
+    marginBottom: 12,
+  },
+  datePicker: {
+    height: 200,
+  },
+  datePickerConfirmBtn: {
+    backgroundColor: 'rgba(16,185,129,0.2)',
+    borderRadius: 14,
+    paddingVertical: 16,
+    alignItems: 'center',
+    marginTop: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(16,185,129,0.4)',
+  },
+  datePickerConfirmBtnText: {
+    fontSize: 17,
+    fontWeight: '600',
     color: '#10b981',
   },
 })

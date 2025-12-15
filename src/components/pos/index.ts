@@ -9,7 +9,6 @@ export { POSRegisterSelector } from './POSRegisterSelector'
 
 // Customer & ID Scanning
 export { POSUnifiedCustomerSelector } from './POSUnifiedCustomerSelector'
-export { POSAddCustomerModal } from './POSAddCustomerModal'
 export { POSCustomerMatchModal } from './POSCustomerMatchModal'
 // CustomerMatch and PendingOrder types are now exported from @/stores/customer.store
 

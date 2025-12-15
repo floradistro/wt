@@ -21,7 +21,6 @@ import type { CustomerMatch } from '@/hooks/pos/useCustomerSelection'
 
 // POS Components
 import { POSUnifiedCustomerSelector } from '../POSUnifiedCustomerSelector'
-import { POSAddCustomerModal } from '../POSAddCustomerModal'
 import { POSCustomerMatchModal } from '../POSCustomerMatchModal'
 import POSPaymentModal from '../POSPaymentModal'
 import { POSCashCountModal } from '../POSCashCountModal'
@@ -137,10 +136,8 @@ export function POSCheckoutModals({
       <POSUnifiedCustomerSelector />
 
       {/* Customer Match Modal - ZERO PROPS (reads from stores) */}
+      {/* Also includes Create New Customer view */}
       <POSCustomerMatchModal />
-
-      {/* Add Customer Modal - ZERO PROPS (reads from stores) */}
-      <POSAddCustomerModal />
 
       {/* Payment Modal - Always rendered, uses retry total in retry mode */}
       <POSPaymentModal

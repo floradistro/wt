@@ -200,10 +200,10 @@ function POSUnifiedCustomerSelector() {
           checkoutUIActions.closeModal()
           checkoutUIActions.openModal('customerMatch')
         } else {
-          // No match found - go to add customer with pre-filled data
-          logger.info('[POSUnifiedCustomerSelector] No matching customer found, opening add customer modal')
+          // No match found - open customerMatch modal which has create new view built-in
+          logger.info('[POSUnifiedCustomerSelector] No matching customer found, opening customer match modal for creation')
           checkoutUIActions.closeModal()
-          checkoutUIActions.openModal('addCustomer')
+          checkoutUIActions.openModal('customerMatch')
         }
       } catch (error) {
         logger.error('[POSUnifiedCustomerSelector] Error processing scanned data:', error)
@@ -343,9 +343,9 @@ function POSUnifiedCustomerSelector() {
               <TouchableOpacity
                 onPress={() => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-                  // TRUE ZERO PROPS: Open add customer modal
+                  // TRUE ZERO PROPS: Open customer match modal (has create new view built-in)
                   checkoutUIActions.closeModal()
-                  checkoutUIActions.openModal('addCustomer')
+                  checkoutUIActions.openModal('customerMatch')
                 }}
                 style={styles.manualAddButtonInner}
                 activeOpacity={0.7}
