@@ -1050,7 +1050,7 @@ function POSCustomerMatchModal() {
               style={styles.modalScrollContent}
               contentContainerStyle={[
                 styles.modalScrollContentContainer,
-                { paddingBottom: Math.max(insets.bottom + 20, 40) },
+                { paddingBottom: Math.max(insets.bottom + 40, 60) },
               ]}
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
@@ -2056,30 +2056,37 @@ const styles = StyleSheet.create({
   // Action Buttons - Modern glass style
   actionsContainer: {
     gap: 12,
-    marginTop: 12,
+    marginTop: 24,
+    marginBottom: 8,
   },
   actionBtn: {
-    backgroundColor: 'rgba(16,185,129,0.18)',
+    backgroundColor: 'rgba(16,185,129,0.2)',
     borderRadius: 16,
-    paddingVertical: 18,
+    paddingVertical: 16,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(16,185,129,0.25)',
+    borderColor: 'rgba(16,185,129,0.3)',
+    shadowColor: '#10b981',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
   },
   actionBtnSecondary: {
     backgroundColor: 'rgba(255,255,255,0.06)',
-    borderColor: 'rgba(255,255,255,0.1)',
+    borderColor: 'rgba(255,255,255,0.12)',
+    shadowColor: '#000',
+    shadowOpacity: 0.1,
   },
   actionBtnText: {
     fontSize: 16,
     fontWeight: '600',
     color: '#10b981',
-    letterSpacing: 0.2,
+    letterSpacing: 0.3,
   },
   actionBtnTextSecondary: {
     fontSize: 16,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.6)',
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.7)',
   },
 
   // Profile View Styles
