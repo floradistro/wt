@@ -9,6 +9,7 @@
  */
 
 import { supabase } from '@/lib/supabase/client'
+import { logger } from '@/utils/logger'
 
 export type DiscountType = 'percentage' | 'fixed' | 'bogo'
 export type ApplyTo = 'all' | 'categories' | 'products'
@@ -382,7 +383,7 @@ export async function recordCampaignUsage(params: {
   })
 
   if (updateError) {
-    console.warn('Failed to increment campaign usage:', updateError.message)
+    logger.warn('Failed to increment campaign usage:', updateError.message)
   }
 }
 

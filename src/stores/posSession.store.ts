@@ -79,11 +79,11 @@ export const usePOSSessionStore = create<POSSessionState>((set, get) => ({
 
       if (userError || !userData) throw userError || new Error('User record not found');
 
-      const vendors = userData.vendors as Array<{
+      const vendors = userData.vendors as {
         id: string;
         store_name: string;
         logo_url: string | null;
-      }> | null;
+      }[] | null;
       const vendorData = vendors && vendors.length > 0 ? vendors[0] : null;
       if (!vendorData) throw new Error('No vendor found for user');
 

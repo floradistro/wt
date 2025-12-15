@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/preserve-manual-memoization */
 /**
  * useCheckoutTotals Hook - Apple Engineering Standard
  *

@@ -7,6 +7,7 @@ import { supabase } from '@/lib/supabase/client'
 import type { Customer } from '@/services/customers.service'
 import type { AAMVAData } from '@/lib/id-scanner/aamva-parser'
 import { normalizePhone, normalizeEmail } from './data-normalization'
+import { logger } from '@/utils/logger'
 import type { PostgrestError } from '@supabase/supabase-js'
 
 type SupabaseQueryResult<T> = {
@@ -58,14 +59,14 @@ export async function findPotentialDuplicates(params: {
   ): Promise<T | null> => {
     const timeoutPromise = new Promise<null>((resolve) =>
       setTimeout(() => {
-        console.warn(`[Customer Deduplication] Query timeout: ${queryName} exceeded ${QUERY_TIMEOUT}ms`)
+        logger.warn(`[Customer Deduplication] Query timeout: ${queryName} exceeded ${QUERY_TIMEOUT}ms`)
         resolve(null)
       }, QUERY_TIMEOUT)
     )
     try {
       return await Promise.race([promise, timeoutPromise])
     } catch (error) {
-      console.error(`[Customer Deduplication] Query error in ${queryName}:`, error)
+      logger.error(`[Customer Deduplication] Query error in ${queryName}:`, error)
       return null
     }
   }

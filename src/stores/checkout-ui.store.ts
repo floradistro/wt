@@ -259,6 +259,10 @@ export const useShowDiscountSelector = () =>
 export const useActiveModal = () =>
   useCheckoutUIStore((state) => state.activeModal)
 
+// Check if any modal is currently open (for dimming backgrounds)
+export const useAnyModalOpen = () =>
+  useCheckoutUIStore((state) => state.activeModal !== null)
+
 // Get modal data
 export const useModalData = () =>
   useCheckoutUIStore((state) => state.modalData)

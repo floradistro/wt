@@ -28,8 +28,7 @@ import { usePOSSession } from '@/contexts/POSSessionContext'
 import { useAppAuth } from '@/contexts/AppAuthContext'
 
 // Stores (ZERO PROP DRILLING - Apple Engineering Standard)
-import { posProductsActions, usePOSProductsState } from '@/stores/pos-products.store'
-import { usePOSProductsStore } from '@/stores/pos-products.store'
+import { posProductsActions, usePOSProductsState, usePOSProductsStore } from '@/stores/pos-products.store'
 import {
   useProductFilters,
   useActiveFilterCount,

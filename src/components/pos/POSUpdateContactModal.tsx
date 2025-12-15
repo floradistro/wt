@@ -114,7 +114,8 @@ function POSUpdateContactModal({ visible, onClose }: POSUpdateContactModalProps)
       })
 
       // Update the selected customer in store
-      customerActions.selectCustomer(updatedCustomer)
+      // Cast service response to pos Customer type (service types differ, but runtime data is compatible)
+      customerActions.selectCustomer(updatedCustomer as unknown as Parameters<typeof customerActions.selectCustomer>[0])
 
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
       Keyboard.dismiss()

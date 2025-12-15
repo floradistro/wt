@@ -154,7 +154,7 @@ export function useCustomerSelection() {
         logger.debug('🔍 [Customer Match] Step 2: Exact name + DOB match')
 
         // Try multiple name combinations
-        const nameVariations: Array<{ first_name: string; middle_name: string | null }> = [
+        const nameVariations: { first_name: string; middle_name: string | null }[] = [
           // Exact first name
           { first_name: data.firstName, middle_name: data.middleName || null },
           // First + Middle as first_name (if middle name exists)

@@ -20,6 +20,7 @@
 import { View, Text, StyleSheet, TouchableOpacity, Dimensions, Animated, Modal, ScrollView, Pressable, TextInput, Alert, Easing, Linking, PanResponder } from 'react-native'
 import { BlurView } from 'expo-blur'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import { Ionicons } from '@expo/vector-icons'
 import * as Haptics from 'expo-haptics'
 import { useState, useRef, memo, useEffect, useMemo, useCallback } from 'react'
 
@@ -36,8 +37,7 @@ import { useAppAuth } from '@/contexts/AppAuthContext'
 // Services
 import { supabase } from '@/lib/supabase/client'
 import { logger } from '@/utils/logger'
-import type { Order, OrderItem, OrderLocation } from '@/services/orders.service'
-import { ordersService } from '@/services/orders.service'
+import { ordersService, type Order, type OrderItem, type OrderLocation } from '@/services/orders.service'
 
 // Layout
 import { layout } from '@/theme/layout'
@@ -81,6 +81,7 @@ const PAYMENT_COLORS: Record<string, string> = {
   failed: '#ef4444',
   refunded: '#6366f1',
   partially_refunded: '#8b5cf6',
+  partial: '#f97316', // Orange for partial payment (multi-card)
 }
 
 // Carrier tracking URLs
@@ -612,9 +613,16 @@ const POSOrderCard = memo(({ order }: POSOrderCardProps) => {
 
             {/* Order type + total */}
             <View style={styles.cardFooter}>
-              <Text style={styles.orderType}>
-                {order.order_type?.replace('_', ' ') || 'walk-in'}
-              </Text>
+              <View style={styles.orderTypeRow}>
+                <Text style={styles.orderType}>
+                  {order.order_type?.replace('_', ' ') || 'walk-in'}
+                </Text>
+                {order.payment_status === 'partial' && (
+                  <View style={styles.partialBadge}>
+                    <Text style={styles.partialBadgeText}>PARTIAL</Text>
+                  </View>
+                )}
+              </View>
               <Text style={styles.totalAmount}>${order.total_amount?.toFixed(2)}</Text>
             </View>
           </View>
@@ -716,6 +724,95 @@ const POSOrderCard = memo(({ order }: POSOrderCardProps) => {
                   </View>
                 )}
 
+                {/* Partial Payment Warning - Multi-Card Split */}
+                {order.payment_status === 'partial' && (order as any).metadata?.multi_card_split && (
+                  <View style={styles.partialPaymentAlert}>
+                    <View style={styles.partialPaymentHeader}>
+                      <Text style={styles.partialPaymentTitle}>Partial Payment</Text>
+                    </View>
+                    <View style={styles.partialPaymentDetails}>
+                      <View style={styles.partialPaymentRow}>
+                        <Text style={styles.partialPaymentLabel}>Card 1 Paid</Text>
+                        <Text style={styles.partialPaymentValue}>
+                          ${(order as any).metadata.multi_card_split.card1_amount?.toFixed(2)}
+                          {(order as any).metadata.multi_card_split.card1_last4 && (
+                            <Text style={styles.partialPaymentCardInfo}>
+                              {' '}•••• {(order as any).metadata.multi_card_split.card1_last4}
+                            </Text>
+                          )}
+                        </Text>
+                      </View>
+                      <View style={styles.partialPaymentRow}>
+                        <Text style={styles.partialPaymentLabelRemaining}>Remaining</Text>
+                        <Text style={styles.partialPaymentValueRemaining}>
+                          ${(order as any).metadata.multi_card_split.amount_remaining?.toFixed(2) ||
+                            (order as any).metadata.multi_card_split.card2_amount?.toFixed(2)}
+                        </Text>
+                      </View>
+                    </View>
+                    <TouchableOpacity
+                      style={styles.retryPaymentBtn}
+                      onPress={() => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+                        const metadata = (order as any).metadata?.multi_card_split
+                        const amountRemaining = metadata?.amount_remaining || metadata?.card2_amount || 0
+
+                        // Capture retry data before closing
+                        const retryData = {
+                          mode: 'retry',
+                          orderId: order.id,
+                          orderNumber: order.order_number,
+                          amountRemaining: amountRemaining,
+                          card1Amount: metadata?.card1_amount || 0,
+                          card1Auth: metadata?.card1_auth || '',
+                          card1Last4: metadata?.card1_last4 || '',
+                        }
+
+                        // Close order card first
+                        // Animation starts immediately
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+
+                        // Clear external selection when closing
+                        if (selectedOrderId === order.id) {
+                          ordersUIActions.selectOrder(null)
+                        }
+
+                        // Fast exit animation - then open payment modal in callback
+                        Animated.parallel([
+                          Animated.timing(modalSlideAnim, {
+                            toValue: 600,
+                            duration: 200,
+                            useNativeDriver: true,
+                          }),
+                          Animated.timing(modalOpacity, {
+                            toValue: 0,
+                            duration: 150,
+                            useNativeDriver: true,
+                          }),
+                        ]).start(() => {
+                          // Modal fully closed - now safe to open payment modal
+                          setShowModal(false)
+                          setIsEditing(false)
+                          setHasChanges(false)
+                          setOrderItems([])
+                          setOrderLocations([])
+
+                          // NOW open the payment modal - with a small delay for iOS modal system
+                          // Use requestAnimationFrame + setTimeout to ensure iOS modal stack is clear
+                          requestAnimationFrame(() => {
+                            setTimeout(() => {
+                              checkoutUIActions.openModal('payment', retryData)
+                            }, 50)
+                          })
+                        })
+                      }}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.retryPaymentBtnText}>Retry Card 2 Payment</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+
                 {/* Items List - iOS 26 Grouped List Style */}
                 <View style={styles.sectionContainer}>
                   <View style={styles.itemsListContainer}>
@@ -758,6 +855,52 @@ const POSOrderCard = memo(({ order }: POSOrderCardProps) => {
                       <Text style={styles.summaryValueTotal}>${order.total_amount?.toFixed(2)}</Text>
                     </View>
                   </View>
+
+                  {/* Split Payment Details - Show for completed multi-card payments */}
+                  {(order as any).metadata?.multi_card_split && order.payment_status !== 'partial' && (
+                    <View style={styles.splitPaymentDetails}>
+                      <Text style={styles.splitPaymentTitle}>Split Payment</Text>
+                      <View style={styles.splitPaymentRow}>
+                        <View style={styles.splitPaymentCard}>
+                          <View style={styles.splitPaymentCardHeader}>
+                            <View style={styles.splitPaymentCardBadge}>
+                              <Text style={styles.splitPaymentCardBadgeText}>1</Text>
+                            </View>
+                            <Text style={styles.splitPaymentCardLabel}>Card 1</Text>
+                            <Ionicons name="checkmark-circle" size={16} color="#10b981" />
+                          </View>
+                          <Text style={styles.splitPaymentCardAmount}>
+                            ${(order as any).metadata.multi_card_split.card1_amount?.toFixed(2)}
+                          </Text>
+                          {(order as any).metadata.multi_card_split.card1_last4 && (
+                            <Text style={styles.splitPaymentCardLast4}>
+                              •••• {(order as any).metadata.multi_card_split.card1_last4}
+                            </Text>
+                          )}
+                        </View>
+                        <View style={styles.splitPaymentDivider}>
+                          <Ionicons name="add" size={16} color="rgba(255,255,255,0.3)" />
+                        </View>
+                        <View style={styles.splitPaymentCard}>
+                          <View style={styles.splitPaymentCardHeader}>
+                            <View style={styles.splitPaymentCardBadge}>
+                              <Text style={styles.splitPaymentCardBadgeText}>2</Text>
+                            </View>
+                            <Text style={styles.splitPaymentCardLabel}>Card 2</Text>
+                            <Ionicons name="checkmark-circle" size={16} color="#10b981" />
+                          </View>
+                          <Text style={styles.splitPaymentCardAmount}>
+                            ${(order as any).metadata.multi_card_split.card2_amount?.toFixed(2)}
+                          </Text>
+                          {(order as any).metadata.multi_card_split.card2_last4 && (
+                            <Text style={styles.splitPaymentCardLast4}>
+                              •••• {(order as any).metadata.multi_card_split.card2_last4}
+                            </Text>
+                          )}
+                        </View>
+                      </View>
+                    </View>
+                  )}
                 </View>
 
                 {/* Shipping Section */}
@@ -966,11 +1109,28 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
   },
+  orderTypeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   orderType: {
     fontSize: 11,
     fontWeight: '500',
     color: 'rgba(255,255,255,0.35)',
     textTransform: 'capitalize',
+  },
+  partialBadge: {
+    backgroundColor: 'rgba(249,115,22,0.2)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  partialBadgeText: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#f97316',
+    letterSpacing: 0.3,
   },
   totalAmount: {
     fontSize: 15,
@@ -1095,6 +1255,141 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     textTransform: 'uppercase',
     letterSpacing: 0.3,
+  },
+
+  // Partial Payment Alert - Multi-Card Split
+  partialPaymentAlert: {
+    backgroundColor: 'rgba(249,115,22,0.1)',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(249,115,22,0.25)',
+  },
+  partialPaymentHeader: {
+    marginBottom: 12,
+  },
+  partialPaymentTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#f97316',
+    letterSpacing: -0.2,
+  },
+  partialPaymentDetails: {
+    gap: 8,
+    marginBottom: 16,
+  },
+  partialPaymentRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  partialPaymentLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.7)',
+  },
+  partialPaymentValue: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#10b981',
+  },
+  partialPaymentCardInfo: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.5)',
+  },
+  partialPaymentLabelRemaining: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#f97316',
+  },
+  partialPaymentValueRemaining: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#f97316',
+  },
+  retryPaymentBtn: {
+    backgroundColor: 'rgba(249,115,22,0.2)',
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(249,115,22,0.3)',
+  },
+  retryPaymentBtnText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#f97316',
+  },
+
+  // Split Payment Details - Completed multi-card payments
+  splitPaymentDetails: {
+    marginTop: 16,
+    padding: 16,
+    backgroundColor: 'rgba(16,185,129,0.08)',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(16,185,129,0.2)',
+  },
+  splitPaymentTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#10b981',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+    marginBottom: 12,
+  },
+  splitPaymentRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  splitPaymentCard: {
+    flex: 1,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 12,
+    padding: 12,
+    alignItems: 'center',
+  },
+  splitPaymentCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 8,
+  },
+  splitPaymentCardBadge: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: 'rgba(16,185,129,0.3)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  splitPaymentCardBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#10b981',
+  },
+  splitPaymentCardLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.6)',
+  },
+  splitPaymentCardAmount: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#fff',
+    letterSpacing: -0.3,
+  },
+  splitPaymentCardLast4: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.5)',
+    marginTop: 4,
+  },
+  splitPaymentDivider: {
+    paddingHorizontal: 4,
   },
 
   // Customer Row

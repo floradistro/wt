@@ -9,8 +9,6 @@
     "newArchEnabled": true,
     "scheme": "whaletools",
     "splash": {
-      "image": "./assets/logo.png",
-      "resizeMode": "contain",
       "backgroundColor": "#000000"
     },
     "backgroundColor": "#000000",

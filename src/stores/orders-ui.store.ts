@@ -15,7 +15,7 @@ import { create } from 'zustand'
 import { devtools } from 'zustand/middleware'
 import { useShallow } from 'zustand/react/shallow'
 
-type NavSection = 'fulfillment' | 'in-store' | 'errors'
+type NavSection = 'fulfillment' | 'in-store' | 'errors' | 'pickup' | 'ecommerce'
 type DateRange = 'today' | 'week' | 'month' | 'all' | 'custom'
 
 interface OrdersUIState {

@@ -289,10 +289,10 @@ export interface CreateProductParams {
   status?: 'published' | 'draft'
   stock_status?: 'instock' | 'outofstock' | 'onbackorder'
   featured?: boolean
-  initial_inventory?: Array<{
+  initial_inventory?: {
     location_id: string
     quantity: number
-  }>
+  }[]
 }
 
 export interface CreateProductResult {
@@ -304,7 +304,7 @@ export interface CreateProductResult {
 
 export interface CreateProductsBulkParams {
   vendor_id: string
-  products: Array<{
+  products: {
     name: string
     sku?: string
     description?: string
@@ -312,7 +312,7 @@ export interface CreateProductsBulkParams {
     status?: string
     stock_status?: string
     featured?: boolean
-  }>
+  }[]
   category_id: string
   pricing_data: any
 }

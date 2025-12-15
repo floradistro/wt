@@ -1,7 +1,6 @@
 /**
  * Cash Payment View - TRUE ZERO PROPS ✅
  * Single Responsibility: Handle cash payment input and change calculation
- * Apple Standard: Component < 300 lines
  *
  * ZERO DATA PROPS - Reads from stores:
  * - total (calculated from subtotal + tax)
@@ -11,17 +10,18 @@
  */
 
 import { useState, useMemo } from 'react'
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native'
-import { LiquidGlassView } from '@callstack/liquid-glass'
+import { View, Text, TextInput, TouchableOpacity, StyleSheet } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import * as Haptics from 'expo-haptics'
 import { logger } from '@/utils/logger'
 import { Sentry } from '@/utils/sentry'
 import { useCheckoutTotals } from '@/hooks/useCheckoutTotals'
-import type { PaymentData, SaleCompletionData, PaymentStage } from './PaymentTypes'
+import { PaymentProcessingAnimation } from './PaymentProcessingAnimation'
+import { PaymentActionButton } from './PaymentActionButton'
+import type { PaymentData, SaleCompletionData } from './PaymentTypes'
 
 interface CashPaymentViewProps {
-  onComplete: (paymentData: PaymentData) => Promise<SaleCompletionData>  // ✅ Coordination callback only
+  onComplete: (paymentData: PaymentData) => Promise<SaleCompletionData>
   onCancel: () => void
 }
 
@@ -29,18 +29,10 @@ export function CashPaymentView({
   onComplete,
   onCancel,
 }: CashPaymentViewProps) {
-  // ========================================
-  // SINGLE SOURCE OF TRUTH - Centralized total calculation
-  // ========================================
-  const { total, subtotal, taxAmount, itemCount, loyaltyDiscount, campaignDiscount } = useCheckoutTotals()
+  const { total } = useCheckoutTotals()
 
-  // ========================================
-  // LOCAL STATE (UI only)
-  // ========================================
   const [cashTendered, setCashTendered] = useState('')
   const [processing, setProcessing] = useState(false)
-  const [paymentStage, setPaymentStage] = useState<PaymentStage>('initializing')
-  const [completionData, setCompletionData] = useState<SaleCompletionData | null>(null)
 
   // Calculate change
   const changeAmount = useMemo(() => {
@@ -48,7 +40,7 @@ export function CashPaymentView({
   }, [cashTendered, total])
 
   const canComplete = useMemo(() => {
-    return cashTendered && !isNaN(parseFloat(cashTendered)) && changeAmount >= 0 && !processing
+    return !!cashTendered && !isNaN(parseFloat(cashTendered)) && changeAmount >= 0 && !processing
   }, [cashTendered, changeAmount, processing])
 
   // Smart quick amounts
@@ -58,11 +50,11 @@ export function CashPaymentView({
       Math.ceil(total / 20) * 20,
       Math.ceil(total / 50) * 50,
       100,
-    ].filter((v, i, a) => a.indexOf(v) === i && v >= total)
+    ].filter((v, i, a) => a.indexOf(v) === i && v >= total).slice(0, 4)
   }, [total])
 
   const handleQuickAmount = (amount: number) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
     setCashTendered(amount.toString())
   }
 
@@ -70,28 +62,15 @@ export function CashPaymentView({
     if (!canComplete) return
 
     setProcessing(true)
-    setPaymentStage('processing')
 
-    // Set Sentry context for cash payment tracking
     Sentry.setContext('cash_payment', {
       amount: total,
       cashTendered: parseFloat(cashTendered),
       changeGiven: changeAmount,
     })
 
-    Sentry.addBreadcrumb({
-      category: 'payment',
-      message: 'Cash payment initiated',
-      level: 'info',
-      data: {
-        amount: total,
-        cashTendered: parseFloat(cashTendered),
-        changeGiven: changeAmount,
-      },
-    })
-
     try {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
 
       const paymentData: PaymentData = {
         paymentMethod: 'cash',
@@ -99,441 +78,243 @@ export function CashPaymentView({
         changeGiven: changeAmount,
       }
 
-      // Brief moment to show success
-      await new Promise(resolve => setTimeout(resolve, 500))
-      setPaymentStage('success')
+      logger.debug('💵 Processing cash payment...', paymentData)
+      await onComplete(paymentData)
 
-      Sentry.addBreadcrumb({
-        category: 'payment',
-        message: 'Cash payment accepted',
-        level: 'info',
-      })
-
-      // CRITICAL: Save sale to database - MUST complete
-      setPaymentStage('saving')
-      logger.debug('💵 Cash payment complete, saving sale...', paymentData)
-
-      Sentry.addBreadcrumb({
-        category: 'payment',
-        message: 'Saving cash sale to database',
-        level: 'info',
-      })
-
-      try {
-        const saleData = await onComplete(paymentData)
-
-        // Sale saved successfully!
-        setCompletionData(saleData)
-        setPaymentStage('complete')
-
-        logger.debug('💵 Cash sale completed successfully', { orderNumber: saleData.orderNumber })
-
-        Sentry.addBreadcrumb({
-          category: 'payment',
-          message: 'Cash sale completed successfully',
-          level: 'info',
-          data: {
-            orderNumber: saleData.orderNumber,
-            loyaltyPointsAdded: saleData.loyaltyPointsAdded,
-          },
-        })
-
-        // Parent modal will show success animation and handle dismissal
-        // Keep processing state until modal fully closes (parent will reset on next open)
-
-      } catch (saveError) {
-        // CRITICAL: Sale save failed
-        logger.error('💥 CRITICAL: Cash payment accepted but sale save failed', saveError)
-
-        Sentry.captureException(saveError, {
-          level: 'fatal',
-          contexts: {
-            cash_payment: {
-              amount: total,
-              cashTendered: parseFloat(cashTendered),
-              changeGiven: changeAmount,
-              stage: 'save_failed',
-            },
-          },
-          tags: {
-            payment_method: 'cash',
-            critical: 'sale_save_failure',
-          },
-        })
-
-        setPaymentStage('error')
-        setProcessing(false)
-        throw new Error('Sale could not be saved. Please contact support.')
-      }
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
     } catch (error: any) {
-      setPaymentStage('error')
-      setProcessing(false)
       logger.error('Cash payment error:', error)
-
       Sentry.captureException(error, {
         level: 'error',
         contexts: {
           cash_payment: {
             amount: total,
             cashTendered: parseFloat(cashTendered),
-            stage: paymentStage,
           },
         },
-        tags: {
-          payment_method: 'cash',
-        },
+        tags: { payment_method: 'cash' },
       })
-
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
-      // Error will be shown by parent
+    } finally {
+      setProcessing(false)
     }
   }
 
-  return (
-    <View style={styles.container}>
-      {processing ? (
-        <View style={styles.processingContainer}>
-          <View style={styles.processingHeader}>
-            <ActivityIndicator size="large" color="#10b981" />
-          </View>
-
-          <View style={styles.processingBody}>
-            <Text style={styles.processingAmount}>${total.toFixed(2)}</Text>
-
-            <View style={styles.statusDivider} />
-
-            <Text style={styles.statusText}>
-              {paymentStage === 'processing' && 'Processing...'}
-              {paymentStage === 'success' && 'Approved ✓'}
-              {paymentStage === 'saving' && 'Saving sale...'}
-              {paymentStage === 'complete' && 'Complete ✓'}
-              {paymentStage === 'error' && 'Error'}
-            </Text>
-          </View>
-        </View>
-      ) : (
-        <>
-          <Text style={styles.sectionLabel}>CASH RECEIVED</Text>
-
-      {/* Quick Buttons */}
-      <View style={styles.quickButtons}>
-        {quickAmounts.map((amount) => (
-          <TouchableOpacity
-            key={amount}
-            onPress={() => handleQuickAmount(amount)}
-            style={[
-              styles.quickButton,
-              cashTendered === amount.toString() && styles.quickButtonActive,
-            ]}
-            activeOpacity={0.7}
-            accessibilityRole="button"
-            accessibilityLabel={`${amount} dollars`}
-            accessibilityHint="Quick select this cash amount"
-            accessibilityState={{ selected: cashTendered === amount.toString() }}
-          >
-            <Text
-              style={[
-                styles.quickButtonText,
-                cashTendered === amount.toString() && styles.quickButtonTextActive,
-              ]}
-            >
-              ${amount}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
-
-      <Text style={styles.orLabel}>OR ENTER AMOUNT</Text>
-
-      {/* Cash Input */}
-      <View style={styles.inputCard}>
-        <TextInput
-          style={styles.input}
-          value={cashTendered}
-          onChangeText={setCashTendered}
-          keyboardType="decimal-pad"
-          placeholder={`$${total.toFixed(2)}`}
-          placeholderTextColor="rgba(255,255,255,0.3)"
-          selectionColor="#10b981"
-          accessibilityLabel="Cash received amount"
-          accessibilityHint={`Enter cash amount, minimum ${total.toFixed(2)} dollars`}
-          accessibilityRole="text"
+  // ========== PROCESSING VIEW ==========
+  if (processing) {
+    return (
+      <View style={styles.container}>
+        <PaymentProcessingAnimation
+          amount={`$${total.toFixed(2)}`}
+          title="Processing Cash Payment"
+          subtitle={`Change: $${changeAmount.toFixed(2)}`}
+          icon="cash"
+          showProgress={false}
         />
       </View>
+    )
+  }
 
-      {/* Change Display */}
-      {cashTendered && parseFloat(cashTendered) > 0 && (
-        <LiquidGlassView
-          effect="regular"
-          colorScheme="dark"
-          tintColor={changeAmount >= 0 ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)'}
-          style={styles.changeCard}
-        >
-          <Text style={[styles.changeLabel, changeAmount < 0 && styles.changeLabelError]}>
-            {changeAmount >= 0 ? 'GIVE CUSTOMER' : 'INSUFFICIENT'}
-          </Text>
-          <Text
-            style={[
-              styles.changeAmount,
-              changeAmount < 0 && styles.changeAmountError,
-            ]}
-          >
-            ${Math.abs(changeAmount).toFixed(2)}
-          </Text>
-          <Text style={[styles.changeSubtext, changeAmount < 0 && styles.changeSubtextError]}>
-            {changeAmount >= 0 ? 'in change' : `need $${Math.abs(changeAmount).toFixed(2)} more`}
-          </Text>
-        </LiquidGlassView>
-      )}
+  const showChange = cashTendered && parseFloat(cashTendered) > 0
+  const isValidAmount = changeAmount >= 0
 
-      {/* Action Buttons Row */}
-      <View style={styles.actionsRow}>
-        <TouchableOpacity
-          onPress={onCancel}
-          activeOpacity={0.7}
-          style={styles.cancelButtonWrapper}
-          accessibilityRole="button"
-          accessibilityLabel="Cancel payment"
-        >
-          <View style={styles.cancelButton}>
-            <Text style={styles.cancelButtonText}>Cancel</Text>
-          </View>
-        </TouchableOpacity>
+  // ========== SETUP VIEW ==========
+  return (
+    <View style={styles.container}>
+      {/* Main Input Area */}
+      <View style={styles.inputArea}>
+        <View style={styles.inputRow}>
+          <Text style={styles.currencySymbol} accessibilityElementsHidden>$</Text>
+          <TextInput
+            style={styles.input}
+            value={cashTendered}
+            onChangeText={setCashTendered}
+            keyboardType="decimal-pad"
+            placeholder={total.toFixed(2)}
+            placeholderTextColor="rgba(255,255,255,0.2)"
+            selectionColor="#10b981"
+            accessibilityLabel="Cash tendered amount"
+            accessibilityHint={`Enter cash amount. Total due is ${total.toFixed(2)} dollars`}
+          />
+        </View>
 
-        <TouchableOpacity
-          onPress={handleComplete}
-          disabled={!canComplete}
-          activeOpacity={0.7}
-          style={styles.completeButtonWrapper}
-          accessibilityRole="button"
-          accessibilityLabel="Complete cash payment"
-          accessibilityHint={canComplete ? `Give customer $${changeAmount.toFixed(2)} in change` : `Enter at least $${total.toFixed(2)}`}
-          accessibilityState={{ disabled: !canComplete }}
-        >
-          <View
-            style={[
-              styles.completeButton,
-              canComplete && styles.completeButtonActive,
-              !canComplete && styles.completeButtonDisabled,
-            ]}
-          >
-            <Text style={[
-              styles.completeButtonText,
-              canComplete && styles.completeButtonTextActive
-            ]}>
-              Complete
-            </Text>
-          </View>
-        </TouchableOpacity>
+        {/* Quick Amount Buttons */}
+        <View style={styles.quickRow} accessibilityRole="radiogroup" accessibilityLabel="Quick cash amounts">
+          {quickAmounts.map((amount) => {
+            const isSelected = cashTendered === amount.toString()
+            return (
+              <TouchableOpacity
+                key={amount}
+                onPress={() => handleQuickAmount(amount)}
+                style={[styles.quickPill, isSelected && styles.quickPillActive]}
+                activeOpacity={0.7}
+                accessibilityRole="radio"
+                accessibilityState={{ checked: isSelected }}
+                accessibilityLabel={`${amount} dollars`}
+              >
+                <Text style={[styles.quickPillText, isSelected && styles.quickPillTextActive]}>
+                  ${amount}
+                </Text>
+              </TouchableOpacity>
+            )
+          })}
+        </View>
       </View>
-        </>
-      )}
+
+      {/* Change Display - fills remaining space */}
+      <View style={styles.changeArea}>
+        {showChange ? (
+          <View
+            style={[styles.changeDisplay, !isValidAmount && styles.changeDisplayError]}
+            accessibilityRole="text"
+            accessibilityLiveRegion="polite"
+            accessibilityLabel={isValidAmount ? `Change due: ${Math.abs(changeAmount).toFixed(2)} dollars` : `Insufficient funds. Need ${Math.abs(changeAmount).toFixed(2)} more dollars`}
+          >
+            <Ionicons
+              name={isValidAmount ? 'arrow-down-circle' : 'alert-circle'}
+              size={28}
+              color={isValidAmount ? '#10b981' : '#ef4444'}
+            />
+            <View style={styles.changeTextGroup}>
+              <Text style={[styles.changeLabel, !isValidAmount && styles.changeLabelError]}>
+                {isValidAmount ? 'Change Due' : 'Need More'}
+              </Text>
+              <Text style={[styles.changeAmount, !isValidAmount && styles.changeAmountError]}>
+                ${Math.abs(changeAmount).toFixed(2)}
+              </Text>
+            </View>
+          </View>
+        ) : (
+          <View style={styles.emptyChange} accessibilityLabel="Enter cash amount to calculate change">
+            <Ionicons name="cash-outline" size={32} color="rgba(255,255,255,0.1)" />
+            <Text style={styles.emptyChangeText}>Enter cash amount</Text>
+          </View>
+        )}
+      </View>
+
+      {/* Action Button */}
+      <PaymentActionButton
+        onPress={canComplete ? handleComplete : onCancel}
+        isActive={canComplete}
+        activeText="Complete Sale"
+        activeIcon="checkmark-circle"
+      />
     </View>
   )
 }
 
 const styles = StyleSheet.create({
   container: {
-    marginBottom: 12,
-  },
-  processingContainer: {
-    paddingVertical: 48,
-    paddingHorizontal: 24,
-    alignItems: 'center',
-  },
-  processingHeader: {
-    marginBottom: 24,
-  },
-  processingBody: {
-    width: '100%',
-    alignItems: 'center',
-    gap: 12,
-  },
-  processingAmount: {
-    fontSize: 42,
-    fontWeight: '700',
-    color: '#fff',
-    letterSpacing: -0.4,
-  },
-  statusDivider: {
-    width: 40,
-    height: 2,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    marginVertical: 8,
-  },
-  statusText: {
-    fontSize: 15,
-    fontWeight: '400',
-    color: 'rgba(255,255,255,0.8)',
-    textAlign: 'center',
-    letterSpacing: -0.2,
-  },
-  completionDetails: {
-    marginTop: 16,
-    alignItems: 'center',
-    gap: 6,
-  },
-  completionLabel: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#10b981',
-    letterSpacing: -0.2,
-  },
-  completionSubtext: {
-    fontSize: 13,
-    fontWeight: '400',
-    color: 'rgba(255,255,255,0.6)',
-    letterSpacing: -0.1,
-  },
-  sectionLabel: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.5)',
-    letterSpacing: 0.6,
-    textTransform: 'uppercase',
-    marginBottom: 12,
-  },
-  quickButtons: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 12,
-  },
-  quickButton: {
     flex: 1,
-    height: 48,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
-    borderRadius: 14,
+    minHeight: 280,
+  },
+
+  // Input Area
+  inputArea: {
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.06)',
+  },
+  inputRow: {
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  quickButtonActive: {
-    backgroundColor: 'rgba(16,185,129,0.2)',
-    borderColor: '#10b981',
-    borderWidth: 2,
-  },
-  quickButtonText: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.7)',
-    letterSpacing: -0.2,
-  },
-  quickButtonTextActive: {
-    color: '#10b981',
-  },
-  orLabel: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.35)',
-    letterSpacing: 0.6,
-    textAlign: 'center',
-    textTransform: 'uppercase',
-    marginBottom: 10,
-  },
-  inputCard: {
-    borderRadius: 14,
-    padding: 12,
-    marginBottom: 12,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
-  },
-  input: {
-    fontSize: 34,
-    fontWeight: '400',
-    color: '#fff',
-    textAlign: 'center',
-    padding: 0,
-    letterSpacing: -0.3,
-    minHeight: 50,
-  },
-  changeCard: {
-    borderRadius: 14,
-    padding: 16,
-    alignItems: 'center',
     marginBottom: 16,
   },
-  changeLabel: {
-    fontSize: 11,
+  currencySymbol: {
+    fontSize: 40,
+    fontWeight: '300',
+    color: 'rgba(255,255,255,0.25)',
+    marginRight: 4,
+  },
+  input: {
+    fontSize: 48,
+    fontWeight: '700',
+    color: '#fff',
+    padding: 0,
+    minWidth: 120,
+    textAlign: 'center',
+    letterSpacing: -1,
+  },
+  quickRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 10,
+  },
+  quickPill: {
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+  },
+  quickPillActive: {
+    backgroundColor: 'rgba(16,185,129,0.15)',
+    borderColor: 'rgba(16,185,129,0.3)',
+  },
+  quickPillText: {
+    fontSize: 15,
     fontWeight: '600',
+    color: 'rgba(255,255,255,0.5)',
+  },
+  quickPillTextActive: {
     color: '#10b981',
-    letterSpacing: 0.6,
+  },
+
+  // Change Area - fills space
+  changeArea: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 24,
+  },
+  changeDisplay: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    paddingHorizontal: 24,
+    paddingVertical: 16,
+    backgroundColor: 'rgba(16,185,129,0.08)',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(16,185,129,0.15)',
+  },
+  changeDisplayError: {
+    backgroundColor: 'rgba(239,68,68,0.08)',
+    borderColor: 'rgba(239,68,68,0.15)',
+  },
+  changeTextGroup: {
+    alignItems: 'flex-start',
+  },
+  changeLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: 'rgba(16,185,129,0.7)',
     textTransform: 'uppercase',
-    marginBottom: 6,
+    letterSpacing: 0.5,
+    marginBottom: 2,
   },
   changeLabelError: {
-    color: '#ef4444',
+    color: 'rgba(239,68,68,0.7)',
   },
   changeAmount: {
-    fontSize: 36,
+    fontSize: 32,
     fontWeight: '700',
     color: '#10b981',
-    letterSpacing: -0.4,
-    marginBottom: 2,
+    letterSpacing: -1,
+    fontVariant: ['tabular-nums'],
   },
   changeAmountError: {
     color: '#ef4444',
   },
-  changeSubtext: {
-    fontSize: 13,
-    fontWeight: '400',
-    color: 'rgba(16,185,129,0.7)',
-    letterSpacing: 0,
-  },
-  changeSubtextError: {
-    color: 'rgba(239,68,68,0.7)',
-  },
-  actionsRow: {
-    flexDirection: 'row',
-    gap: 12,
-    marginTop: 20,
-  },
-  cancelButtonWrapper: {
-    flex: 1,
-  },
-  cancelButton: {
-    height: 50,
-    borderRadius: 25,
+  emptyChange: {
     alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
+    gap: 8,
   },
-  cancelButtonText: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.7)',
-    letterSpacing: -0.2,
-  },
-  completeButtonWrapper: {
-    flex: 1,
-  },
-  completeButton: {
-    height: 50,
-    borderRadius: 25,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
-  },
-  completeButtonActive: {
-    backgroundColor: 'rgba(16,185,129,0.2)',
-    borderColor: '#10b981',
-  },
-  completeButtonDisabled: {
-    opacity: 0.4,
-  },
-  completeButtonText: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.5)',
-    letterSpacing: -0.2,
-  },
-  completeButtonTextActive: {
-    color: '#10b981',
-    fontWeight: '700',
+  emptyChangeText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.25)',
   },
 })

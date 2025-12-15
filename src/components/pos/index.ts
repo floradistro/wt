@@ -3,6 +3,7 @@
 // Session & Setup
 export { CloseCashDrawerModal } from './CloseCashDrawerModal'
 export { OpenCashDrawerModal } from './OpenCashDrawerModal'
+export { POSCashCountModal } from './POSCashCountModal'
 export { POSLocationSelector } from './POSLocationSelector'
 export { POSRegisterSelector } from './POSRegisterSelector'
 

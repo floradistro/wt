@@ -400,6 +400,7 @@ export const useCartStore = create<CartState>()(
             await AsyncStorage.removeItem(name)
           },
         },
+        // @ts-expect-error - Zustand persist partialize return type mismatch with full state
         partialize: (state) => ({
           // Only persist cart items, not UI state
           items: state.items,

@@ -1,18 +1,18 @@
 /**
- * Dock Offset Context
- *
- * Minimal context for POS setup override to control dock centering.
- * Extracted to separate file to prevent circular dependencies.
+ * DockOffsetContext - Legacy stub (Dock removed)
+ * Kept for backwards compatibility with POSScreen
  */
 
 import { createContext, useContext } from 'react'
 
 interface DockOffsetContextType {
-  setFullWidth: (isFullWidth: boolean) => void
+  setFullWidth: (fullWidth: boolean) => void
 }
 
-export const DockOffsetContext = createContext<DockOffsetContextType>({
-  setFullWidth: () => {}
+const DockOffsetContext = createContext<DockOffsetContextType>({
+  setFullWidth: () => {}, // No-op since Dock is removed
 })
+
+export { DockOffsetContext }
 
 export const useDockOffset = () => useContext(DockOffsetContext)

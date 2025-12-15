@@ -20,12 +20,8 @@ import { LiquidGlassView, isLiquidGlassSupported } from '@callstack/liquid-glass
 import { startPaymentProcessorMonitoring, stopPaymentProcessorMonitoring } from '@/stores/payment-processor.store'
 import { useDockOffset } from '@/navigation/DockOffsetContext'
 import { layout } from '@/theme/layout'
-import { useRealtimeInventory } from '@/hooks/useRealtimeInventory'
-import { useRealtimePricing } from '@/hooks/useRealtimePricing'
-
 // Context - Zero prop drilling!
 import { usePOSSession } from '@/contexts/POSSessionContext'
-import { useAppAuth } from '@/contexts/AppAuthContext'
 
 // New Refactored Components
 import {
@@ -48,15 +44,8 @@ export function POSScreen({ isActive = true }: { isActive?: boolean }) {
 
   // Context - Session data (no prop drilling!)
   const { session } = usePOSSession()
-  const { vendor } = useAppAuth()
 
-  // ✅ REAL-TIME INVENTORY: Subscribe to inventory updates for current POS location
-  // Critical for POS: When a sale completes, all product cards update instantly
-  useRealtimeInventory(session?.locationId)
-
-  // ✅ REAL-TIME PRICING: Subscribe to pricing template updates for vendor
-  // Critical for POS: When pricing changes, all product cards update instantly
-  useRealtimePricing(vendor?.id)
+  // Note: Real-time inventory and pricing are handled by pos-products.store
 
   // ========================================
   // LOCAL STATE (Minimal!)
@@ -153,6 +142,9 @@ const styles = StyleSheet.create({
   leftColumn: {
     width: layout.sidebarWidth, // Match nav sidebar exactly (375px)
     backgroundColor: '#000',
+    borderTopRightRadius: 32,
+    borderBottomRightRadius: 32,
+    overflow: 'hidden',
   },
   rightColumn: {
     flex: 1,

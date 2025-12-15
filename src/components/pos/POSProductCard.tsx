@@ -110,13 +110,13 @@ const POSProductCard = forwardRef<any, POSProductCardProps>(({ product }, ref) =
   const saveProgressAnim = useRef(new Animated.Value(0)).current
 
   // Variant inventory conversion state (edit mode only)
-  const [variantInventory, setVariantInventory] = useState<Array<{
+  const [variantInventory, setVariantInventory] = useState<{
     variant_template_id: string
     variant_name: string
     conversion_ratio: number
     quantity: number
     available_quantity: number
-  }>>([])
+  }[]>([])
   const [convertAmount, setConvertAmount] = useState('')
   const [convertingVariant, setConvertingVariant] = useState<string | null>(null)
   const [conversionLoading, setConversionLoading] = useState(false)
@@ -797,6 +797,18 @@ const POSProductCard = forwardRef<any, POSProductCardProps>(({ product }, ref) =
     }
   }
 
+  // Double-tap backdrop to close (always closes, even in edit mode)
+  const backdropLastTap = useRef<number>(0)
+  const handleBackdropDoubleTap = () => {
+    const now = Date.now()
+    const DOUBLE_TAP_DELAY = 300
+    if (now - backdropLastTap.current < DOUBLE_TAP_DELAY) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+      closePricingModal()
+    }
+    backdropLastTap.current = now
+  }
+
   // Track changes
   const markChanged = () => {
     if (!hasChanges) setHasChanges(true)
@@ -1333,8 +1345,8 @@ const POSProductCard = forwardRef<any, POSProductCardProps>(({ product }, ref) =
                   accessibilityLabel={`${product.name} product image`}
                   accessibilityRole="image"
                 />
-                {/* Jobs Principle: Subtle dimming filter for consistent look (matches shop page) */}
-                <View style={styles.imageDimOverlay} pointerEvents="none" />
+                {/* Default dim for uniform brightness + extra dim when this card's modal is open */}
+                <View style={[styles.imageDimOverlay, showPricingModal && styles.imageDimOverlayActive]} pointerEvents="none" />
               </>
             ) : product.vendor_logo_url ? (
               <View style={styles.vendorLogoContainer}>
@@ -1409,11 +1421,10 @@ const POSProductCard = forwardRef<any, POSProductCardProps>(({ product }, ref) =
         onRequestClose={closePricingModal}
       >
         <Animated.View style={[styles.modalOverlay, { opacity: modalOpacity }]}>
-          {/* JOBS PRINCIPLE: Tap outside to dismiss (no X button needed) */}
-          {/* Reduced blur for performance */}
+          {/* Double-tap backdrop to close */}
           <Pressable
             style={StyleSheet.absoluteFill}
-            onPress={closePricingModal}
+            onPress={handleBackdropDoubleTap}
           >
             <BlurView intensity={25} tint="dark" style={StyleSheet.absoluteFill} />
           </Pressable>
@@ -2084,10 +2095,14 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
-  // Apple Music style - no dimming, full brightness images
+  // Default dimming for uniform brightness across all products
   imageDimOverlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'transparent', // No dimming - full brightness like Apple Music
+    backgroundColor: 'rgba(0,0,0,0.45)', // Default dim for uniformity
+  },
+  // Extra dim when modal is open for better modal readability
+  imageDimOverlayActive: {
+    backgroundColor: 'rgba(0,0,0,0.6)',
   },
   // Apple Music style fallback for missing images
   vendorLogoContainer: {

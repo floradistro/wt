@@ -10,11 +10,10 @@
  * All state and actions read/dispatched through stores = zero prop drilling!
  */
 
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native'
-import { useCallback, useState } from 'react'
-import { LiquidGlassView, isLiquidGlassSupported } from '@callstack/liquid-glass'
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Pressable, Animated, Easing } from 'react-native'
+import { useCallback, useState, useRef, useEffect } from 'react'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import * as Haptics from 'expo-haptics'
+import * as Haptics from 'expo-haptics'    // ms total to end session (after press starts)
 import { POSCartItem } from './POSCartItem'
 import { POSTotalsSection } from './POSTotalsSection'
 import { POSMissingContactBanner } from '../POSMissingContactBanner'
@@ -24,9 +23,12 @@ import { layout } from '@/theme/layout'
 
 // Stores
 import { useCartItems, cartActions, useCartTotals } from '@/stores/cart.store'
-import { checkoutUIActions } from '@/stores/checkout-ui.store'
-import { useSelectedCustomer, customerActions } from '@/stores/customer.store'
+import { useSelectedCustomer } from '@/stores/customer.store'
 import { useScannedOrder } from '@/stores/scanned-order.store'
+
+// Timing constants
+const CLEAR_CART_DELAY = 600      // ms to clear cart
+const END_SESSION_DELAY = 2000
 
 interface POSCartProps {
   onEndSession?: () => void
@@ -42,6 +44,21 @@ export function POSCart({ onEndSession }: POSCartProps) {
   // LOCAL STATE
   // ========================================
   const [showUpdateContactModal, setShowUpdateContactModal] = useState(false)
+
+  // ========================================
+  // ANIMATION - Long press feedback
+  // ========================================
+  const scaleAnim = useRef(new Animated.Value(1)).current
+  const opacityAnim = useRef(new Animated.Value(1)).current
+  const endSessionProgress = useRef(new Animated.Value(0)).current
+  const [showEndSessionHint, setShowEndSessionHint] = useState(false)
+  const [endSessionCountdown, setEndSessionCountdown] = useState<number | null>(null)
+
+  // Timers for staged long press
+  const pressTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const endSessionTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const countdownIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const isPressing = useRef(false)
 
   // ========================================
   // STORES - Cart Data
@@ -60,28 +77,159 @@ export function POSCart({ onEndSession }: POSCartProps) {
   const selectedCustomer = useSelectedCustomer()
 
   // ========================================
-  // HANDLERS (MEMOIZED to prevent re-render loops)
+  // CLEANUP - Clear timers on unmount
   // ========================================
-  const handleSelectCustomer = useCallback(() => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-    checkoutUIActions.openModal('customerSelector')
-  }, [])
-
-  const handleClearCustomer = useCallback(() => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-    customerActions.clearCustomer()
-  }, [])
-
-  const handleEndSession = useCallback(() => {
-    if (onEndSession) {
-      onEndSession()
+  useEffect(() => {
+    return () => {
+      if (pressTimerRef.current) clearTimeout(pressTimerRef.current)
+      if (endSessionTimerRef.current) clearTimeout(endSessionTimerRef.current)
+      if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current)
     }
-  }, [onEndSession])
-
-  const handleClearCart = useCallback(() => {
-    cartActions.clearCart()
-    cartActions.setDiscountingItemId(null)
   }, [])
+
+  // ========================================
+  // HANDLERS - Staged Long Press
+  // ========================================
+  const clearAllTimers = useCallback(() => {
+    if (pressTimerRef.current) {
+      clearTimeout(pressTimerRef.current)
+      pressTimerRef.current = null
+    }
+    if (endSessionTimerRef.current) {
+      clearTimeout(endSessionTimerRef.current)
+      endSessionTimerRef.current = null
+    }
+    if (countdownIntervalRef.current) {
+      clearInterval(countdownIntervalRef.current)
+      countdownIntervalRef.current = null
+    }
+  }, [])
+
+  const handlePressIn = useCallback(() => {
+    // Clear any existing timers first
+    clearAllTimers()
+
+    isPressing.current = true
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+
+    // Reset animations to starting state
+    scaleAnim.setValue(1)
+    opacityAnim.setValue(1)
+    endSessionProgress.setValue(0)
+
+    // Scale down to indicate press
+    Animated.spring(scaleAnim, {
+      toValue: 0.97,
+      tension: 300,
+      friction: 20,
+      useNativeDriver: true,
+    }).start()
+
+    // Stage 1: Clear cart after CLEAR_CART_DELAY (if cart has items)
+    if (cart.length > 0) {
+      pressTimerRef.current = setTimeout(() => {
+        if (!isPressing.current) return
+
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy)
+        // Flash animation on clear
+        Animated.sequence([
+          Animated.timing(opacityAnim, {
+            toValue: 0.3,
+            duration: 100,
+            useNativeDriver: true,
+          }),
+          Animated.timing(opacityAnim, {
+            toValue: 1,
+            duration: 200,
+            useNativeDriver: true,
+          }),
+        ]).start()
+
+        cartActions.clearCart()
+        cartActions.setDiscountingItemId(null)
+
+        // Start end session countdown after cart is cleared
+        if (isPressing.current) {
+          startEndSessionPhase()
+        }
+      }, CLEAR_CART_DELAY)
+    } else {
+      // Cart is empty - start end session countdown after a brief delay
+      pressTimerRef.current = setTimeout(() => {
+        if (isPressing.current) {
+          startEndSessionPhase()
+        }
+      }, CLEAR_CART_DELAY)
+    }
+  }, [cart.length, scaleAnim, opacityAnim, endSessionProgress, clearAllTimers])
+
+  const startEndSessionPhase = useCallback(() => {
+    if (!isPressing.current) return
+
+    // Show hint and start progress animation
+    setShowEndSessionHint(true)
+    setEndSessionCountdown(2)
+
+    // Subtle haptic to indicate new stage
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+
+    // Progress bar animation
+    Animated.timing(endSessionProgress, {
+      toValue: 1,
+      duration: END_SESSION_DELAY - CLEAR_CART_DELAY,
+      easing: Easing.linear,
+      useNativeDriver: false,
+    }).start()
+
+    // Countdown updates
+    countdownIntervalRef.current = setInterval(() => {
+      if (!isPressing.current) return
+      setEndSessionCountdown(prev => {
+        if (prev === null || prev <= 1) return prev
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+        return prev - 1
+      })
+    }, 700)
+
+    // End session timer
+    endSessionTimerRef.current = setTimeout(() => {
+      if (!isPressing.current) return
+
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+      clearAllTimers()
+      isPressing.current = false
+      setShowEndSessionHint(false)
+      setEndSessionCountdown(null)
+
+      if (onEndSession) {
+        onEndSession()
+      }
+    }, END_SESSION_DELAY - CLEAR_CART_DELAY)
+  }, [endSessionProgress, clearAllTimers, onEndSession])
+
+  const handlePressOut = useCallback(() => {
+    isPressing.current = false
+    clearAllTimers()
+
+    // Reset UI state
+    setShowEndSessionHint(false)
+    setEndSessionCountdown(null)
+
+    // Reset animations
+    Animated.parallel([
+      Animated.spring(scaleAnim, {
+        toValue: 1,
+        tension: 300,
+        friction: 20,
+        useNativeDriver: true,
+      }),
+      Animated.timing(endSessionProgress, {
+        toValue: 0,
+        duration: 150,
+        useNativeDriver: false,
+      }),
+    ]).start()
+  }, [clearAllTimers, scaleAnim, endSessionProgress])
 
   const handleUpdateContactInfo = useCallback(() => {
     setShowUpdateContactModal(true)
@@ -108,139 +256,75 @@ export function POSCart({ onEndSession }: POSCartProps) {
 
       {/* iOS 26 Perfectly Simple Cart Header */}
       <View style={styles.cartHeader}>
-        {/* Customer Section - iOS 26 Rounded Container or Pill Button */}
-        {!selectedCustomer ? (
-          <LiquidGlassView
-            key="customer-pill-empty"
-            effect="regular"
-            colorScheme="dark"
-            tintColor="rgba(255,255,255,0.05)"
-            interactive
-            style={[
-              styles.customerPillButton,
-              !isLiquidGlassSupported && styles.customerPillButtonFallback
-            ]}
-          >
-            <TouchableOpacity
-              onPress={handleSelectCustomer}
-              style={styles.customerPillButtonPressable}
-              activeOpacity={0.7}
-              accessibilityRole="button"
-              accessibilityLabel="Select customer"
-              accessibilityHint="Opens customer selection to apply loyalty points or track purchase"
-            >
-              <Text style={styles.customerPillText}>Customer</Text>
-            </TouchableOpacity>
-          </LiquidGlassView>
-        ) : (
-          <LiquidGlassView
-            key={`customer-pill-${selectedCustomer.id}`}
-            effect="regular"
-            colorScheme="dark"
-            interactive
-            style={[
-              styles.customerPill,
-              !isLiquidGlassSupported && styles.customerPillFallback
-            ]}
-          >
-            <TouchableOpacity
-              onPress={handleSelectCustomer}
-              style={styles.customerPillPressable}
-              activeOpacity={0.8}
-              accessibilityRole="button"
-              accessibilityLabel={`Selected customer: ${selectedCustomer.display_name || `${selectedCustomer.first_name} ${selectedCustomer.last_name}`.trim() || selectedCustomer.email}${selectedCustomer.loyalty_points > 0 ? `, ${selectedCustomer.loyalty_points} loyalty points` : ''}`}
-              accessibilityHint="Tap to change customer or view customer details"
-            >
-            <View style={styles.customerPillContent}>
-              <View style={styles.customerPillTextContainer}>
-                <Text style={styles.customerPillName} numberOfLines={1}>
-                  {selectedCustomer.display_name ||
-                    `${selectedCustomer.first_name} ${selectedCustomer.last_name}`.trim() ||
-                    selectedCustomer.email}
-                </Text>
-                {selectedCustomer.loyalty_points > 0 && (
-                  <Text style={styles.customerPillPoints}>
-                    {selectedCustomer.loyalty_points.toLocaleString()} pts
-                  </Text>
-                )}
-              </View>
-              <TouchableOpacity
-                onPress={(e) => {
-                  e.stopPropagation()
-                  handleClearCustomer()
-                }}
-                style={styles.customerPillClearButton}
-                activeOpacity={0.6}
-                accessibilityRole="button"
-                accessibilityLabel="Clear customer selection"
-                accessibilityHint="Removes customer from this transaction"
-              >
-                <Text style={styles.customerPillClearText}>×</Text>
-              </TouchableOpacity>
-            </View>
-            </TouchableOpacity>
-          </LiquidGlassView>
-        )}
-
         {/* Missing Contact Banner - shows when customer needs email/phone */}
         {selectedCustomer && (
           <POSMissingContactBanner onUpdateCustomer={handleUpdateContactInfo} />
         )}
-
-        {/* Clear Cart Button - Pill Style */}
-        {cart.length > 0 && (
-          <LiquidGlassView
-            key="clear-cart-button"
-            effect="regular"
-            colorScheme="dark"
-            tintColor="rgba(255,255,255,0.05)"
-            interactive
-            style={[
-              styles.customerPillButton,
-              !isLiquidGlassSupported && styles.customerPillButtonFallback
-            ]}
-          >
-            <TouchableOpacity
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
-                handleClearCart()
-              }}
-              style={styles.customerPillButtonPressable}
-              activeOpacity={0.7}
-              accessibilityRole="button"
-              accessibilityLabel="Clear cart"
-              accessibilityHint="Removes all items from cart"
-            >
-              <Text style={styles.customerPillText}>Clear Cart</Text>
-            </TouchableOpacity>
-          </LiquidGlassView>
-        )}
       </View>
 
-      {/* Cart Items - Rounded container */}
-      <View style={styles.cartItemsContainer}>
-        <ScrollView
-          style={styles.cartItems}
-          showsVerticalScrollIndicator={true}
-          indicatorStyle="white"
-          scrollIndicatorInsets={{ right: 2, bottom: layout.dockHeight }}
-          contentContainerStyle={{ paddingBottom: layout.dockHeight }}
+      {/* Cart Items - Staged long press: clear cart → end session */}
+      <Pressable
+        style={styles.cartItemsContainer}
+        onPressIn={handlePressIn}
+        onPressOut={handlePressOut}
+        accessibilityRole="none"
+        accessibilityLabel={cart.length > 0 ? `Cart with ${itemCount} items, subtotal ${subtotal.toFixed(2)} dollars` : 'Empty cart'}
+        accessibilityHint="Long press to clear cart, keep holding to end session"
+      >
+        <Animated.View
+          style={[
+            styles.cartItemsAnimated,
+            {
+              transform: [{ scale: scaleAnim }],
+              opacity: opacityAnim,
+            },
+          ]}
         >
-          {cart.length === 0 ? (
-            <View style={styles.emptyCart}>
-              <Text style={styles.emptyCartText}>Cart is empty</Text>
-              <Text style={styles.emptyCartSubtext}>Add items to get started</Text>
+          <ScrollView
+            style={styles.cartItems}
+            showsVerticalScrollIndicator={true}
+            indicatorStyle="white"
+            scrollIndicatorInsets={{ right: 2, bottom: layout.dockHeight }}
+            contentContainerStyle={{ paddingBottom: layout.dockHeight }}
+          >
+            {cart.length === 0 ? (
+              <View style={styles.emptyCart} accessibilityRole="text" accessibilityLabel="Cart is empty. Add items to get started.">
+                <Text style={styles.emptyCartText}>Cart is empty</Text>
+                <Text style={styles.emptyCartSubtext}>Add items to get started</Text>
+              </View>
+            ) : (
+              cart.map((item) => (
+                <POSCartItem
+                  key={item.id}
+                  item={item}
+                />
+              ))
+            )}
+          </ScrollView>
+        </Animated.View>
+
+        {/* End Session Hint Overlay */}
+        {showEndSessionHint && (
+          <View style={styles.endSessionOverlay} accessibilityRole="alert" accessibilityLiveRegion="polite">
+            <View style={styles.endSessionHintContainer}>
+              <Text style={styles.endSessionHintText} accessibilityLabel="Keep holding to end session">Keep holding to end session</Text>
+              <View style={styles.endSessionProgressContainer}>
+                <Animated.View
+                  style={[
+                    styles.endSessionProgressBar,
+                    {
+                      width: endSessionProgress.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: ['0%', '100%'],
+                      }),
+                    },
+                  ]}
+                />
+              </View>
             </View>
-          ) : (
-            cart.map((item) => (
-              <POSCartItem
-                key={item.id}
-                item={item}
-              />
-            ))
-          )}
-        </ScrollView>
-      </View>
+          </View>
+        )}
+      </Pressable>
 
       {cart.length > 0 && (
         <>
@@ -250,17 +334,6 @@ export function POSCart({ onEndSession }: POSCartProps) {
           <POSTotalsSection />
         </>
       )}
-
-      {/* Jobs Principle: End Session - Bottom of cart, subtle, out of the way */}
-      <TouchableOpacity
-        onPress={handleEndSession}
-        style={styles.endSessionFooter}
-        accessibilityRole="button"
-        accessibilityLabel="End session"
-        accessibilityHint="Closes the current POS session and returns to session setup"
-      >
-        <Text style={styles.endSessionFooterText}>End Session</Text>
-      </TouchableOpacity>
     </View>
   )
 }
@@ -269,6 +342,8 @@ const styles = StyleSheet.create({
   cartCard: {
     flex: 1,
     backgroundColor: 'rgba(255,255,255,0.03)', // Match product card glass tint
+    borderTopRightRadius: 32,
+    borderBottomRightRadius: 32,
   },
   cartHeader: {
     paddingHorizontal: 8,
@@ -276,83 +351,14 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
     gap: 8,
   },
-  customerPillButton: {
-    borderRadius: 20,
-    overflow: 'hidden',
-    minHeight: 44,
-  },
-  customerPillButtonFallback: {
-    backgroundColor: 'rgba(255,255,255,0.08)', // Match pricing modal tier buttons
-  },
-  customerPillButtonPressable: {
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    minHeight: 44,
-    justifyContent: 'center',
-  },
-  customerPillText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.9)',
-    textAlign: 'center',
-  },
-  customerPill: {
-    borderRadius: 20,
-    overflow: 'hidden',
-    minHeight: 44,
-  },
-  customerPillFallback: {
-    backgroundColor: 'rgba(255,255,255,0.10)', // Slightly brighter for selected state
-  },
-  customerPillPressable: {
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    minHeight: 44,
-    justifyContent: 'center',
-  },
-  customerPillContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
-  customerPillTextContainer: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  customerPillName: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#fff',
-    flex: 1,
-  },
-  customerPillPoints: {
-    fontSize: 12,
-    fontWeight: '500',
-    color: 'rgba(255,255,255,0.6)',
-  },
-  customerPillClearButton: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  customerPillClearText: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.6)',
-    lineHeight: 20,
-  },
   cartItemsContainer: {
     flex: 1,
     marginHorizontal: 8,
     borderRadius: 20,
     overflow: 'hidden',
-    // No background - transparent
+  },
+  cartItemsAnimated: {
+    flex: 1,
   },
   cartItems: {
     flex: 1,
@@ -378,14 +384,36 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.06)',
     marginHorizontal: 12,
   },
-  endSessionFooter: {
-    paddingVertical: 12,
+  // End Session Overlay - Appears during extended hold
+  endSessionOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.03)', // Subtle glass tint matching modal theme
+    borderRadius: 20,
   },
-  endSessionFooterText: {
-    fontSize: 12,
-    fontWeight: '500',
-    color: 'rgba(255,255,255,0.4)',
+  endSessionHintContainer: {
+    alignItems: 'center',
+    paddingHorizontal: 32,
+    paddingVertical: 24,
+  },
+  endSessionHintText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.9)',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  endSessionProgressContainer: {
+    width: 160,
+    height: 4,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  endSessionProgressBar: {
+    height: '100%',
+    backgroundColor: 'rgba(255,100,100,0.8)',
+    borderRadius: 2,
   },
 })

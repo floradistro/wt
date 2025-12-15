@@ -95,6 +95,18 @@ export function POSStaffDiscountModal() {
     checkoutUIActions.closeModal()
   }, [])
 
+  // Double-tap backdrop to close
+  const lastTapRef = useRef<number>(0)
+  const handleDoubleTap = useCallback(() => {
+    const now = Date.now()
+    const DOUBLE_TAP_DELAY = 300
+    if (now - lastTapRef.current < DOUBLE_TAP_DELAY) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+      checkoutUIActions.closeModal()
+    }
+    lastTapRef.current = now
+  }, [])
+
   const handleTypeChange = useCallback((type: DiscountType) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
     setDiscountType(type)
@@ -150,8 +162,8 @@ export function POSStaffDiscountModal() {
         style={styles.container}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
-        {/* Backdrop */}
-        <Pressable style={styles.backdrop} onPress={handleClose}>
+        {/* Backdrop - double tap to close */}
+        <Pressable style={styles.backdrop} onPress={handleDoubleTap}>
           <Animated.View style={{ flex: 1, opacity: fadeAnim }}>
             <BlurView intensity={20} style={StyleSheet.absoluteFill} tint="dark" />
           </Animated.View>
@@ -273,163 +285,178 @@ export function POSStaffDiscountModal() {
 }
 
 // ========================================
-// STYLES - Apple Design System
+// STYLES - Modern Glass Design
 // ========================================
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: spacing.lg, // 20px
+    padding: 24,
   },
   backdrop: {
     ...StyleSheet.absoluteFillObject,
   },
   modalCard: {
     width: '100%',
-    maxWidth: 400,
-    backgroundColor: colors.glass.regular,
-    borderRadius: radius.lg, // 16px
+    maxWidth: 420,
+    backgroundColor: 'rgba(20,20,22,0.95)',
+    borderRadius: 24,
     borderCurve: 'continuous' as any,
-    padding: spacing.lg, // 20px
-    gap: spacing.lg, // 20px
+    padding: 24,
+    gap: 20,
     borderWidth: 1,
-    borderColor: colors.border.subtle,
+    borderColor: 'rgba(255,255,255,0.1)',
+    // Modern shadow
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 20 },
+    shadowOpacity: 0.5,
+    shadowRadius: 40,
   },
-  // Header
+  // Header - Hero style
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    paddingBottom: 4,
   },
   title: {
-    fontSize: 20,
+    fontSize: 24,
     fontWeight: '700',
-    color: colors.text.primary,
-    letterSpacing: -0.4,
+    color: '#fff',
+    letterSpacing: -0.5,
   },
   closeButton: {
-    width: 32,
-    height: 32,
+    width: 36,
+    height: 36,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
   },
   closeButtonText: {
-    fontSize: 20,
-    color: colors.text.tertiary,
+    fontSize: 18,
+    color: 'rgba(255,255,255,0.6)',
+    fontWeight: '600',
   },
-  // Type Selector
+  // Type Selector - Modern pill style
   typeSelector: {
     flexDirection: 'row',
-    gap: spacing.xs, // 8px
+    gap: 10,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderRadius: 16,
+    padding: 6,
   },
   typeButton: {
     flex: 1,
-    paddingVertical: 12,
-    paddingHorizontal: spacing.md, // 16px
-    backgroundColor: colors.glass.regular,
-    borderRadius: radius.md, // 12px
-    borderCurve: 'continuous' as any,
-    borderWidth: 1,
-    borderColor: colors.border.regular,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    backgroundColor: 'transparent',
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 44, // Apple HIG minimum
+    minHeight: 48,
   },
   typeButtonActive: {
-    backgroundColor: colors.semantic.infoBg,
-    borderColor: colors.semantic.info,
+    backgroundColor: 'rgba(16,185,129,0.2)',
+    shadowColor: '#10b981',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
   },
   typeButtonText: {
     fontSize: 15,
     fontWeight: '600',
-    color: colors.text.secondary,
-    letterSpacing: -0.2,
+    color: 'rgba(255,255,255,0.5)',
+    letterSpacing: 0.2,
   },
   typeButtonTextActive: {
-    color: colors.semantic.info,
+    color: '#10b981',
   },
-  // Input
+  // Input - Large hero style
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.glass.regular,
-    borderRadius: radius.md, // 12px
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 16,
     borderCurve: 'continuous' as any,
     borderWidth: 1,
-    borderColor: colors.border.regular,
-    paddingHorizontal: spacing.md, // 16px
-    minHeight: 60,
+    borderColor: 'rgba(255,255,255,0.1)',
+    paddingHorizontal: 20,
+    minHeight: 80,
   },
   inputPrefix: {
-    fontSize: 28,
+    fontSize: 32,
     fontWeight: '600',
-    color: colors.text.tertiary,
-    marginRight: spacing.xs, // 8px
+    color: 'rgba(255,255,255,0.4)',
+    marginRight: 8,
   },
   input: {
     flex: 1,
-    fontSize: 36,
+    fontSize: 48,
     fontWeight: '700',
-    color: colors.text.primary,
-    letterSpacing: -0.8,
+    color: '#fff',
+    letterSpacing: -1,
   },
   helperText: {
     fontSize: 13,
-    fontWeight: '400',
-    color: colors.text.tertiary,
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.4)',
     letterSpacing: -0.1,
     textAlign: 'center',
-    marginTop: -spacing.sm, // -12px (tighten gap)
+    marginTop: -8,
   },
-  // Actions
+  // Actions - Modern button style
   actions: {
     flexDirection: 'row',
-    gap: spacing.xs, // 8px
+    gap: 12,
+    marginTop: 4,
   },
   clearButton: {
     flex: 1,
-    paddingVertical: 12,
-    paddingHorizontal: spacing.md, // 16px
-    backgroundColor: colors.glass.regular,
-    borderRadius: radius.md, // 12px
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 16,
     borderCurve: 'continuous' as any,
     borderWidth: 1,
-    borderColor: colors.border.regular,
+    borderColor: 'rgba(255,255,255,0.1)',
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 44,
+    minHeight: 52,
   },
   clearButtonText: {
     fontSize: 15,
     fontWeight: '600',
-    color: colors.text.secondary,
-    letterSpacing: -0.2,
+    color: 'rgba(255,255,255,0.6)',
+    letterSpacing: 0.2,
   },
   applyButton: {
-    flex: 1,
-    paddingVertical: 12,
-    paddingHorizontal: spacing.md, // 16px
-    backgroundColor: colors.semantic.infoBg,
-    borderRadius: radius.md, // 12px
+    flex: 1.5,
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    backgroundColor: 'rgba(16,185,129,0.2)',
+    borderRadius: 16,
     borderCurve: 'continuous' as any,
     borderWidth: 1,
-    borderColor: colors.semantic.info,
+    borderColor: 'rgba(16,185,129,0.3)',
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 44,
+    minHeight: 52,
   },
   applyButtonDisabled: {
-    backgroundColor: colors.glass.regular,
-    borderColor: colors.border.subtle,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderColor: 'rgba(255,255,255,0.08)',
   },
   applyButtonText: {
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: '700',
-    color: colors.semantic.info,
-    letterSpacing: -0.2,
+    color: '#10b981',
+    letterSpacing: 0.2,
   },
   applyButtonTextDisabled: {
-    color: colors.text.disabled,
+    color: 'rgba(255,255,255,0.3)',
   },
 })

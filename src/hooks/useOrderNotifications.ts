@@ -39,10 +39,12 @@ try {
       shouldShowAlert: true,
       shouldPlaySound: true,
       shouldSetBadge: true,
+      shouldShowBanner: true,
+      shouldShowList: true,
     }),
   })
 } catch (error) {
-  console.error('[OrderNotifications] Failed to set notification handler:', error)
+  logger.error('[OrderNotifications] Failed to set notification handler:', error)
 }
 
 /**
@@ -141,10 +143,11 @@ async function showOrderNotification(
       }
     }
 
-    console.log('🔔 [OrderNotifications] Scheduling notification...')
-    console.log('🔔 Title:', `New ${orderTypeLabel} Order`)
-    console.log('🔔 Body:', bodyText)
-    console.log('🔔 Fulfillment Type:', fulfillmentType)
+    logger.debug('[OrderNotifications] Scheduling notification...', {
+      title: `New ${orderTypeLabel} Order`,
+      body: bodyText,
+      fulfillmentType,
+    })
 
     const result = await Notifications.scheduleNotificationAsync({
       content: {
@@ -157,9 +160,7 @@ async function showOrderNotification(
       trigger: null, // Show immediately
     })
 
-    console.log('🔔 [OrderNotifications] ✅ Notification scheduled! ID:', result)
-
-    logger.info('[OrderNotifications] Notification shown:', {
+    logger.info('[OrderNotifications] Notification scheduled:', {
       orderId: order.id,
       orderType: order.order_type,
       fulfillmentType,
@@ -167,7 +168,6 @@ async function showOrderNotification(
       notificationId: result,
     })
   } catch (error) {
-    console.error('🔔 [OrderNotifications] ❌ Failed to show notification:', error)
     logger.error('[OrderNotifications] Failed to show notification:', error)
   }
 }
@@ -196,7 +196,6 @@ export function useOrderNotifications() {
       const orderType = response.notification.request.content.data.orderType as string
 
       logger.info('[OrderNotifications] Notification tapped:', { orderId, orderType })
-      console.log('🔔 [OrderNotifications] Notification tapped - navigating to order:', orderId)
 
       // Navigate to Orders screen (tab index 2)
       if (navigateToOrders) {
@@ -217,13 +216,11 @@ export function useOrderNotifications() {
     // Only subscribe if user has active POS session
     if (!session?.locationId) {
       logger.info('[OrderNotifications] No active POS session - notifications disabled')
-      console.log('🔔 [OrderNotifications] No active POS session - notifications disabled')
       return
     }
 
     const locationId = session.locationId
-    logger.info('[OrderNotifications] Setting up notifications for location:', locationId)
-    console.log('🔔 [OrderNotifications] Setting up notifications for location:', locationId, session.locationName)
+    logger.info('[OrderNotifications] Setting up notifications for location:', { locationId, locationName: session.locationName })
 
     // Subscribe to realtime order inserts
     const channel = supabase
@@ -243,19 +240,12 @@ export function useOrderNotifications() {
             orderType: newOrder.order_type,
             orderLocation: newOrder.pickup_location_id,
             sessionLocation: locationId,
+            customer: (newOrder.metadata as any)?.customer_name || newOrder.customer_name || 'Guest',
           })
-
-          console.log('🔔 [OrderNotifications] ===== NEW ORDER DETECTED =====')
-          console.log('🔔 Order ID:', newOrder.id)
-          console.log('🔔 Order Type:', newOrder.order_type)
-          console.log('🔔 Primary Location:', newOrder.pickup_location_id)
-          console.log('🔔 Session Location:', locationId)
-          console.log('🔔 Customer:', (newOrder.metadata as any)?.customer_name || newOrder.customer_name || 'Guest')
 
           // Filter: Only pickup and shipping orders
           if (newOrder.order_type !== 'pickup' && newOrder.order_type !== 'shipping') {
-            logger.info('[OrderNotifications] Skipping - not pickup/shipping order')
-            console.log('🔔 [OrderNotifications] ❌ Skipping - not pickup/shipping order')
+            logger.debug('[OrderNotifications] Skipping - not pickup/shipping order')
             return
           }
 
@@ -275,7 +265,7 @@ export function useOrderNotifications() {
             .eq('location_id', locationId)
 
           if (itemsError) {
-            console.error('🔔 [OrderNotifications] ❌ Error checking location items:', itemsError)
+            logger.error('[OrderNotifications] Error checking location items:', itemsError)
             return
           }
 
@@ -283,14 +273,13 @@ export function useOrderNotifications() {
             // No items at this location - check if maybe it's the primary pickup location
             // (for backwards compatibility with orders that don't have location_id on items)
             if (newOrder.pickup_location_id === locationId) {
-              console.log('🔔 [OrderNotifications] ✅ Primary pickup location match (legacy)')
+              logger.debug('[OrderNotifications] Primary pickup location match (legacy)')
               const fulfillmentType = newOrder.order_type === 'pickup' ? 'pickup' : 'shipping'
               await showOrderNotification(newOrder, locationId, fulfillmentType)
               return
             }
 
-            logger.info('[OrderNotifications] Skipping - no items at this location')
-            console.log('🔔 [OrderNotifications] ❌ Skipping - no items at this location')
+            logger.debug('[OrderNotifications] Skipping - no items at this location')
             return
           }
 
@@ -307,8 +296,10 @@ export function useOrderNotifications() {
             fulfillmentType = 'shipping'
           }
 
-          console.log('🔔 [OrderNotifications] ✅ Location has', locationItems.length, 'items to fulfill')
-          console.log('🔔 [OrderNotifications] Fulfillment type:', fulfillmentType)
+          logger.debug('[OrderNotifications] Location has items to fulfill:', {
+            itemCount: locationItems.length,
+            fulfillmentType,
+          })
 
           // Show notification with location-specific info
           await showOrderNotification(newOrder, locationId, fulfillmentType)

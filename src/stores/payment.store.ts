@@ -278,11 +278,17 @@ export const usePaymentStore = create<PaymentState>()(
             loyaltyDiscountAmount: loyaltyDiscountAmount || 0,
             campaignDiscountAmount: discountAmount || 0,
             campaignId: selectedDiscountId || null,
-            // Split payment support
+            // Split payment support (cash+card)
             ...(paymentData.paymentMethod === 'split' && paymentData.splitPayments ? {
               splitPayments: paymentData.splitPayments,
               cashAmount: paymentData.splitPayments.find(p => p.method === 'cash')?.amount || 0,
               cardAmount: paymentData.splitPayments.find(p => p.method === 'card')?.amount || 0,
+            } : {}),
+            // Multi-card split payment support (2 cards)
+            ...(paymentData.paymentMethod === 'multi-card' && paymentData.splitPayments ? {
+              splitPayments: paymentData.splitPayments,
+              orderId: paymentData.orderId,  // For retry mode
+              amountRemaining: paymentData.amountRemaining,  // For retry mode
             } : {}),
             // Cash payment support
             ...(paymentData.paymentMethod === 'cash' ? {
@@ -343,6 +349,15 @@ export const usePaymentStore = create<PaymentState>()(
             try {
               const errorData = JSON.parse(responseText)
               edgeFunctionError = new Error(errorData.error || errorData.message || `HTTP ${response.status}: ${response.statusText}`)
+
+              // Preserve partial success info for multi-card payments (Card 1 succeeded, Card 2 failed)
+              if (errorData.partialSuccess) {
+                (edgeFunctionError as any).partialSuccess = true
+                ;(edgeFunctionError as any).card1 = errorData.card1
+                ;(edgeFunctionError as any).amountRemaining = errorData.amountRemaining
+                ;(edgeFunctionError as any).orderId = errorData.orderId
+                ;(edgeFunctionError as any).orderNumber = errorData.orderNumber
+              }
             } catch {
               edgeFunctionError = new Error(`HTTP ${response.status}: ${response.statusText} - ${responseText}`)
             }
@@ -383,10 +398,12 @@ export const usePaymentStore = create<PaymentState>()(
           const serverLoyaltyRedeemed = data.data?.loyaltyPointsRedeemed || 0
 
           // Prepare completion data
+          // For retry payments (multi-card Card 2), use amountRemaining as the display total
+          const displayTotal = paymentData.amountRemaining || total
           const completionData: SaleCompletionData = {
             orderNumber,
             transactionNumber,
-            total,
+            total: displayTotal,
             paymentMethod: paymentData.paymentMethod,
             authorizationCode: paymentData.authorizationCode,
             cardType: paymentData.cardType,

@@ -19,7 +19,6 @@ import { logger } from '@/utils/logger'
 import * as Haptics from 'expo-haptics'
 import type { Location } from '@/types/pos'
 import { useLoyaltyCampaignsStore, startLoyaltyCampaignsRealtimeMonitoring, stopLoyaltyCampaignsRealtimeMonitoring } from '@/stores/loyalty-campaigns.store'
-import { useLocationFilter } from '@/stores/location-filter.store'
 import { useTaxStore } from '@/stores/tax.store'
 import { useAppAuth } from './AppAuthContext'
 
@@ -159,24 +158,6 @@ export function POSSessionProvider({ children, authUserId }: POSSessionProviderP
     }
   }, [authUserId])
 
-  /**
-   * Auto-sync location filter with POS session
-   * When session starts, auto-filter app to that location
-   * When session ends, clear the filter lock
-   */
-  useEffect(() => {
-    if (session?.sessionId && session?.locationId) {
-      // Active session - lock filter to this location
-      useLocationFilter.getState().setFromPOSSession(session.locationId, session.locationName)
-      logger.info('[POSSessionContext] 🎯 Auto-filtered app to session location:', {
-        locationId: session.locationId,
-        locationName: session.locationName,
-      })
-    } else if (!session?.sessionId) {
-      // No active session - clear the POS filter lock
-      useLocationFilter.getState().clearPOSSession()
-    }
-  }, [session?.sessionId, session?.locationId])
 
   /**
    * Load persisted session from AsyncStorage

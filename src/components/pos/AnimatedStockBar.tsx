@@ -126,6 +126,8 @@ export const AnimatedStockBar = memo(({
   )
 })
 
+AnimatedStockBar.displayName = 'AnimatedStockBar'
+
 const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',

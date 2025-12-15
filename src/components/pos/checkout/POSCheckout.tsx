@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/preserve-manual-memoization */
 /**
  * POSCheckout Component (REFACTORED)
  * Jobs Principle: One focused responsibility - Checkout orchestration
@@ -18,6 +19,7 @@ import { View, StyleSheet } from 'react-native'
 import * as Haptics from 'expo-haptics'
 import { supabase } from '@/lib/supabase/client'
 import { logger } from '@/utils/logger'
+import { recordCashDrop, getDrawerBalance, getSafeBalance } from '@/services/cash-management.service'
 
 // POS Components
 import { POSCart } from '../cart/POSCart'
@@ -70,6 +72,19 @@ export function POSCheckout({
     totalSales: number
     totalCash: number
     openingCash: number
+    totalCashDrops: number
+    // Shift performance metrics
+    shiftStart: Date | null
+    transactionCount: number
+    averageTransaction: number
+    cardSales: number
+    auditsCompleted: number
+  } | null>(null)
+
+  // Cash drop state
+  const [cashDropData, setCashDropData] = useState<{
+    drawerBalance: number
+    safeBalance: number
   } | null>(null)
 
   // ========================================
@@ -141,7 +156,7 @@ export function POSCheckout({
     if (!selectedCustomer) return 0
     const pointValue = loyaltyProgram?.point_value || 0.01
     const maxPointsFromSubtotal = Math.floor(subtotal / pointValue)
-    return Math.min(selectedCustomer.loyalty_points, maxPointsFromSubtotal)
+    return Math.min(selectedCustomer.loyalty_points ?? 0, maxPointsFromSubtotal)
   }
 
   // Get active discounts from store
@@ -226,9 +241,11 @@ export function POSCheckout({
 
     try {
       logger.debug('[END SESSION] Loading session data for ID:', sessionId)
+
+      // Fetch session data with card sales
       const { data: sessionRecord, error } = await supabase
         .from('pos_sessions')
-        .select('session_number, total_sales, total_cash, opening_cash')
+        .select('session_number, total_sales, total_cash, total_card, opening_cash, total_cash_drops, opened_at')
         .eq('id', sessionId)
         .single()
 
@@ -237,13 +254,36 @@ export function POSCheckout({
         return
       }
 
+      // Count transactions for this session
+      const { count: transactionCount } = await supabase
+        .from('orders')
+        .select('*', { count: 'exact', head: true })
+        .eq('pos_session_id', sessionId)
+
+      // Count audits completed during this shift
+      const { count: auditsCount } = await supabase
+        .from('inventory_adjustments')
+        .select('*', { count: 'exact', head: true })
+        .eq('location_id', locationId)
+        .gte('created_at', sessionRecord.opened_at)
+
+      const totalSales = sessionRecord.total_sales || 0
+      const txCount = transactionCount || 0
+      const avgTransaction = txCount > 0 ? totalSales / txCount : 0
+
       logger.debug('[END SESSION] Session data loaded:', sessionRecord)
 
       setSessionData({
         sessionNumber: sessionRecord.session_number,
-        totalSales: sessionRecord.total_sales || 0,
+        totalSales,
         totalCash: sessionRecord.total_cash || 0,
         openingCash: sessionRecord.opening_cash || 0,
+        totalCashDrops: sessionRecord.total_cash_drops || 0,
+        shiftStart: sessionRecord.opened_at ? new Date(sessionRecord.opened_at) : null,
+        transactionCount: txCount,
+        averageTransaction: avgTransaction,
+        cardSales: sessionRecord.total_card || 0,
+        auditsCompleted: auditsCount || 0,
       })
 
       logger.debug('[END SESSION] Opening close drawer modal')
@@ -252,6 +292,95 @@ export function POSCheckout({
       logger.error('[END SESSION] Error in handleEndSession:', error)
     }
   }, [sessionId, openModal])
+
+  // ========================================
+  // HANDLERS - Cash Drop
+  // ========================================
+  const handleCashDropClick = useCallback(async () => {
+    logger.debug('[CASH DROP] Button clicked')
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+
+    if (!sessionId || !session?.locationId) {
+      logger.error('[CASH DROP] No session or location ID found!')
+      return
+    }
+
+    try {
+      // Get current drawer and safe balances
+      const [drawerBalance, safeBalance] = await Promise.all([
+        getDrawerBalance(sessionId),
+        getSafeBalance(session.locationId),
+      ])
+
+      logger.debug('[CASH DROP] Balances loaded:', { drawerBalance, safeBalance })
+
+      setCashDropData({
+        drawerBalance,
+        safeBalance,
+      })
+
+      openModal('cashDrop')
+    } catch (error) {
+      logger.error('[CASH DROP] Error loading balances:', error)
+    }
+  }, [sessionId, session?.locationId, openModal])
+
+  const handleCashDropSubmit = useCallback(async (amount: number, notes: string) => {
+    logger.debug('[CASH DROP] Submitting drop:', { amount, notes })
+
+    if (!vendor?.id || !session?.locationId || !session?.registerId || !sessionId) {
+      logger.error('[CASH DROP] Missing session data')
+      return
+    }
+
+    try {
+      const result = await recordCashDrop({
+        vendorId: vendor.id,
+        locationId: session.locationId,
+        registerId: session.registerId,
+        sessionId,
+        amount,
+        notes,
+        userId: customUserId || undefined,
+      })
+
+      if (result.success) {
+        logger.info('[CASH DROP] Successfully recorded:', result)
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+
+        // Update session data to reflect new cash drop total
+        if (sessionData) {
+          setSessionData({
+            ...sessionData,
+            totalCashDrops: sessionData.totalCashDrops + amount,
+          })
+        }
+      } else {
+        logger.error('[CASH DROP] Failed:', result.error)
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
+      }
+    } catch (error) {
+      logger.error('[CASH DROP] Error recording drop:', error)
+    }
+
+    setCashDropData(null)
+    closeModal()
+
+    // Re-open close drawer modal if we came from there
+    if (sessionData) {
+      openModal('cashDrawerClose')
+    }
+  }, [vendor?.id, session?.locationId, session?.registerId, sessionId, customUserId, closeModal, sessionData, openModal])
+
+  const handleCashDropCancel = useCallback(() => {
+    setCashDropData(null)
+    closeModal()
+
+    // Re-open close drawer modal if we came from there
+    if (sessionData) {
+      openModal('cashDrawerClose')
+    }
+  }, [closeModal, sessionData, openModal])
 
   /**
    * Payment processing using Payment Store
@@ -349,8 +478,15 @@ export function POSCheckout({
       })
 
       return completionData
-    } catch (error) {
-      // Error modal handling
+    } catch (error: any) {
+      // Check if this is a partial success (Card 1 succeeded, Card 2 failed in multi-card)
+      // Don't close modal or show error - let SplitCardPaymentView handle it
+      if (error?.partialSuccess) {
+        logger.info('[POSCheckout] Partial payment success - letting SplitCardPaymentView handle retry UI')
+        throw error  // Re-throw so SplitCardPaymentView catches it
+      }
+
+      // Error modal handling for non-partial errors
       const errorMessage = error instanceof Error ? error.message : 'Failed to process sale'
       const isTimeout = errorMessage.includes('timed out')
 
@@ -408,16 +544,15 @@ export function POSCheckout({
         subtotal={subtotal}
         taxAmount={taxAmount}
         taxRate={taxRate}
-        loyaltyDiscountAmount={loyaltyDiscountAmount}
-        loyaltyPointsEarned={loyaltyPointsEarned}
         itemCount={itemCount}
-        loyaltyProgram={loyaltyProgram}
-        getMaxRedeemablePoints={getMaxRedeemablePoints}
         onPaymentComplete={handlePaymentComplete}
-        onApplyLoyaltyPoints={setLoyaltyPointsToRedeem}
         sessionData={sessionData}
         onCloseDrawerSubmit={handleCloseDrawerSubmit}
         onCloseDrawerCancel={handleCloseDrawerCancel}
+        onDropToSafe={handleCashDropClick}
+        cashDropData={cashDropData}
+        onCashDropSubmit={handleCashDropSubmit}
+        onCashDropCancel={handleCashDropCancel}
         errorModal={errorModal}
         onCloseErrorModal={() => setErrorModal({ visible: false, title: '', message: '' })}
       />

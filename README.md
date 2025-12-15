@@ -117,8 +117,13 @@ const { createUser, updateUser } = useUsersActions()
 
 ### Documentation
 
-- **[ARCHITECTURE.md](./ARCHITECTURE.md)** - Complete architecture guide with store patterns, best practices, and migration guides
-- **[docs/](./docs/)** - Feature-specific implementation guides
+> **Master Architecture Document**: See [`/bigswag/WHALETOOLS_UNIFIED_VISION.md`](../bigswag/WHALETOOLS_UNIFIED_VISION.md) for the complete system architecture and Swift migration roadmap.
+
+**This repo's docs:**
+- [`docs/guides/`](./docs/guides/) - Quick start, deployment, dev workflow
+- [`docs/integrations/`](./docs/integrations/) - Supabase, payments, Sentry
+- [`docs/features/`](./docs/features/) - ID scanner, auth, design system
+- [`docs/testing/`](./docs/testing/) - Test plans and commands
 
 ## 🎨 Design System
 

@@ -10,17 +10,26 @@ export type PaymentStage =
   | 'processing'
   | 'approving'
   | 'success'
-  | 'saving'      // NEW: Saving sale to database
-  | 'complete'    // NEW: Sale completed successfully
+  | 'saving'      // Saving sale to database
+  | 'complete'    // Sale completed successfully
   | 'error'
 
 export interface SplitPayment {
   method: 'cash' | 'card'
+  cardNumber?: 1 | 2        // For multi-card: which card (1 or 2)
   amount: number
+  status?: 'pending' | 'processing' | 'success' | 'failed' | 'refunded'
+  authorizationCode?: string
+  transactionId?: string
+  cardType?: string
+  cardLast4?: string
+  errorMessage?: string
 }
 
+export type PaymentMethod = 'cash' | 'card' | 'split' | 'multi-card'
+
 export interface PaymentData {
-  paymentMethod: 'cash' | 'card' | 'split'
+  paymentMethod: PaymentMethod
   cashTendered?: number
   changeGiven?: number
   authorizationCode?: string
@@ -28,6 +37,9 @@ export interface PaymentData {
   cardType?: string
   cardLast4?: string
   splitPayments?: SplitPayment[]
+  // For partial payment recovery (retry Card 2 on failed split)
+  orderId?: string           // Resume payment for existing order
+  amountRemaining?: number   // How much still owed
 }
 
 // NEW: Sale completion data (shown after save completes)
@@ -47,22 +59,20 @@ export interface SaleCompletionData {
 }
 
 /**
- * PaymentModalProps - Apple Engineering Standard ✅
- * ZERO DATA PROPS - Only callbacks and UI state
- * Modal reads all data from stores
+ * PaymentModalProps - Payment modal props
  */
 export interface PaymentModalProps {
-  visible: boolean  // ✅ UI state
-  onPaymentComplete: (paymentData: PaymentData) => Promise<SaleCompletionData>  // ✅ Callback
-  onCancel: () => void  // ✅ Callback
-
-  // All data props REMOVED - read from stores:
-  // - total, subtotal, taxAmount, taxRate, taxName → tax.store + cart.store
-  // - loyaltyDiscountAmount, loyaltyPointsEarned, etc → loyalty.store
-  // - itemCount → cart.store
-  // - customerName → customer.store
-  // - hasPaymentProcessor → payment-processor.store
-  // - locationId, registerId → POSSessionContext
+  visible: boolean
+  total: number
+  subtotal: number
+  taxAmount: number
+  taxRate: number
+  taxName?: string
+  itemCount: number
+  onPaymentComplete: (paymentData: PaymentData) => Promise<SaleCompletionData>
+  onCancel: () => void
+  locationId?: string
+  registerId?: string
 }
 
 /**

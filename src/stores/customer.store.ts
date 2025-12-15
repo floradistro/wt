@@ -69,7 +69,7 @@ interface CustomerState {
   clearScannedData: () => void
   setCustomerMatches: (matches: CustomerMatch[]) => void
   clearCustomerMatches: () => void
-  setVendorId: (vendorId: string) => void
+  setVendorId: (vendorId: string | null) => void
   findMatchingCustomer: (data: AAMVAData) => Promise<{
     customer: Customer | null
     matchType: 'exact' | 'high' | null
@@ -129,7 +129,7 @@ export const useCustomerStore = create<CustomerState>()(
     set({ customerMatches: [] })
   },
 
-  setVendorId: (vendorId: string) => {
+  setVendorId: (vendorId: string | null) => {
     // ANTI-LOOP: Only sets value - no side effects
     set({ vendorId })
   },
@@ -208,7 +208,7 @@ export const useCustomerStore = create<CustomerState>()(
         logger.debug('🔍 [Customer Match] Step 2: Exact name + DOB match')
 
         // Try multiple name combinations
-        const nameVariations: Array<{ first_name: string; middle_name: string | null }> = [
+        const nameVariations: { first_name: string; middle_name: string | null }[] = [
           // Exact first name
           { first_name: data.firstName, middle_name: data.middleName || null },
           // First + Middle as first_name (if middle name exists)
@@ -361,7 +361,12 @@ export const useCustomerStore = create<CustomerState>()(
       }
 
       logger.info(`[Customer Store] Found ${orders?.length || 0} pending orders for customer`)
-      return (orders || []) as PendingOrder[]
+      // Transform Supabase join results (arrays) to expected object format
+      return (orders || []).map((order) => ({
+        ...order,
+        pickup_location: Array.isArray(order.pickup_location) ? order.pickup_location[0] : order.pickup_location,
+        created_by_user: Array.isArray(order.created_by_user) ? order.created_by_user[0] : order.created_by_user,
+      })) as PendingOrder[]
     } catch (error) {
       logger.error('[Customer Store] Exception fetching pending orders:', error)
       return []
@@ -423,7 +428,7 @@ export const useCustomerStore = create<CustomerState>()(
 
       // Step 2: Find by exact name + DOB (with middle name variations)
       if (data.firstName && data.lastName && data.dateOfBirth) {
-        const nameVariations: Array<{ first_name: string }> = [
+        const nameVariations: { first_name: string }[] = [
           { first_name: data.firstName },
           ...(data.middleName ? [{ first_name: `${data.firstName} ${data.middleName}` }] : []),
         ]
@@ -608,6 +613,7 @@ export const useCustomerStore = create<CustomerState>()(
             await AsyncStorage.removeItem(name)
           },
         },
+        // @ts-expect-error - Zustand persist partialize return type mismatch with full state
         partialize: (state) => ({
           // Only persist selected customer, not scan data or matches
           selectedCustomer: state.selectedCustomer,

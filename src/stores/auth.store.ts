@@ -3,22 +3,14 @@ import { devtools } from 'zustand/middleware'
 import { useShallow } from 'zustand/react/shallow'
 import type { Session, User } from '@supabase/supabase-js'
 import { AuthService } from '../features/auth/services/auth.service'
-import { useLocationFilter } from './location-filter.store'
 // Note: POS session is now managed by POSSessionContext, not a store
 import { useCartStore } from './cart.store'
 import { usePaymentStore } from './payment.store'
 import { useTaxStore } from './tax.store'
 import { useCheckoutUIStore } from './checkout-ui.store'
-import { useSettingsUIStore } from './settings-ui.store'
-import { useUsersManagementStore } from './users-management.store'
-import { useSuppliersManagementStore } from './suppliers-management.store'
 import { useLoyaltyCampaignsStore } from './loyalty-campaigns.store'
-import { usePaymentProcessorsSettingsStore } from './payment-processors-settings.store'
 import { useOrdersStore } from './orders.store'
 import { useOrdersUIStore } from './orders-ui.store'
-import { useOrderDetailStore } from './order-detail.store'
-import { useCustomersListStore } from './customers-list.store'
-import { useCustomersUIStore } from './customers-ui.store'
 import { logger } from '@/utils/logger'
 
 interface AuthState {
@@ -90,28 +82,13 @@ export const useAuthStore = create<AuthState>()(
 
       // Reset all stores on logout (Apple principle: Clean slate)
       // Note: POSSession is managed by Context, cleared automatically on logout
-      // POS Stores
-      useLocationFilter.getState().reset()
       useCartStore.getState().reset()
       usePaymentStore.getState().resetPayment()
       useTaxStore.getState().reset()
       useCheckoutUIStore.getState().reset()
-
-      // Customers Stores ✅ NEW
-      useCustomersListStore.getState().reset()
-      useCustomersUIStore.getState().reset()
-
-      // Orders Stores ✅
       useOrdersStore.getState().reset()
       useOrdersUIStore.getState().reset()
-      useOrderDetailStore.getState().reset()
-
-      // Settings Stores ✅
-      useSettingsUIStore.getState().reset()
-      useUsersManagementStore.getState().reset()
-      useSuppliersManagementStore.getState().reset()
       useLoyaltyCampaignsStore.getState().reset()
-      usePaymentProcessorsSettingsStore.getState().reset()
 
       set({
         user: null,

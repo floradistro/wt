@@ -17,13 +17,9 @@ import { devtools } from 'zustand/middleware'
 import { useShallow } from 'zustand/react/shallow'
 import type { Product } from '@/types/pos'
 import {
-  applyFilters,
   countActiveFilters,
-  getMatchingFilters,
-  extractFieldValues,
   type ProductFilters,
 } from '@/utils/product-transformers'
-import { useProductsStore } from './products.store'
 
 interface ProductFilterState {
   // State

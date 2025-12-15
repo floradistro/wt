@@ -27,13 +27,13 @@ export interface Customer {
   id: string
   first_name: string
   last_name: string
-  email: string
-  phone: string | null
-  display_name: string | null
-  date_of_birth: string | null
-  loyalty_points: number
-  loyalty_tier: string
-  vendor_customer_number: string
+  email?: string
+  phone?: string | null
+  display_name?: string | null
+  date_of_birth?: string | null
+  loyalty_points?: number
+  loyalty_tier?: string
+  vendor_customer_number?: string
 }
 
 export interface Location {
@@ -52,6 +52,7 @@ export interface Location {
 
 export interface PricingTier {
   qty: number
+  quantity?: number // Alias for qty (some APIs use this)
   price: string | number
   weight?: string
   label?: string
@@ -92,14 +93,14 @@ export interface Product {
   pricing_template?: {
     id: string
     name: string
-    default_tiers: Array<{
+    default_tiers: {
       id: string
       label: string
       quantity: number
       unit: string
       default_price: number
       sort_order: number
-    }>
+    }[]
   } | null
 
   // Legacy fields (deprecated - use pricing_template instead)
@@ -132,7 +133,6 @@ export interface Product {
     store_name: string
     logo_url: string | null
   } | null
-  description?: string | null
   short_description?: string | null
   inventory_id?: string
   // Multi-location inventory support
@@ -296,18 +296,18 @@ export interface InventoryTransferItem {
 export interface CreateTransferInput {
   source_location_id: string
   destination_location_id: string
-  items: Array<{
+  items: {
     product_id: string
     quantity: number
-  }>
+  }[]
   notes?: string
 }
 
 export interface ReceiveTransferInput {
-  items: Array<{
+  items: {
     item_id: string
     received_quantity: number
     condition: ItemCondition
     notes?: string
-  }>
+  }[]
 }

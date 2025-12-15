@@ -97,7 +97,7 @@ export function useLoyaltyTransaction() {
     // Use loyalty program point value if available, otherwise default to $0.01 per point
     const pointValue = loyaltyProgram?.point_value || 0.01
     const maxPointsFromSubtotal = Math.floor(subtotal / pointValue)
-    const maxRedeemable = Math.min(selectedCustomer.loyalty_points, maxPointsFromSubtotal)
+    const maxRedeemable = Math.min(selectedCustomer.loyalty_points ?? 0, maxPointsFromSubtotal)
 
     return maxRedeemable
   }

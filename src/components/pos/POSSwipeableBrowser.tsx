@@ -52,9 +52,10 @@ import {
   POS_ORDER_STATUS_GROUPS,
   type POSOrderStatusGroup,
 } from '@/stores/pos-order-filter.store'
-import { usePOSProductsState } from '@/stores/pos-products.store'
+import { usePOSProductsState, usePOSProductsStore } from '@/stores/pos-products.store'
 import { extractFieldValues } from '@/utils/product-transformers'
-import { usePOSProductsStore } from '@/stores/pos-products.store'
+import { checkoutUIActions } from '@/stores/checkout-ui.store'
+import { useSelectedCustomer, customerActions } from '@/stores/customer.store'
 
 type Tab = 'products' | 'orders'
 
@@ -89,6 +90,29 @@ export function POSSwipeableBrowser() {
     if (!selectedOrderId) return null
     return orders.find(o => o.id === selectedOrderId) || null
   }, [selectedOrderId, orders])
+
+  // ========================================
+  // CUSTOMER BUTTON - Opens customer selector or profile modal
+  // ========================================
+  const selectedCustomer = useSelectedCustomer()
+
+  const handleCustomerPress = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    if (selectedCustomer) {
+      // Customer already selected - show their profile
+      checkoutUIActions.openModal('customerMatch', { viewProfile: selectedCustomer })
+    } else {
+      // No customer - open selector
+      checkoutUIActions.openModal('customerSelector')
+    }
+  }, [selectedCustomer])
+
+  const handleCustomerLongPress = useCallback(() => {
+    if (selectedCustomer) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+      customerActions.clearCustomer()
+    }
+  }, [selectedCustomer])
 
   // ========================================
   // UNIFIED SEARCH - Updates both stores
@@ -473,6 +497,37 @@ export function POSSwipeableBrowser() {
                   </View>
                 </TouchableOpacity>
               )}
+
+              {/* Customer/Scan Button - Right side of search bar */}
+              <TouchableOpacity
+                onPress={handleCustomerPress}
+                onLongPress={handleCustomerLongPress}
+                delayLongPress={400}
+                style={selectedCustomer ? styles.customerButtonWithInfo : styles.customerButton}
+                activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel={selectedCustomer ? `Customer: ${selectedCustomer.first_name}` : "Select customer or scan ID"}
+                accessibilityHint={selectedCustomer ? "Tap to view profile, hold to clear" : "Tap to select customer"}
+              >
+                {selectedCustomer ? (
+                  <View style={styles.customerButtonActive}>
+                    <Text style={styles.customerButtonInitials} numberOfLines={1}>
+                      {(selectedCustomer.first_name?.[0] || '').toUpperCase()}{(selectedCustomer.last_name?.[0] || '').toUpperCase()}
+                    </Text>
+                    {(selectedCustomer.loyalty_points ?? 0) > 0 && (
+                      <Text style={styles.customerButtonPoints}>
+                        {(selectedCustomer.loyalty_points ?? 0).toLocaleString()}
+                      </Text>
+                    )}
+                  </View>
+                ) : (
+                  <View style={styles.customerButtonInactive}>
+                    {/* Person icon - minimal line style */}
+                    <View style={styles.personIconHead} />
+                    <View style={styles.personIconBody} />
+                  </View>
+                )}
+              </TouchableOpacity>
             </LiquidGlassView>
           </Animated.View>
         </Pressable>
@@ -867,6 +922,63 @@ const styles = StyleSheet.create({
     fontWeight: '400',
     color: 'rgba(255,255,255,0.7)',
     marginTop: -2,
+  },
+  // Customer Button - Right side of search bar
+  customerButton: {
+    width: 32,
+    height: 32,
+    marginRight: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  customerButtonWithInfo: {
+    height: 32,
+    marginRight: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  customerButtonActive: {
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+    gap: 6,
+  },
+  customerButtonInitials: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.9)',
+    letterSpacing: 0.5,
+  },
+  customerButtonPoints: {
+    fontSize: 10,
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.6)',
+  },
+  customerButtonInactive: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  personIconHead: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: 'rgba(255,255,255,0.4)',
+    marginBottom: 2,
+  },
+  personIconBody: {
+    width: 12,
+    height: 6,
+    borderTopLeftRadius: 6,
+    borderTopRightRadius: 6,
+    backgroundColor: 'rgba(255,255,255,0.4)',
   },
   // Filter Dropdown Styles - True Glass (same as product/order modals)
   filterOverlay: {

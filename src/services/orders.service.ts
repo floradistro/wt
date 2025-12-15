@@ -6,6 +6,8 @@
  */
 
 import { supabase } from '@/lib/supabase/client'
+import { logger } from '@/utils/logger'
+import { withServiceErrorHandling, ServiceError } from '@/utils/service-errors'
 
 export interface Order {
   id: string
@@ -18,7 +20,7 @@ export interface Order {
 
   // Status - Context-aware workflow based on order_type
   status: 'pending' | 'confirmed' | 'preparing' | 'packing' | 'packed' | 'ready' | 'out_for_delivery' | 'ready_to_ship' | 'shipped' | 'in_transit' | 'delivered' | 'completed' | 'cancelled'
-  payment_status: 'pending' | 'paid' | 'failed' | 'refunded' | 'partially_refunded'
+  payment_status: 'pending' | 'paid' | 'partial' | 'failed' | 'refunded' | 'partially_refunded'
   fulfillment_status: 'unfulfilled' | 'partial' | 'fulfilled' | 'cancelled'
 
   // Pricing
@@ -82,6 +84,9 @@ export interface Order {
   customer_name?: string
   customer_email?: string
   customer_phone?: string
+
+  // Flexible metadata for additional order info
+  metadata?: Record<string, unknown>
 
   // Staff tracking (joined from users table)
   created_by_user?: {
@@ -187,7 +192,7 @@ export async function getOrders(params?: {
   let page = 0
   let hasMore = true
 
-  console.log('[getOrders] Starting paginated fetch (bypassing Supabase 1000 row limit)')
+  logger.info('[getOrders] Starting paginated fetch (bypassing Supabase 1000 row limit)')
 
   // Paginate through all orders - NEVER use a single query for orders
   while (hasMore && page < MAX_PAGES) {
@@ -242,11 +247,11 @@ export async function getOrders(params?: {
 
     if (data && data.length > 0) {
       allData = allData.concat(data)
-      console.log(`[getOrders] Page ${page + 1}: fetched ${data.length} orders (total: ${allData.length})`)
+      logger.debug(`[getOrders] Page ${page + 1}: fetched ${data.length} orders (total: ${allData.length})`)
 
       // ⚠️ SANITY CHECK: Warn if we're hitting the Supabase limit
       if (page === 0 && data.length === PAGE_SIZE) {
-        console.warn('[getOrders] ⚠️ First page returned exactly 1000 rows - pagination is working correctly')
+        logger.warn('[getOrders] ⚠️ First page returned exactly 1000 rows - pagination is working correctly')
       }
     }
 
@@ -257,7 +262,7 @@ export async function getOrders(params?: {
 
     // Safety: warn if we're hitting max pages
     if (page >= MAX_PAGES - 1) {
-      console.error(`[getOrders] 🚨 CRITICAL: Hit max pages limit (${MAX_PAGES}). Some orders may be missing!`)
+      logger.error(`[getOrders] 🚨 CRITICAL: Hit max pages limit (${MAX_PAGES}). Some orders may be missing!`)
     }
 
     // If user requested a limit and we've reached it, stop
@@ -268,13 +273,13 @@ export async function getOrders(params?: {
     page++
   }
 
-  console.log('[getOrders] Total orders fetched:', allData.length)
+  logger.info('[getOrders] Total orders fetched:', allData.length)
   const data = allData
 
   // Batch fetch order_locations for ALL orders (no limits - orders must never have orphaned data)
   const allOrders = data || []
   const orderIds = allOrders.map((o: any) => o.id)
-  let orderLocationsMap: Record<string, any[]> = {}
+  const orderLocationsMap: Record<string, any[]> = {}
 
   if (orderIds.length > 0) {
     // Batch fetch in chunks of 500 to avoid Supabase IN clause limits
@@ -309,7 +314,7 @@ export async function getOrders(params?: {
       }
     }
 
-    console.log('[getOrders] order_locations fetch:', {
+    logger.debug('[getOrders] order_locations fetch:', {
       orderIdsCount: orderIds.length,
       locationsFound: allLocationsData.length,
       batches: batches.length,
@@ -322,7 +327,7 @@ export async function getOrders(params?: {
       }
       orderLocationsMap[loc.order_id].push(loc)
     })
-    console.log('[getOrders] orderLocationsMap keys:', Object.keys(orderLocationsMap).length)
+    logger.debug('[getOrders] orderLocationsMap keys:', Object.keys(orderLocationsMap).length)
   }
 
   // Flatten customer and location data
@@ -504,7 +509,7 @@ export async function fulfillItemsAtLocation(
     .eq('location_id', locationId)
 
   if (locError) {
-    console.error('Failed to update order_locations:', locError)
+    logger.error('Failed to update order_locations:', locError)
     // Continue - this table might not exist for all orders
   }
 
@@ -550,7 +555,7 @@ export async function fulfillItemsAtLocation(
       .eq('id', orderId)
 
     if (orderError) {
-      console.error('Failed to update order status:', orderError)
+      logger.error('Failed to update order status:', orderError)
     }
   } else if (fulfilledItems > 0) {
     // Partial fulfillment
@@ -563,7 +568,7 @@ export async function fulfillItemsAtLocation(
       .eq('id', orderId)
 
     if (orderError) {
-      console.error('Failed to update order partial status:', orderError)
+      logger.error('Failed to update order partial status:', orderError)
     }
   }
 
@@ -595,14 +600,26 @@ export async function updateOrderStatus(
   orderId: string,
   status: Order['status']
 ): Promise<void> {
-  const { error } = await supabase
-    .from('orders')
-    .update({ status, updated_at: new Date().toISOString() })
-    .eq('id', orderId)
+  return withServiceErrorHandling(
+    'OrdersService',
+    'updateOrderStatus',
+    async () => {
+      const { error } = await supabase
+        .from('orders')
+        .update({ status, updated_at: new Date().toISOString() })
+        .eq('id', orderId)
 
-  if (error) {
-    throw new Error(`Failed to update order status: ${error.message}`)
-  }
+      if (error) {
+        throw new ServiceError(
+          `Failed to update order status: ${error.message}`,
+          'DATABASE_ERROR',
+          { orderId, status },
+          error
+        )
+      }
+    },
+    { orderId, newStatus: status }
+  )
 }
 
 /**
@@ -779,7 +796,7 @@ export async function shipFromLocation(
 }> {
   const now = new Date().toISOString()
 
-  console.log('[shipFromLocation] Starting...', { orderId, locationId, trackingNumber, carrier })
+  logger.info('[shipFromLocation] Starting...', { orderId, locationId, trackingNumber, carrier })
 
   // 1. Update order_locations with shipping info
   // Note: Don't include shipped_by_user_id in order_locations - it has FK constraint to users table
@@ -798,16 +815,16 @@ export async function shipFromLocation(
     .eq('location_id', locationId)
     .select()
 
-  console.log('[shipFromLocation] order_locations update result:', { locData, locError })
+  logger.debug('[shipFromLocation] order_locations update result:', { locData, locError })
 
   if (locError) {
-    console.error('[shipFromLocation] order_locations update failed:', locError)
+    logger.error('[shipFromLocation] order_locations update failed:', locError)
     // Don't throw - continue to update the order directly
   }
 
   // If no rows were updated, the order_locations record might not exist
   if (!locData || locData.length === 0) {
-    console.warn('[shipFromLocation] No order_locations record found, creating one...')
+    logger.warn('[shipFromLocation] No order_locations record found, creating one...')
     // Try to create the record (without shipped_by_user_id due to FK constraint)
     const { error: insertError } = await supabase
       .from('order_locations')
@@ -824,7 +841,7 @@ export async function shipFromLocation(
       })
 
     if (insertError) {
-      console.error('[shipFromLocation] Failed to create order_locations:', insertError)
+      logger.error('[shipFromLocation] Failed to create order_locations:', insertError)
       // Continue anyway - we can still update the order directly
     }
   }
@@ -840,7 +857,7 @@ export async function shipFromLocation(
     .neq('fulfillment_status', 'fulfilled')
 
   if (itemsError) {
-    console.error('Failed to update item fulfillment status:', itemsError)
+    logger.error('Failed to update item fulfillment status:', itemsError)
     // Don't throw - continue with the rest
   }
 
@@ -850,7 +867,7 @@ export async function shipFromLocation(
     .select('location_id, shipped_at')
     .eq('order_id', orderId)
 
-  console.log('[shipFromLocation] Fetched all locations:', { allLocations, fetchError })
+  logger.debug('[shipFromLocation] Fetched all locations:', { allLocations, fetchError })
 
   // Handle case where there are no order_locations records (single-location order without routing)
   const totalLocations = allLocations?.length || 0
@@ -862,7 +879,7 @@ export async function shipFromLocation(
   // If no order_locations exist, treat as single-location order - just update the order directly
   const allLocationsShipped = totalLocations === 0 || (shippedLocations === totalLocations && totalLocations > 0)
 
-  console.log('[shipFromLocation] Shipping status:', { totalLocations, shippedLocations, allLocationsShipped })
+  logger.debug('[shipFromLocation] Shipping status:', { totalLocations, shippedLocations, allLocationsShipped })
 
   // 4. Update order status
   // NOTE: We intentionally don't set shipped_by_user_id because the foreign key
@@ -890,10 +907,10 @@ export async function shipFromLocation(
       .update(updateData)
       .eq('id', orderId)
 
-    console.log('[shipFromLocation] Order update result:', { orderError })
+    logger.debug('[shipFromLocation] Order update result:', { orderError })
 
     if (orderError) {
-      console.error('[shipFromLocation] Failed to update order status:', orderError)
+      logger.error('[shipFromLocation] Failed to update order status:', orderError)
       throw new Error(`Failed to update order: ${orderError.message}`)
     }
   } else if (shippedLocations > 0) {
@@ -907,11 +924,11 @@ export async function shipFromLocation(
       .eq('id', orderId)
 
     if (orderError) {
-      console.error('[shipFromLocation] Failed to update order partial status:', orderError)
+      logger.error('[shipFromLocation] Failed to update order partial status:', orderError)
     }
   }
 
-  console.log('[shipFromLocation] Complete!', { success: true, allLocationsShipped })
+  logger.info('[shipFromLocation] Complete!', { success: true, allLocationsShipped })
 
   return {
     success: true,
@@ -964,7 +981,7 @@ export async function deleteOrder(orderId: string): Promise<void> {
     .eq('order_id', orderId)
 
   if (checkoutError) {
-    console.error('Failed to delete checkout attempts:', checkoutError)
+    logger.error('Failed to delete checkout attempts:', checkoutError)
     // Continue - some orders might not have checkout attempts
   }
 
@@ -975,7 +992,7 @@ export async function deleteOrder(orderId: string): Promise<void> {
     .eq('order_id', orderId)
 
   if (itemsError) {
-    console.error('Failed to delete order items:', itemsError)
+    logger.error('Failed to delete order items:', itemsError)
     // Continue - some orders might not have items
   }
 
@@ -986,7 +1003,7 @@ export async function deleteOrder(orderId: string): Promise<void> {
     .eq('order_id', orderId)
 
   if (locError) {
-    console.error('Failed to delete order locations:', locError)
+    logger.error('Failed to delete order locations:', locError)
     // Continue - some orders might not have locations
   }
 
@@ -1015,7 +1032,7 @@ export async function deleteOrdersBulk(orderIds: string[]): Promise<{ deleted: n
       await deleteOrder(orderId)
       deleted++
     } catch (error) {
-      console.error(`Failed to delete order ${orderId}:`, error)
+      logger.error(`Failed to delete order ${orderId}:`, error)
       failed.push(orderId)
     }
   }
@@ -1041,7 +1058,7 @@ export async function getOrderWalletPass(orderId: string): Promise<{
       .maybeSingle()
 
     if (error) {
-      console.error('[getOrderWalletPass] Error:', error)
+      logger.error('[getOrderWalletPass] Error:', error)
       return null
     }
 
@@ -1062,7 +1079,7 @@ export async function getOrderWalletPass(orderId: string): Promise<{
       deviceCount: deviceCount || 0,
     }
   } catch (err) {
-    console.error('[getOrderWalletPass] Exception:', err)
+    logger.error('[getOrderWalletPass] Exception:', err)
     return null
   }
 }

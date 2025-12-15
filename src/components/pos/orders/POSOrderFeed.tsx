@@ -39,7 +39,7 @@ import type { Order } from '@/services/orders.service'
 import { logger } from '@/utils/logger'
 
 // Status group labels for filter dropdown
-const STATUS_GROUP_LABELS: Array<{ key: POSOrderStatusGroup; label: string }> = [
+const STATUS_GROUP_LABELS: { key: POSOrderStatusGroup; label: string }[] = [
   { key: 'active', label: 'Active' },
   { key: 'shipping', label: 'Shipping' },
   { key: 'completed', label: 'Completed' },
@@ -49,7 +49,7 @@ const STATUS_GROUP_LABELS: Array<{ key: POSOrderStatusGroup; label: string }> = 
 ]
 
 // Order type labels for filter dropdown
-const ORDER_TYPE_LABELS: Array<{ key: string; label: string }> = [
+const ORDER_TYPE_LABELS: { key: string; label: string }[] = [
   { key: 'all', label: 'All Types' },
   { key: 'walk_in', label: 'Walk-in (POS)' },
   { key: 'pickup', label: 'In-Store Pickup' },

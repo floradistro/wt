@@ -1,243 +1,222 @@
 /**
  * POS Payment Modal
- * Single Responsibility: Payment orchestration and modal presentation
- * Apple Standard: Component < 300 lines
+ * Optimized glass modal for checkout - INSTANT OPEN
  */
 
-import { View, Text, StyleSheet, Modal, TouchableOpacity, Animated, useWindowDimensions, ScrollView, Platform, KeyboardAvoidingView, InteractionManager } from 'react-native'
-import { LiquidGlassView } from '@callstack/liquid-glass'
-import { useState, useRef, useEffect, memo, useMemo, useCallback } from 'react'
+import { View, Text, StyleSheet, Modal, TouchableOpacity, Animated, useWindowDimensions, Platform, KeyboardAvoidingView, Pressable, PanResponder, InteractionManager } from 'react-native'
+import { BlurView } from 'expo-blur'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import { useState, useRef, useEffect, memo, useCallback } from 'react'
 import { Ionicons } from '@expo/vector-icons'
-import Slider from '@react-native-community/slider'
 import * as Haptics from 'expo-haptics'
-import { usePaymentProcessor } from '@/stores/payment-processor.store'
-import { useSelectedCustomer } from '@/stores/customer.store'
-import { useCartTotals } from '@/stores/cart.store'
-import { useLoyaltyProgram, usePointsToRedeem, loyaltyActions, useCampaigns } from '@/stores/loyalty-campaigns.store'
-import { useSelectedDiscountId, checkoutUIActions } from '@/stores/checkout-ui.store'
+import { POSDiscountBar } from './payment/POSDiscountBar'
 import { CashPaymentView } from './payment/CashPaymentView'
 import { CardPaymentView } from './payment/CardPaymentView'
 import { SplitPaymentView } from './payment/SplitPaymentView'
-import { SaleSuccessModal } from './SaleSuccessModal'
+import { SplitCardPaymentView } from './payment/SplitCardPaymentView'
+import { playSaleCompletionSound } from '@/lib/id-scanner/audio'
 import type { PaymentModalProps, PaymentData, SaleCompletionData } from './payment/PaymentTypes'
+import { useModalData } from '@/stores/checkout-ui.store'
 
-// Apple-standard spring config for buttery 60fps animations
-const SPRING_CONFIG = {
-  tension: 300,
-  friction: 26,
-  useNativeDriver: true,
+type PaymentMethod = 'cash' | 'card' | 'split' | 'multi-card'
+
+interface RetryContext {
+  orderId: string
+  orderNumber: string
+  card1Amount: number
+  card1Auth: string
+  card1Last4: string
+  amountRemaining: number
 }
 
-const FADE_CONFIG = {
-  duration: 200,
-  useNativeDriver: true,
-}
+// Tab config for cleaner rendering
+const TABS: { id: PaymentMethod; icon: string; label: string }[] = [
+  { id: 'cash', icon: 'cash-outline', label: 'Cash' },
+  { id: 'card', icon: 'card-outline', label: 'Card' },
+  { id: 'split', icon: 'git-compare-outline', label: 'Split' },
+  { id: 'multi-card', icon: 'copy-outline', label: '2 Cards' },
+]
 
 function POSPaymentModal({
   visible,
   total,
-  subtotal,
-  taxAmount,
-  taxRate,
-  taxName,
   itemCount,
   onPaymentComplete,
   onCancel,
-  locationId,
-  registerId,
 }: PaymentModalProps) {
-  // Lazy content rendering - don't render heavy content until first visible
-  const [hasBeenVisible, setHasBeenVisible] = useState(false)
+  const modalData = useModalData()
+  const retryContext: RetryContext | undefined = modalData?.mode === 'retry' ? {
+    orderId: modalData.orderId,
+    orderNumber: modalData.orderNumber,
+    card1Amount: modalData.card1Amount,
+    card1Auth: modalData.card1Auth,
+    card1Last4: modalData.card1Last4,
+    amountRemaining: modalData.amountRemaining,
+  } : undefined
 
-  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card' | 'split'>('cash')
-  const [showSuccessModal, setShowSuccessModal] = useState(false)
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash')
   const [completionData, setCompletionData] = useState<SaleCompletionData | null>(null)
-  const { width, height } = useWindowDimensions()
-  const isLandscape = width > height
+  const [showSuccess, setShowSuccess] = useState(false)
+  const [contentReady, setContentReady] = useState(false) // Deferred content loading
+  const { height } = useWindowDimensions()
+  const insets = useSafeAreaInsets()
 
-  // Track first visibility for lazy loading
+  // Refs for pan responder and double-tap
+  const showSuccessRef = useRef(false)
+  const onCancelRef = useRef(onCancel)
+  const lastTapRef = useRef<number>(0)
+
+  // Animation values - stored in refs for pan responder access
+  const slideAnimRef = useRef(new Animated.Value(height))
+  const opacityAnimRef = useRef(new Animated.Value(0))
+  const successAnimRef = useRef(new Animated.Value(0))
+  const slideAnim = slideAnimRef.current
+  const opacityAnim = opacityAnimRef.current
+  const successAnim = successAnimRef.current
+
+  // Sync refs
+  useEffect(() => { showSuccessRef.current = showSuccess }, [showSuccess])
+  useEffect(() => { onCancelRef.current = onCancel }, [onCancel])
+
+  // Auto-switch tab for retry
   useEffect(() => {
-    if (visible && !hasBeenVisible) {
-      setHasBeenVisible(true)
-    }
-  }, [visible, hasBeenVisible])
+    if (visible && retryContext) setPaymentMethod('multi-card')
+  }, [visible, retryContext])
 
-  // Use current height for animations
-  const slideAnim = useRef(new Animated.Value(height)).current
-  const fadeAnim = useRef(new Animated.Value(0)).current
+  // Pan responder for drag-to-dismiss with integrated double-tap
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_, gestureState) => {
+        // Capture vertical drags (but not during success animation)
+        return !showSuccessRef.current && Math.abs(gestureState.dy) > 5 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx)
+      },
+      onPanResponderGrant: () => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+      },
+      onPanResponderMove: (_, gestureState) => {
+        if (gestureState.dy > 0 && !showSuccessRef.current) {
+          slideAnimRef.current.setValue(gestureState.dy)
+          opacityAnimRef.current.setValue(Math.max(0, 1 - gestureState.dy / 300))
+        }
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        if (showSuccessRef.current) return
 
-  const currentProcessor = usePaymentProcessor((state) => state.currentProcessor)
-  const processorStatus = usePaymentProcessor((state) => state.status)
-
-  // Loyalty state from stores (ZERO PROP DRILLING)
-  const selectedCustomer = useSelectedCustomer()
-  const loyaltyProgram = useLoyaltyProgram()
-  const pointsToRedeem = usePointsToRedeem()
-  const { subtotal: cartSubtotal } = useCartTotals()
-
-  // Calculate loyalty discount for display (total prop already has it applied)
-  const pointValue = loyaltyProgram?.point_value || 0.05
-  const loyaltyDiscount = pointsToRedeem * pointValue
-
-  // Calculate max redeemable points
-  const maxRedeemablePoints = useMemo(() => {
-    if (!selectedCustomer || !loyaltyProgram?.is_active) return 0
-    const customerPoints = selectedCustomer.loyalty_points || 0
-    const maxFromSubtotal = Math.floor(cartSubtotal / pointValue)
-    return Math.min(customerPoints, maxFromSubtotal)
-  }, [selectedCustomer, loyaltyProgram, cartSubtotal, pointValue])
-
-  // NOTE: `total` prop already includes loyalty discount from useCheckoutTotals
-  // No need to calculate adjustedTotal - use total directly
-
-  // Show loyalty section if customer has points
-  const showLoyaltySection = selectedCustomer &&
-    (selectedCustomer.loyalty_points || 0) > 0 &&
-    maxRedeemablePoints > 0
-
-  // Discount state from stores
-  const campaigns = useCampaigns()
-  const selectedDiscountId = useSelectedDiscountId()
-  const [showDiscountPicker, setShowDiscountPicker] = useState(false)
-
-  // Get active POS discounts (in_store or both)
-  const activeDiscounts = useMemo(() => {
-    return campaigns.filter(d => {
-      if (!d.is_active) return false
-      const salesChannel = (d as any).sales_channel || 'both'
-      return salesChannel === 'in_store' || salesChannel === 'both'
+        if (gestureState.dy > 100 || gestureState.vy > 0.5) {
+          // Dismiss
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+          onCancelRef.current()
+        } else {
+          // Snap back
+          Animated.parallel([
+            Animated.spring(slideAnimRef.current, { toValue: 0, tension: 300, friction: 26, useNativeDriver: true }),
+            Animated.timing(opacityAnimRef.current, { toValue: 1, duration: 120, useNativeDriver: true }),
+          ]).start()
+        }
+      },
     })
-  }, [campaigns])
+  ).current
 
-  // Get selected discount
-  const selectedDiscount = useMemo(() =>
-    activeDiscounts.find(d => d.id === selectedDiscountId) || null,
-    [activeDiscounts, selectedDiscountId]
-  )
-
-  // Calculate discount amount for display
-  const discountAmount = useMemo(() => {
-    if (!selectedDiscount) return 0
-    const subtotalAfterLoyalty = Math.max(0, cartSubtotal - loyaltyDiscount)
-    if (selectedDiscount.discount_type === 'percentage') {
-      return subtotalAfterLoyalty * (selectedDiscount.discount_value / 100)
-    }
-    return Math.min(selectedDiscount.discount_value, subtotalAfterLoyalty)
-  }, [selectedDiscount, cartSubtotal, loyaltyDiscount])
-
-  // Discount handlers - Direct state updates for instant response
-  const handleSelectDiscount = useCallback((discountId: string) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
-    checkoutUIActions.setSelectedDiscountId(discountId)
-    setShowDiscountPicker(false)
-  }, [])
-
-  const handleClearDiscount = useCallback(() => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-    checkoutUIActions.setSelectedDiscountId(null)
-  }, [])
-
-  const handleToggleDiscountPicker = useCallback(() => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-    setShowDiscountPicker(prev => !prev)
-  }, [])
-
-  // Loyalty slider handlers
-  const handleSliderChange = useCallback((value: number) => {
-    const roundedValue = Math.round(value)
-    loyaltyActions.setPointsToRedeem(roundedValue)
-  }, [])
-
-  const handleSliderComplete = useCallback(() => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-  }, [])
-
-  const handleUseAllPoints = useCallback(() => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-    loyaltyActions.setPointsToRedeem(pointsToRedeem === maxRedeemablePoints ? 0 : maxRedeemablePoints)
-  }, [pointsToRedeem, maxRedeemablePoints])
-
-  const hasActiveProcessor = !!currentProcessor
-  const canCompleteCard = hasActiveProcessor
-
-  // Animation - Apple-standard 60fps smooth transitions
+  // INSTANT OPEN: Animate in when visible, defer heavy content
   useEffect(() => {
     if (visible) {
-      // Reset to start position
-      slideAnim.setValue(height)
-      fadeAnim.setValue(0)
+      // Reset state immediately
+      setShowSuccess(false)
+      setCompletionData(null)
+      successAnim.setValue(0)
+      lastTapRef.current = 0 // Reset double-tap state
 
-      // Staggered animation for perceived smoothness
+      // Start slide-up animation IMMEDIATELY (modal shell appears instantly)
+      slideAnim.setValue(height * 0.3) // Start slightly below
+      opacityAnim.setValue(0.5)
+
+      // Fast spring animation for responsive feel
       Animated.parallel([
         Animated.spring(slideAnim, {
           toValue: 0,
-          ...SPRING_CONFIG,
+          tension: 200,
+          friction: 22,
+          useNativeDriver: true
         }),
-        Animated.timing(fadeAnim, {
+        Animated.timing(opacityAnim, {
           toValue: 1,
-          ...FADE_CONFIG,
+          duration: 150,
+          useNativeDriver: true
         }),
       ]).start()
+
+      // Defer heavy content (payment views) until after animation
+      InteractionManager.runAfterInteractions(() => {
+        setContentReady(true)
+      })
     } else {
-      // Quick exit animation
+      // Animate out
       Animated.parallel([
-        Animated.timing(slideAnim, {
-          toValue: height,
-          duration: 180,
-          useNativeDriver: true,
-        }),
-        Animated.timing(fadeAnim, {
-          toValue: 0,
-          duration: 150,
-          useNativeDriver: true,
-        }),
+        Animated.timing(slideAnim, { toValue: height, duration: 180, useNativeDriver: true }),
+        Animated.timing(opacityAnim, { toValue: 0, duration: 150, useNativeDriver: true }),
       ]).start(() => {
-        // Reset state after animation completes
         setPaymentMethod('cash')
-        setShowSuccessModal(false)
+        setShowSuccess(false)
         setCompletionData(null)
+        setContentReady(false)
       })
     }
-  }, [visible, height, slideAnim, fadeAnim])
+  }, [visible, height])
 
-  const handleClose = () => {
+  const handleClose = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
     onCancel()
-  }
+  }, [onCancel])
 
-  const handleTabChange = (method: 'cash' | 'card' | 'split') => {
+  // Double-tap anywhere to close (same pattern as other modals)
+  const handleDoubleTap = useCallback(() => {
+    const now = Date.now()
+    const DOUBLE_TAP_DELAY = 300
+    if (now - lastTapRef.current < DOUBLE_TAP_DELAY) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+      onCancel()
+    }
+    lastTapRef.current = now
+  }, [onCancel])
+
+  const handleTabChange = useCallback((method: PaymentMethod) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
     setPaymentMethod(method)
-  }
+  }, [])
 
-  const handlePaymentComplete = async (paymentData: PaymentData) => {
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+  const handlePaymentComplete = useCallback(async (paymentData: PaymentData) => {
     const saleData = await onPaymentComplete(paymentData)
-
-    // Show Apple-style success modal
     setCompletionData(saleData)
-    setShowSuccessModal(true)
+    setShowSuccess(true)
+
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+    playSaleCompletionSound()
+
+    Animated.spring(successAnim, {
+      toValue: 1,
+      tension: 100,
+      friction: 8,
+      useNativeDriver: true,
+    }).start()
+
+    setTimeout(() => {
+      Animated.timing(successAnim, {
+        toValue: 0,
+        duration: 200,
+        useNativeDriver: true,
+      }).start(() => onCancel())
+    }, 1500)
 
     return saleData
-  }
+  }, [onPaymentComplete, onCancel, successAnim])
 
-  const handleSuccessModalDismiss = () => {
-    // Hide success modal first
-    setShowSuccessModal(false)
+  if (!visible) return null
 
-    // Wait a moment for the success modal's fade out animation
-    // Then close the payment modal smoothly
-    setTimeout(() => {
-      setCompletionData(null)
-      onCancel()
-    }, 300) // Give 300ms for any exit animations
-  }
+  const successScale = successAnim.interpolate({ inputRange: [0, 1], outputRange: [0.8, 1] })
+  const contentOpacity = successAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 0] })
 
-  // Lazy rendering: Don't mount heavy content until first visible
-  // This prevents payment modal from slowing down initial checkout load
-  if (!hasBeenVisible) {
-    return <Modal visible={false} transparent><View /></Modal>
-  }
+  const displayTotal = retryContext?.amountRemaining ?? total
 
   return (
     <Modal
@@ -245,491 +224,194 @@ function POSPaymentModal({
       transparent
       animationType="none"
       onRequestClose={handleClose}
-      supportedOrientations={['portrait', 'landscape']}
-      accessibilityViewIsModal={true}
+      statusBarTranslucent
     >
-      {/* Backdrop */}
-      <Animated.View
-        style={[styles.backdrop, { opacity: fadeAnim }]}
-        accessible={true}
-        accessibilityRole="none"
-        accessibilityLabel={`Checkout. Total: ${total.toFixed(2)} dollars`}
-        onAccessibilityEscape={handleClose}
-      >
-        <TouchableOpacity
-          style={StyleSheet.absoluteFill}
-          onPress={handleClose}
-          activeOpacity={1}
-          accessible={true}
-          accessibilityRole="button"
-          accessibilityLabel="Close checkout"
-          accessibilityHint="Double tap to cancel and return to cart"
-        />
-      </Animated.View>
+      <Animated.View style={[styles.overlay, { opacity: opacityAnim }]}>
+        {/* Full-screen double-tap to close (same as other modals) */}
+        <Pressable style={StyleSheet.absoluteFill} onPress={showSuccess ? undefined : handleDoubleTap}>
+          <BlurView intensity={25} tint="dark" style={StyleSheet.absoluteFill} />
+        </Pressable>
 
-      {/* Modal Container */}
-      <Animated.View
-        style={[
-          styles.container,
-          isLandscape ? styles.containerLandscape : styles.containerPortrait,
-          {
-            transform: [{ translateY: slideAnim }],
-          },
-        ]}
-        accessible={false}
-      >
-        <LiquidGlassView
-          effect="regular"
-          colorScheme="dark"
-          style={[
-            styles.modalCard,
-            isLandscape ? styles.modalCardLandscape : styles.modalCardPortrait
-          ]}
-          accessible={false}
-        >
-          {/* Handle removed - full screen modal */}
-
-          {/* Header */}
-          <View style={styles.header} accessible={false}>
-            <Text style={styles.title} accessibilityRole="header">CHECKOUT</Text>
-            <Text style={styles.totalLabel} accessible={false}>TOTAL</Text>
-            <Text
-              style={styles.totalAmount}
-              accessibilityLabel={`Total amount: ${total.toFixed(2)} dollars`}
-              accessibilityRole="text"
+        <Animated.View style={[styles.sheet, { height: height * 0.92, transform: [{ translateY: slideAnim }] }]}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.flex}>
+            {/* Double-tap anywhere on content to close */}
+            <Pressable
+              style={[styles.content, { paddingBottom: insets.bottom }]}
+              onPress={showSuccess ? undefined : handleDoubleTap}
             >
-              ${total.toFixed(2)}
-            </Text>
-            {loyaltyDiscount > 0 && (
-              <Text style={styles.loyaltySavings}>
-                Saving ${loyaltyDiscount.toFixed(2)} with {pointsToRedeem} points
-              </Text>
-            )}
-          </View>
+              {/* Content blur - matches other modals */}
+              <BlurView intensity={30} tint="dark" style={StyleSheet.absoluteFill} />
 
-          {/* Loyalty Points Redemption */}
-          {showLoyaltySection && (
-            <View style={styles.loyaltySection}>
-              <View style={styles.loyaltyHeader}>
-                <Text style={styles.loyaltyTitle}>Redeem Points</Text>
-                <Text style={styles.loyaltyAvailable}>
-                  {(selectedCustomer?.loyalty_points || 0).toLocaleString()} available
-                </Text>
+              {/* Handle - drag to close */}
+              <View
+                style={styles.handleRow}
+                {...panResponder.panHandlers}
+                accessible
+                accessibilityRole="button"
+                accessibilityLabel="Drag handle"
+                accessibilityHint="Swipe down to close payment modal"
+              >
+                <View style={styles.handle} />
               </View>
-              <View style={styles.loyaltySliderRow}>
-                <Text style={styles.loyaltyPointsText}>
-                  {pointsToRedeem} pts
-                </Text>
-                <Slider
-                  style={styles.loyaltySlider}
-                  minimumValue={0}
-                  maximumValue={maxRedeemablePoints}
-                  step={1}
-                  value={pointsToRedeem}
-                  onValueChange={handleSliderChange}
-                  onSlidingComplete={handleSliderComplete}
-                  minimumTrackTintColor="#10b981"
-                  maximumTrackTintColor="rgba(255,255,255,0.15)"
-                  thumbTintColor="#10b981"
-                />
-                <TouchableOpacity onPress={handleUseAllPoints} style={styles.useAllButton}>
-                  <Text style={styles.useAllText}>
-                    {pointsToRedeem === maxRedeemablePoints ? 'Clear' : 'Max'}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-              {pointsToRedeem > 0 && (
-                <Text style={styles.loyaltyDiscountText}>
-                  -${loyaltyDiscount.toFixed(2)} discount
-                </Text>
+
+              {/* Success Overlay */}
+              {showSuccess && completionData && (
+                <Animated.View
+                  style={[styles.success, { opacity: successAnim, transform: [{ scale: successScale }] }]}
+                  accessibilityRole="alert"
+                  accessibilityLiveRegion="polite"
+                  accessibilityLabel={`Payment complete. Total ${completionData.total?.toFixed(2)} dollars. Order number ${completionData.orderNumber}${completionData.changeGiven && completionData.changeGiven > 0 ? `. Change due ${completionData.changeGiven.toFixed(2)} dollars` : ''}`}
+                >
+                  <View style={styles.checkCircle}>
+                    <Ionicons name="checkmark" size={56} color="#fff" />
+                  </View>
+                  <Text style={styles.successAmount}>${completionData.total?.toFixed(2)}</Text>
+                  <Text style={styles.successOrder}>#{completionData.orderNumber}</Text>
+                  {completionData.changeGiven !== undefined && completionData.changeGiven > 0 && (
+                    <View style={styles.changeRow}>
+                      <Text style={styles.changeLabel}>Change</Text>
+                      <Text style={styles.changeAmount}>${completionData.changeGiven.toFixed(2)}</Text>
+                    </View>
+                  )}
+                </Animated.View>
               )}
-            </View>
-          )}
 
-          {/* Discount Section */}
-          {activeDiscounts.length > 0 && (
-            <TouchableOpacity
-              style={styles.discountSection}
-              onPress={selectedDiscount ? undefined : handleToggleDiscountPicker}
-              activeOpacity={selectedDiscount ? 1 : 0.7}
-              disabled={!!selectedDiscount}
-            >
-              <View style={styles.discountHeader}>
-                <View style={styles.discountTitleRow}>
-                  <Ionicons
-                    name="pricetag-outline"
-                    size={16}
-                    color={selectedDiscount ? '#10b981' : 'rgba(255,255,255,0.6)'}
-                    style={styles.discountIcon}
-                  />
-                  <Text style={[styles.discountTitle, selectedDiscount && styles.discountTitleActive]}>
-                    {selectedDiscount ? selectedDiscount.name : 'Apply Discount'}
+              {/* Main Content */}
+              <Animated.View style={[styles.flex, { opacity: contentOpacity }]}>
+                {/* Header */}
+                <View style={styles.header}>
+                  <Text style={styles.label}>{retryContext ? 'RETRY CARD 2' : 'CHECKOUT'}</Text>
+                  <Text style={styles.amount}>${displayTotal.toFixed(2)}</Text>
+                  <Text style={styles.subtext}>
+                    {retryContext
+                      ? `Order #${retryContext.orderNumber} · Card 1 paid $${retryContext.card1Amount.toFixed(2)}`
+                      : `${itemCount} ${itemCount === 1 ? 'item' : 'items'}`}
                   </Text>
                 </View>
-                {selectedDiscount ? (
-                  <TouchableOpacity onPress={handleClearDiscount} style={styles.discountClearButton}>
-                    <Ionicons name="close-circle" size={20} color="rgba(255,255,255,0.5)" />
-                  </TouchableOpacity>
-                ) : (
-                  <Ionicons
-                    name={showDiscountPicker ? 'chevron-up' : 'chevron-down'}
-                    size={18}
-                    color="rgba(255,255,255,0.5)"
-                  />
-                )}
-              </View>
-              {selectedDiscount && discountAmount > 0 && (
-                <Text style={styles.discountAmountText}>
-                  -{selectedDiscount.discount_type === 'percentage'
-                    ? `${selectedDiscount.discount_value}%`
-                    : `$${selectedDiscount.discount_value.toFixed(2)}`}
-                  {' '}· saves ${discountAmount.toFixed(2)}
-                </Text>
-              )}
-              {showDiscountPicker && !selectedDiscount && (
-                <View style={styles.discountPickerList}>
-                  {activeDiscounts.map(discount => (
-                    <TouchableOpacity
-                      key={discount.id}
-                      onPress={() => handleSelectDiscount(discount.id)}
-                      style={styles.discountPickerItem}
-                      activeOpacity={0.7}
-                    >
-                      <Text style={styles.discountPickerItemName}>{discount.name}</Text>
-                      <Text style={styles.discountPickerItemBadge}>
-                        {discount.discount_type === 'percentage'
-                          ? `${discount.discount_value}% off`
-                          : `$${discount.discount_value.toFixed(2)} off`}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
+
+                {/* Body */}
+                <View style={styles.body}>
+                  {!retryContext && <POSDiscountBar />}
+
+                  {/* Tabs */}
+                  {!retryContext && (
+                    <View style={styles.tabs} accessibilityRole="tablist">
+                      {TABS.map(tab => (
+                        <TouchableOpacity
+                          key={tab.id}
+                          style={[styles.tab, paymentMethod === tab.id && styles.tabActive]}
+                          onPress={() => handleTabChange(tab.id)}
+                          activeOpacity={0.7}
+                          accessibilityRole="tab"
+                          accessibilityState={{ selected: paymentMethod === tab.id }}
+                          accessibilityLabel={`${tab.label} payment`}
+                          accessibilityHint={`Switch to ${tab.label.toLowerCase()} payment method`}
+                        >
+                          <Ionicons
+                            name={tab.icon as any}
+                            size={18}
+                            color={paymentMethod === tab.id ? '#10b981' : 'rgba(255,255,255,0.5)'}
+                          />
+                          <Text style={[styles.tabText, paymentMethod === tab.id && styles.tabTextActive]}>
+                            {tab.label}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  )}
+
+                  {/* Payment View - Deferred until animation completes */}
+                  <View style={styles.paymentView}>
+                    {contentReady && paymentMethod === 'cash' && (
+                      <CashPaymentView onComplete={handlePaymentComplete} onCancel={handleClose} />
+                    )}
+                    {contentReady && paymentMethod === 'card' && (
+                      <CardPaymentView onComplete={handlePaymentComplete} onCancel={handleClose} />
+                    )}
+                    {contentReady && paymentMethod === 'split' && (
+                      <SplitPaymentView onComplete={handlePaymentComplete} onCancel={handleClose} />
+                    )}
+                    {contentReady && paymentMethod === 'multi-card' && (
+                      <SplitCardPaymentView onComplete={handlePaymentComplete} onCancel={handleClose} retryContext={retryContext} />
+                    )}
+                  </View>
                 </View>
-              )}
-            </TouchableOpacity>
-          )}
-
-          {/* Payment Method Tabs */}
-          <View style={styles.tabs} accessibilityRole="tablist" accessible={false}>
-            <TouchableOpacity
-              style={[styles.tab, paymentMethod === 'cash' && styles.tabActive]}
-              onPress={() => handleTabChange('cash')}
-              activeOpacity={0.7}
-              accessibilityRole="tab"
-              accessibilityLabel="Cash payment"
-              accessibilityState={{ selected: paymentMethod === 'cash' }}
-              accessibilityHint="Pay with cash"
-            >
-              <Ionicons
-                name="cash-outline"
-                size={20}
-                color={paymentMethod === 'cash' ? '#10b981' : 'rgba(255,255,255,0.6)'}
-                accessibilityElementsHidden={true}
-                importantForAccessibility="no"
-              />
-              <Text style={[styles.tabText, paymentMethod === 'cash' && styles.tabTextActive]}>
-                CASH
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.tab, paymentMethod === 'card' && styles.tabActive]}
-              onPress={() => handleTabChange('card')}
-              activeOpacity={0.7}
-              accessibilityRole="tab"
-              accessibilityLabel="Card payment"
-              accessibilityState={{ selected: paymentMethod === 'card' }}
-              accessibilityHint="Pay with credit or debit card"
-            >
-              <Ionicons
-                name="card-outline"
-                size={20}
-                color={paymentMethod === 'card' ? '#10b981' : 'rgba(255,255,255,0.6)'}
-                accessibilityElementsHidden={true}
-                importantForAccessibility="no"
-              />
-              <Text style={[styles.tabText, paymentMethod === 'card' && styles.tabTextActive]}>
-                CARD
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.tab, paymentMethod === 'split' && styles.tabActive]}
-              onPress={() => handleTabChange('split')}
-              activeOpacity={0.7}
-              accessibilityRole="tab"
-              accessibilityLabel="Split payment"
-              accessibilityState={{ selected: paymentMethod === 'split' }}
-              accessibilityHint="Split payment between cash and card"
-            >
-              <Ionicons
-                name="swap-horizontal-outline"
-                size={20}
-                color={paymentMethod === 'split' ? '#10b981' : 'rgba(255,255,255,0.6)'}
-                accessibilityElementsHidden={true}
-                importantForAccessibility="no"
-              />
-              <Text style={[styles.tabText, paymentMethod === 'split' && styles.tabTextActive]}>
-                SPLIT
-              </Text>
-            </TouchableOpacity>
-          </View>
-
-          <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-            style={{ flex: 1 }}
-          >
-            <ScrollView
-              style={[styles.content, { maxHeight: height * (isLandscape ? 0.5 : 0.75) }]}
-              showsVerticalScrollIndicator={true}
-              indicatorStyle="white"
-              scrollIndicatorInsets={{ right: 2 }}
-              bounces={false}
-              keyboardShouldPersistTaps="always"
-              keyboardDismissMode="interactive"
-              contentContainerStyle={{ flexGrow: 1 }}
-            >
-              {/* Payment Views - total already includes loyalty discount */}
-              {paymentMethod === 'cash' && (
-                <CashPaymentView
-                  onComplete={handlePaymentComplete}
-                  onCancel={handleClose}
-                />
-              )}
-
-              {paymentMethod === 'card' && (
-                <CardPaymentView
-                  onComplete={handlePaymentComplete}
-                  onCancel={handleClose}
-                />
-              )}
-
-              {paymentMethod === 'split' && (
-                <SplitPaymentView
-                  onComplete={handlePaymentComplete}
-                  onCancel={handleClose}
-                />
-              )}
-            </ScrollView>
+              </Animated.View>
+            </Pressable>
           </KeyboardAvoidingView>
-        </LiquidGlassView>
+        </Animated.View>
       </Animated.View>
-
-      {/* Apple-style success modal */}
-      <SaleSuccessModal
-        visible={showSuccessModal}
-        completionData={completionData}
-        onDismiss={handleSuccessModalDismiss}
-      />
     </Modal>
   )
 }
 
 const styles = StyleSheet.create({
-  backdrop: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-  },
-  container: {
-    position: 'absolute',
-  },
-  containerPortrait: {
-    top: 0,
-    bottom: 0,
-    left: 0,
-    right: 0,
-  },
-  containerLandscape: {
-    top: 0,
-    bottom: 0,
-    left: 0,
-    right: 0,
-  },
-  modalCard: {
-    flex: 1,
+  flex: { flex: 1 },
+  overlay: { flex: 1, justifyContent: 'flex-end' },
+  sheet: {
+    borderTopLeftRadius: 32,
+    borderTopRightRadius: 32,
     overflow: 'hidden',
-    paddingTop: 48,
-    paddingHorizontal: 24,
-    paddingBottom: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -8 },
+    shadowOpacity: 0.4,
+    shadowRadius: 24,
+    elevation: 24,
   },
-  modalCardPortrait: {
-    borderRadius: 0,
+  content: {
+    flex: 1,
+    borderTopLeftRadius: 30,
+    borderTopRightRadius: 30,
+    overflow: 'hidden',
   },
-  modalCardLandscape: {
-    borderRadius: 0,
-  },
-  header: {
+  handleRow: {
     alignItems: 'center',
-    marginBottom: 16,
+    justifyContent: 'center',
+    paddingTop: 16,
+    paddingBottom: 12,
+    minHeight: 44, // Apple minimum touch target
   },
-  title: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.5)',
-    letterSpacing: 0.6,
-    textTransform: 'uppercase',
-    marginBottom: 8,
+  handle: {
+    width: 40,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: 'rgba(255,255,255,0.25)',
   },
-  totalLabel: {
+
+  // Header
+  header: { alignItems: 'center', paddingVertical: 12, paddingHorizontal: 24 },
+  label: {
     fontSize: 11,
     fontWeight: '600',
-    color: 'rgba(255,255,255,0.4)',
-    letterSpacing: 0.6,
-    textTransform: 'uppercase',
-    marginBottom: 2,
+    color: 'rgba(255,255,255,0.35)',
+    letterSpacing: 1.5,
+    marginBottom: 4,
   },
-  totalAmount: {
-    fontSize: 36,
+  amount: {
+    fontSize: 48,
     fontWeight: '700',
     color: '#fff',
-    letterSpacing: -1,
+    letterSpacing: -2,
   },
-  loyaltySavings: {
+  subtext: {
     fontSize: 13,
     fontWeight: '500',
-    color: '#10b981',
-    marginTop: 4,
+    color: 'rgba(255,255,255,0.4)',
+    marginTop: 2,
   },
-  // Loyalty Section
-  loyaltySection: {
-    backgroundColor: 'rgba(16,185,129,0.1)',
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(16,185,129,0.2)',
-  },
-  loyaltyHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  loyaltyTitle: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#10b981',
-    letterSpacing: 0.3,
-  },
-  loyaltyAvailable: {
-    fontSize: 12,
-    fontWeight: '500',
-    color: 'rgba(255,255,255,0.5)',
-  },
-  loyaltySliderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  loyaltyPointsText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.7)',
-    width: 55,
-    textAlign: 'right',
-  },
-  loyaltySlider: {
-    flex: 1,
-    height: 36,
-  },
-  useAllButton: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    borderRadius: 6,
-  },
-  useAllText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.7)',
-  },
-  loyaltyDiscountText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#10b981',
-    textAlign: 'center',
-    marginTop: 8,
-  },
-  loyaltyLabel: {
-    color: '#10b981',
-  },
-  loyaltyValue: {
-    color: '#10b981',
-  },
-  discountLabel: {
-    color: '#10b981',
-  },
-  discountValue: {
-    color: '#10b981',
-  },
-  // Discount Section - matches modal theme
-  discountSection: {
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
-  },
-  discountHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  discountTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  discountIcon: {
-    marginRight: 8,
-  },
-  discountTitle: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: 'rgba(255,255,255,0.7)',
-    letterSpacing: 0.2,
-  },
-  discountTitleActive: {
-    color: '#10b981',
-    fontWeight: '600',
-  },
-  discountClearButton: {
-    padding: 4,
-  },
-  discountAmountText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#10b981',
-    marginTop: 8,
-  },
-  discountPickerList: {
-    marginTop: 10,
-    gap: 6,
-  },
-  discountPickerItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  discountPickerItemName: {
-    fontSize: 13,
-    fontWeight: '500',
-    color: '#fff',
-    flex: 1,
-  },
-  discountPickerItemBadge: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#10b981',
-  },
+
+  // Body
+  body: { flex: 1, paddingHorizontal: 24 },
+  paymentView: { flex: 1, marginTop: 8 },
+
+  // Tabs
   tabs: {
     flexDirection: 'row',
     gap: 8,
-    marginBottom: 16,
+    marginBottom: 12,
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderRadius: 14,
+    padding: 4,
   },
   tab: {
     flex: 1,
@@ -738,28 +420,56 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 6,
     height: 40,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
-    borderRadius: 12,
+    borderRadius: 10,
   },
-  tabActive: {
-    backgroundColor: 'rgba(16,185,129,0.2)',
-    borderColor: '#10b981',
-    borderWidth: 2,
+  tabActive: { backgroundColor: 'rgba(16,185,129,0.15)' },
+  tabText: { fontSize: 13, fontWeight: '600', color: 'rgba(255,255,255,0.4)' },
+  tabTextActive: { color: '#10b981' },
+
+  // Success
+  success: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 100,
   },
-  tabText: {
-    fontSize: 12,
+  checkCircle: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: '#10b981',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 24,
+    shadowColor: '#10b981',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.5,
+    shadowRadius: 20,
+  },
+  successAmount: {
+    fontSize: 52,
+    fontWeight: '700',
+    color: '#fff',
+    letterSpacing: -2,
+    marginBottom: 4,
+  },
+  successOrder: {
+    fontSize: 18,
     fontWeight: '600',
-    color: 'rgba(255,255,255,0.6)',
-    letterSpacing: 0.5,
+    color: 'rgba(255,255,255,0.5)',
+    marginBottom: 20,
   },
-  tabTextActive: {
-    color: '#10b981',
+  changeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    backgroundColor: 'rgba(16,185,129,0.1)',
+    borderRadius: 16,
   },
-  content: {
-    // maxHeight is applied inline based on orientation
-  },
+  changeLabel: { fontSize: 15, fontWeight: '500', color: 'rgba(255,255,255,0.6)' },
+  changeAmount: { fontSize: 18, fontWeight: '700', color: '#10b981' },
 })
 
 export default memo(POSPaymentModal)

@@ -31,6 +31,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   TouchableOpacity,
+  Pressable,
 } from 'react-native'
 import { BlurView } from 'expo-blur'
 import { LiquidGlassView, isLiquidGlassSupported } from '@callstack/liquid-glass'
@@ -80,6 +81,7 @@ function POSModal({
   const fadeAnim = useRef(new Animated.Value(0)).current
   const scaleAnim = useRef(new Animated.Value(0.92)).current
   const isAnimatingRef = useRef(false)
+  const lastTapRef = useRef<number>(0)
 
   useEffect(() => {
     if (isAnimatingRef.current) return
@@ -126,6 +128,17 @@ function POSModal({
     onClose()
   }, [onClose])
 
+  // Double-tap anywhere to close modal
+  const handleDoubleTap = useCallback(() => {
+    const now = Date.now()
+    const DOUBLE_TAP_DELAY = 300
+    if (now - lastTapRef.current < DOUBLE_TAP_DELAY) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+      onClose()
+    }
+    lastTapRef.current = now
+  }, [onClose])
+
   return (
     <Modal
       visible={visible}
@@ -142,15 +155,17 @@ function POSModal({
         accessibilityLabel={`${title}${subtitle ? `. ${subtitle}` : ''}`}
         onAccessibilityEscape={handleClose}
       >
-        {/* Blurred background overlay - reduced intensity for performance */}
-        <BlurView
-          intensity={25}
-          tint="dark"
-          style={StyleSheet.absoluteFill}
-          accessible={false}
-        />
-        {/* Dark tint over blur for better contrast */}
-        <View style={styles.overlayTint} />
+        {/* Blurred background overlay - double tap to close */}
+        <Pressable style={StyleSheet.absoluteFill} onPress={handleDoubleTap}>
+          <BlurView
+            intensity={25}
+            tint="dark"
+            style={StyleSheet.absoluteFill}
+            accessible={false}
+          />
+          {/* Dark tint over blur for better contrast */}
+          <View style={styles.overlayTint} />
+        </Pressable>
 
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}

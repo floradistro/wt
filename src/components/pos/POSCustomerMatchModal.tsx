@@ -23,6 +23,7 @@ import {
   Alert,
   ActivityIndicator,
   InteractionManager,
+  TextInput,
 } from 'react-native'
 import { BlurView } from 'expo-blur'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -30,11 +31,12 @@ import * as Haptics from 'expo-haptics'
 import { memo, useRef, useEffect, useState, useMemo, useCallback } from 'react'
 import type { Customer } from '@/types/pos'
 import { useCustomerState, customerActions, type PendingOrder, type CustomerMatch } from '@/stores/customer.store'
-import { useActiveModal, useHasModalHistory, useModalSuspended, checkoutUIActions } from '@/stores/checkout-ui.store'
+import { useActiveModal, useHasModalHistory, useModalSuspended, useModalData, checkoutUIActions } from '@/stores/checkout-ui.store'
 import { scannedOrderActions } from '@/stores/scanned-order.store'
 import { ordersUIActions } from '@/stores/orders-ui.store'
 import { mergeCustomers, customersService, type CustomerWithOrders } from '@/services/customers.service'
 import { useAppAuth } from '@/contexts/AppAuthContext'
+import { logger } from '@/utils/logger'
 
 const { width, height } = Dimensions.get('window')
 
@@ -52,8 +54,26 @@ const SPRING_DRAG = {
 }
 
 function POSCustomerMatchModal() {
+  type OrderDisplay = {
+    id: string
+    order_number: string
+    order_type?: PendingOrder['order_type']
+    status?: string | null
+    fulfillment_status?: string | null
+    total_amount?: number
+    created_at: string
+    pickup_location?: { id?: string; name?: string } | null
+    created_by_user?: { first_name?: string; last_name?: string } | null
+    shipping_city?: string | null
+    shipping_state?: string | null
+    shipping_carrier?: string | null
+    tracking_number?: string | null
+    shipping_method_title?: string | null
+  }
+
   const insets = useSafeAreaInsets()
   const activeModal = useActiveModal()
+  const modalData = useModalData()
   const { scannedData, matches } = useCustomerState()
   const { vendor } = useAppAuth()
 
@@ -61,9 +81,12 @@ function POSCustomerMatchModal() {
   const hasModalHistory = useHasModalHistory()
   const modalSuspended = useModalSuspended()
 
-  // Only show if we have matches OR scanned data - prevent random popups
+  // Check if we're opening directly to view a profile (from customer button)
+  const directProfileCustomer = modalData?.viewProfile as Customer | undefined
+
+  // Only show if we have matches OR scanned data OR direct profile view - prevent random popups
   // Hide when suspended (e.g., viewing order detail)
-  const hasContentToShow = matches.length > 0 || scannedData !== null
+  const hasContentToShow = matches.length > 0 || scannedData !== null || directProfileCustomer
   const visible = activeModal === 'customerMatch' && hasContentToShow && !modalSuspended
 
   // Lazy content rendering - don't render heavy content until first visible
@@ -75,6 +98,37 @@ function POSCustomerMatchModal() {
     }
   }, [visible, hasBeenVisible])
 
+  // ✅ Direct profile view - when opened from customer button in search bar
+  useEffect(() => {
+    if (visible && directProfileCustomer && !viewingProfile) {
+      // Set the profile directly and load orders
+      setViewingProfile(directProfileCustomer)
+
+      // Check cache first
+      const cached = profileCache.current.get(directProfileCustomer.id)
+      if (cached) {
+        setProfileOrders(cached)
+        return
+      }
+
+      // Load orders
+      setLoadingOrders(true)
+      InteractionManager.runAfterInteractions(() => {
+        customersService.getCustomerWithOrders(directProfileCustomer.id)
+          .then(data => {
+            profileCache.current.set(directProfileCustomer.id, data)
+            setProfileOrders(data)
+          })
+          .catch(err => {
+            logger.error('Failed to load customer orders:', err)
+          })
+          .finally(() => {
+            setLoadingOrders(false)
+          })
+      })
+    }
+  }, [visible, directProfileCustomer])
+
   // Merge mode state
   const [mergeMode, setMergeMode] = useState(false)
   const [selectedForMerge, setSelectedForMerge] = useState<string[]>([])
@@ -85,6 +139,18 @@ function POSCustomerMatchModal() {
   const [profileOrders, setProfileOrders] = useState<CustomerWithOrders | null>(null)
   const [loadingOrders, setLoadingOrders] = useState(false)
   const lastTapRef = useRef<number>(0)
+
+  // Edit mode state (like POSProductCard)
+  const [isEditMode, setIsEditMode] = useState(false)
+  const [isSaving, setIsSaving] = useState(false)
+  const [editedFirstName, setEditedFirstName] = useState('')
+  const [editedLastName, setEditedLastName] = useState('')
+  const [editedEmail, setEditedEmail] = useState('')
+  const [editedPhone, setEditedPhone] = useState('')
+  const [editedLoyaltyPoints, setEditedLoyaltyPoints] = useState('')
+  const longPressTimer = useRef<NodeJS.Timeout | null>(null)
+  const saveProgressAnim = useRef(new Animated.Value(0)).current
+  const justActivatedEditMode = useRef(false)
 
   // ✅ Profile cache for instant re-visits (Apple pattern)
   const profileCache = useRef<Map<string, CustomerWithOrders>>(new Map())
@@ -103,6 +169,13 @@ function POSCustomerMatchModal() {
     const orders = m.pendingOrders || []
     return sum + orders.length
   }, 0)
+
+  const historyOrders = useMemo<OrderDisplay[]>(() => {
+    if (!profileOrders?.recent_orders) return []
+    return profileOrders.recent_orders.slice(0, 10).map((order) => ({
+      ...order,
+    }))
+  }, [profileOrders?.recent_orders])
 
   // PanResponder for drag-to-dismiss - optimized for 60fps
   const panResponder = useMemo(
@@ -265,7 +338,7 @@ function POSCustomerMatchModal() {
           setProfileOrders(data)
         })
         .catch(err => {
-          console.error('Failed to load customer orders:', err)
+          logger.error('Failed to load customer orders:', err)
         })
         .finally(() => {
           setLoadingOrders(false)
@@ -275,23 +348,187 @@ function POSCustomerMatchModal() {
 
   const handleBackFromProfile = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-    setViewingProfile(null)
-    setProfileOrders(null)
+    // If opened directly to profile (from customer pill), go to customer selector
+    // This lets user change the attached customer
+    if (directProfileCustomer && matches.length === 0) {
+      // Clean up and go to customer selector
+      setViewingProfile(null)
+      setProfileOrders(null)
+      checkoutUIActions.closeModal()
+      checkoutUIActions.openModal('customerSelector')
+    } else {
+      // Normal back to matches list
+      setViewingProfile(null)
+      setProfileOrders(null)
+    }
   }
 
-  const handleProfileDoubleTap = () => {
+  // Double-tap backdrop to close modal
+  const backdropLastTapRef = useRef<number>(0)
+  const handleBackdropDoubleTap = useCallback(() => {
     const now = Date.now()
     const DOUBLE_TAP_DELAY = 300
-
-    if (now - lastTapRef.current < DOUBLE_TAP_DELAY) {
-      // Double tap detected - select customer
-      if (!viewingProfile) return
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
-      customerActions.selectCustomer(viewingProfile)
+    if (now - backdropLastTapRef.current < DOUBLE_TAP_DELAY) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
       handleClose()
+    }
+    backdropLastTapRef.current = now
+  }, [handleClose])
+
+  const handleProfileDoubleTap = () => {
+    // Skip if we just activated edit mode from long press
+    if (justActivatedEditMode.current) {
+      justActivatedEditMode.current = false
+      return
+    }
+
+    const now = Date.now()
+    const DOUBLE_TAP_DELAY = 300
+    const isDoubleTap = now - lastTapRef.current < DOUBLE_TAP_DELAY
+
+    if (isDoubleTap) {
+      // Reset to prevent triple-tap
+      lastTapRef.current = 0
+
+      // Double tap detected
+      if (isEditMode) {
+        // In edit mode, double-tap saves
+        handleSaveEdits()
+        return
+      }
+
+      if (!viewingProfile) return
+
+      if (directProfileCustomer) {
+        // Already selected - just close modal
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+        handleClose()
+      } else {
+        // Select customer and close
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+        customerActions.selectCustomer(viewingProfile)
+        handleClose()
+      }
     } else {
       // First tap - just record time
       lastTapRef.current = now
+    }
+  }
+
+  // ========================================
+  // EDIT MODE HANDLERS (like POSProductCard)
+  // ========================================
+  const handleLongPressIn = () => {
+    if (!viewingProfile) return
+
+    // Start progress animation (matches POSProductCard timing)
+    Animated.timing(saveProgressAnim, {
+      toValue: 1,
+      duration: 600,
+      useNativeDriver: false,
+    }).start()
+
+    longPressTimer.current = setTimeout(() => {
+      // Clear timer ref so handleLongPressOut won't interfere
+      longPressTimer.current = null
+      // Set flag so onPress doesn't immediately trigger save
+      justActivatedEditMode.current = true
+      // Reset tap time so double-tap detection starts fresh
+      lastTapRef.current = 0
+
+      if (isEditMode) {
+        // In edit mode, hold saves
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+        handleSaveEdits()
+      } else {
+        // Not in edit mode, hold enters edit mode
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy)
+        // Initialize edit fields
+        setEditedFirstName(viewingProfile.first_name || '')
+        setEditedLastName(viewingProfile.last_name || '')
+        setEditedEmail(viewingProfile.email || '')
+        setEditedPhone(viewingProfile.phone || '')
+        setEditedLoyaltyPoints(String(viewingProfile.loyalty_points || 0))
+        setIsEditMode(true)
+      }
+    }, 600)
+  }
+
+  const handleLongPressOut = () => {
+    // Only cancel if timer hasn't fired yet
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current)
+      longPressTimer.current = null
+      // Only reset progress if we're canceling (not if action completed)
+      saveProgressAnim.setValue(0)
+    }
+  }
+
+  const handleCancelEdit = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    setIsEditMode(false)
+  }
+
+  const handleSaveEdits = async () => {
+    if (!viewingProfile || isSaving) return
+
+    setIsSaving(true)
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+
+    try {
+      // Build updates object - use null for empty values (Supabase doesn't like undefined)
+      const updates: Record<string, string | number | null> = {
+        first_name: editedFirstName.trim(),
+        last_name: editedLastName.trim(),
+        loyalty_points: parseInt(editedLoyaltyPoints) || 0,
+      }
+
+      // Only include email/phone if they have values, otherwise set to null to clear
+      const trimmedEmail = editedEmail.trim()
+      const trimmedPhone = editedPhone.trim()
+      if (trimmedEmail) {
+        updates.email = trimmedEmail
+      } else if (viewingProfile.email) {
+        // Only clear if there was a previous value
+        updates.email = null
+      }
+      if (trimmedPhone) {
+        updates.phone = trimmedPhone
+      } else if (viewingProfile.phone) {
+        // Only clear if there was a previous value
+        updates.phone = null
+      }
+
+      logger.debug('[POSCustomerMatchModal] Saving edits', {
+        customerId: viewingProfile.id,
+        updates,
+      })
+
+      const updatedCustomer = await customersService.updateCustomer(viewingProfile.id, updates)
+
+      // Update local state
+      setViewingProfile(updatedCustomer)
+
+      // Update cache
+      if (profileCache.current.has(viewingProfile.id)) {
+        const cached = profileCache.current.get(viewingProfile.id)!
+        profileCache.current.set(viewingProfile.id, { ...cached, ...updatedCustomer })
+      }
+
+      // If this customer is selected in cart, update that too
+      if (directProfileCustomer?.id === viewingProfile.id) {
+        customerActions.selectCustomer(updatedCustomer)
+      }
+
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+      setIsEditMode(false)
+    } catch (error) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
+      Alert.alert('Save Failed', error instanceof Error ? error.message : 'Unknown error')
+    } finally {
+      setIsSaving(false)
+      // Reset progress bar animation
+      saveProgressAnim.setValue(0)
     }
   }
 
@@ -385,13 +622,151 @@ function POSCustomerMatchModal() {
     )
   }
 
-  const handleViewOrder = (order: PendingOrder, customer: Customer) => {
+  const handleViewOrder = (orderId: string) => {
     // Suspend customer modal (keeps state for return)
     checkoutUIActions.suspendModal()
 
     // Open order modal
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
-    ordersUIActions.selectOrder(order.id)
+    ordersUIActions.selectOrder(orderId)
+  }
+
+  const formatOrderMeta = (order: OrderDisplay) => {
+    const type = order.order_type || 'walk_in'
+    const isShipping = type === 'shipping'
+    const isPickup = type === 'pickup'
+    const isDelivery = type === 'delivery'
+
+    let orderTypeLabel = 'WALK-IN'
+    if (isShipping) orderTypeLabel = 'SHIPPING'
+    else if (isPickup) orderTypeLabel = 'PICKUP'
+    else if (isDelivery) orderTypeLabel = 'DELIVERY'
+
+    let primaryText = order.pickup_location?.name || 'In-Store'
+    let secondaryText = ''
+
+    if (isShipping || isDelivery) {
+      if (order.shipping_city && order.shipping_state) {
+        primaryText = `${isDelivery ? 'Deliver to' : 'Ship to'} ${order.shipping_city}, ${order.shipping_state}`
+      } else {
+        primaryText = isDelivery ? 'Delivery Order' : 'Shipping Order'
+      }
+      secondaryText = order.shipping_carrier && order.tracking_number
+        ? `${order.shipping_carrier} · ${order.tracking_number}`
+        : order.shipping_method_title || ''
+    } else if (isPickup) {
+      primaryText = order.pickup_location?.name || 'Store Pickup'
+      secondaryText = 'Online Order'
+    } else {
+      const staffName = order.created_by_user
+        ? `by ${order.created_by_user.first_name} ${order.created_by_user.last_name?.charAt(0) || ''}.`
+        : ''
+      secondaryText = staffName
+    }
+
+    const orderDate = new Date(order.created_at)
+    const dateStr = orderDate.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+    })
+    const timeStr = orderDate.toLocaleTimeString('en-US', {
+      hour: 'numeric',
+      minute: '2-digit',
+    })
+
+    const status = order.status || order.fulfillment_status || 'completed'
+    const getStatusStyle = () => {
+      switch (status) {
+        case 'ready':
+        case 'ready_to_ship':
+          return styles.orderStatusReady
+        case 'shipped':
+          return styles.orderStatusShipped
+        case 'preparing':
+          return styles.orderStatusPreparing
+        default:
+          return null
+      }
+    }
+
+    const getStatusLabel = () => {
+      if (isShipping) {
+        switch (status) {
+          case 'ready':
+          case 'ready_to_ship': return 'Ready to Ship'
+          case 'shipped': return 'Shipped'
+          case 'preparing': return 'Packing'
+          case 'pending': return 'Pending'
+          case 'confirmed': return 'Confirmed'
+          default: return status?.replace(/_/g, ' ') || 'Completed'
+        }
+      }
+      switch (status) {
+        case 'ready': return isDelivery ? 'Out for Delivery' : 'Ready for Pickup'
+        case 'ready_to_ship': return 'Ready'
+        case 'shipped': return isDelivery ? 'Delivered' : 'Shipped'
+        case 'preparing': return 'Preparing'
+        case 'pending': return 'Pending'
+        case 'confirmed': return 'Confirmed'
+        case 'completed': return 'Completed'
+        case 'delivered': return 'Delivered'
+        default: return status?.replace(/_/g, ' ') || 'Completed'
+      }
+    }
+
+    return {
+      orderTypeLabel,
+      primaryText,
+      secondaryText,
+      dateStr,
+      timeStr,
+      statusLabel: getStatusLabel(),
+      statusStyle: getStatusStyle(),
+    }
+  }
+
+  const renderOrderRow = (
+    order: OrderDisplay,
+    index: number,
+    arr: OrderDisplay[]
+  ) => {
+    const meta = formatOrderMeta(order)
+    const totalDisplay = order.total_amount !== undefined && order.total_amount !== null ? order.total_amount.toFixed(2) : '0.00'
+
+    return (
+      <TouchableOpacity
+        key={order.id}
+        style={[
+          styles.orderRow,
+          index === 0 && styles.orderRowFirst,
+          index === arr.length - 1 && styles.orderRowLast,
+        ]}
+        onPress={() => handleViewOrder(order.id)}
+        activeOpacity={0.7}
+      >
+        <View style={styles.orderRowContent}>
+          <View style={styles.orderInfo}>
+            <View style={styles.orderPrimaryRow}>
+              <View style={styles.orderTypeBadge}>
+                <Text style={styles.orderTypeBadgeText}>{meta.orderTypeLabel}</Text>
+              </View>
+              <Text style={styles.orderLocationName}>{meta.primaryText}</Text>
+            </View>
+            <Text style={styles.orderStaffName}>
+              {meta.secondaryText ? `${meta.secondaryText} · ` : ''}{meta.dateStr} at {meta.timeStr}
+            </Text>
+          </View>
+          <View style={styles.orderRight}>
+            <Text style={styles.orderTotal}>
+              ${totalDisplay}
+            </Text>
+            <View style={[styles.orderStatusBadge, meta.statusStyle]}>
+              <Text style={styles.orderStatusText}>{meta.statusLabel}</Text>
+            </View>
+          </View>
+        </View>
+      </TouchableOpacity>
+    )
   }
 
   // Title based on match count
@@ -424,8 +799,8 @@ function POSCustomerMatchModal() {
       statusBarTranslucent
     >
       <Animated.View style={[styles.modalOverlay, { opacity: modalOpacity }]}>
-        {/* Tap outside to dismiss - reduced blur for performance */}
-        <Pressable style={StyleSheet.absoluteFill} onPress={handleClose}>
+        {/* Double-tap backdrop to close */}
+        <Pressable style={StyleSheet.absoluteFill} onPress={handleBackdropDoubleTap}>
           <BlurView intensity={25} tint="dark" style={StyleSheet.absoluteFill} />
         </Pressable>
 
@@ -442,9 +817,29 @@ function POSCustomerMatchModal() {
           <View style={styles.modalContent}>
             <BlurView intensity={30} tint="dark" style={StyleSheet.absoluteFill} />
 
-            {/* Pull Handle */}
+            {/* Pull Handle / Progress Bar area */}
             <View style={styles.modalHeaderRow} {...panResponder.panHandlers}>
-              <View style={styles.pullHandle} />
+              {/* Progress bar replaces pull handle when active */}
+              <Animated.View
+                style={[
+                  styles.pullHandle,
+                  isEditMode && styles.pullHandleEditing,
+                  viewingProfile && {
+                    width: saveProgressAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [40, width - 48], // From pull handle width to full width minus padding
+                    }),
+                    backgroundColor: saveProgressAnim.interpolate({
+                      inputRange: [0, 0.01, 1],
+                      outputRange: [
+                        isEditMode ? 'rgba(16,185,129,0.6)' : 'rgba(255,255,255,0.3)',
+                        isEditMode ? 'rgba(16,185,129,0.8)' : 'rgba(59,130,246,0.8)',
+                        isEditMode ? 'rgba(16,185,129,0.8)' : 'rgba(59,130,246,0.8)',
+                      ],
+                    }),
+                  },
+                ]}
+              />
             </View>
 
             {/* Scrollable Content */}
@@ -464,63 +859,150 @@ function POSCustomerMatchModal() {
                   <View style={styles.profileBreadcrumb}>
                     <TouchableOpacity
                       style={styles.breadcrumbBack}
-                      onPress={handleBackFromProfile}
+                      onPress={isEditMode ? handleCancelEdit : handleBackFromProfile}
                       activeOpacity={0.7}
                     >
-                      <Text style={styles.breadcrumbBackText}>← Back</Text>
+                      <Text style={styles.breadcrumbBackText}>
+                        {isEditMode ? '← Cancel' : '← Back'}
+                      </Text>
                     </TouchableOpacity>
-                    <Text style={styles.doubleTapHint}>Double-tap to select</Text>
+                    <Text style={styles.doubleTapHint}>
+                      {isEditMode
+                        ? 'Hold to save'
+                        : (directProfileCustomer ? 'Hold to edit' : 'Hold to edit · Double-tap to select')}
+                    </Text>
                   </View>
 
-                  {/* Profile Header - Double tap to select */}
-                  <Pressable onPress={handleProfileDoubleTap}>
+                  {/* Profile Header - Hold to edit, double tap to select/close/save */}
+                  <Pressable
+                    onPress={handleProfileDoubleTap}
+                    onPressIn={handleLongPressIn}
+                    onPressOut={handleLongPressOut}
+                    delayLongPress={600}
+                  >
+                    {/* Profile Header - Same layout, inline editable */}
                     <View style={styles.profileHeader}>
-                      <View style={styles.profileAvatar}>
+                      <View style={[styles.profileAvatar, isEditMode && styles.profileAvatarEditing]}>
                         <Text style={styles.profileAvatarText}>
-                          {(viewingProfile.first_name || viewingProfile.display_name || 'C').charAt(0).toUpperCase()}
+                          {(isEditMode ? editedFirstName : viewingProfile.first_name || viewingProfile.display_name || 'C').charAt(0).toUpperCase()}
                         </Text>
                       </View>
                       <View style={styles.profileInfo}>
-                        <Text style={styles.profileName}>
-                          {viewingProfile.display_name ||
-                            `${viewingProfile.first_name || ''} ${viewingProfile.last_name || ''}`.trim() ||
-                            'Customer'}
-                        </Text>
-                        {viewingProfile.email && (
-                          <Text style={styles.profileDetail}>{viewingProfile.email}</Text>
-                        )}
-                        {viewingProfile.phone && (
-                          <Text style={styles.profileDetail}>{viewingProfile.phone}</Text>
+                        {isEditMode ? (
+                          // EDIT MODE - Inline TextInputs styled like text
+                          <>
+                            <View style={styles.editNameRow}>
+                              <TextInput
+                                style={styles.editableNameInput}
+                                value={editedFirstName}
+                                onChangeText={setEditedFirstName}
+                                placeholder="First"
+                                placeholderTextColor="rgba(255,255,255,0.3)"
+                                autoCapitalize="words"
+                                selectTextOnFocus
+                              />
+                              <TextInput
+                                style={styles.editableNameInput}
+                                value={editedLastName}
+                                onChangeText={setEditedLastName}
+                                placeholder="Last"
+                                placeholderTextColor="rgba(255,255,255,0.3)"
+                                autoCapitalize="words"
+                                selectTextOnFocus
+                              />
+                            </View>
+                            <TextInput
+                              style={styles.editableDetailInput}
+                              value={editedEmail}
+                              onChangeText={setEditedEmail}
+                              placeholder="email@example.com"
+                              placeholderTextColor="rgba(255,255,255,0.3)"
+                              keyboardType="email-address"
+                              autoCapitalize="none"
+                              selectTextOnFocus
+                            />
+                            <TextInput
+                              style={styles.editableDetailInput}
+                              value={editedPhone}
+                              onChangeText={setEditedPhone}
+                              placeholder="(555) 555-5555"
+                              placeholderTextColor="rgba(255,255,255,0.3)"
+                              keyboardType="phone-pad"
+                              selectTextOnFocus
+                            />
+                          </>
+                        ) : (
+                          // VIEW MODE - Display text
+                          <>
+                            <Text style={styles.profileName}>
+                              {viewingProfile.display_name ||
+                                `${viewingProfile.first_name || ''} ${viewingProfile.last_name || ''}`.trim() ||
+                                'Customer'}
+                            </Text>
+                            {viewingProfile.email && (
+                              <Text style={styles.profileDetail}>{viewingProfile.email}</Text>
+                            )}
+                            {viewingProfile.phone && (
+                              <Text style={styles.profileDetail}>{viewingProfile.phone}</Text>
+                            )}
+                          </>
                         )}
                       </View>
                     </View>
 
-                    {/* Stats Row */}
+                    {/* Stats Row - Points editable in edit mode */}
                     <View style={styles.profileStats}>
                       <View style={styles.profileStatItem}>
                         <Text style={styles.profileStatValue}>
-                          ${(viewingProfile.total_spent || 0).toFixed(2)}
+                          ${(profileOrders?.total_spent || 0).toFixed(2)}
                         </Text>
                         <Text style={styles.profileStatLabel}>Total Spent</Text>
                       </View>
                       <View style={styles.profileStatDivider} />
                       <View style={styles.profileStatItem}>
                         <Text style={styles.profileStatValue}>
-                          {viewingProfile.total_orders || 0}
+                          {profileOrders?.total_orders || 0}
                         </Text>
                         <Text style={styles.profileStatLabel}>Orders</Text>
                       </View>
                       <View style={styles.profileStatDivider} />
                       <View style={styles.profileStatItem}>
-                        <Text style={[styles.profileStatValue, styles.profileStatValuePoints]}>
-                          {(viewingProfile.loyalty_points || 0).toLocaleString()}
-                        </Text>
+                        {isEditMode ? (
+                          <TextInput
+                            style={[styles.profileStatValue, styles.profileStatValuePoints, styles.editablePointsInput]}
+                            value={editedLoyaltyPoints}
+                            onChangeText={setEditedLoyaltyPoints}
+                            keyboardType="number-pad"
+                            selectTextOnFocus
+                          />
+                        ) : (
+                          <Text style={[styles.profileStatValue, styles.profileStatValuePoints]}>
+                            {(viewingProfile.loyalty_points || 0).toLocaleString()}
+                          </Text>
+                        )}
                         <Text style={styles.profileStatLabel}>Points</Text>
                       </View>
                     </View>
+
                   </Pressable>
 
-                  {/* Customer Details */}
+                  {/* Large Save Zone - wraps everything below edit fields in edit mode */}
+                  <Pressable
+                    style={isEditMode ? styles.saveZoneActive : undefined}
+                    onPressIn={isEditMode ? handleLongPressIn : undefined}
+                    onPressOut={isEditMode ? handleLongPressOut : undefined}
+                    disabled={!isEditMode}
+                  >
+                    {/* Hold to Save indicator - only visible in edit mode */}
+                    {isEditMode && (
+                      <View style={styles.holdToSaveZone}>
+                        <Text style={styles.holdToSaveText}>
+                          {isSaving ? 'Saving...' : 'Hold anywhere below to save'}
+                        </Text>
+                      </View>
+                    )}
+
+                  {/* Customer Details - Always visible */}
                   <View style={styles.sectionContainer}>
                     <Text style={styles.sectionTitle}>CUSTOMER DETAILS</Text>
                     <View style={styles.profileDetailsCard}>
@@ -551,48 +1033,19 @@ function POSCustomerMatchModal() {
                     </View>
                   </View>
 
-                  {/* Order History */}
+                  {/* Order History - Always visible */}
                   <View style={styles.sectionContainer}>
                     <Text style={styles.sectionTitle}>ORDER HISTORY</Text>
-                    <View style={styles.profileDetailsCard}>
+                    <View style={styles.ordersListContainer}>
                       {loadingOrders ? (
                         <View style={styles.profileLoadingRow}>
                           <ActivityIndicator color="rgba(255,255,255,0.6)" size="small" />
                           <Text style={styles.profileLoadingText}>Loading orders...</Text>
                         </View>
-                      ) : profileOrders?.recent_orders && profileOrders.recent_orders.length > 0 ? (
-                        profileOrders.recent_orders.slice(0, 10).map((order, index) => {
-                          const locationName = order.pickup_location?.name || 'Unknown'
-                          const staffName = order.created_by_user
-                            ? `${order.created_by_user.first_name} ${order.created_by_user.last_name?.charAt(0) || ''}.`
-                            : null
-
-                          return (
-                            <View
-                              key={order.id}
-                              style={[
-                                styles.profileOrderRow,
-                                index === Math.min(profileOrders.recent_orders!.length - 1, 9) &&
-                                  styles.profileDetailRowLast,
-                              ]}
-                            >
-                              <View style={styles.profileOrderInfo}>
-                                <Text style={styles.profileOrderLocation}>{locationName}</Text>
-                                <Text style={styles.profileOrderMeta}>
-                                  {staffName ? `by ${staffName} · ` : ''}
-                                  {new Date(order.created_at).toLocaleDateString('en-US', {
-                                    month: 'short',
-                                    day: 'numeric',
-                                  })}
-                                </Text>
-                                <Text style={styles.profileOrderNumberSmall}>#{order.order_number}</Text>
-                              </View>
-                              <Text style={styles.profileOrderAmount}>
-                                ${order.total_amount.toFixed(2)}
-                              </Text>
-                            </View>
-                          )
-                        })
+                      ) : historyOrders.length > 0 ? (
+                        historyOrders.map((order, index) =>
+                          renderOrderRow(order, index, historyOrders)
+                        )
                       ) : (
                         <View style={[styles.profileDetailRow, styles.profileDetailRowLast]}>
                           <Text style={styles.profileDetailValue}>No orders yet</Text>
@@ -600,6 +1053,7 @@ function POSCustomerMatchModal() {
                       )}
                     </View>
                   </View>
+                  </Pressable>
                 </>
               ) : (
                 <>
@@ -690,9 +1144,9 @@ function POSCustomerMatchModal() {
                                   {match.confidenceScore}%
                                 </Text>
                               </View>
-                              {match.customer.loyalty_points > 0 && (
+                              {(match.customer.loyalty_points ?? 0) > 0 && (
                                 <Text style={styles.matchPoints}>
-                                  {match.customer.loyalty_points.toLocaleString()} pts
+                                  {(match.customer.loyalty_points ?? 0).toLocaleString()} pts
                                 </Text>
                               )}
                               {orderCount > 0 && (
@@ -702,15 +1156,6 @@ function POSCustomerMatchModal() {
                               )}
                             </View>
                           </TouchableOpacity>
-                          {/* View Profile Button - Separate touchable */}
-                          {!mergeMode && (
-                            <Pressable
-                              style={styles.viewProfileBtn}
-                              onPress={() => handleViewFullProfile(match.customer)}
-                            >
-                              <Text style={styles.viewProfileBtnText}>View Full Profile →</Text>
-                            </Pressable>
-                          )}
                         </View>
                       )
                     })}
@@ -740,128 +1185,9 @@ function POSCustomerMatchModal() {
                   <Text style={styles.sectionTitle}>PENDING ORDERS</Text>
                   <View style={styles.ordersListContainer}>
                     {matches.flatMap((match) =>
-                      (match.pendingOrders || []).map((order, index, arr) => {
-                        const isShipping = order.order_type === 'shipping'
-                        const isPickup = order.order_type === 'pickup'
-
-                        // Format date/time
-                        const orderDate = new Date(order.created_at)
-                        const dateStr = orderDate.toLocaleDateString('en-US', {
-                          month: 'short',
-                          day: 'numeric',
-                        })
-                        const timeStr = orderDate.toLocaleTimeString('en-US', {
-                          hour: 'numeric',
-                          minute: '2-digit',
-                        })
-
-                        // For shipping: show destination city/state
-                        // For pickup: show pickup location
-                        // For walk-in: show location where order was created
-                        let primaryText = ''
-                        let secondaryText = ''
-                        let orderTypeLabel = ''
-
-                        if (isShipping) {
-                          // Shipping order - show destination
-                          primaryText = order.shipping_city && order.shipping_state
-                            ? `Ship to ${order.shipping_city}, ${order.shipping_state}`
-                            : 'Shipping Order'
-                          secondaryText = order.shipping_carrier && order.tracking_number
-                            ? `${order.shipping_carrier} · ${order.tracking_number}`
-                            : order.shipping_method_title || ''
-                          orderTypeLabel = 'SHIPPING'
-                        } else if (isPickup) {
-                          // Pickup order - show pickup location (NOT shipping address)
-                          primaryText = order.pickup_location?.name || 'Store Pickup'
-                          secondaryText = 'Online Order'
-                          orderTypeLabel = 'PICKUP'
-                        } else {
-                          // Walk-in POS order
-                          primaryText = order.pickup_location?.name || 'In-Store'
-                          const staffName = order.created_by_user
-                            ? `by ${order.created_by_user.first_name} ${order.created_by_user.last_name?.charAt(0) || ''}.`
-                            : ''
-                          secondaryText = staffName
-                          orderTypeLabel = 'WALK-IN'
-                        }
-
-                        // Status display with colors
-                        const getStatusStyle = () => {
-                          switch (order.status) {
-                            case 'ready':
-                            case 'ready_to_ship':
-                              return styles.orderStatusReady
-                            case 'shipped':
-                              return styles.orderStatusShipped
-                            case 'preparing':
-                              return styles.orderStatusPreparing
-                            default:
-                              return null
-                          }
-                        }
-
-                        const getStatusLabel = () => {
-                          // For shipping orders, 'ready' means ready to ship
-                          if (isShipping) {
-                            switch (order.status) {
-                              case 'ready':
-                              case 'ready_to_ship': return 'Ready to Ship'
-                              case 'shipped': return 'Shipped'
-                              case 'preparing': return 'Packing'
-                              case 'pending': return 'Pending'
-                              case 'confirmed': return 'Confirmed'
-                              default: return order.status.replace(/_/g, ' ')
-                            }
-                          }
-                          // For pickup/walk-in orders
-                          switch (order.status) {
-                            case 'ready': return 'Ready for Pickup'
-                            case 'ready_to_ship': return 'Ready'
-                            case 'shipped': return 'Shipped'
-                            case 'preparing': return 'Preparing'
-                            case 'pending': return 'Pending'
-                            case 'confirmed': return 'Confirmed'
-                            default: return order.status.replace(/_/g, ' ')
-                          }
-                        }
-
-                        return (
-                          <TouchableOpacity
-                            key={order.id}
-                            style={[
-                              styles.orderRow,
-                              index === 0 && styles.orderRowFirst,
-                              index === arr.length - 1 && styles.orderRowLast,
-                            ]}
-                            onPress={() => handleViewOrder(order, match.customer)}
-                            activeOpacity={0.7}
-                          >
-                            <View style={styles.orderRowContent}>
-                              <View style={styles.orderInfo}>
-                                <View style={styles.orderPrimaryRow}>
-                                  <View style={styles.orderTypeBadge}>
-                                    <Text style={styles.orderTypeBadgeText}>{orderTypeLabel}</Text>
-                                  </View>
-                                  <Text style={styles.orderLocationName}>{primaryText}</Text>
-                                </View>
-                                <Text style={styles.orderStaffName}>
-                                  {secondaryText ? `${secondaryText} · ` : ''}{dateStr} at {timeStr}
-                                </Text>
-                                <Text style={styles.orderNumberSecondary}>#{order.order_number}</Text>
-                              </View>
-                              <View style={styles.orderRight}>
-                                <Text style={styles.orderTotal}>
-                                  ${order.total_amount?.toFixed(2)}
-                                </Text>
-                                <View style={[styles.orderStatusBadge, getStatusStyle()]}>
-                                  <Text style={styles.orderStatusText}>{getStatusLabel()}</Text>
-                                </View>
-                              </View>
-                            </View>
-                          </TouchableOpacity>
-                        )
-                      })
+                      (match.pendingOrders || []).map((order, index, arr) =>
+                        renderOrderRow(order, index, arr)
+                      )
                     )}
                   </View>
                 </View>
@@ -944,6 +1270,10 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.3)',
     borderRadius: 2,
   },
+  pullHandleEditing: {
+    backgroundColor: 'rgba(16,185,129,0.6)',
+    width: 50,
+  },
 
   // Scroll Content
   modalScrollContent: {
@@ -953,22 +1283,26 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
   },
 
-  // Header Section
+  // Header Section - Modern hero style
   headerSection: {
-    marginBottom: 24,
+    marginBottom: 28,
+    alignItems: 'center',
+    paddingTop: 8,
   },
   title: {
-    fontSize: 28,
+    fontSize: 32,
     fontWeight: '700',
     color: '#fff',
-    letterSpacing: -0.5,
-    marginBottom: 4,
+    letterSpacing: -1,
+    marginBottom: 6,
+    textAlign: 'center',
   },
   subtitle: {
     fontSize: 15,
-    fontWeight: '400',
-    color: 'rgba(255,255,255,0.6)',
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.5)',
     letterSpacing: -0.2,
+    textAlign: 'center',
   },
 
   // Section Container
@@ -979,15 +1313,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: 10,
     marginLeft: 4,
     marginRight: 4,
   },
   sectionTitle: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: 'rgba(255,255,255,0.5)',
-    letterSpacing: 0.6,
+    fontSize: 12,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.4)',
+    letterSpacing: 1.2,
   },
   mergeModeBtn: {
     paddingHorizontal: 12,
@@ -1251,29 +1585,33 @@ const styles = StyleSheet.create({
     textTransform: 'capitalize',
   },
 
-  // Action Buttons
+  // Action Buttons - Modern glass style
   actionsContainer: {
     gap: 12,
-    marginTop: 8,
+    marginTop: 12,
   },
   actionBtn: {
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    borderRadius: 14,
-    paddingVertical: 16,
+    backgroundColor: 'rgba(16,185,129,0.18)',
+    borderRadius: 16,
+    paddingVertical: 18,
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(16,185,129,0.25)',
   },
   actionBtnSecondary: {
     backgroundColor: 'rgba(255,255,255,0.06)',
+    borderColor: 'rgba(255,255,255,0.1)',
   },
   actionBtnText: {
-    fontSize: 17,
+    fontSize: 16,
     fontWeight: '600',
-    color: '#fff',
+    color: '#10b981',
+    letterSpacing: 0.2,
   },
   actionBtnTextSecondary: {
-    fontSize: 17,
+    fontSize: 16,
     fontWeight: '600',
-    color: 'rgba(255,255,255,0.7)',
+    color: 'rgba(255,255,255,0.6)',
   },
 
   // Profile View Styles
@@ -1473,5 +1811,127 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontWeight: '600',
     color: '#fff',
+  },
+
+  // Edit Mode Styles
+  saveZoneActive: {
+    // The entire area below edit fields becomes tappable for save
+    flex: 1,
+  },
+  holdToSaveZone: {
+    backgroundColor: 'rgba(16,185,129,0.12)',
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    marginBottom: 20,
+    borderWidth: 1.5,
+    borderColor: 'rgba(16,185,129,0.35)',
+    borderStyle: 'dashed',
+    alignItems: 'center',
+  },
+  holdToSaveText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: 'rgba(16,185,129,1)',
+    letterSpacing: -0.2,
+  },
+  profileAvatarEditing: {
+    borderWidth: 2,
+    borderColor: 'rgba(16,185,129,0.5)',
+  },
+  editNameRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 4,
+  },
+  editableNameInput: {
+    flex: 1,
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#fff',
+    letterSpacing: -0.4,
+    padding: 8,
+    paddingLeft: 12,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(59,130,246,0.5)',
+  },
+  editableDetailInput: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#fff',
+    padding: 8,
+    paddingLeft: 12,
+    marginBottom: 4,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(59,130,246,0.5)',
+  },
+  editablePointsInput: {
+    textAlign: 'center',
+    padding: 4,
+    paddingHorizontal: 8,
+    minWidth: 80,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(16,185,129,0.5)',
+  },
+  saveButton: {
+    backgroundColor: 'rgba(16,185,129,0.2)',
+    borderRadius: 14,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginTop: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(16,185,129,0.3)',
+  },
+  saveButtonDisabled: {
+    opacity: 0.6,
+  },
+  saveButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#10b981',
+  },
+  // Edit mode action buttons
+  editActions: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  editCancelButton: {
+    flex: 1,
+    paddingVertical: 14,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 12,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
+  },
+  editCancelButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.7)',
+  },
+  editSaveButton: {
+    flex: 1.5,
+    paddingVertical: 14,
+    backgroundColor: 'rgba(16,185,129,0.2)',
+    borderRadius: 12,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(16,185,129,0.4)',
+  },
+  editSaveButtonDisabled: {
+    opacity: 0.6,
+  },
+  editSaveButtonText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#10b981',
   },
 })

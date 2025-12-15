@@ -14,7 +14,7 @@
 
 import * as Haptics from 'expo-haptics'
 import { logger } from '@/utils/logger'
-import type { Customer, Vendor, SessionInfo, LoyaltyProgram } from '@/types/pos'
+import type { Customer, Vendor, SessionInfo } from '@/types/pos'
 import type { PaymentData, SaleCompletionData } from '@/components/pos/payment'
 import type { AAMVAData } from '@/lib/id-scanner/aamva-parser'
 import type { CustomerMatch } from '@/hooks/pos/useCustomerSelection'
@@ -24,13 +24,13 @@ import { POSUnifiedCustomerSelector } from '../POSUnifiedCustomerSelector'
 import { POSAddCustomerModal } from '../POSAddCustomerModal'
 import { POSCustomerMatchModal } from '../POSCustomerMatchModal'
 import POSPaymentModal from '../POSPaymentModal'
-import { CloseCashDrawerModal } from '../CloseCashDrawerModal'
+import { POSCashCountModal } from '../POSCashCountModal'
 import { ErrorModal } from '@/components/ErrorModal'
 
 // Context - Zero prop drilling!
 import { useAppAuth } from '@/contexts/AppAuthContext'
 import { usePOSSession } from '@/contexts/POSSessionContext'
-import { useActiveModal, checkoutUIActions } from '@/stores/checkout-ui.store'
+import { useActiveModal, useModalData, checkoutUIActions } from '@/stores/checkout-ui.store'
 import { useSelectedCustomer, useScannedDataForNewCustomer, useCustomerMatches } from '@/stores/customer.store'
 
 interface POSCheckoutModalsProps {
@@ -40,13 +40,8 @@ interface POSCheckoutModalsProps {
   subtotal: number
   taxAmount: number
   taxRate: number
-  loyaltyDiscountAmount: number
-  loyaltyPointsEarned: number
   itemCount: number
-  loyaltyProgram: LoyaltyProgram | null
-  getMaxRedeemablePoints: (subtotal: number) => number
   onPaymentComplete: (paymentData: PaymentData) => Promise<SaleCompletionData>
-  onApplyLoyaltyPoints: (points: number) => void
 
   // Session end
   sessionData: {
@@ -54,9 +49,25 @@ interface POSCheckoutModalsProps {
     totalSales: number
     totalCash: number
     openingCash: number
+    totalCashDrops: number
+    // Shift performance metrics
+    shiftStart: Date | null
+    transactionCount: number
+    averageTransaction: number
+    cardSales: number
+    auditsCompleted: number
   } | null
   onCloseDrawerSubmit: (closingCash: number, notes: string) => void
   onCloseDrawerCancel: () => void
+  onDropToSafe: () => void  // Opens cash drop modal from close drawer
+
+  // Cash drop
+  cashDropData: {
+    drawerBalance: number
+    safeBalance: number
+  } | null
+  onCashDropSubmit: (amount: number, notes: string) => void
+  onCashDropCancel: () => void
 
   // Error modal
   errorModal: {
@@ -73,16 +84,15 @@ export function POSCheckoutModals({
   subtotal,
   taxAmount,
   taxRate,
-  loyaltyDiscountAmount,
-  loyaltyPointsEarned,
   itemCount,
-  loyaltyProgram,
-  getMaxRedeemablePoints,
   onPaymentComplete,
-  onApplyLoyaltyPoints,
   sessionData,
   onCloseDrawerSubmit,
   onCloseDrawerCancel,
+  onDropToSafe,
+  cashDropData,
+  onCashDropSubmit,
+  onCashDropCancel,
   errorModal,
   onCloseErrorModal,
 }: POSCheckoutModalsProps) {
@@ -96,11 +106,16 @@ export function POSCheckoutModals({
   // STORES - Customer state (TRUE ZERO PROPS)
   // ========================================
   const activeModal = useActiveModal()
+  const modalData = useModalData()
   const selectedCustomer = useSelectedCustomer()
   const scannedDataForNewCustomer = useScannedDataForNewCustomer()
   const customerMatches = useCustomerMatches()
   const isModalOpen = (id: string) => activeModal === id
   const closeModal = checkoutUIActions.closeModal
+
+  // Check if we're in retry mode for payment modal
+  const isRetryMode = modalData?.mode === 'retry'
+  const retryTotal = isRetryMode ? modalData.amountRemaining : null
 
   // Guard: Ensure session data exists
   if (!vendor || !session) {
@@ -127,44 +142,52 @@ export function POSCheckoutModals({
       {/* Add Customer Modal - ZERO PROPS (reads from stores) */}
       <POSAddCustomerModal />
 
-      {/* Payment Modal - Always rendered */}
+      {/* Payment Modal - Always rendered, uses retry total in retry mode */}
       <POSPaymentModal
         visible={isModalOpen('payment')}
-        total={total}
-        subtotal={subtotal}
-        taxAmount={taxAmount}
-        taxRate={taxRate}
+        total={isRetryMode ? retryTotal : total}
+        subtotal={isRetryMode ? retryTotal : subtotal}
+        taxAmount={isRetryMode ? 0 : taxAmount}
+        taxRate={isRetryMode ? 0 : taxRate}
         taxName={apiConfig?.taxName}
-        loyaltyDiscountAmount={loyaltyDiscountAmount}
-        loyaltyPointsEarned={loyaltyPointsEarned}
-        currentLoyaltyPoints={selectedCustomer?.loyalty_points || 0}
-        pointValue={loyaltyProgram?.point_value || 0.01}
-        maxRedeemablePoints={getMaxRedeemablePoints(subtotal)}
-        itemCount={itemCount}
-        customerName={
-          selectedCustomer
-            ? selectedCustomer.display_name ||
-              `${selectedCustomer.first_name} ${selectedCustomer.last_name}`.trim() ||
-              selectedCustomer.email
-            : undefined
-        }
-        onApplyLoyaltyPoints={onApplyLoyaltyPoints}
+        itemCount={isRetryMode ? 0 : itemCount}
         onPaymentComplete={onPaymentComplete}
         onCancel={closeModal}
-        hasPaymentProcessor={true}
         locationId={session?.locationId}
         registerId={session?.registerId}
       />
 
       {/* Close Cash Drawer Modal - Always rendered, visibility controlled by isModalOpen */}
-      <CloseCashDrawerModal
+      <POSCashCountModal
         visible={isModalOpen('cashDrawerClose') && !!sessionData}
-        sessionNumber={sessionData?.sessionNumber || ''}
+        mode="close"
         totalSales={sessionData?.totalSales || 0}
-        totalCash={sessionData?.totalCash || 0}
+        totalCashSales={sessionData?.totalCash || 0}
         openingCash={sessionData?.openingCash || 0}
+        totalCashDrops={sessionData?.totalCashDrops || 0}
+        expectedCash={(sessionData?.openingCash || 0) + (sessionData?.totalCash || 0) - (sessionData?.totalCashDrops || 0)}
+        shiftPerformance={sessionData ? {
+          shiftStart: sessionData.shiftStart,
+          transactionCount: sessionData.transactionCount,
+          averageTransaction: sessionData.averageTransaction,
+          cardSales: sessionData.cardSales,
+          auditsCompleted: sessionData.auditsCompleted,
+          cashPercent: sessionData.totalSales > 0 ? Math.round((sessionData.totalCash / sessionData.totalSales) * 100) : 0,
+          cardPercent: sessionData.totalSales > 0 ? Math.round((sessionData.cardSales / sessionData.totalSales) * 100) : 0,
+        } : undefined}
         onSubmit={onCloseDrawerSubmit}
         onCancel={onCloseDrawerCancel}
+        onDropToSafe={onDropToSafe}
+      />
+
+      {/* Cash Drop Modal - Move cash from drawer to safe */}
+      <POSCashCountModal
+        visible={isModalOpen('cashDrop') && !!cashDropData}
+        mode="drop"
+        currentDrawerBalance={cashDropData?.drawerBalance || 0}
+        safeBalance={cashDropData?.safeBalance || 0}
+        onSubmit={onCashDropSubmit}
+        onCancel={onCashDropCancel}
       />
     </>
   )

@@ -126,7 +126,7 @@ interface CheckoutRequest {
   total: number
 
   // Payment (flexible format)
-  paymentMethod?: 'cash' | 'card' | 'split' | 'credit' | 'debit' | 'ebt_food' | 'ebt_cash' | 'gift'
+  paymentMethod?: 'cash' | 'card' | 'split' | 'multi-card' | 'credit' | 'debit' | 'ebt_food' | 'ebt_cash' | 'gift'
   payment?: {  // E-commerce format
     method: string
     amount: number
@@ -175,10 +175,24 @@ interface CheckoutRequest {
   affiliate_code?: string  // The code the customer entered
   affiliate_discount_amount?: number  // Discount applied from affiliate code
 
-  // Split Payment
-  splitPayments?: Array<{ method: 'cash' | 'card'; amount: number }>
+  // Split Payment (cash+card or multi-card)
+  splitPayments?: Array<{
+    method: 'cash' | 'card'
+    cardNumber?: 1 | 2  // For multi-card: which card (1 or 2)
+    amount: number
+    status?: 'pending' | 'processing' | 'success' | 'failed' | 'refunded'
+    authorizationCode?: string
+    transactionId?: string
+    cardType?: string
+    cardLast4?: string
+    errorMessage?: string
+  }>
   cashAmount?: number
   cardAmount?: number
+  // For resuming partial multi-card payments
+  orderId?: string  // Resume payment for existing order
+  amountRemaining?: number  // How much still owed on Card 2
+  card1Only?: boolean  // Process only Card 1, return partial for UI to call Card 2 separately
 
   // Cash Payment
   cashTendered?: number
@@ -1080,146 +1094,154 @@ serve(async (req) => {
       }
     }
 
-    if (!body.items || body.items.length === 0) {
-      return await errorResponse('Cart is empty', 400, requestId, allowedOrigin)
-    }
+    // Skip cart validation for retry payments (orderId + amountRemaining = retry mode)
+    const isRetryPayment = body.orderId && body.amountRemaining && body.paymentMethod === 'multi-card'
 
-    if (!body.total || body.total <= 0) {
-      return await errorResponse('Invalid total amount', 400, requestId, allowedOrigin)
+    if (!isRetryPayment) {
+      if (!body.items || body.items.length === 0) {
+        return await errorResponse('Cart is empty', 400, requestId, allowedOrigin)
+      }
+
+      if (!body.total || body.total <= 0) {
+        return await errorResponse('Invalid total amount', 400, requestId, allowedOrigin)
+      }
     }
 
     // ========================================================================
     // STEP 3.5: COMPREHENSIVE INPUT VALIDATION (Apple Security Standards)
+    // Skip for retry payments - order already validated on initial creation
     // ========================================================================
 
-    // DEBUG: Log payment calculation inputs
-    console.log(`[${requestId}] 💰 EDGE FUNCTION RECEIVED:`, {
-      subtotal: body.subtotal,
-      loyaltyDiscount: body.loyaltyDiscountAmount || 0,
-      campaignDiscount: body.campaignDiscountAmount || 0,
-      affiliateDiscount: body.affiliate_discount_amount || 0,
-      affiliateCode: body.affiliate_code || null,
-      affiliateId: body.affiliate_id || null,
-      taxAmount: body.taxAmount,
-      total: body.total,
-      calculation: `${body.subtotal} - ${body.loyaltyDiscountAmount || 0} - ${body.campaignDiscountAmount || 0} - ${body.affiliate_discount_amount || 0} + ${body.taxAmount} tax = ${body.total}`,
-    })
-
-    // Validate each line item
-    let calculatedSubtotal = 0
-    for (let i = 0; i < body.items.length; i++) {
-      const item = body.items[i]
-
-      // Validate quantity is positive
-      if (!item.quantity || item.quantity <= 0) {
-        return await errorResponse(
-          `Invalid quantity for item ${i + 1}: ${item.productName}`,
-          400,
-          requestId
-        )
-      }
-
-      // Validate unit price is non-negative
-      if (item.unitPrice === undefined || item.unitPrice < 0) {
-        return await errorResponse(
-          `Invalid price for item ${i + 1}: ${item.productName}`,
-          400,
-          requestId
-        )
-      }
-
-      // Validate line total matches quantity * unit price (within 0.01 tolerance)
-      const expectedLineTotal = item.quantity * item.unitPrice
-      if (Math.abs(item.lineTotal - expectedLineTotal) > 0.01) {
-        return await errorResponse(
-          `Invalid line total for item ${i + 1}: ${item.productName}`,
-          400,
-          requestId
-        )
-      }
-
-      calculatedSubtotal += item.lineTotal
-    }
-
-    // Validate subtotal matches sum of line items (within 0.01 tolerance)
-    if (Math.abs(calculatedSubtotal - body.subtotal) > 0.01) {
-      Sentry.captureMessage('Subtotal mismatch detected', {
-        level: 'warning',
-        tags: { requestId, security: 'validation' },
-        contexts: {
-          validation: {
-            calculatedSubtotal,
-            requestedSubtotal: body.subtotal,
-            difference: Math.abs(calculatedSubtotal - body.subtotal),
-          },
-        },
-      })
-      return await errorResponse(
-        'Invalid subtotal calculation',
-        400,
-        requestId
-      )
-    }
-
-    // Validate total = subtotal - discounts + tax + shipping (within 0.01 tolerance)
-    const totalDiscounts = (body.loyaltyDiscountAmount || 0) + (body.campaignDiscountAmount || 0) + (body.affiliate_discount_amount || 0)
-    const expectedTotal = body.subtotal - totalDiscounts + body.taxAmount + (body.shipping || 0)
-    if (Math.abs(body.total - expectedTotal) > 0.01) {
-      Sentry.captureMessage('Total mismatch detected', {
-        level: 'warning',
-        tags: { requestId, security: 'validation' },
-        contexts: {
-          validation: {
-            subtotal: body.subtotal,
-            loyaltyDiscountAmount: body.loyaltyDiscountAmount || 0,
-            campaignDiscountAmount: body.campaignDiscountAmount || 0,
-            affiliateDiscountAmount: body.affiliate_discount_amount || 0,
-            taxAmount: body.taxAmount,
-            shipping: body.shipping || 0,
-            calculatedTotal: expectedTotal,
-            requestedTotal: body.total,
-            difference: Math.abs(body.total - expectedTotal),
-          },
-        },
-      })
-      return await errorResponse(
-        'Invalid total calculation',
-        400,
-        requestId,
-        allowedOrigin
-      )
-    }
-
-    // Sanity check: No unreasonably large transactions for walk-in orders
-    const MAX_WALK_IN_AMOUNT = 50000 // $50,000
-    if (body.total > MAX_WALK_IN_AMOUNT) {
-      Sentry.captureMessage('Unusually large walk-in transaction', {
-        level: 'warning',
-        tags: { requestId, security: 'fraud-detection' },
-        contexts: {
-          transaction: {
-            total: body.total,
-            threshold: MAX_WALK_IN_AMOUNT,
-            vendorId: body.vendorId,
-            userId: user?.id || 'e-commerce',
-          },
-        },
-      })
-      // Log but allow - might be legitimate bulk purchase
-      console.warn(`[${requestId}] Large transaction: $${body.total}`)
-    }
-
-    Sentry.addBreadcrumb({
-      category: 'validation',
-      message: 'Input validation passed',
-      level: 'info',
-      data: {
-        itemCount: body.items.length,
+    if (!isRetryPayment) {
+      // DEBUG: Log payment calculation inputs
+      console.log(`[${requestId}] 💰 EDGE FUNCTION RECEIVED:`, {
         subtotal: body.subtotal,
-        tax: body.taxAmount,
+        loyaltyDiscount: body.loyaltyDiscountAmount || 0,
+        campaignDiscount: body.campaignDiscountAmount || 0,
+        affiliateDiscount: body.affiliate_discount_amount || 0,
+        affiliateCode: body.affiliate_code || null,
+        affiliateId: body.affiliate_id || null,
+        taxAmount: body.taxAmount,
         total: body.total,
-      },
-    })
+        calculation: `${body.subtotal} - ${body.loyaltyDiscountAmount || 0} - ${body.campaignDiscountAmount || 0} - ${body.affiliate_discount_amount || 0} + ${body.taxAmount} tax = ${body.total}`,
+      })
+
+      // Validate each line item
+      let calculatedSubtotal = 0
+      for (let i = 0; i < body.items.length; i++) {
+        const item = body.items[i]
+
+        // Validate quantity is positive
+        if (!item.quantity || item.quantity <= 0) {
+          return await errorResponse(
+            `Invalid quantity for item ${i + 1}: ${item.productName}`,
+            400,
+            requestId
+          )
+        }
+
+        // Validate unit price is non-negative
+        if (item.unitPrice === undefined || item.unitPrice < 0) {
+          return await errorResponse(
+            `Invalid price for item ${i + 1}: ${item.productName}`,
+            400,
+            requestId
+          )
+        }
+
+        // Validate line total matches quantity * unit price (within 0.01 tolerance)
+        const expectedLineTotal = item.quantity * item.unitPrice
+        if (Math.abs(item.lineTotal - expectedLineTotal) > 0.01) {
+          return await errorResponse(
+            `Invalid line total for item ${i + 1}: ${item.productName}`,
+            400,
+            requestId
+          )
+        }
+
+        calculatedSubtotal += item.lineTotal
+      }
+
+      // Validate subtotal matches sum of line items (within 0.01 tolerance)
+      if (Math.abs(calculatedSubtotal - body.subtotal) > 0.01) {
+        Sentry.captureMessage('Subtotal mismatch detected', {
+          level: 'warning',
+          tags: { requestId, security: 'validation' },
+          contexts: {
+            validation: {
+              calculatedSubtotal,
+              requestedSubtotal: body.subtotal,
+              difference: Math.abs(calculatedSubtotal - body.subtotal),
+            },
+          },
+        })
+        return await errorResponse(
+          'Invalid subtotal calculation',
+          400,
+          requestId
+        )
+      }
+
+      // Validate total = subtotal - discounts + tax + shipping (within 0.01 tolerance)
+      const totalDiscounts = (body.loyaltyDiscountAmount || 0) + (body.campaignDiscountAmount || 0) + (body.affiliate_discount_amount || 0)
+      const expectedTotal = body.subtotal - totalDiscounts + body.taxAmount + (body.shipping || 0)
+      if (Math.abs(body.total - expectedTotal) > 0.01) {
+        Sentry.captureMessage('Total mismatch detected', {
+          level: 'warning',
+          tags: { requestId, security: 'validation' },
+          contexts: {
+            validation: {
+              subtotal: body.subtotal,
+              loyaltyDiscountAmount: body.loyaltyDiscountAmount || 0,
+              campaignDiscountAmount: body.campaignDiscountAmount || 0,
+              affiliateDiscountAmount: body.affiliate_discount_amount || 0,
+              taxAmount: body.taxAmount,
+              shipping: body.shipping || 0,
+              calculatedTotal: expectedTotal,
+              requestedTotal: body.total,
+              difference: Math.abs(body.total - expectedTotal),
+            },
+          },
+        })
+        return await errorResponse(
+          'Invalid total calculation',
+          400,
+          requestId,
+          allowedOrigin
+        )
+      }
+
+      // Sanity check: No unreasonably large transactions for walk-in orders
+      const MAX_WALK_IN_AMOUNT = 50000 // $50,000
+      if (body.total > MAX_WALK_IN_AMOUNT) {
+        Sentry.captureMessage('Unusually large walk-in transaction', {
+          level: 'warning',
+          tags: { requestId, security: 'fraud-detection' },
+          contexts: {
+            transaction: {
+              total: body.total,
+              threshold: MAX_WALK_IN_AMOUNT,
+              vendorId: body.vendorId,
+              userId: user?.id || 'e-commerce',
+            },
+          },
+        })
+        // Log but allow - might be legitimate bulk purchase
+        console.warn(`[${requestId}] Large transaction: $${body.total}`)
+      }
+
+      Sentry.addBreadcrumb({
+        category: 'validation',
+        message: 'Input validation passed',
+        level: 'info',
+        data: {
+          itemCount: body.items.length,
+          subtotal: body.subtotal,
+          tax: body.taxAmount,
+          total: body.total,
+        },
+      })
+    } // End of !isRetryPayment validation block
 
     // ========================================================================
     // STEP 3.6: CART SNAPSHOT VALIDATION (Verify prices haven't changed)
@@ -1382,6 +1404,187 @@ serve(async (req) => {
       environment: paymentProcessor.environment,
       isEcommerce: body.is_ecommerce,
     })
+
+    // ========================================================================
+    // STEP 5.5: RETRY PAYMENT FOR EXISTING ORDER (Multi-card Card 2 retry)
+    // ========================================================================
+    if (body.orderId && body.amountRemaining && body.paymentMethod === 'multi-card') {
+      console.log(`[${requestId}] 🔄 RETRY MODE: Resuming Card 2 payment for order ${body.orderId}`)
+
+      // Fetch the existing order
+      const { data: existingOrder, error: fetchError } = await supabaseAdmin
+        .from('orders')
+        .select('*')
+        .eq('id', body.orderId)
+        .single()
+
+      if (fetchError || !existingOrder) {
+        return await errorResponse(`Order ${body.orderId} not found for retry`, 404, requestId, allowedOrigin)
+      }
+
+      // Validate order is in partial status
+      if (existingOrder.payment_status !== 'partial') {
+        return await errorResponse(`Order ${body.orderId} is not in partial status (current: ${existingOrder.payment_status})`, 400, requestId, allowedOrigin)
+      }
+
+      // Get Card 2 payment data from splitPayments
+      const card2Payment = body.splitPayments?.find((p: any) => p.cardNumber === 2)
+      if (!card2Payment) {
+        return await errorResponse('Retry requires Card 2 payment data', 400, requestId, allowedOrigin)
+      }
+
+      // Validate processor is Dejavoo
+      if (paymentProcessor.processor_type !== 'dejavoo') {
+        return await errorResponse(
+          `Multi-card payments require a Dejavoo payment processor. Current: ${paymentProcessor.processor_type || 'none'}`,
+          400, requestId, allowedOrigin
+        )
+      }
+
+      // Process Card 2
+      const spinClient = new SPINClient(
+        paymentProcessor.authkey,
+        paymentProcessor.tpn,
+        paymentProcessor.environment
+      )
+
+      console.log(`[${requestId}] Processing Card 2 retry: $${card2Payment.amount}`)
+
+      try {
+        const card2Request: SPINSaleRequest = {
+          Amount: card2Payment.amount,
+          TipAmount: 0,
+          PaymentType: 'Credit',
+          ReferenceId: `${existingOrder.order_number}-C2-RETRY`,
+          InvoiceNumber: `${existingOrder.order_number}-C2`,
+          Tpn: paymentProcessor.tpn,
+          Authkey: paymentProcessor.authkey,
+          SPInProxyTimeout: PAYMENT_TIMEOUT,
+          PrintReceipt: 'No',
+          GetReceipt: 'Both',
+          GetExtendedData: true,
+        }
+
+        const result2 = await spinClient.processSale(card2Request)
+        const resultCode2 = result2.GeneralResponse.ResultCode
+        const statusCode2 = result2.GeneralResponse.StatusCode
+
+        // Log full response for debugging
+        console.log(`[${requestId}] Card 2 retry FULL RESPONSE:`, JSON.stringify(result2, null, 2))
+
+        // Check for approval - ALSO check for AuthCode presence as backup
+        const hasAuthCode = !!result2.GeneralResponse?.AuthCode
+        const isStandardSuccess = resultCode2 === '0' && statusCode2 === '0000'
+        const isApproved = isStandardSuccess || (hasAuthCode && resultCode2 === '0')
+
+        if (isApproved) {
+          // Card 2 SUCCESS!
+          console.log(`[${requestId}] Card 2 retry APPROVED: ${result2.GeneralResponse.AuthCode}`)
+
+          // Log Card 2 transaction
+          await supabaseAdmin.from('payment_transactions').insert({
+            vendor_id: existingOrder.vendor_id,
+            location_id: existingOrder.pickup_location_id,
+            payment_processor_id: paymentProcessor.processor_id,
+            order_id: existingOrder.id,
+            processor_type: 'dejavoo',
+            transaction_type: 'sale',
+            payment_method: 'multi-card-2',
+            amount: card2Payment.amount,
+            total_amount: existingOrder.total_amount,
+            status: 'approved',
+            processor_transaction_id: result2.GeneralResponse.ReferenceId,
+            processor_reference_id: `${existingOrder.order_number}-C2`,
+            authorization_code: result2.GeneralResponse.AuthCode,
+            result_code: resultCode2,
+            status_code: statusCode2,
+            card_type: result2.CardData?.CardType,
+            card_last_four: result2.CardData?.LastFour,
+            response_data: result2,
+            processed_at: new Date().toISOString(),
+            idempotency_key: `${idempotencyKey}-card2-retry`,
+          })
+
+          // Update order to COMPLETED
+          const metadata = existingOrder.metadata || {}
+          const multiCardSplit = metadata.multi_card_split || {}
+
+          await supabaseAdmin
+            .from('orders')
+            .update({
+              status: OrderStatus.COMPLETED,
+              payment_status: PaymentStatus.PAID,
+              processor_transaction_id: `MULTI-${multiCardSplit.card1_auth || 'C1'}-${result2.GeneralResponse.ReferenceId}`,
+              payment_authorization_code: `${multiCardSplit.card1_auth || ''}/${result2.GeneralResponse.AuthCode}`,
+              card_type: `${metadata.multi_card_split?.card1_type || 'Card'}/${result2.CardData?.CardType}`,
+              card_last_four: `${multiCardSplit.card1_last4 || '****'}/${result2.CardData?.LastFour}`,
+              metadata: {
+                ...metadata,
+                multi_card_split: {
+                  ...multiCardSplit,
+                  card2_status: 'success',
+                  card2_auth: result2.GeneralResponse.AuthCode,
+                  card2_last4: result2.CardData?.LastFour,
+                  amount_remaining: 0,
+                  retry_success: true,
+                }
+              }
+            })
+            .eq('id', existingOrder.id)
+
+          // Return success
+          return new Response(JSON.stringify({
+            success: true,
+            message: 'Card 2 retry successful - order complete',
+            data: {
+              order: {
+                id: existingOrder.id,
+                order_number: existingOrder.order_number,
+              },
+              orderNumber: existingOrder.order_number,
+              orderId: existingOrder.id,
+              transactionId: result2.GeneralResponse.ReferenceId,
+              authorizationCode: result2.GeneralResponse.AuthCode,
+              cardType: result2.CardData?.CardType,
+              cardLast4: result2.CardData?.LastFour,
+            },
+            meta: { requestId, timestamp: new Date().toISOString() },
+          }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': allowedOrigin },
+          })
+
+        } else {
+          // Card 2 FAILED again
+          console.log(`[${requestId}] Card 2 retry DECLINED: ${result2.GeneralResponse.Message}`)
+
+          return new Response(JSON.stringify({
+            success: false,
+            error: `Card 2 retry failed: ${result2.GeneralResponse.Message}`,
+            partialSuccess: true,  // Still partial
+            amountRemaining: card2Payment.amount,
+            orderId: existingOrder.id,
+            orderNumber: existingOrder.order_number,
+          }), {
+            status: 402,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': allowedOrigin },
+          })
+        }
+      } catch (err) {
+        console.error(`[${requestId}] Card 2 retry ERROR:`, err)
+        return new Response(JSON.stringify({
+          success: false,
+          error: `Card 2 retry error: ${err instanceof Error ? err.message : 'Unknown error'}`,
+          partialSuccess: true,
+          amountRemaining: card2Payment.amount,
+          orderId: existingOrder.id,
+          orderNumber: existingOrder.order_number,
+        }), {
+          status: 402,
+          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': allowedOrigin },
+        })
+      }
+    }
 
     // ========================================================================
     // STEP 6: CREATE DRAFT ORDER
@@ -2006,10 +2209,406 @@ serve(async (req) => {
       }
     }
 
+    // ========================================================================
+    // MULTI-CARD SPLIT PAYMENT (2 cards sequential processing)
+    // ========================================================================
+    if (body.paymentMethod === 'multi-card' && body.splitPayments && body.splitPayments.length === 2) {
+      console.log(`[${requestId}] Multi-card split payment - processing 2 cards sequentially`)
+
+      const card1Payment = body.splitPayments.find(p => p.cardNumber === 1)
+      const card2Payment = body.splitPayments.find(p => p.cardNumber === 2)
+
+      if (!card1Payment || !card2Payment) {
+        return await errorResponse('Multi-card split requires exactly 2 card payments', 400, requestId, allowedOrigin)
+      }
+
+      // Track payment results for potential partial success
+      let card1Result: { success: boolean; authCode?: string; transactionId?: string; cardType?: string; cardLast4?: string; error?: string } = { success: false }
+      let card2Result: { success: boolean; authCode?: string; transactionId?: string; cardType?: string; cardLast4?: string; error?: string } = { success: false }
+
+      // Set order to PARTIAL payment status during multi-card processing
+      await supabaseAdmin
+        .from('orders')
+        .update({
+          payment_status: 'partial',
+          metadata: {
+            ...(order.metadata || {}),
+            multi_card_split: {
+              card1_amount: card1Payment.amount,
+              card2_amount: card2Payment.amount,
+              card1_status: 'pending',
+              card2_status: 'pending',
+            }
+          }
+        })
+        .eq('id', order.id)
+
+      // ========== PROCESS CARD 1 ==========
+      console.log(`[${requestId}] Processing Card 1: $${card1Payment.amount}`)
+
+      // Multi-card requires a Dejavoo processor
+      if (paymentProcessor.processor_type !== 'dejavoo') {
+        return await errorResponse(
+          `Multi-card payments require a Dejavoo payment processor. Current processor type: ${paymentProcessor.processor_type || 'none'}`,
+          400,
+          requestId,
+          allowedOrigin
+        )
+      }
+
+      if (paymentProcessor.processor_type === 'dejavoo') {
+        const spinClient = new SPINClient(
+          paymentProcessor.authkey,
+          paymentProcessor.tpn,
+          paymentProcessor.environment
+        )
+
+        try {
+          const card1Request: SPINSaleRequest = {
+            Amount: card1Payment.amount,
+            TipAmount: 0,
+            PaymentType: 'Credit',
+            ReferenceId: `${orderNumber}-C1`,
+            InvoiceNumber: `${orderNumber}-C1`,
+            Tpn: paymentProcessor.tpn,
+            Authkey: paymentProcessor.authkey,
+            SPInProxyTimeout: PAYMENT_TIMEOUT,
+            PrintReceipt: 'No',
+            GetReceipt: 'Both',
+            GetExtendedData: true,
+          }
+
+          const result1 = await spinClient.processSale(card1Request)
+          const resultCode1 = result1.GeneralResponse.ResultCode
+          const statusCode1 = result1.GeneralResponse.StatusCode
+
+          // Log full response for debugging
+          console.log(`[${requestId}] Card 1 FULL RESPONSE:`, JSON.stringify(result1, null, 2))
+
+          // Check for approval - ALSO check for AuthCode presence as backup
+          const hasAuthCode1 = !!result1.GeneralResponse?.AuthCode
+          const isStandardSuccess1 = resultCode1 === '0' && statusCode1 === '0000'
+          const isApproved1 = isStandardSuccess1 || (hasAuthCode1 && resultCode1 === '0')
+
+          if (isApproved1) {
+            card1Result = {
+              success: true,
+              authCode: result1.GeneralResponse.AuthCode,
+              transactionId: result1.GeneralResponse.ReferenceId,
+              cardType: result1.CardData?.CardType,
+              cardLast4: result1.CardData?.LastFour,
+            }
+
+            // Log Card 1 transaction
+            await supabaseAdmin.from('payment_transactions').insert({
+              vendor_id: body.vendorId,
+              location_id: body.locationId,
+              payment_processor_id: paymentProcessor.processor_id,
+              order_id: order.id,
+              processor_type: 'dejavoo',
+              transaction_type: 'sale',
+              payment_method: 'multi-card-1',
+              amount: card1Payment.amount,
+              total_amount: body.total,
+              status: 'approved',
+              processor_transaction_id: result1.GeneralResponse.ReferenceId,
+              processor_reference_id: `${orderNumber}-C1`,
+              authorization_code: result1.GeneralResponse.AuthCode,
+              result_code: resultCode1,
+              status_code: statusCode1,
+              card_type: result1.CardData?.CardType,
+              card_last_four: result1.CardData?.LastFour,
+              response_data: result1,
+              processed_at: new Date().toISOString(),
+              idempotency_key: `${idempotencyKey}-card1`,
+            })
+
+            // Update order metadata with Card 1 success
+            await supabaseAdmin
+              .from('orders')
+              .update({
+                metadata: {
+                  ...(order.metadata || {}),
+                  multi_card_split: {
+                    card1_amount: card1Payment.amount,
+                    card2_amount: card2Payment.amount,
+                    card1_status: 'success',
+                    card1_auth: result1.GeneralResponse.AuthCode,
+                    card1_last4: result1.CardData?.LastFour,
+                    card2_status: 'pending',
+                  }
+                }
+              })
+              .eq('id', order.id)
+
+            console.log(`[${requestId}] Card 1 APPROVED: ${result1.GeneralResponse.AuthCode}`)
+          } else {
+            card1Result = {
+              success: false,
+              error: result1.GeneralResponse.Message || 'Card 1 declined',
+            }
+            console.log(`[${requestId}] Card 1 DECLINED: ${result1.GeneralResponse.Message}`)
+          }
+        } catch (err) {
+          card1Result = {
+            success: false,
+            error: err instanceof Error ? err.message : 'Card 1 processing error',
+          }
+          console.error(`[${requestId}] Card 1 ERROR:`, err)
+        }
+      }
+
+      // If Card 1 failed, return error immediately
+      if (!card1Result.success) {
+        await supabaseAdmin
+          .from('orders')
+          .update({
+            payment_status: 'failed',
+            status: OrderStatus.FAILED,
+            metadata: {
+              ...(order.metadata || {}),
+              multi_card_split: {
+                card1_amount: card1Payment.amount,
+                card2_amount: card2Payment.amount,
+                card1_status: 'failed',
+                card1_error: card1Result.error,
+                card2_status: 'not_attempted',
+              }
+            }
+          })
+          .eq('id', order.id)
+
+        return await errorResponse(`Card 1 failed: ${card1Result.error}`, 402, requestId, allowedOrigin)
+      }
+
+      // ========== CARD 1 ONLY MODE ==========
+      // If card1Only flag is set, return success with order info so UI can update
+      // and then call back for Card 2 separately
+      if (body.card1Only) {
+        console.log(`[${requestId}] Card 1 Only mode - returning partial success for UI to process Card 2`)
+        return new Response(JSON.stringify({
+          success: true,
+          card1Only: true,
+          data: {
+            order: {
+              id: order.id,
+              order_number: orderNumber,
+              status: 'pending',
+            },
+            orderId: order.id,
+            orderNumber: orderNumber,
+            orderStatus: 'pending',
+            paymentStatus: 'partial',
+            card1: card1Result,
+            amountRemaining: card2Payment.amount,
+            message: 'Card 1 processed successfully. Ready for Card 2.',
+          },
+          meta: {
+            requestId,
+            timestamp: new Date().toISOString(),
+          },
+        }), {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': allowedOrigin,
+          },
+        })
+      }
+
+      // ========== PROCESS CARD 2 ==========
+      // Add delay between cards - terminal needs time to show "Complete" screen and return to idle
+      // Dejavoo terminals show a success screen after Card 1, must wait for it to clear
+      console.log(`[${requestId}] Waiting 5s for terminal to return to idle before Card 2...`)
+      await new Promise(resolve => setTimeout(resolve, 5000))
+
+      console.log(`[${requestId}] Processing Card 2: $${card2Payment.amount}`)
+
+      if (paymentProcessor.processor_type === 'dejavoo') {
+        const spinClient = new SPINClient(
+          paymentProcessor.authkey,
+          paymentProcessor.tpn,
+          paymentProcessor.environment
+        )
+
+        try {
+          const card2Request: SPINSaleRequest = {
+            Amount: card2Payment.amount,
+            TipAmount: 0,
+            PaymentType: 'Credit',
+            ReferenceId: `${orderNumber}-C2`,
+            InvoiceNumber: `${orderNumber}-C2`,
+            Tpn: paymentProcessor.tpn,
+            Authkey: paymentProcessor.authkey,
+            SPInProxyTimeout: PAYMENT_TIMEOUT,
+            PrintReceipt: 'No',
+            GetReceipt: 'Both',
+            GetExtendedData: true,
+          }
+
+          const result2 = await spinClient.processSale(card2Request)
+          const resultCode2 = result2.GeneralResponse.ResultCode
+          const statusCode2 = result2.GeneralResponse.StatusCode
+
+          // Log full response for debugging
+          console.log(`[${requestId}] Card 2 FULL RESPONSE:`, JSON.stringify(result2, null, 2))
+
+          // Check for approval - ALSO check for AuthCode presence as backup
+          // Dejavoo sometimes returns approved transactions with non-standard codes
+          const hasAuthCode = !!result2.GeneralResponse?.AuthCode
+          const isStandardSuccess = resultCode2 === '0' && statusCode2 === '0000'
+          const isApproved = isStandardSuccess || (hasAuthCode && resultCode2 === '0')
+
+          if (isApproved) {
+            card2Result = {
+              success: true,
+              authCode: result2.GeneralResponse.AuthCode,
+              transactionId: result2.GeneralResponse.ReferenceId,
+              cardType: result2.CardData?.CardType,
+              cardLast4: result2.CardData?.LastFour,
+            }
+
+            // Log Card 2 transaction
+            await supabaseAdmin.from('payment_transactions').insert({
+              vendor_id: body.vendorId,
+              location_id: body.locationId,
+              payment_processor_id: paymentProcessor.processor_id,
+              order_id: order.id,
+              processor_type: 'dejavoo',
+              transaction_type: 'sale',
+              payment_method: 'multi-card-2',
+              amount: card2Payment.amount,
+              total_amount: body.total,
+              status: 'approved',
+              processor_transaction_id: result2.GeneralResponse.ReferenceId,
+              processor_reference_id: `${orderNumber}-C2`,
+              authorization_code: result2.GeneralResponse.AuthCode,
+              result_code: resultCode2,
+              status_code: statusCode2,
+              card_type: result2.CardData?.CardType,
+              card_last_four: result2.CardData?.LastFour,
+              response_data: result2,
+              processed_at: new Date().toISOString(),
+              idempotency_key: `${idempotencyKey}-card2`,
+            })
+
+            console.log(`[${requestId}] Card 2 APPROVED: ${result2.GeneralResponse.AuthCode}`)
+          } else {
+            card2Result = {
+              success: false,
+              error: result2.GeneralResponse.Message || 'Card 2 declined',
+            }
+            console.log(`[${requestId}] Card 2 DECLINED: ${result2.GeneralResponse.Message}`)
+          }
+        } catch (err) {
+          card2Result = {
+            success: false,
+            error: err instanceof Error ? err.message : 'Card 2 processing error',
+          }
+          console.error(`[${requestId}] Card 2 ERROR:`, err)
+        }
+      }
+
+      // Handle Card 2 failure (partial success scenario)
+      if (!card2Result.success) {
+        // Update order to PARTIAL status - Card 1 succeeded, Card 2 failed
+        await supabaseAdmin
+          .from('orders')
+          .update({
+            payment_status: 'partial',
+            status: OrderStatus.PENDING, // Keep pending for retry
+            metadata: {
+              ...(order.metadata || {}),
+              multi_card_split: {
+                card1_amount: card1Payment.amount,
+                card2_amount: card2Payment.amount,
+                card1_status: 'success',
+                card1_auth: card1Result.authCode,
+                card1_last4: card1Result.cardLast4,
+                card2_status: 'failed',
+                card2_error: card2Result.error,
+                amount_remaining: card2Payment.amount,
+              }
+            }
+          })
+          .eq('id', order.id)
+
+        // Return partial success error with details for retry
+        const partialError = new Error(`Card 2 failed: ${card2Result.error}. Card 1 payment of $${card1Payment.amount} was successful.`)
+        ;(partialError as any).partialSuccess = true
+        ;(partialError as any).card1 = card1Result
+        ;(partialError as any).amountRemaining = card2Payment.amount
+        ;(partialError as any).orderId = order.id
+
+        return new Response(JSON.stringify({
+          success: false,
+          error: `Card 2 failed: ${card2Result.error}`,
+          partialSuccess: true,
+          card1: card1Result,
+          amountRemaining: card2Payment.amount,
+          orderId: order.id,
+          orderNumber: orderNumber,
+        }), {
+          status: 402,
+          headers: {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': allowedOrigin,
+          },
+        })
+      }
+
+      // Both cards succeeded - complete the order
+      console.log(`[${requestId}] Multi-card payment COMPLETE - both cards approved`)
+
+      await supabaseAdmin
+        .from('orders')
+        .update({
+          status: OrderStatus.COMPLETED,
+          payment_status: PaymentStatus.PAID,
+          processor_transaction_id: `MULTI-${card1Result.transactionId}-${card2Result.transactionId}`,
+          payment_authorization_code: `${card1Result.authCode}/${card2Result.authCode}`,
+          card_type: `${card1Result.cardType}/${card2Result.cardType}`,
+          card_last_four: `${card1Result.cardLast4}/${card2Result.cardLast4}`,
+          metadata: {
+            ...(order.metadata || {}),
+            multi_card_split: {
+              card1_amount: card1Payment.amount,
+              card2_amount: card2Payment.amount,
+              card1_status: 'success',
+              card1_auth: card1Result.authCode,
+              card1_last4: card1Result.cardLast4,
+              card2_status: 'success',
+              card2_auth: card2Result.authCode,
+              card2_last4: card2Result.cardLast4,
+            }
+          }
+        })
+        .eq('id', order.id)
+
+      // Set paymentResult for downstream success response
+      paymentResult = {
+        GeneralResponse: {
+          ResultCode: '0',
+          StatusCode: '0000',
+          AuthCode: `${card1Result.authCode}/${card2Result.authCode}`,
+          Message: 'Multi-card payment approved',
+          ReferenceId: `MULTI-${orderNumber}`,
+        },
+        CardData: {
+          CardType: `${card1Result.cardType}/${card2Result.cardType}`,
+          LastFour: `${card1Result.cardLast4}/${card2Result.cardLast4}`,
+        },
+      } as SPINSaleResponse
+
+      // Skip the regular card processing section below
+    }
+
     // Process card payment (either full card or split payment card portion)
+    // Skip if multi-card already processed above
     // Accept all card types: credit, debit, card, split, ebt_food, ebt_cash, gift, authorizenet (e-commerce)
     const isCardPayment = ['card', 'credit', 'debit', 'ebt_food', 'ebt_cash', 'gift', 'split', 'authorizenet'].includes(body.paymentMethod)
-    if (isCardPayment && body.paymentMethod !== 'cash') {
+    const isMultiCardAlreadyProcessed = body.paymentMethod === 'multi-card' && paymentResult !== null
+    if (isCardPayment && body.paymentMethod !== 'cash' && !isMultiCardAlreadyProcessed) {
       const isSplit = body.paymentMethod === 'split'
       const cardAmount = isSplit ? (body.cardAmount || 0) : body.total
 

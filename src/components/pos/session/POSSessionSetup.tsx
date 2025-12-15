@@ -20,7 +20,7 @@ import * as Haptics from 'expo-haptics'
 import { supabase } from '@/lib/supabase/client'
 import { POSLocationSelector } from '../POSLocationSelector'
 import { POSRegisterSelector } from '../POSRegisterSelector'
-import { OpenCashDrawerModal } from '../OpenCashDrawerModal'
+import { POSCashCountModal } from '../POSCashCountModal'
 import { useModalState } from '@/hooks/pos'
 import { useAppAuth } from '@/contexts/AppAuthContext'
 import { usePOSSession } from '@/contexts/POSSessionContext'
@@ -181,8 +181,9 @@ function POSSessionSetup() {
       {renderScreen()}
 
       {/* ALWAYS RENDER MODALS - Never conditionally mount/unmount */}
-      <OpenCashDrawerModal
+      <POSCashCountModal
         visible={isModalOpen('cashDrawerOpen')}
+        mode="open"
         onSubmit={handleCashDrawerSubmit}
         onCancel={handleCashDrawerCancel}
       />

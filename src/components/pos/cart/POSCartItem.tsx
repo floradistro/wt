@@ -1,16 +1,16 @@
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, Animated, PanResponder, LayoutAnimation, Platform, UIManager } from 'react-native'
 import * as Haptics from 'expo-haptics'
 import { useState, memo, useCallback, useRef, useEffect } from 'react'
-
-// Enable LayoutAnimation on Android
-if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
-  UIManager.setLayoutAnimationEnabledExperimental(true)
-}
 import type { CartItem } from '@/types/pos'
 
 // ✅ ZERO PROP DRILLING - Read from stores
 import { cartActions, useDiscountingItemId } from '@/stores/cart.store'
 import { checkoutUIActions } from '@/stores/checkout-ui.store'
+
+// Enable LayoutAnimation on Android
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true)
+}
 
 const DELETE_WIDTH = 80
 const SWIPE_THRESHOLD = 25 // How far to swipe before it triggers (lower = easier)
@@ -161,6 +161,8 @@ function POSCartItem({ item }: POSCartItemProps) {
             style={styles.deleteButton}
             onPress={handleDelete}
             activeOpacity={0.8}
+            accessibilityRole="button"
+            accessibilityLabel={`Delete ${item.productName || item.name} from cart`}
           >
             <Text style={styles.deleteButtonText}>Delete</Text>
           </TouchableOpacity>
@@ -178,6 +180,9 @@ function POSCartItem({ item }: POSCartItemProps) {
           delayLongPress={400}
           activeOpacity={0.7}
           disabled={isDiscounting}
+          accessibilityRole="button"
+          accessibilityLabel={`${item.productName || item.name}, ${item.tierLabel || `quantity ${item.quantity}`}, ${displayPrice.toFixed(2)} dollars each, total ${(displayPrice * item.quantity).toFixed(2)} dollars${hasDiscount ? ', discounted' : ''}`}
+          accessibilityHint="Tap to change quantity. Long press to add discount. Swipe left to delete."
         >
           {/* Left: Product Info */}
           <View style={styles.cartItemInfo}>
@@ -246,6 +251,8 @@ function POSCartItem({ item }: POSCartItemProps) {
               value={discountValue}
               onChangeText={setDiscountValue}
               autoFocus
+              accessibilityLabel={`Discount ${discountType === 'percentage' ? 'percentage' : 'amount'}`}
+              accessibilityHint={`Enter ${discountType === 'percentage' ? 'percentage off' : 'dollar amount off'}`}
             />
             {/* Single button: Cancel when empty, Apply when has value */}
             {(!discountValue || parseFloat(discountValue) <= 0) ? (

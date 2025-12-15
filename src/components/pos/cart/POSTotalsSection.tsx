@@ -8,7 +8,7 @@
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native'
 import React, { memo, useMemo } from 'react'
 import * as Haptics from 'expo-haptics'
-import { Button } from '@/theme'
+import { LiquidGlassView, isLiquidGlassSupported } from '@callstack/liquid-glass'
 import { logger } from '@/utils/logger'
 
 // Stores (ZERO PROP DRILLING)
@@ -136,17 +136,35 @@ function POSTotalsSection() {
         </View>
       </View>
 
-      {/* Checkout Button - Using Design System */}
+      {/* Checkout Button - Liquid Glass Style */}
       <View style={styles.checkoutButtonContainer}>
-        <Button
-          variant="primary"
-          size="large"
-          fullWidth
-          onPress={handleCheckout}
-          disabled={cart.length === 0}
+        <LiquidGlassView
+          effect="regular"
+          colorScheme="dark"
+          tintColor="rgba(255,255,255,0.08)"
+          interactive
+          style={[
+            styles.checkoutButton,
+            !isLiquidGlassSupported && styles.checkoutButtonFallback,
+            cart.length === 0 && styles.checkoutButtonDisabled,
+          ]}
         >
-          CHECKOUT
-        </Button>
+          <TouchableOpacity
+            onPress={handleCheckout}
+            disabled={cart.length === 0}
+            style={styles.checkoutButtonPressable}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel={`Checkout. Total: ${total.toFixed(2)} dollars`}
+          >
+            <Text style={[
+              styles.checkoutButtonText,
+              cart.length === 0 && styles.checkoutButtonTextDisabled,
+            ]}>
+              CHECKOUT
+            </Text>
+          </TouchableOpacity>
+        </LiquidGlassView>
       </View>
     </View>
   )
@@ -207,9 +225,36 @@ const styles = StyleSheet.create({
     color: '#fff',
     letterSpacing: -0.4,
   },
-  // Checkout Button Container
+  // Checkout Button - Liquid Glass Style
   checkoutButtonContainer: {
-    marginHorizontal: 16,
-    marginBottom: 16, // ✅ Bottom padding - lift off bottom edge
+    marginHorizontal: 12,
+    marginBottom: 16,
+  },
+  checkoutButton: {
+    borderRadius: 20,
+    overflow: 'hidden',
+    minHeight: 52,
+  },
+  checkoutButtonFallback: {
+    backgroundColor: 'rgba(255,255,255,0.12)',
+  },
+  checkoutButtonDisabled: {
+    opacity: 0.4,
+  },
+  checkoutButtonPressable: {
+    paddingHorizontal: 24,
+    paddingVertical: 16,
+    minHeight: 52,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  checkoutButtonText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#fff',
+    letterSpacing: 1,
+  },
+  checkoutButtonTextDisabled: {
+    color: 'rgba(255,255,255,0.5)',
   },
 })

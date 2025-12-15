@@ -247,8 +247,8 @@ function POSUnifiedCustomerSelector() {
     const timestamp = isRecent && 'viewedAt' in item ? formatRelativeTime(item.viewedAt) : null
 
     const accessibilityLabel =
-      item.loyalty_points > 0
-        ? `${customerName}, ${item.loyalty_points.toLocaleString()} loyalty points`
+      (item.loyalty_points ?? 0) > 0
+        ? `${customerName}, ${(item.loyalty_points ?? 0).toLocaleString()} loyalty points`
         : customerName
 
     return (
@@ -271,13 +271,13 @@ function POSUnifiedCustomerSelector() {
             <Text style={styles.customerTimestamp}>{timestamp}</Text>
           )}
         </View>
-        {item.loyalty_points > 0 && (
+        {(item.loyalty_points ?? 0) > 0 && (
           <Text
             style={styles.customerPoints}
             accessibilityElementsHidden={true}
             importantForAccessibility="no"
           >
-            {item.loyalty_points.toLocaleString()} pts
+            {(item.loyalty_points ?? 0).toLocaleString()} pts
           </Text>
         )}
       </TouchableOpacity>

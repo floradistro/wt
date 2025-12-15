@@ -8,20 +8,25 @@
 import { supabase } from '@/lib/supabase/client'
 import { normalizePhone, normalizeEmail } from '@/utils/data-normalization'
 import { logger } from '@/utils/logger'
+import { withServiceErrorHandling, ServiceError } from '@/utils/service-errors'
 
 export interface Customer {
   id: string
+  first_name: string
+  last_name: string
   email?: string
-  phone?: string
-  first_name?: string
-  last_name?: string
+  phone?: string | null
   full_name?: string
-  loyalty_points: number
-  total_spent: number
-  total_orders: number
+  display_name?: string | null
+  date_of_birth?: string | null
+  loyalty_points?: number
+  loyalty_tier?: string
+  vendor_customer_number?: string
+  total_spent?: number
+  total_orders?: number
   vendor_id?: string
-  created_at: string
-  updated_at: string
+  created_at?: string
+  updated_at?: string
   // Wallet pass fields
   has_wallet_pass?: boolean
   wallet_pass_created_at?: string
@@ -45,6 +50,9 @@ export interface CustomerWithOrders extends Customer {
     id: string
     order_number: string
     total_amount: number
+    order_type?: 'walk_in' | 'pickup' | 'shipping' | 'delivery'
+    status?: string
+    fulfillment_status?: string
     created_at: string
     pickup_location?: {
       name: string
@@ -53,6 +61,11 @@ export interface CustomerWithOrders extends Customer {
       first_name: string
       last_name: string
     } | null
+    shipping_city?: string | null
+    shipping_state?: string | null
+    shipping_carrier?: string | null
+    tracking_number?: string | null
+    shipping_method_title?: string | null
   }[]
 }
 
@@ -334,113 +347,243 @@ export async function createCustomer(params: {
   vendor_id?: string
   idempotency_key?: string
 }): Promise<Customer> {
-  // Validate required fields
-  if (!params.first_name?.trim() || !params.last_name?.trim()) {
-    throw new Error('First name and last name are required')
-  }
+  return withServiceErrorHandling(
+    'CustomersService',
+    'createCustomer',
+    async () => {
+      // Validate required fields
+      if (!params.first_name?.trim() || !params.last_name?.trim()) {
+        throw new ServiceError(
+          'First name and last name are required',
+          'VALIDATION_ERROR',
+          { params }
+        )
+      }
 
-  if (!params.vendor_id) {
-    throw new Error('Vendor ID is required')
-  }
+      if (!params.vendor_id) {
+        throw new ServiceError(
+          'Vendor ID is required',
+          'VALIDATION_ERROR',
+          { params }
+        )
+      }
 
-  // Call atomic database function
-  logger.debug('Calling create_customer_safe RPC', {
-    vendorId: params.vendor_id,
-    firstName: params.first_name,
-    lastName: params.last_name,
-    hasEmail: !!params.email,
-    hasPhone: !!params.phone,
-    hasIdempotencyKey: !!params.idempotency_key,
-  })
+      // Call atomic database function
+      logger.debug('Calling create_customer_safe RPC', {
+        vendorId: params.vendor_id,
+        firstName: params.first_name,
+        lastName: params.last_name,
+        hasEmail: !!params.email,
+        hasPhone: !!params.phone,
+        hasIdempotencyKey: !!params.idempotency_key,
+      })
 
-  const { data, error } = await supabase.rpc('create_customer_safe', {
-    p_vendor_id: params.vendor_id,
-    p_first_name: params.first_name,
-    p_last_name: params.last_name,
-    p_email: params.email || null,
-    p_phone: params.phone || null,
-    p_middle_name: params.middle_name || null,
-    p_date_of_birth: params.date_of_birth || null,
-    p_street_address: params.street_address || null,
-    p_city: params.city || null,
-    p_state: params.state || null,
-    p_postal_code: params.postal_code || null,
-    p_idempotency_key: params.idempotency_key || null,
-  })
+      const { data, error } = await supabase.rpc('create_customer_safe', {
+        p_vendor_id: params.vendor_id,
+        p_first_name: params.first_name,
+        p_last_name: params.last_name,
+        p_email: params.email || null,
+        p_phone: params.phone || null,
+        p_middle_name: params.middle_name || null,
+        p_date_of_birth: params.date_of_birth || null,
+        p_street_address: params.street_address || null,
+        p_city: params.city || null,
+        p_state: params.state || null,
+        p_postal_code: params.postal_code || null,
+        p_idempotency_key: params.idempotency_key || null,
+      })
 
-  logger.debug('create_customer_safe returned', {
-    hasData: !!data,
-    dataLength: data?.length,
-    hasError: !!error,
-  })
+      logger.debug('create_customer_safe returned', {
+        hasData: !!data,
+        dataLength: data?.length,
+        hasError: !!error,
+      })
 
-  if (error) {
-    throw new Error(`Failed to create customer: ${error.message}`)
-  }
+      if (error) {
+        throw new ServiceError(
+          `Database error: ${error.message}`,
+          'DATABASE_ERROR',
+          { code: error.code },
+          error
+        )
+      }
 
-  // Verify function returned data
-  if (!data || data.length === 0) {
-    throw new Error('Failed to create customer: no data returned')
-  }
+      // Verify function returned data
+      if (!data || data.length === 0) {
+        throw new ServiceError(
+          'No data returned from database',
+          'DATABASE_ERROR'
+        )
+      }
 
-  const result = data[0]
+      const result = data[0]
 
-  logger.debug('Customer creation result', {
-    customerId: result.customer_id,
-    created: result.created,
-    duplicateFound: result.duplicate_found,
-    success: result.success,
-  })
+      logger.debug('Customer creation result', {
+        customerId: result.customer_id,
+        created: result.created,
+        duplicateFound: result.duplicate_found,
+        success: result.success,
+      })
 
-  // Check if operation succeeded
-  if (!result.success) {
-    throw new Error('Failed to create customer: operation did not complete')
-  }
+      // Check if operation succeeded
+      if (!result.success) {
+        throw new ServiceError(
+          'Customer creation did not complete',
+          'DATABASE_ERROR',
+          { result }
+        )
+      }
 
-  // Fetch the full customer record
-  const { data: customer, error: fetchError } = await supabase
-    .from('customers')
-    .select('*')
-    .eq('id', result.customer_id)
-    .eq('is_active', true)
-    .single()
+      // Fetch the full customer record
+      const { data: customer, error: fetchError } = await supabase
+        .from('customers')
+        .select('*')
+        .eq('id', result.customer_id)
+        .eq('is_active', true)
+        .single()
 
-  if (fetchError || !customer) {
-    throw new Error(`Failed to fetch created customer: ${fetchError?.message || 'Not found'}`)
-  }
+      if (fetchError || !customer) {
+        throw new ServiceError(
+          `Failed to fetch created customer: ${fetchError?.message || 'Not found'}`,
+          fetchError?.code === 'PGRST116' ? 'NOT_FOUND' : 'DATABASE_ERROR',
+          { customerId: result.customer_id },
+          fetchError
+        )
+      }
 
-  logger.debug('Customer fetched successfully', {
-    customerId: customer.id,
-    email: customer.email,
-    phone: customer.phone,
-    isWalkIn: customer.email?.includes('@walk-in.local'),
-  })
+      logger.debug('Customer fetched successfully', {
+        customerId: customer.id,
+        email: customer.email,
+        phone: customer.phone,
+        isWalkIn: customer.email?.includes('@walk-in.local'),
+      })
 
-  return customer
+      return customer
+    },
+    { firstName: params.first_name, lastName: params.last_name, vendorId: params.vendor_id }
+  )
 }
 
 /**
  * Update customer
+ * Uses atomic RPC function to bypass RLS issues
  */
 export async function updateCustomer(
   customerId: string,
-  updates: Partial<Customer>
+  updates: Partial<Customer>,
+  vendorId?: string
 ): Promise<Customer> {
-  const { data, error } = await supabase
-    .from('customers')
-    .update({
-      ...updates,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', customerId)
-    .select()
-    .single()
+  return withServiceErrorHandling(
+    'CustomersService',
+    'updateCustomer',
+    async () => {
+      logger.info('[updateCustomer] Updating customer: ' + customerId)
+      logger.info('[updateCustomer] Updates: ' + JSON.stringify(updates))
 
-  if (error) {
-    throw new Error(`Failed to update customer: ${error.message}`)
-  }
+      // Get vendor ID if not provided
+      let resolvedVendorId = vendorId
+      if (!resolvedVendorId) {
+        const { data: userData } = await supabase
+          .from('users')
+          .select('vendor_id')
+          .eq('auth_user_id', (await supabase.auth.getUser()).data.user?.id)
+          .single()
+        resolvedVendorId = userData?.vendor_id
+      }
 
-  return data
+      if (!resolvedVendorId) {
+        throw new ServiceError(
+          'Failed to determine vendor ID for customer update',
+          'VALIDATION_ERROR'
+        )
+      }
+
+      logger.info('[updateCustomer] Calling RPC with vendorId: ' + resolvedVendorId)
+
+      // Build SQL directly to avoid parameter ordering issues
+      const updateFields: string[] = []
+
+      if (updates.first_name) {
+        updateFields.push(`first_name = '${updates.first_name.trim().replace(/'/g, "''")}'`)
+      }
+      if (updates.last_name) {
+        updateFields.push(`last_name = '${updates.last_name.trim().replace(/'/g, "''")}'`)
+      }
+      if (updates.email !== undefined) {
+        if (updates.email) {
+          updateFields.push(`email = '${updates.email.trim().toLowerCase().replace(/'/g, "''")}'`)
+        } else {
+          updateFields.push(`email = NULL`)
+        }
+      }
+      if (updates.phone !== undefined) {
+        if (updates.phone) {
+          const normalizedPhone = updates.phone.replace(/[^0-9]/g, '')
+          updateFields.push(`phone = '${normalizedPhone}'`)
+        } else {
+          updateFields.push(`phone = NULL`)
+        }
+      }
+      if (updates.loyalty_points !== undefined) {
+        updateFields.push(`loyalty_points = ${updates.loyalty_points}`)
+      }
+
+      updateFields.push(`updated_at = NOW()`)
+
+      // Use raw SQL via RPC to bypass RLS
+      const { data: rpcResult, error: rpcError } = await supabase.rpc('exec_sql_update_customer', {
+        customer_id: customerId,
+        vendor_id: resolvedVendorId,
+        update_sql: updateFields.join(', ')
+      })
+
+      logger.info('[updateCustomer] RPC result: ' + JSON.stringify(rpcResult))
+
+      if (rpcError) {
+        logger.error('[updateCustomer] RPC error: ' + rpcError.message)
+        logger.error('[updateCustomer] RPC error code: ' + rpcError.code)
+        throw new ServiceError(
+          `Failed to update customer: ${rpcError.message}`,
+          'DATABASE_ERROR',
+          { customerId },
+          rpcError
+        )
+      }
+
+      // Check RPC result
+      const result = rpcResult?.[0]
+      logger.info('[updateCustomer] Result success: ' + result?.success + ', error: ' + result?.error_message)
+
+      if (!result?.success) {
+        const errorMsg = result?.error_message || 'Unknown error'
+        logger.error('[updateCustomer] Update failed: ' + errorMsg)
+        throw new ServiceError(
+          `Failed to update customer: ${errorMsg}`,
+          errorMsg.includes('not found') ? 'NOT_FOUND' : 'DATABASE_ERROR',
+          { customerId }
+        )
+      }
+
+      // Fetch updated customer data
+      const { data: customer, error: fetchError } = await supabase
+        .from('customers')
+        .select('*')
+        .eq('id', customerId)
+        .single()
+
+      if (fetchError || !customer) {
+        throw new ServiceError(
+          `Failed to fetch updated customer: ${fetchError?.message || 'Not found'}`,
+          'DATABASE_ERROR',
+          { customerId },
+          fetchError
+        )
+      }
+
+      return customer
+    },
+    { customerId, updateFields: Object.keys(updates) }
+  )
 }
 
 /**
@@ -493,6 +636,9 @@ export async function getCustomerWithOrders(customerId: string): Promise<Custome
     .select(`
       id,
       order_number,
+      order_type,
+      status,
+      fulfillment_status,
       total_amount,
       created_at,
       pickup_location:pickup_location_id (
@@ -501,12 +647,17 @@ export async function getCustomerWithOrders(customerId: string): Promise<Custome
       created_by_user:created_by_user_id (
         first_name,
         last_name
-      )
+      ),
+      shipping_city,
+      shipping_state,
+      shipping_carrier,
+      tracking_number,
+      shipping_method_title
     `)
     .eq('customer_id', customerId)
 
   if (linkedError) {
-    console.warn('Error fetching linked orders:', linkedError)
+    logger.warn('Error fetching linked orders:', linkedError)
   }
 
   // Query 2: Legacy orders matched by metadata.customer_name (where customer_id is null)
@@ -517,6 +668,9 @@ export async function getCustomerWithOrders(customerId: string): Promise<Custome
       .select(`
         id,
         order_number,
+        order_type,
+        status,
+        fulfillment_status,
         total_amount,
         created_at,
         pickup_location:pickup_location_id (
@@ -525,13 +679,18 @@ export async function getCustomerWithOrders(customerId: string): Promise<Custome
         created_by_user:created_by_user_id (
           first_name,
           last_name
-        )
+        ),
+        shipping_city,
+        shipping_state,
+        shipping_carrier,
+        tracking_number,
+        shipping_method_title
       `)
       .is('customer_id', null)
       .eq('metadata->>customer_name', fullName)
 
     if (legacyError) {
-      console.warn('Error fetching legacy orders:', legacyError)
+      logger.warn('Error fetching legacy orders:', legacyError)
     } else {
       legacyOrders = legacyData || []
     }

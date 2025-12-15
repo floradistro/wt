@@ -27,6 +27,7 @@ import { layout } from '@/theme/layout'
 // Stores (ZERO PROP DRILLING - Apple Standard)
 import { useProductFilters } from '@/stores/product-filter.store'
 import { usePOSProductsStore } from '@/stores/pos-products.store'
+import { useAnyModalOpen } from '@/stores/checkout-ui.store'
 
 // Utils
 import { applyFilters } from '@/utils/product-transformers'
@@ -38,6 +39,7 @@ export function POSProductGrid() {
   const products = usePOSProductsStore((state) => state.products)
   const loading = usePOSProductsStore((state) => state.loading)
   const filters = useProductFilters()
+  const anyModalOpen = useAnyModalOpen()
 
   // Compute filtered products internally (Apple pattern)
   const filteredProducts = useMemo(() =>
@@ -147,47 +149,51 @@ export function POSProductGrid() {
   // ========================================
 
   return (
-    <FlatList
-      // Force complete re-render when filters change to prevent grid glitches
-      key={listKey}
+    <View style={styles.gridContainer}>
+      <FlatList
+        // Force complete re-render when filters change to prevent grid glitches
+        key={listKey}
 
-      // Data
-      data={filteredProducts}
-      renderItem={renderItem}
-      keyExtractor={keyExtractor}
+        // Data
+        data={filteredProducts}
+        renderItem={renderItem}
+        keyExtractor={keyExtractor}
 
-      // Grid Layout (4 columns - Apple Music style)
-      numColumns={4}
-      columnWrapperStyle={styles.columnWrapper}
+        // Grid Layout (4 columns - Apple Music style)
+        numColumns={4}
+        columnWrapperStyle={styles.columnWrapper}
 
-      // Empty State
-      ListEmptyComponent={renderEmptyComponent}
+        // Empty State
+        ListEmptyComponent={renderEmptyComponent}
 
-      // Styling
-      style={styles.productsScrollBehind}
-      contentContainerStyle={contentContainerStyle}
-      showsVerticalScrollIndicator={false}
+        // Styling
+        style={styles.productsScrollBehind}
+        contentContainerStyle={contentContainerStyle}
+        showsVerticalScrollIndicator={false}
 
-      // ========================================
-      // PERFORMANCE OPTIMIZATIONS
-      // ========================================
+        // ========================================
+        // PERFORMANCE OPTIMIZATIONS
+        // ========================================
 
-      // Remove off-screen views from memory (huge memory savings)
-      removeClippedSubviews={false} // Disabled to prevent flicker
+        // Remove off-screen views from memory (huge memory savings)
+        removeClippedSubviews={false} // Disabled to prevent flicker
 
-      // Render 15 items at a time (smooth batching)
-      maxToRenderPerBatch={15}
+        // Render 15 items at a time (smooth batching)
+        maxToRenderPerBatch={15}
 
-      // Keep 7 screens worth of items in memory for smoother scrolling
-      windowSize={7}
+        // Keep 7 screens worth of items in memory for smoother scrolling
+        windowSize={7}
 
-      // Show 16 items immediately on mount (4 rows x 4 columns)
-      initialNumToRender={16}
+        // Show 16 items immediately on mount (4 rows x 4 columns)
+        initialNumToRender={16}
 
-      // Accessibility
-      accessible={false}
-      accessibilityLabel={`Product grid with ${filteredProducts.length} products`}
-    />
+        // Accessibility
+        accessible={false}
+        accessibilityLabel={`Product grid with ${filteredProducts.length} products`}
+      />
+      {/* Grid-level dim overlay when any modal is open - single subscription instead of per-card */}
+      {anyModalOpen && <View style={styles.modalDimOverlay} pointerEvents="none" />}
+    </View>
   )
 }
 
@@ -195,6 +201,15 @@ export function POSProductGrid() {
 // STYLES
 // ========================================
 const styles = StyleSheet.create({
+  gridContainer: {
+    flex: 1,
+    position: 'relative',
+  },
+  // Overlay that dims entire grid when any modal is open (single subscription, not per-card)
+  modalDimOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.2)', // Extra dim when modal open for better readability
+  },
   loadingContainer: {
     flex: 1,
     alignItems: 'center',
