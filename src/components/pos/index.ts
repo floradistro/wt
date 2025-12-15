@@ -12,9 +12,6 @@ export { POSUnifiedCustomerSelector } from './POSUnifiedCustomerSelector'
 export { POSCustomerMatchModal } from './POSCustomerMatchModal'
 // CustomerMatch and PendingOrder types are now exported from @/stores/customer.store
 
-// Customer Contact Info
-export { POSMissingContactBanner } from './POSMissingContactBanner'
-export { POSUpdateContactModal } from './POSUpdateContactModal'
 
 // Unified Modal Component
 export { POSModal } from './POSModal'

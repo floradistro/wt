@@ -16,14 +16,11 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import * as Haptics from 'expo-haptics'    // ms total to end session (after press starts)
 import { POSCartItem } from './POSCartItem'
 import { POSTotalsSection } from './POSTotalsSection'
-import { POSMissingContactBanner } from '../POSMissingContactBanner'
-import { POSUpdateContactModal } from '../POSUpdateContactModal'
 import { POSScannedOrderCard } from '../POSScannedOrderCard'
 import { layout } from '@/theme/layout'
 
 // Stores
 import { useCartItems, cartActions, useCartTotals } from '@/stores/cart.store'
-import { useSelectedCustomer } from '@/stores/customer.store'
 import { useScannedOrder } from '@/stores/scanned-order.store'
 
 // Timing constants
@@ -43,7 +40,6 @@ export function POSCart({ onEndSession }: POSCartProps) {
   // ========================================
   // LOCAL STATE
   // ========================================
-  const [showUpdateContactModal, setShowUpdateContactModal] = useState(false)
 
   // ========================================
   // ANIMATION - Long press feedback
@@ -70,11 +66,6 @@ export function POSCart({ onEndSession }: POSCartProps) {
   // STORES - Scanned Pickup Order
   // ========================================
   const scannedOrder = useScannedOrder()
-
-  // ========================================
-  // STORES - Customer
-  // ========================================
-  const selectedCustomer = useSelectedCustomer()
 
   // ========================================
   // CLEANUP - Clear timers on unmount
@@ -231,10 +222,6 @@ export function POSCart({ onEndSession }: POSCartProps) {
     ]).start()
   }, [clearAllTimers, scaleAnim, endSessionProgress])
 
-  const handleUpdateContactInfo = useCallback(() => {
-    setShowUpdateContactModal(true)
-  }, [])
-
   // ========================================
   // RENDER - Scanned Order takes precedence
   // ========================================
@@ -248,20 +235,6 @@ export function POSCart({ onEndSession }: POSCartProps) {
 
   return (
     <View style={[styles.cartCard, { paddingTop: insets.top }]}>
-      {/* Update Contact Modal */}
-      <POSUpdateContactModal
-        visible={showUpdateContactModal}
-        onClose={() => setShowUpdateContactModal(false)}
-      />
-
-      {/* iOS 26 Perfectly Simple Cart Header */}
-      <View style={styles.cartHeader}>
-        {/* Missing Contact Banner - shows when customer needs email/phone */}
-        {selectedCustomer && (
-          <POSMissingContactBanner onUpdateCustomer={handleUpdateContactInfo} />
-        )}
-      </View>
-
       {/* Cart Items - Staged long press: clear cart → end session */}
       <Pressable
         style={styles.cartItemsContainer}
